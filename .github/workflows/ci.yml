@@ -24,10 +24,14 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
+          cmdline-tools-version: '15859902'
           packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
+      - run: bash tools/prepare_android_tools.sh
       - run: adb version && adb start-server
       - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
         with:
+          avd-name: syn443-ci
+          pre-emulator-launch-script: grep -Fx 'target=android-37.0' "$HOME/.android/avd/syn443-ci.ini"
           api-level: '37.0'
           arch: x86_64
           target: google_apis
