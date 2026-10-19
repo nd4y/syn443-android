@@ -41,6 +41,7 @@ class DecisionTest {
             "[" + "0,".repeat(4096) + "0]",
             "{" + (0..64).joinToString(",") { "\"key" + it + "\":0" } + "}",
             " ".repeat((1 shl 20) + 1),
+            "\"" + "\u2603".repeat((1 shl 20) / 3 + 1) + "\"",
         )
         invalid.forEach { fails { Decision.decode(it) } }
     }
@@ -58,6 +59,39 @@ class DecisionTest {
             low.copy(id = "high", handshakesPerMinute = 100, latencyMs = 0),
             low.copy(id = "high", activeBackups = 3, latencyMs = 0),
         )) assertEquals("low", Decision.select(r.copy(candidates = listOf(high, low))).selectedPathId)
+    }
+
+    @Test fun scalarBoundariesMatchSchema() {
+        val r = first()
+        val c = r.candidates.first()
+        listOf(
+            r.copy(schemaVersion = 2), r.copy(nowMs = -1), r.copy(nowMs = Decision.MAX_TIME + 1),
+            r.copy(evidenceTtlMs = 0), r.copy(evidenceTtlMs = 600001),
+            r.copy(intent = "ANY"), r.copy(metricGroup = "bad/value"),
+        ).forEach { fails { Decision.select(it) } }
+        listOf(
+            c.copy(observedAtMs = -1), c.copy(observedAtMs = Decision.MAX_TIME + 1),
+            c.copy(samples = -1), c.copy(samples = 21), c.copy(failures = -1),
+            c.copy(failures = c.samples + 1), c.copy(trailingSuccesses = -1),
+            c.copy(trailingSuccesses = c.samples + 1),
+            c.copy(bytesPerMinute = -1), c.copy(bytesPerMinute = 2147483648L),
+            c.copy(handshakesPerMinute = -1), c.copy(handshakesPerMinute = 1000001),
+            c.copy(activeBackups = -1), c.copy(activeBackups = 65),
+            c.copy(latencyMs = -1), c.copy(latencyMs = 600001),
+            c.copy(exitClass = "ANY"), c.copy(id = "BAD"), c.copy(metricGroup = ""),
+        ).forEach { fails { Decision.select(r.copy(candidates = listOf(it))) } }
+        listOf(
+            r.context.copy(networkEpoch = Decision.MAX_GENERATION + 1),
+            r.context.copy(activationGeneration = -1),
+            r.context.copy(engineGeneration = Decision.MAX_GENERATION + 1),
+            r.context.copy(configRevision = "x".repeat(65)),
+            r.context.copy(algorithmRevision = ""),
+            r.context.copy(dependencyHash = "b".repeat(63)),
+        ).forEach { context ->
+            fails { Decision.select(r.copy(context = context)) }
+            fails { Decision.select(r.copy(candidates = listOf(c.copy(context = context)))) }
+        }
+        fails { Decision.select(r.copy(candidates = listOf(c, c))) }
     }
 
     @Test fun randomWireDoesNotProduceInvalidWinner() {

@@ -115,6 +115,7 @@ object Decision {
         val stability = when {
             c.optionalDegraded -> 2
             c.samples >= 5 && c.trailingSuccesses >= 3 && c.failures * 100 <= c.samples * 5 -> 0
+            c.samples >= 5 -> 2
             else -> 1
         }
         val energy = maxOf(

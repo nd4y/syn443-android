@@ -4,7 +4,7 @@ root=Path(__file__).resolve().parent.parent
 mode=sys.argv[1]
 if mode=="jvm":
     paths=list((root/"core/decision/build/test-results/test").glob("TEST-*.xml"))
-    minimum=7
+    minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
     minimum=2

@@ -85,6 +85,7 @@ internal class StrictJson private constructor(private val text: String) {
 
     companion object {
         fun validate(raw: String) {
+            require(raw.length <= (1 shl 20))
             require(raw.toByteArray(Charsets.UTF_8).size <= (1 shl 20))
             val parser = StrictJson(raw)
             parser.value(0)
