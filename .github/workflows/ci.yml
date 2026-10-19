@@ -86,6 +86,11 @@ jobs:
       fail-fast: false
       matrix:
         api: [29, 35, '37.0']
+        include:
+          - api: '37.0'
+            profile: pixel_2
+            ram: 3072M
+            cores: 4
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -109,7 +114,12 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace && python3 tools/check_test_evidence.py emulator
+          profile: ${{ matrix.profile || '' }}
+          ram-size: ${{ matrix.ram || '' }}
+          cores: ${{ matrix.cores || 2 }}
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics -feature -Vulkan -show-kernel
+          script: adb shell getprop ro.build.version.sdk && ./gradlew :app:connectedDebugAndroidTest --stacktrace && python3 tools/check_test_evidence.py emulator
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: emulator-evidence-upload
         continue-on-error: true
