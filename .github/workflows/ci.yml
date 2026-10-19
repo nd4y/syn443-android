@@ -22,6 +22,7 @@ jobs:
       - run: python3 tools/check_documents.py
       - run: python3 tools/check_contracts.py
       - run: python3 -m unittest discover -s tools -p 'test_*.py'
+      - run: bash -n tools/run_emulator_tests.sh
   jvm-and-apk:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -131,7 +132,7 @@ jobs:
           disk-size: ${{ matrix.disk || '' }}
           emulator-boot-timeout: 900
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics -feature -Vulkan -show-kernel
-          script: adb shell getprop ro.build.version.sdk && adb shell df -h /data && ./gradlew :app:connectedDebugAndroidTest --stacktrace && python3 tools/check_test_evidence.py emulator
+          script: bash tools/run_emulator_tests.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: emulator-evidence-upload
         continue-on-error: true
