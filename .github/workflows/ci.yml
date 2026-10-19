@@ -21,6 +21,7 @@ jobs:
           persist-credentials: false
       - run: python3 tools/check_documents.py
       - run: python3 tools/check_contracts.py
+      - run: python3 -m unittest discover -s tools -p 'test_*.py'
   jvm-and-apk:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -39,6 +40,8 @@ jobs:
           packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
       - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - run: python3 tools/check_test_evidence.py jvm
+      - run: python3 tools/check_apk.py app/build/outputs/apk/debug/app-debug.apk
+      - run: '"$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 app/build/outputs/apk/debug/app-debug.apk'
       - name: Dependency inventory
         run: ./gradlew :app:dependencies --configuration debugRuntimeClasspath > dependency-inventory.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
