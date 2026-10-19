@@ -32,10 +32,10 @@ jobs:
           arch: x86_64
           target: google_apis
           profile: pixel_2
-          ram-size: 3072M
+          ram-size: 4096M
           cores: 4
           disk-size: 8G
           emulator-boot-timeout: 900
           disable-animations: false
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics -feature -Vulkan -show-kernel
+          emulator-options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim -no-metrics -show-kernel
           script: bash tools/android17_bootstrap_diagnostic.sh
