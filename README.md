@@ -21,3 +21,5 @@ Third-party dependencies retain their own licenses.
 See [implementation status](docs/M0_IMPLEMENTATION.md) for implemented paths and limitations.
 
 Run: ./gradlew :core:decision:test :app:assembleDebug. Emulator tests: ./gradlew :app:connectedDebugAndroidTest.
+
+See [CI delivery limitations](docs/CI_DELIVERY.md) for current artifact-quota and private branch-protection constraints.
