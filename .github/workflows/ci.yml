@@ -38,17 +38,4 @@ jobs:
           emulator-boot-timeout: 900
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics -feature -Vulkan -show-kernel
-          script: |
-            adb shell getprop ro.build.version.sdk
-            adb shell df -h /data
-            for attempt in 1 2 3 4 5 6; do
-              echo "health iteration $attempt"
-              adb shell pidof system_server || true
-              adb shell service check package || true
-              adb shell service check settings || true
-              sleep 10
-            done
-            adb logcat -b crash -d
-            adb logcat -d -s AndroidRuntime SystemServer Watchdog PackageManager
-            adb shell service list
-
+          script: bash tools/android17_bootstrap_diagnostic.sh
