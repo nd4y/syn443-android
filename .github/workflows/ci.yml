@@ -34,11 +34,15 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/wrapper-validation@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
-      - run: sdkmanager 'platforms;android-37' 'build-tools;36.0.0'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: 'platform-tools platforms;android-37 build-tools;36.0.0'
       - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - name: Dependency inventory
         run: ./gradlew :app:dependencies --configuration debugRuntimeClasspath > dependency-inventory.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: reports-upload
+        continue-on-error: true
         if: always()
         with:
           name: android-jvm-lint-evidence
@@ -47,12 +51,17 @@ jobs:
             **/build/test-results/
             dependency-inventory.txt
           retention-days: 14
+      - run: test -s app/build/outputs/apk/debug/app-debug.apk && test -s app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: apk-upload
+        continue-on-error: true
         with:
           name: syn443-prototype-debug-apks
           path: app/build/outputs/apk/
           if-no-files-found: error
           retention-days: 14
+      - if: always() && (steps.reports-upload.outcome == 'failure' || steps.apk-upload.outcome == 'failure')
+        run: echo 'Artifact delivery failed (see upload log). Test/build gates remain mandatory; private prerelease assets are the fallback.' >> "$GITHUB_STEP_SUMMARY"
   workflow-lint:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -87,7 +96,9 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - run: sdkmanager 'platforms;android-37' 'build-tools;36.0.0'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: 'platform-tools platforms;android-37 build-tools;36.0.0'
       - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
         with:
           api-level: ${{ matrix.api }}
@@ -96,6 +107,8 @@ jobs:
           disable-animations: true
           script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: emulator-evidence-upload
+        continue-on-error: true
         if: always()
         with:
           name: android-emulator-${{ matrix.api }}-evidence
@@ -103,3 +116,5 @@ jobs:
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
           retention-days: 14
+      - if: always() && steps.emulator-evidence-upload.outcome == 'failure'
+        run: echo 'Emulator evidence upload failed; test outcomes remain in this job log.' >> "$GITHUB_STEP_SUMMARY"
