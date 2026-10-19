@@ -10,6 +10,10 @@ class Coordinator(initial: Context) {
     @Synchronized fun snapshot(): Snapshot = state
 
     @Synchronized private fun intent(on: Boolean): Context {
+        if (!on && state.context.activationGeneration == Decision.MAX_GENERATION) {
+            state = Snapshot(state.context, false, null)
+            return state.context
+        }
         check(state.context.activationGeneration < Decision.MAX_GENERATION)
         val next = state.context.copy(activationGeneration = state.context.activationGeneration + 1)
         state = Snapshot(next, on, null)

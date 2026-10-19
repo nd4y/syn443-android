@@ -52,7 +52,7 @@ class CoordinatorTest {
             val coordinator = Coordinator(ctx)
             val before = coordinator.snapshot()
             val actions: List<() -> Any> = when (index) {
-                0 -> listOf({ coordinator.start() }, { coordinator.stop() }, { coordinator.activate("cfg-2", "alg-2", "b".repeat(64)) })
+                0 -> listOf({ coordinator.start() }, { coordinator.activate("cfg-2", "alg-2", "b".repeat(64)) })
                 1 -> listOf({ coordinator.networkChanged() })
                 else -> listOf({ coordinator.engineChanged() })
             }
@@ -66,6 +66,14 @@ class CoordinatorTest {
         try { coordinator.activate("INVALID", "alg-2", "b".repeat(64)); fail("invalid activation") } catch (_: IllegalArgumentException) { }
         assertEquals(before, coordinator.snapshot())
         try { Coordinator(initial.copy(networkEpoch = -1)); fail("invalid context") } catch (_: IllegalArgumentException) { }
+        val last = Coordinator(initial.copy(activationGeneration = Decision.MAX_GENERATION - 1))
+        val token = last.start()
+        assertTrue(last.tryApply(token, "path"))
+        last.stop()
+        assertFalse(last.snapshot().desiredOn)
+        assertNull(last.snapshot().activePathId)
+        assertFalse(last.tryApply(token, "path"))
+        try { last.start(); fail("exhausted generation restarted") } catch (_: IllegalStateException) { }
     }
 }
 
