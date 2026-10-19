@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
+collect() {
+  result=$?
+  trap - EXIT
+  python3 tools/print_android17_reports.py || true
+  timeout 20s adb logcat -b crash -d || true
+  timeout 20s adb logcat -d -s AndroidJUnitRunner TestRunner ActivityManager AndroidRuntime || true
+  exit "$result"
+}
+trap collect EXIT
 adb shell getprop ro.build.version.sdk
 adb shell df -h /data
-for attempt in 1 2 3 4 5 6; do
-  echo "health iteration $attempt"
-  adb shell pidof system_server || true
-  adb shell service check package || true
-  adb shell service check settings || true
-  sleep 10
-done
-adb logcat -b crash -d
-adb logcat -d -s AndroidRuntime SystemServer Watchdog PackageManager
-adb shell service list
+./gradlew :app:connectedDebugAndroidTest --info --stacktrace
+python3 tools/check_test_evidence.py emulator
