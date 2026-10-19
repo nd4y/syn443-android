@@ -45,7 +45,9 @@ jobs:
       - run: python3 tools/check_apk.py app/build/outputs/apk/debug/app-debug.apk
       - run: '"$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 app/build/outputs/apk/debug/app-debug.apk'
       - name: Dependency inventory
-        run: ./gradlew :app:dependencies --configuration debugRuntimeClasspath > dependency-inventory.txt
+        run: |
+          ./gradlew :app:dependencies --configuration debugRuntimeClasspath > dependency-inventory.txt
+          ./gradlew :app:dependencies --configuration debugAndroidTestRuntimeClasspath >> dependency-inventory.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: reports-upload
         continue-on-error: true
