@@ -1,0 +1,22 @@
+from pathlib import Path
+import sys,xml.etree.ElementTree as ET
+root=Path(__file__).resolve().parent.parent
+mode=sys.argv[1]
+if mode=="jvm":
+    paths=list((root/"core/decision/build/test-results/test").glob("TEST-*.xml"))
+    minimum=7
+elif mode=="emulator":
+    paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
+    minimum=2
+else: raise SystemExit("unknown evidence type")
+assert paths,"No JUnit XML evidence produced"
+cases=[]
+for path in paths:
+    doc=ET.parse(path).getroot()
+    for case in doc.iter("testcase"):
+        if not case.attrib.get("classname","").startswith("io.syn443."): continue
+        assert not any(case.find(k) is not None for k in ("skipped","failure","error")),(path,case.attrib)
+        cases.append(case)
+assert len(cases)>=minimum,(mode,len(cases),minimum)
+print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
+

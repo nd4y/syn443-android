@@ -36,8 +36,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
-          packages: 'platform-tools platforms;android-37 build-tools;36.0.0'
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
       - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - run: python3 tools/check_test_evidence.py jvm
       - name: Dependency inventory
         run: ./gradlew :app:dependencies --configuration debugRuntimeClasspath > dependency-inventory.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -81,7 +82,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [29, 35, 37]
+        api: [29, 35, '37.0']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -98,14 +99,14 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
-          packages: 'platform-tools platforms;android-37 build-tools;36.0.0'
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
       - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
+          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace && python3 tools/check_test_evidence.py emulator
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: emulator-evidence-upload
         continue-on-error: true
