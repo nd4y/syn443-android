@@ -10,7 +10,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.syn443.decision.Coordinator
-import io.syn443.decision.Context
 import io.syn443.decision.Decision
 import io.syn443.decision.Request
 import kotlinx.serialization.json.*
@@ -29,7 +28,7 @@ class MainActivity : ComponentActivity() {
 private fun Prototype(request: Request) {
     val coordinator = remember { Coordinator(request.context) }
     var state by remember { mutableStateOf(coordinator.snapshot()) }
-    var pending by remember { mutableStateOf<Context?>(null) }
+    var pending by remember { mutableStateOf<Request?>(null) }
     var outcome by remember { mutableStateOf("Проверка ещё не запускалась") }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("SYN443", style = MaterialTheme.typography.headlineLarge)
@@ -39,7 +38,13 @@ private fun Prototype(request: Request) {
         Text(if (state.desiredOn) "Модель запущена" else "Остановлено", Modifier.testTag("state"))
         Text(outcome, Modifier.testTag("outcome"))
         Button(onClick = {
-            pending = coordinator.start()
+            val dispatchContext = coordinator.start()
+            // Only synthetic fixture templates are restamped here. Real probe evidence
+            // must keep its original dispatch context through completion.
+            pending = request.copy(
+                context = dispatchContext,
+                candidates = request.candidates.map { it.copy(context = dispatchContext) },
+            )
             state = coordinator.snapshot()
             outcome = "Результат ожидает применения"
         }, modifier = Modifier.testTag("start")) { Text("Запустить проверку") }
@@ -49,8 +54,9 @@ private fun Prototype(request: Request) {
             outcome = "Сеть изменена"
         }, modifier = Modifier.testTag("network")) { Text("Сменить сеть в модели") }
         Button(onClick = {
-            val selected = Decision.select(request).selectedPathId
-            val accepted = pending?.let { token -> selected?.let { coordinator.tryApply(token, it) } } ?: false
+            val job = pending
+            val selected = job?.let { Decision.select(it).selectedPathId }
+            val accepted = if (job != null && selected != null) coordinator.tryApply(job.context, selected) else false
             state = coordinator.snapshot()
             outcome = if (accepted) "Выбран тестовый маршрут: " + selected else "Устаревший результат отклонён"
         }, modifier = Modifier.testTag("apply")) { Text("Применить результат") }

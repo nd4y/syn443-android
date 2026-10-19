@@ -17,6 +17,9 @@ class PrototypeTest {
         compose.onNodeWithTag("network").performClick()
         compose.onNodeWithTag("apply").performClick()
         compose.onNodeWithTag("outcome").assertTextEquals("Устаревший результат отклонён")
+        compose.onNodeWithTag("start").performClick()
+        compose.onNodeWithTag("apply").performClick()
+        compose.onNodeWithTag("outcome").assertTextEquals("Выбран тестовый маршрут: stable")
     }
 
     @Test fun explicitStopRejectsLateCompletion() {
