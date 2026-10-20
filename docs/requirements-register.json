@@ -1,5 +1,5 @@
 {
-  "specVersion": "0.6",
+  "specVersion": "0.7",
   "requirements": [
     {
       "id": "ARC-01",
@@ -100,7 +100,10 @@
       "evidence": [
         "core/host-lifecycle/src/main/kotlin/io/syn443/host/HostFence.kt",
         "core/host-lifecycle/src/test/kotlin/io/syn443/host/HostFenceTest.kt",
-        "docs/host-lifecycle.md"
+        "docs/host-lifecycle.md",
+        "app/src/debug/kotlin/io/syn443/android/HostProbeService.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/HostProcessTest.kt",
+        "docs/process-probe.md"
       ]
     },
     {
@@ -110,7 +113,10 @@
       "evidence": [
         "core/host-lifecycle/src/main/kotlin/io/syn443/host/HostFence.kt",
         "core/host-lifecycle/src/test/kotlin/io/syn443/host/HostFenceTest.kt",
-        "docs/host-lifecycle.md"
+        "docs/host-lifecycle.md",
+        "app/src/debug/kotlin/io/syn443/android/HostProbeService.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/HostProcessTest.kt",
+        "docs/process-probe.md"
       ]
     },
     {
@@ -1114,6 +1120,16 @@
       "text": "Support-команды: получить статус, запустить назначенную диагностику, запросить очищенный бандл, предложить переподключение. Каждая команда имеет ID, адресата, TTL, разрешения и аудит. Произвольные shell-команды и удалённое исполнение кода в канал поддержки не входят.",
       "status": "planned",
       "evidence": []
+    },
+    {
+      "id": "UI-01",
+      "text": "Android-приложение использует тёмную тему по умолчанию независимо от системной темы Android. Единая контрастная палитра применяется ко всем экранам, диалогам, системным панелям и экрану старта; светлые вспышки при переходах не допускаются. Контент учитывает системные отступы и вырезы, элементы доступны на небольших экранах и при увеличенном шрифте. Приложение не меняет системную тему устройства.",
+      "status": "partial",
+      "evidence": [
+        "docs/ANDROID_UI.md",
+        "app/src/main/kotlin/io/syn443/android/MainActivity.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/PrototypeTest.kt"
+      ]
     },
     {
       "id": "EDIT-01",
@@ -2133,6 +2149,16 @@
       "specRow": " Перегрузка общей telemetry DB/очереди и выпуск групповой правки с admin/home зависимостями | Provisioning SLO соблюдён за счёт quotas/backpressure, typed errors/ack корректны; private recipients/step-up и scope не обходятся |",
       "status": "planned",
       "evidence": []
+    },
+    {
+      "id": "AC81",
+      "specRow": " Первый запуск и перезапуск Android-приложения при светлой и тёмной системной теме, малый экран и вырез | По умолчанию все поверхности приложения тёмные, читаемый текст имеет контраст не ниже4.5:1, нет перекрытия системными панелями, элементы доступны через прокрутку; смены системной темы и светлых вспышек нет |",
+      "status": "partial",
+      "evidence": [
+        "docs/ANDROID_UI.md",
+        "app/src/main/kotlin/io/syn443/android/MainActivity.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/PrototypeTest.kt"
+      ]
     }
   ]
 }

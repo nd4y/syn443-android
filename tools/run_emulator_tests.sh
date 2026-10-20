@@ -15,6 +15,8 @@ trap collect_diagnostics EXIT
 
 adb shell getprop ro.build.version.sdk
 adb shell df -h /data
+# Disposable emulator only: prove the app stays dark with light system settings.
+adb shell cmd uimode night no
 ./gradlew :app:connectedDebugAndroidTest --info --stacktrace
 python3 tools/check_test_evidence.py emulator
 
