@@ -79,8 +79,11 @@ jobs:
         with:
           name: android-jvm-lint-evidence
           path: |
-            **/build/reports/
-            **/build/test-results/
+            core/decision/build/reports/
+            core/decision/build/test-results/
+            core/host-lifecycle/build/reports/
+            core/host-lifecycle/build/test-results/
+            app/build/reports/
             dependency-inventory.txt
           retention-days: 14
       - run: test -s app/build/outputs/apk/debug/app-debug.apk && test -s app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
