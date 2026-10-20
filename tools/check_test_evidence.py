@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=5
+    minimum=6
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -22,7 +22,7 @@ for path in paths:
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="emulator":
-    required={"selectionAndStaleNetworkResult", "explicitStopRejectsLateCompletion",
+    required={"selectionAndStaleNetworkResult", "explicitStopRejectsLateCompletion", "darkThemeByDefault",
               "workerRunsInSeparateProcessAndStops", "wedgedWorkerCanBeTerminatedAndRebound",
               "foreignSessionCannotTerminateHost"}
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"

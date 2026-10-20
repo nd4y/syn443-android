@@ -4,12 +4,28 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toPixelMap
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
 class PrototypeTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test fun darkThemeByDefault() {
+        compose.onNodeWithTag("prototype").assertExists()
+        val screen = compose.onRoot().captureToImage().toPixelMap()
+        val background = screen[1, screen.height - 2].luminance()
+        assertTrue("Default surface is not dark", background < 0.1f)
+        val title = compose.onNodeWithText("SYN443").captureToImage().toPixelMap()
+        var foreground = 0f
+        for (y in 0 until title.height) for (x in 0 until title.width) {
+            foreground = maxOf(foreground, title[x, y].luminance())
+        }
+        assertTrue("Title lacks readable contrast on dark surface", (foreground + 0.05f) / (background + 0.05f) >= 4.5f)
+    }
 
     @Test fun selectionAndStaleNetworkResult() {
         val titleTop = compose.onNodeWithText("SYN443").fetchSemanticsNode().boundsInWindow.top

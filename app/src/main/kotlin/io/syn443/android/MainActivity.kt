@@ -22,7 +22,11 @@ class MainActivity : ComponentActivity() {
         val fixture = assets.open("decision-vectors.json").bufferedReader().use { it.readText() }
         val input = Decision.json.parseToJsonElement(fixture).jsonObject["cases"]!!.jsonArray.first().jsonObject["input"]!!
         val request = Decision.decode(input.toString())
-        setContent { MaterialTheme { Prototype(request) } }
+        setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                Surface(Modifier.fillMaxSize()) { Prototype(request) }
+            }
+        }
     }
 }
 

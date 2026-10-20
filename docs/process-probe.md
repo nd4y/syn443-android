@@ -10,7 +10,7 @@ looper, successful rebinding, and rejection of commands bearing another session.
 Every command carries a per-binding random session and replies preserve the request ID.
 Only the dedicated service terminates its own process; tests never kill arbitrary PIDs.
 The final unbind also terminates the dedicated process. Tests cancel automatic rebinding
-before launching a replacement. CI runs these tests alongside the two diagnostic UI tests
+before launching a replacement. CI runs these tests alongside the three diagnostic UI tests
 on API 29, 35 and 37; physical results are recorded separately without device identifiers.
 
 This is a fault harness, not the production ownership supervisor. A responsive control
