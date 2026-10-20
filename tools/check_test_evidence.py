@@ -8,6 +8,9 @@ if mode=="jvm":
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
     minimum=2
+elif mode=="host":
+    paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
+    minimum=11
 else: raise SystemExit("unknown evidence type")
 assert paths,"No JUnit XML evidence produced"
 cases=[]

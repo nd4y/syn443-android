@@ -4,6 +4,7 @@ All automatable implemented behavior must run on pull requests and main in GitHu
 - Contracts: strict schema validation, shared fixtures, unsupported fields/versions and bounded numeric inputs.
 - Go: unit, property/permutation, fuzz seed/smoke, race detector, vet, coverage and HTTP boundary tests.
 - Android: same fixtures on JVM, lifecycle/state tests, lint, APK build and connected instrumentation on emulator API 29, 35 and 37.
+- Host lifecycle: eleven JVM methods, including concurrent requests and 10,000 deterministic randomized events; actual JUnit evidence is mandatory. Real process death/FD ownership still needs Android integration fault injection.
 - Cross-platform: identical fixture bytes and SHA lock; server/client expected route and explanation agree.
 - Later: Postgres migrations/transaction races, job retries, provider fixtures, browser UI/API E2E, fault/load/security checks as components arrive.
 
