@@ -4,6 +4,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '47 2 * * *'
 permissions:
   contents: read
 concurrency:
@@ -18,3 +20,135 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 tools/check_documents.py
+      - run: python3 tools/check_contracts.py
+      - run: python3 -m unittest discover -s tools -p 'test_*.py'
+      - run: bash -n tools/run_emulator_tests.sh tools/prepare_android_tools.sh
+  jvm-and-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/wrapper-validation@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '15859902'
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
+      - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - run: python3 tools/check_test_evidence.py jvm
+      - run: python3 tools/check_apk.py app/build/outputs/apk/debug/app-debug.apk
+      - run: '"$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 app/build/outputs/apk/debug/app-debug.apk'
+      - name: Dependency inventory
+        run: |
+          ./gradlew :app:dependencies --configuration debugRuntimeClasspath > dependency-inventory.txt
+          ./gradlew :app:dependencies --configuration debugAndroidTestRuntimeClasspath >> dependency-inventory.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: reports-upload
+        continue-on-error: true
+        if: always()
+        with:
+          name: android-jvm-lint-evidence
+          path: |
+            **/build/reports/
+            **/build/test-results/
+            dependency-inventory.txt
+          retention-days: 14
+      - run: test -s app/build/outputs/apk/debug/app-debug.apk && test -s app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: apk-upload
+        continue-on-error: true
+        with:
+          name: syn443-prototype-debug-apks
+          path: app/build/outputs/apk/
+          if-no-files-found: error
+          retention-days: 14
+      - if: always() && (steps.reports-upload.outcome == 'failure' || steps.apk-upload.outcome == 'failure')
+        run: echo 'Artifact delivery failed (see upload log). Test/build gates remain mandatory; private prerelease assets are the fallback.' >> "$GITHUB_STEP_SUMMARY"
+  workflow-lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color
+  emulator:
+    needs: jvm-and-apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 35, '37.0']
+        include:
+          - api: '37.0'
+            profile: pixel_2
+            ram: 4096M
+            cores: 4
+            disk: 8G
+            options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim -no-metrics -show-kernel
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Reserve emulator disk on this disposable runner
+        run: |
+          df -h "$HOME"
+          sudo rm -rf -- /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h "$HOME"
+          available_mb=$(df -Pm "$HOME" | awk 'NR==2 {print $4}')
+          test "$available_mb" -ge 16384
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '15859902'
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
+      - run: bash tools/prepare_android_tools.sh
+      - name: Start ADB before emulator
+        run: adb version && adb start-server
+      - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+        with:
+          avd-name: syn443-ci
+          pre-emulator-launch-script: grep -Fx 'target=android-${{ matrix.api }}' "$HOME/.android/avd/syn443-ci.ini"
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          profile: ${{ matrix.profile || '' }}
+          ram-size: ${{ matrix.ram || '' }}
+          cores: ${{ matrix.cores || 2 }}
+          disk-size: ${{ matrix.disk || '8G' }}
+          emulator-boot-timeout: 900
+          emulator-options: ${{ matrix.options || '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics -feature -Vulkan -show-kernel' }}
+          script: bash tools/run_emulator_tests.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: emulator-evidence-upload
+        continue-on-error: true
+        if: always()
+        with:
+          name: android-emulator-${{ matrix.api }}-evidence
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+          retention-days: 14
+      - if: always() && steps.emulator-evidence-upload.outcome == 'failure'
+        run: echo 'Emulator evidence upload failed; test outcomes remain in this job log.' >> "$GITHUB_STEP_SUMMARY"

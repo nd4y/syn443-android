@@ -16,3 +16,10 @@ One Remnawave API resource and NetBird are in version 1.0.
 Multiple Remnawave resources, x-ui/3x-ui and Tailscale/ZeroTier are extension contracts only.
 Copyright (c) 2026 SYN443 contributors. All rights reserved pending an explicit product license.
 Third-party dependencies retain their own licenses.
+
+## M0 prototype
+See [implementation status](docs/M0_IMPLEMENTATION.md) for implemented paths and limitations.
+
+Run: ./gradlew :core:decision:test :app:assembleDebug. Emulator tests: ./gradlew :app:connectedDebugAndroidTest.
+
+See [CI delivery limitations](docs/CI_DELIVERY.md) for current artifact-quota and private branch-protection constraints.
