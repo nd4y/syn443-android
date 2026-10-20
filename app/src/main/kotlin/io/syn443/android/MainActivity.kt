@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -30,7 +32,10 @@ private fun Prototype(request: Request) {
     var state by remember { mutableStateOf(coordinator.snapshot()) }
     var pending by remember { mutableStateOf<Request?>(null) }
     var outcome by remember { mutableStateOf("Проверка ещё не запускалась") }
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(
+        Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         Text("SYN443", style = MaterialTheme.typography.headlineLarge)
         Text("Secure Your Network")
         Text("Диагностический прототип. VPN ещё не подключается.", Modifier.testTag("prototype"))

@@ -19,3 +19,6 @@ The JVM HostFence is not wired to these callbacks: trusted identity locks, drain
 launches, hostile PID reuse, persistent retry budgets, isolated native runtime, FD/TUN
 ownership, foreground service lifecycle and real Wi-Fi/LTE traffic remain pending.
 No VPN permission is requested and an existing VPN is not replaced.
+
+The diagnostic screen respects system bars/cutouts and scrolls on small viewports.
+UI tests bring controls into view before interacting, including after the bottom Stop.

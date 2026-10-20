@@ -11,21 +11,21 @@ class PrototypeTest {
     @Test fun selectionAndStaleNetworkResult() {
         compose.onNodeWithTag("prototype").assertTextContains("VPN ещё не подключается.", substring = true)
         compose.onNodeWithTag("state").assertTextEquals("Остановлено")
-        compose.onNodeWithTag("start").performClick()
-        compose.onNodeWithTag("apply").performClick()
+        compose.onNodeWithTag("start").performScrollTo().performClick()
+        compose.onNodeWithTag("apply").performScrollTo().performClick()
         compose.onNodeWithTag("outcome").assertTextEquals("Выбран тестовый маршрут: stable")
-        compose.onNodeWithTag("network").performClick()
-        compose.onNodeWithTag("apply").performClick()
+        compose.onNodeWithTag("network").performScrollTo().performClick()
+        compose.onNodeWithTag("apply").performScrollTo().performClick()
         compose.onNodeWithTag("outcome").assertTextEquals("Устаревший результат отклонён")
-        compose.onNodeWithTag("start").performClick()
-        compose.onNodeWithTag("apply").performClick()
+        compose.onNodeWithTag("start").performScrollTo().performClick()
+        compose.onNodeWithTag("apply").performScrollTo().performClick()
         compose.onNodeWithTag("outcome").assertTextEquals("Выбран тестовый маршрут: stable")
     }
 
     @Test fun explicitStopRejectsLateCompletion() {
-        compose.onNodeWithTag("start").performClick()
-        compose.onNodeWithTag("stop").performClick()
-        compose.onNodeWithTag("apply").performClick()
+        compose.onNodeWithTag("start").performScrollTo().performClick()
+        compose.onNodeWithTag("stop").performScrollTo().performClick()
+        compose.onNodeWithTag("apply").performScrollTo().performClick()
         compose.onNodeWithTag("state").assertTextEquals("Остановлено")
         compose.onNodeWithTag("outcome").assertTextEquals("Устаревший результат отклонён")
     }

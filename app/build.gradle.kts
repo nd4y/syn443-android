@@ -10,8 +10,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.1.1-process-probe"
+        versionCode = 3
+        versionName = "0.1.2-process-probe"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }
