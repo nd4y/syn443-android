@@ -12,7 +12,19 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  public-data:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - run: python3 -m unittest discover -s tools -p 'test_public_data.py'
+      - run: python3 tools/check_public_data.py --history
+      - run: bash tools/scan_secrets.sh
   documents:
+    needs: public-data
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -24,6 +36,7 @@ jobs:
       - run: python3 -m unittest discover -s tools -p 'test_*.py'
       - run: bash -n tools/run_emulator_tests.sh tools/prepare_android_tools.sh
   jvm-and-apk:
+    needs: public-data
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -49,10 +62,20 @@ jobs:
         run: |
           ./gradlew :app:dependencies --configuration debugRuntimeClasspath > dependency-inventory.txt
           ./gradlew :app:dependencies --configuration debugAndroidTestRuntimeClasspath >> dependency-inventory.txt
+      - name: Scan JVM report payloads
+        id: reports-scan
+        if: always()
+        run: |
+          paths=()
+          for path in core/decision/build/reports core/decision/build/test-results core/host-lifecycle/build/reports core/host-lifecycle/build/test-results app/build/reports dependency-inventory.txt; do
+            if [ -e "$path" ]; then paths+=("$path"); fi
+          done
+          test "${#paths[@]}" -gt 0
+          python3 tools/check_public_data.py "${paths[@]}"
+          bash tools/scan_secrets.sh "${paths[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: reports-upload
-        continue-on-error: true
-        if: always()
+        if: always() && steps.reports-scan.outcome == 'success'
         with:
           name: android-jvm-lint-evidence
           path: |
@@ -61,17 +84,19 @@ jobs:
             dependency-inventory.txt
           retention-days: 14
       - run: test -s app/build/outputs/apk/debug/app-debug.apk && test -s app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+      - name: Scan APK payloads
+        run: |
+          python3 tools/check_public_data.py app/build/outputs/apk/
+          bash tools/scan_secrets.sh app/build/outputs/apk/
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: apk-upload
-        continue-on-error: true
         with:
           name: syn443-prototype-debug-apks
           path: app/build/outputs/apk/
           if-no-files-found: error
           retention-days: 14
-      - if: always() && (steps.reports-upload.outcome == 'failure' || steps.apk-upload.outcome == 'failure')
-        run: echo 'Artifact delivery failed (see upload log). Test/build gates remain mandatory; private prerelease assets are the fallback.' >> "$GITHUB_STEP_SUMMARY"
   workflow-lint:
+    needs: public-data
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -141,15 +166,23 @@ jobs:
           emulator-boot-timeout: 900
           emulator-options: ${{ matrix.options || '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics -feature -Vulkan -show-kernel' }}
           script: bash tools/run_emulator_tests.sh
+      - name: Scan emulator report payloads
+        id: emulator-scan
+        if: always()
+        run: |
+          paths=()
+          for path in app/build/reports/androidTests app/build/outputs/androidTest-results; do
+            if [ -e "$path" ]; then paths+=("$path"); fi
+          done
+          test "${#paths[@]}" -gt 0
+          python3 tools/check_public_data.py "${paths[@]}"
+          bash tools/scan_secrets.sh "${paths[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: emulator-evidence-upload
-        continue-on-error: true
-        if: always()
+        if: always() && steps.emulator-scan.outcome == 'success'
         with:
           name: android-emulator-${{ matrix.api }}-evidence
           path: |
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/
           retention-days: 14
-      - if: always() && steps.emulator-evidence-upload.outcome == 'failure'
-        run: echo 'Emulator evidence upload failed; test outcomes remain in this job log.' >> "$GITHUB_STEP_SUMMARY"
