@@ -101,8 +101,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Reserve API 37 emulator disk on this disposable runner
-        if: matrix.api == '37.0'
+      - name: Reserve emulator disk on this disposable runner
         run: |
           df -h "$HOME"
           sudo rm -rf -- /usr/share/dotnet /opt/ghc /usr/local/.ghcup
@@ -137,7 +136,7 @@ jobs:
           profile: ${{ matrix.profile || '' }}
           ram-size: ${{ matrix.ram || '' }}
           cores: ${{ matrix.cores || 2 }}
-          disk-size: ${{ matrix.disk || '' }}
+          disk-size: ${{ matrix.disk || '8G' }}
           emulator-boot-timeout: 900
           emulator-options: ${{ matrix.options || '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics -feature -Vulkan -show-kernel' }}
           script: bash tools/run_emulator_tests.sh
