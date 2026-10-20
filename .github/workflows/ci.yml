@@ -173,19 +173,13 @@ jobs:
         id: emulator-scan
         if: always()
         run: |
-          paths=()
-          for path in app/build/reports/androidTests app/build/outputs/androidTest-results; do
-            if [ -e "$path" ]; then paths+=("$path"); fi
-          done
-          test "${#paths[@]}" -gt 0
-          python3 tools/check_public_data.py "${paths[@]}"
-          bash tools/scan_secrets.sh "${paths[@]}"
+          python3 tools/collect_public_emulator.py
+          python3 tools/check_public_data.py public-evidence/emulator
+          bash tools/scan_secrets.sh public-evidence/emulator
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: emulator-evidence-upload
         if: always() && steps.emulator-scan.outcome == 'success'
         with:
           name: android-emulator-${{ matrix.api }}-evidence
-          path: |
-            app/build/reports/androidTests/
-            app/build/outputs/androidTest-results/
+          path: public-evidence/emulator/
           retention-days: 14

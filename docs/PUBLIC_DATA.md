@@ -30,3 +30,7 @@ values or the same value at another path.
 APK payloads are additionally scanned as ZIP containers: Gitleaks otherwise skips the
 binary `.apk` file. The real scanner self-test checks both a clean APK and detection
 inside an embedded synthetic asset. Upload allowlists match the scanned report paths.
+Emulator uploads contain only allowlisted JUnit class/method identities and outcome counts.
+Hostnames, device properties, stack traces, messages, system streams, logcat and UTP
+payloads are excluded structurally. Tests prove metadata removal and retention of failed,
+errored and skipped outcomes. A missing, malformed or duplicate test report fails closed.
