@@ -40,8 +40,9 @@ jobs:
         with:
           cmdline-tools-version: '15859902'
           packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
-      - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :core:host-lifecycle:check :core:host-lifecycle:jacocoTestReport :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - run: python3 tools/check_test_evidence.py jvm
+      - run: python3 tools/check_test_evidence.py host
       - run: python3 tools/check_apk.py app/build/outputs/apk/debug/app-debug.apk
       - run: '"$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 app/build/outputs/apk/debug/app-debug.apk'
       - name: Dependency inventory

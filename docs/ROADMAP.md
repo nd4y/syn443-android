@@ -6,6 +6,7 @@ A buildable Android diagnostic shell and CI tests are deliverables, not proof of
 Single VpnService/TUN owner and isolated native host; direct path, two-hop ingress/exit, NetBird/internal probe.
 Real Wi-Fi/cellular handover, fault attribution, native hang/crash, offline config recovery and energy budgets.
 Do not build the full panel before this gate proves feasibility.
+The first M1 building block is the pure JVM [host ownership fence](host-lifecycle.md). It does not satisfy the physical gate or connect a VPN; Android process/TUN integration remains pending.
 ## M2 - identity and provisioning
 Keycloak/QR device enrollment, DPoP, signed bundles/trust/lease, transactional activation, revoke/rollback and durable jobs.
 ## M3 - engines, sources and administration

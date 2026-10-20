@@ -96,14 +96,22 @@
     {
       "id": "MOD-08",
       "text": "Модули используют единый VpnService. Android supervisor владеет основным TUN descriptor, Network binding и поколениями; native host получает контролируемый duplicate descriptor и transport context. В1.0 один согласованный Go runtime для proxy и NetBird модулей в отдельном native-host процессе; UI и supervisor не загружают этот runtime. Повторный start до подтверждённой остановки/смерти предыдущего поколения запрещён. Прототип ARC-02 проверяет эту границу до full implementation.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "core/host-lifecycle/src/main/kotlin/io/syn443/host/HostFence.kt",
+        "core/host-lifecycle/src/test/kotlin/io/syn443/host/HostFenceTest.kt",
+        "docs/host-lifecycle.md"
+      ]
     },
     {
       "id": "MOD-09",
       "text": "Native crash/hang/stop timeout диагностируется по engine/version/generation. JVM timeout сам по себе не доказывает остановку Go: supervisor при необходимости завершает только принадлежащий приложению native-host, дожидается его смерти/освобождения identity lock и ограниченно восстанавливает процесс. Пока TUN удерживается supervisor, потоки блокируются по fail policy. Миграция/откат локального состояния согласуются с ENG-03; сторонние процессы/VPN не завершаются.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "core/host-lifecycle/src/main/kotlin/io/syn443/host/HostFence.kt",
+        "core/host-lifecycle/src/test/kotlin/io/syn443/host/HostFenceTest.kt",
+        "docs/host-lifecycle.md"
+      ]
     },
     {
       "id": "MOD-10",
@@ -1588,7 +1596,10 @@
       "evidence": [
         "core/decision/src/test/kotlin/io/syn443/decision/DecisionTest.kt",
         "core/decision/src/test/kotlin/io/syn443/decision/CoordinatorTest.kt",
-        "contracts/README.md"
+        "contracts/README.md",
+        "core/host-lifecycle/src/main/kotlin/io/syn443/host/HostFence.kt",
+        "core/host-lifecycle/src/test/kotlin/io/syn443/host/HostFenceTest.kt",
+        "docs/host-lifecycle.md"
       ]
     },
     {
