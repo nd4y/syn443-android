@@ -2,6 +2,9 @@ package io.syn443.android
 
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -9,6 +12,10 @@ class PrototypeTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test fun selectionAndStaleNetworkResult() {
+        val insets = checkNotNull(ViewCompat.getRootWindowInsets(compose.activity.window.decorView))
+        val safeTop = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).top
+        val titleTop = compose.onNodeWithText("SYN443").fetchSemanticsNode().boundsInWindow.top
+        assertTrue("Title overlaps system bars/cutout", titleTop >= safeTop)
         compose.onNodeWithTag("prototype").assertTextContains("VPN ещё не подключается.", substring = true)
         compose.onNodeWithTag("state").assertTextEquals("Остановлено")
         compose.onNodeWithTag("start").performScrollTo().performClick()
