@@ -100,7 +100,10 @@
       "evidence": [
         "core/host-lifecycle/src/main/kotlin/io/syn443/host/HostFence.kt",
         "core/host-lifecycle/src/test/kotlin/io/syn443/host/HostFenceTest.kt",
-        "docs/host-lifecycle.md"
+        "docs/host-lifecycle.md",
+        "app/src/debug/kotlin/io/syn443/android/HostProbeService.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/HostProcessTest.kt",
+        "docs/process-probe.md"
       ]
     },
     {
@@ -110,7 +113,10 @@
       "evidence": [
         "core/host-lifecycle/src/main/kotlin/io/syn443/host/HostFence.kt",
         "core/host-lifecycle/src/test/kotlin/io/syn443/host/HostFenceTest.kt",
-        "docs/host-lifecycle.md"
+        "docs/host-lifecycle.md",
+        "app/src/debug/kotlin/io/syn443/android/HostProbeService.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/HostProcessTest.kt",
+        "docs/process-probe.md"
       ]
     },
     {
