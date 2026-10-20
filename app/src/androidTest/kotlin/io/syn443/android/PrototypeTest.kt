@@ -12,9 +12,11 @@ class PrototypeTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test fun selectionAndStaleNetworkResult() {
-        val insets = checkNotNull(ViewCompat.getRootWindowInsets(compose.activity.window.decorView))
-        val safeTop = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).top
         val titleTop = compose.onNodeWithText("SYN443").fetchSemanticsNode().boundsInWindow.top
+        val safeTop = compose.runOnIdle {
+            checkNotNull(ViewCompat.getRootWindowInsets(compose.activity.window.decorView))
+                .getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).top
+        }
         assertTrue("Title overlaps system bars/cutout", titleTop >= safeTop)
         compose.onNodeWithTag("prototype").assertTextContains("VPN ещё не подключается.", substring = true)
         compose.onNodeWithTag("state").assertTextEquals("Остановлено")
