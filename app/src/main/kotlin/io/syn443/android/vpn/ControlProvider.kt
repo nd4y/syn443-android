@@ -76,7 +76,7 @@ class ControlProvider : ContentProvider() {
                     require(!store.read().optBoolean("resumeRequired")) { "explicit_connect_required" }
                     context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE))
                 }
-                "fault-crash", "fault-hang" -> {
+                "fault-crash", "fault-hang", "fault-owner" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
                 }
@@ -94,15 +94,6 @@ class ControlProvider : ContentProvider() {
                         require(java.io.File("/proc/${process.pid}/cmdline").readText().trimEnd('\u0000') == context.packageName)
                         Process.killProcess(process.pid)
                     }
-                }
-                "fault-service" -> {
-                    require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
-                    val generation = store.checkpoint().generation
-                    require(store.checkpoint().desiredOn)
-                    context.stopService(Intent(context, TunnelService::class.java))
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        if (Recovery.current(store.checkpoint(), generation)) context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE))
-                    }, 500)
                 }
                 "test-health" -> {
                     require(io.syn443.android.BuildConfig.DEBUG)

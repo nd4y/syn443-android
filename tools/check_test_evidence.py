@@ -45,7 +45,7 @@ if mode=="emulator":
                  "controllerDeathDuringApplyRollsBackOffline", "expiredLeaseBlocksWithoutDirectFallback",
                  "offlineControlPlaneRetainsAuthorizedPath"}
     required.add("duplicateEngineFieldsCannotReplaceConfiguration")
-    required.add("serviceRecreationKeepsIntentAndRejectsOldCallbacks")
+    required.add("nativeOwnerRecreationKeepsIntentAndRejectsOldCallbacks")
     required.add("signedManagementReleasePreservesLocalState")
     required.add("externalConnectExtraCannotTurnVpnOn")
     required.add("healthyChangedCandidateCommits")

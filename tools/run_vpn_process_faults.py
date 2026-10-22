@@ -147,7 +147,7 @@ def main():
         for name in ('twoHopTunTrafficCrossesBothProxies', 'ingressFailureRecoversWithoutNativeRestart',
                      'egressFailureRecoversWithoutNativeRestart', 'uiProcessDeathKeepsRealTunTraffic',
                      'forceStopWaitsForForegroundReopenAndPreservesIntent',
-                     'controllerDeathRetiresFrozenNativeAndPreservesIntent', 'serviceRecreationKeepsIntentAndRejectsOldCallbacks',
+                     'controllerDeathRetiresFrozenNativeAndPreservesIntent', 'nativeOwnerRecreationKeepsIntentAndRejectsOldCallbacks',
                      'controllerRestartBudgetSurvivesOwnerDeath'):
             case = ET.SubElement(suite, 'testcase', classname='io.syn443.android.ExternalVpnProcessTest', name=name)
             try:
@@ -178,9 +178,9 @@ def main():
                     call('fault-controller')
                     await_condition(lambda: pid(':engine') not in ('', native) and
                                     call('status').get('phase') == 'Online' and proxy.progress > progress)
-                elif name.startswith('serviceRecreation'):
+                elif name.startswith('nativeOwnerRecreation'):
                     previous = pid(':engine')
-                    call('fault-service')
+                    call('fault-owner')
                     await_condition(lambda: pid(':engine') not in ('', previous) and call('status').get('phase') == 'Online' and proxy.progress > progress)
                     native = pid(':engine')
                 elif name.startswith('forceStop'):
@@ -222,6 +222,9 @@ def main():
                 assert call('status')['desiredOn']
                 print(name + ': passed', flush=True)
             except Exception:
+                snapshot = call('status')
+                print('Recovery failure state: ' + json.dumps({k: snapshot.get(k) for k in
+                      ('phase', 'reason', 'desiredOn', 'generation', 'resumeRequired', 'attempt', 'heavyWallMs', 'nextWallMs')}), flush=True)
                 ET.SubElement(case, 'failure', message='External process recovery failed; see job log')
                 raise
     finally:

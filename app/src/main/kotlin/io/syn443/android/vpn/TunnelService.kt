@@ -119,6 +119,7 @@ class TunnelService : VpnService() {
         if (!store.checkpoint().desiredOn) { retire(false); return START_NOT_STICKY }
         if (!OsIntentGate.allowed(this, store)) { store.update { it.put("resumeRequired", true) }; phase("NeedsAction", "explicit_resume_required"); retire(false); return START_NOT_STICKY }
         if (intent?.action == "fault-crash" && io.syn443.android.BuildConfig.DEBUG) terminateOwned()
+        if (intent?.action == "fault-owner" && io.syn443.android.BuildConfig.DEBUG) retire(true)
         if (intent?.action == "fault-hang" && io.syn443.android.BuildConfig.DEBUG && verifiedPid()) Process.sendSignal(hostPid, 19)
         if (intent?.action == "netbird-diagnose" && ready) token?.let { host?.diagnoseNetBird(it) }
         if (intent?.action == "policy-refresh") forcePolicyFetch = true
