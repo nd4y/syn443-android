@@ -20,6 +20,8 @@ class EngineHostService : Service() {
     private lateinit var worker: Handler
     @Volatile private var engine: Runtime? = null
     @Volatile private var token: String? = null
+    private val controlLock = Any()
+    @Volatile private var desiredLease = 0L
     private var tun: ParcelFileDescriptor? = null
     private var lockFile: RandomAccessFile? = null
     private var lock: FileLock? = null
@@ -33,32 +35,45 @@ class EngineHostService : Service() {
     private val binder = object : IEngineHost.Stub() {
         override fun pid() = Process.myPid()
         override fun start(fd: ParcelFileDescriptor, config: String, session: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
+            synchronized(controlLock) {
+                if (token != null) { fd.close(); platform.event(session, FAILED); return }
+                token = session; callback = platform; desiredLease = leaseDeadline
+            }
             worker.post {
-                if (token != null) { fd.close(); platform.event(session, FAILED); return@post }
-                token = session
                 try {
                     lockFile = RandomAccessFile(File(noBackupFilesDir, "engine-owner.lock"), "rw")
                     lock = lockFile!!.channel.tryLock() ?: error("identity already owned")
                     tun = fd
-                    engine = Bridge.newRuntime(config, fd.fd, object : Protector {
+                    val created = Bridge.newRuntime(config, fd.fd, object : Protector {
                         override fun protect(socket: Int) {
                             ParcelFileDescriptor.fromFd(socket).use { if (!platform.protect(it, session)) error("socket protection rejected") }
                         }
                         override fun exchangeDNS(query: ByteArray): ByteArray = platform.exchangeDNS(query, session)
                         override fun physicalInterfaces(): String = platform.physicalInterfaces(session)
-                    }, name, index, leaseDeadline)
-                    engine!!.start()
+                    }, name, index, desiredLease)
+                    synchronized(controlLock) {
+                        engine = created
+                        // Revocation received during construction must precede the first packet.
+                        created.setLeaseDeadline(desiredLease)
+                    }
+                    created.start()
                     platform.event(session, READY)
                 } catch (_: Exception) { platform.event(session, if (engine == null) INVALID else FAILED) }
             }
         }
         override fun leaseDeadline(session: String, deadline: Long) {
-            if (session != token) return
-            // This Go call is an atomic store; it does not enter the SDK/control worker.
-            runCatching { engine?.setLeaseDeadline(deadline) }.onFailure { callback?.event(session, LEASE_RESTART) }
+            synchronized(controlLock) {
+                if (session != token) return
+                desiredLease = deadline
+                // Buffer even before Go exists. This setter never enters the SDK worker.
+                runCatching { engine?.setLeaseDeadline(deadline) }.onFailure {
+                    if (deadline != 1L) callback?.event(session, LEASE_RESTART)
+                }
+            }
         }
         override fun stop(session: String) {
             if (session != token) return
+            leaseDeadline(session, 1L)
             worker.post { runCatching { engine?.cancel(); engine?.close() }; finishHost() }
         }
         override fun pulse(session: String) {
@@ -83,7 +98,7 @@ class EngineHostService : Service() {
     override fun onBind(intent: Intent): IBinder = object : IEngineHost.Stub() {
         override fun pid() = binder.pid()
         override fun start(fd: ParcelFileDescriptor, config: String, token: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
-            callback = platform; binder.start(fd, config, token, name, index, leaseDeadline, platform)
+            binder.start(fd, config, token, name, index, leaseDeadline, platform)
         }
         override fun leaseDeadline(token: String, deadline: Long) = binder.leaseDeadline(token, deadline)
         override fun stop(token: String) = binder.stop(token)

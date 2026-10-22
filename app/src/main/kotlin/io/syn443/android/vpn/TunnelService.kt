@@ -478,7 +478,7 @@ class TunnelService : VpnService() {
             }
             handler.post {
                 probeInFlight = false
-                if (currentToken != token || currentEpoch != epoch || activation != policies.read().journal.activationGeneration || !Recovery.current(store.checkpoint(), generation)) return@post
+                if (destroyed || retiring || !ready || currentToken != token || currentEpoch != epoch || activation != policies.read().journal.activationGeneration || !Recovery.current(store.checkpoint(), generation)) return@post
                 if (ok) {
                     val now = SystemClock.uptimeMillis()
                     if (stableSince == 0L) stableSince = now
@@ -607,10 +607,15 @@ class TunnelService : VpnService() {
             val results = job.run(candidate.payload.activation.checks)
             handler.post {
                 if (policyJob === job) policyJob = null
-                if (!Recovery.current(store.checkpoint(), generation) || currentEpoch != epoch || session != token || activation != policies.read().journal.activationGeneration) return@post
+                if (destroyed || retiring || !ready || !Recovery.current(store.checkpoint(), generation) || currentEpoch != epoch || session != token || activation != policies.read().journal.activationGeneration) return@post
                 if (policies.read().journal.phase == "prepared") {
                     var began = false
-                    store.effectCurrent(generation) { if (policies.read().journal.activationGeneration == activation && policies.read().journal.candidate == candidate.envelope) { policies.begin(results); began = true } }
+                    store.effectCurrent(generation) {
+                        if (policies.read().journal.activationGeneration == activation && policies.read().journal.candidate == candidate.envelope &&
+                            (runningConfigHash == candidate.payload.contentHash || Recovery.replacementReady(store.checkpoint(), System.currentTimeMillis()))) {
+                            policies.begin(results); began = true
+                        }
+                    }
                     if (began && runningConfigHash != candidate.payload.contentHash) retire(true)
                 } else if (policies.read().journal.phase == "applying") {
                     val passed = candidate.payload.activation.checks.indices.all { !candidate.payload.activation.checks[it].required || results[it] }
