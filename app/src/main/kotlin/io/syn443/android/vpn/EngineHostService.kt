@@ -18,7 +18,7 @@ import java.nio.channels.FileLock
 class EngineHostService : Service() {
     private val workerThread = HandlerThread("native-engine")
     private lateinit var worker: Handler
-    private var engine: Runtime? = null
+    @Volatile private var engine: Runtime? = null
     @Volatile private var token: String? = null
     private var tun: ParcelFileDescriptor? = null
     private var lockFile: RandomAccessFile? = null
@@ -32,7 +32,7 @@ class EngineHostService : Service() {
     override fun onCreate() { super.onCreate(); workerThread.start(); worker = Handler(workerThread.looper) }
     private val binder = object : IEngineHost.Stub() {
         override fun pid() = Process.myPid()
-        override fun start(fd: ParcelFileDescriptor, config: String, session: String, name: String, index: Int, platform: IPlatform) {
+        override fun start(fd: ParcelFileDescriptor, config: String, session: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
             worker.post {
                 if (token != null) { fd.close(); platform.event(session, FAILED); return@post }
                 token = session
@@ -46,11 +46,16 @@ class EngineHostService : Service() {
                         }
                         override fun exchangeDNS(query: ByteArray): ByteArray = platform.exchangeDNS(query, session)
                         override fun physicalInterfaces(): String = platform.physicalInterfaces(session)
-                    }, name, index)
+                    }, name, index, leaseDeadline)
                     engine!!.start()
                     platform.event(session, READY)
                 } catch (_: Exception) { platform.event(session, if (engine == null) INVALID else FAILED) }
             }
+        }
+        override fun leaseDeadline(session: String, deadline: Long) {
+            if (session != token) return
+            // This Go call is an atomic store; it does not enter the SDK/control worker.
+            runCatching { engine?.setLeaseDeadline(deadline) }.onFailure { callback?.event(session, LEASE_RESTART) }
         }
         override fun stop(session: String) {
             if (session != token) return
@@ -77,9 +82,10 @@ class EngineHostService : Service() {
     @Volatile private var callback: IPlatform? = null
     override fun onBind(intent: Intent): IBinder = object : IEngineHost.Stub() {
         override fun pid() = binder.pid()
-        override fun start(fd: ParcelFileDescriptor, config: String, token: String, name: String, index: Int, platform: IPlatform) {
-            callback = platform; binder.start(fd, config, token, name, index, platform)
+        override fun start(fd: ParcelFileDescriptor, config: String, token: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
+            callback = platform; binder.start(fd, config, token, name, index, leaseDeadline, platform)
         }
+        override fun leaseDeadline(token: String, deadline: Long) = binder.leaseDeadline(token, deadline)
         override fun stop(token: String) = binder.stop(token)
         override fun pulse(token: String) = binder.pulse(token)
         override fun diagnoseNetBird(token: String) = binder.diagnoseNetBird(token)
@@ -95,5 +101,5 @@ class EngineHostService : Service() {
         token?.let { binder.stop(it) }
         return false
     }
-    companion object { const val READY = 1; const val FAILED = 2; const val PULSE = 3; const val INVALID = 4 }
+    companion object { const val READY = 1; const val FAILED = 2; const val PULSE = 3; const val INVALID = 4; const val LEASE_RESTART = 5 }
 }

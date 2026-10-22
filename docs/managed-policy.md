@@ -61,7 +61,17 @@ targets, bearer values and NetBird identities do not enter durable events.
 policy-stage-file and policy-refresh use the same activation path as delivery.
 No debug reset/unmanage operation is exposed on a physical phone.
 
+An explicit signed operation=release uses the same recipient, watermark, lease and
+activation gates. It must preserve the original local config exactly and pass all
+required checks before atomically clearing the delivery capability. Identity and
+user intent remain intact; epoch/revision floors survive a later explicit binding.
+This permits reversible pilot testing and authorized transfer of management. It is
+not logout or upstream credential revocation. The operator signer requires an
+explicit operation grant; an unsigned ADB flag cannot release a managed device.
+
 An Android Activity is not a Connect command. After OS Force stop, reopening the
 UI requires explicit Connect; OS stopped state is never bypassed. Revoke/competing
 VPN follows the OS permission path. Actual reboot/unlock, Always-on/lockdown,
 Doze and energy observations must be reported separately from emulator evidence.
+
+Managed bundles must require `tun.lease.v1`. A native CLOCK_BOOTTIME guard checks TUN reads (including after a blocking read), writes and batched I/O. Expiry permanently retires that TUN owner; a renewal needs a new owner. No wakeup alarm or Java timer is required to deny data packets after suspend. Delivery admission is persisted across controller death, with a five-second manual minimum and a bounded 30-300-second automatic interval.

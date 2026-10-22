@@ -16,6 +16,7 @@ class ControlProvider : ContentProvider() {
     companion object { @Volatile var explicitConnectInProcess = false }
     override fun onCreate(): Boolean {
         val store = StateStore.get(checkNotNull(context))
+        OsIntentGate.observe(checkNotNull(context), store)
         if (store.checkpoint().desiredOn) store.event(if (store.read().optBoolean("resumeRequired")) "NeedsAction" else "Recovering", if (store.read().optBoolean("resumeRequired")) "explicit_resume_required" else "controller_recreated", store.read().optLong("networkEpoch"))
         return true
     }
@@ -42,7 +43,7 @@ class ControlProvider : ContentProvider() {
                     val file = java.io.File(context.noBackupFilesDir, "operator-policy.json")
                     val raw = try { require(file.length() in 1..524_288); file.readText(Charsets.UTF_8) } finally { file.delete() }
                     val policy = ManagedPolicyStore.get(context)
-                    if (method == "policy-bind-file") policy.bind(raw) else policy.stage(raw.trim(), store.originalConfig())
+                    store.serialized { if (method == "policy-bind-file") policy.bind(raw) else policy.stage(raw.trim(), store.originalConfig()) }
                     if (store.checkpoint().desiredOn) context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE))
                 }
                 "policy-refresh" -> {
@@ -66,7 +67,7 @@ class ControlProvider : ContentProvider() {
                 "connect", "disconnect" -> {
                     val on = method == "connect"
                     explicitConnectInProcess = on
-                    store.update { store.put(it, Recovery.command(store.checkpoint(it), on)); it.put("resumeRequired", false).put("phase", if (on) "Connecting" else "Off") }
+                    store.update { store.put(it, Recovery.command(store.checkpoint(it), on)); OsIntentGate.command(context, it, on); it.put("phase", if (on) "Connecting" else "Off") }
                     val intent = Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE)
                     if (on) context.startForegroundService(intent) else context.startService(intent)
                 }
@@ -94,9 +95,19 @@ class ControlProvider : ContentProvider() {
                         Process.killProcess(process.pid)
                     }
                 }
+                "fault-service" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
+                    val generation = store.checkpoint().generation
+                    require(store.checkpoint().desiredOn)
+                    context.stopService(Intent(context, TunnelService::class.java))
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        if (Recovery.current(store.checkpoint(), generation)) context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE))
+                    }, 500)
+                }
                 "test-health" -> {
                     require(io.syn443.android.BuildConfig.DEBUG)
                     require(arg == "synthetic-http" || arg == "production-https")
+                    require(arg != "synthetic-http" || android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
                     store.update { it.put("testHealth", arg == "synthetic-http") }
                 }
                 "test-reset" -> {

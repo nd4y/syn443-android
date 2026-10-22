@@ -14,7 +14,7 @@ import java.net.URI
     val bearer: String, val serverTimeMs: Long, val tlsCaDer: String = "")
 @Serializable data class PolicyDisk(val binding: PolicyBinding? = null, val journal: Journal = Journal(),
     val anchorWall: Long = 0, val anchorElapsed: Long = 0, val anchorBoot: Int = -1,
-    val applyDeadlineElapsed: Long = 0)
+    val applyDeadlineElapsed: Long = 0, val fetchElapsed: Long = -300_000, val fetchBoot: Int = -1)
 
 class ManagedPolicyStore private constructor(context: Context) {
     companion object {
@@ -29,24 +29,35 @@ class ManagedPolicyStore private constructor(context: Context) {
     @Synchronized fun read(): PolicyDisk = cached ?: (file.read()?.let { Policy.json.decodeFromString<PolicyDisk>(it) } ?: PolicyDisk()).also { cached = it }
     @Synchronized private fun save(value: PolicyDisk) { file.write(Policy.json.encodeToString(value)); cached = value }
     fun managed() = read().binding != null
+    @Synchronized fun admitFetch(force: Boolean): Boolean {
+        val d = read(); if (d.binding == null) return false
+        val elapsed = SystemClock.elapsedRealtime(); val currentBoot = boot()
+        val interval = if (force) 5_000L else runCatching {
+            val raw = d.journal.active ?: d.journal.candidate ?: error("no policy")
+            (verify(raw, d).payload.refreshAfterMs - now(d)).coerceIn(30_000, 300_000)
+        }.getOrDefault(30_000L)
+        if (d.fetchBoot == currentBoot && elapsed - d.fetchElapsed < interval) return false
+        save(d.copy(fetchElapsed = elapsed, fetchBoot = currentBoot)); return true
+    }
     @Synchronized fun resetEmulator() {
         require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
         file.delete(); cached = null; verified.clear()
     }
     fun now(d: PolicyDisk = read()): Long {
-        require(d.anchorBoot == boot() && d.anchorElapsed <= SystemClock.elapsedRealtime()) { "trusted_time_required" }
-        return d.anchorWall + SystemClock.elapsedRealtime() - d.anchorElapsed
+        return TrustedTime.estimate(TimeAnchor(d.anchorWall, d.anchorElapsed, d.anchorBoot), SystemClock.elapsedRealtime(), boot())
     }
     @Synchronized fun bind(raw: String) {
         require(io.syn443.android.BuildConfig.DEBUG && !managed())
         val b = Policy.json.decodeFromJsonElement<PolicyBinding>(Canonical.parse(raw))
         require(b.device.matches(Regex("[a-zA-Z0-9_-]{8,64}")) && b.keys.size in 1..4 && b.keys.keys.all { it.matches(Regex("[a-zA-Z0-9_-]{1,64}")) } && b.keys.values.all { it.length in 80..256 })
-        require(b.bearer.length in 24..256 && b.bearer.all { it.code in 33..126 } && b.serverTimeMs > 0)
+        require(b.bearer.length in 24..256 && b.bearer.all { it.code in 33..126 } && b.serverTimeMs in 1..TrustedTime.MAX)
         require(b.tlsCaDer.length <= 8192)
         val u = URI(b.url)
         require(u.userInfo == null && u.fragment == null && u.host != null &&
             (u.scheme == "https" || (io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish") && u.scheme == "http" && u.host == "127.0.0.1")))
-        save(PolicyDisk(binding = b, anchorWall = b.serverTimeMs, anchorElapsed = SystemClock.elapsedRealtime(), anchorBoot = boot()))
+        val old = read().journal
+        verified.clear()
+        save(PolicyDisk(binding = b, journal = Journal(maxRevision = old.maxRevision, epoch = old.epoch, floor = old.floor, activationGeneration = old.activationGeneration + 1), anchorWall = b.serverTimeMs, anchorElapsed = SystemClock.elapsedRealtime(), anchorBoot = boot()))
     }
     fun deliveryConnection(network: android.net.Network, binding: PolicyBinding): java.net.HttpURLConnection {
         val connection = network.openConnection(java.net.URL(binding.url)) as java.net.HttpURLConnection
@@ -75,22 +86,28 @@ class ManagedPolicyStore private constructor(context: Context) {
     }
     @Synchronized fun stage(raw: String, originalConfig: String?) {
         val d = read(); val v = verify(raw, d); EngineConfig.validate(v.engineConfig)
+        if (v.payload.operation == "release") require(d.journal.active != null && Policy.hash(checkNotNull(originalConfig)) == v.payload.contentHash)
         if (raw == d.journal.active || raw == d.journal.candidate) return
         // Bootstrap first signs the current working configuration, never an unsigned fallback.
         if (d.journal.active == null) require(Policy.hash(checkNotNull(originalConfig)) == v.payload.contentHash)
-        save(d.copy(journal = Policy.stage(d.journal, v)))
+        val base = if (d.journal.phase == "prepared") d.journal.copy(phase = "rejected", candidate = null) else d.journal
+        save(d.copy(journal = Policy.stage(base, v)))
     }
     @Synchronized fun received(raw: String, serverTime: Long, originalConfig: String?) {
         require(serverTime > 0)
-        val d = read(); require(serverTime + 999 >= d.anchorWall)
-        val time = maxOf(serverTime, runCatching { now(d) }.getOrDefault(d.anchorWall))
-        val v = verify(raw, d, time); EngineConfig.validate(v.engineConfig)
+        val d = read()
+        val anchor = TrustedTime.accept(TimeAnchor(d.anchorWall, d.anchorElapsed, d.anchorBoot), serverTime, SystemClock.elapsedRealtime(), boot())
+        val time = anchor.wall
+        val anchored = d.copy(anchorWall = time, anchorElapsed = anchor.elapsed, anchorBoot = anchor.boot)
+        save(anchored)
+        val v = verify(raw, anchored, time); EngineConfig.validate(v.engineConfig)
+        if (v.payload.operation == "release") require(d.journal.active != null && Policy.hash(checkNotNull(originalConfig)) == v.payload.contentHash)
         // Only a response from the separately pinned HTTPS delivery channel may re-anchor after boot.
-        val anchored = d.copy(anchorWall = time, anchorElapsed = SystemClock.elapsedRealtime(), anchorBoot = boot())
         if (raw == d.journal.active || raw == d.journal.candidate) { save(anchored); return }
         require(v.payload.revision > d.journal.maxRevision)
         if (d.journal.active == null) require(Policy.hash(checkNotNull(originalConfig)) == v.payload.contentHash)
-        save(anchored.copy(journal = Policy.stage(d.journal, v)))
+        val base = if (d.journal.phase == "prepared") d.journal.copy(phase = "rejected", candidate = null) else d.journal
+        save(anchored.copy(journal = Policy.stage(base, v)))
     }
     fun config(original: String?): String? {
         val d = read(); if (d.binding == null) return original
@@ -100,13 +117,23 @@ class ManagedPolicyStore private constructor(context: Context) {
         }
         return checkNotNull(allowed(raw, d)) { "no_authorized_policy" }.engineConfig
     }
+    @Synchronized fun leaseDeadline(configHash: String): Long {
+        val d = read(); if (d.binding == null) return 0
+        val elapsed = SystemClock.elapsedRealtime()
+        val time = TrustedTime.estimate(TimeAnchor(d.anchorWall, d.anchorElapsed, d.anchorBoot), elapsed, boot())
+        val raw = if (d.journal.phase == "applying") d.journal.candidate else d.journal.active ?: d.journal.candidate.takeIf { d.journal.phase == "prepared" }
+        val v = verify(checkNotNull(raw), d, time)
+        require(v.payload.revision >= d.journal.floor && v.payload.securityEpoch >= d.journal.epoch && v.payload.contentHash == configHash)
+        return Math.addExact(elapsed, v.payload.offlineUntilMs - time)
+    }
     @Synchronized fun begin(baseline: List<Boolean>) {
         val d = read(); val v = checkNotNull(allowed(d.journal.candidate, d))
         save(d.copy(journal = Policy.begin(d.journal, baseline), applyDeadlineElapsed = SystemClock.elapsedRealtime() + v.payload.activation.timeoutSeconds * 1_000L))
     }
     @Synchronized fun finish(values: List<Boolean>, started: Boolean) {
         val d = read(); val v = checkNotNull(allowed(d.journal.candidate, d))
-        save(d.copy(journal = Policy.finish(d.journal, v, values, started)))
+        val next = Policy.finish(d.journal, v, values, started)
+        save(d.copy(journal = next, binding = if (next.phase == "released") null else d.binding))
     }
     @Synchronized fun rollback(reason: String) {
         val d = read(); if (d.journal.phase != "applying") return
@@ -120,6 +147,9 @@ class ManagedPolicyStore private constructor(context: Context) {
             save(d.copy(journal = Policy.rollback(d.journal, revision, "interrupted_activation")))
         }
     }
+    @Synchronized fun discardPrepared(reason: String) {
+        val d = read(); if (d.journal.phase == "prepared") save(d.copy(journal = d.journal.copy(phase = "rejected", candidate = null, reason = reason)))
+    }
     fun status(): JSONObject = runCatching {
         val d = read(); val j = d.journal
         fun revision(raw: String?): Long? = raw?.let { Policy.json.decodeFromString<Payload>(Policy.utf8(Policy.decode64(it.split('.')[1]))).revision }
@@ -127,5 +157,6 @@ class ManagedPolicyStore private constructor(context: Context) {
             .put("desiredRevision", revision(j.desired)).put("activeRevision", revision(j.active))
             .put("lastKnownGoodRevision", revision(j.lastGood)).put("candidateRevision", revision(j.candidate))
             .put("activationGeneration", j.activationGeneration).put("securityEpoch", j.epoch).put("revocationFloor", j.floor)
+            .put("maxRevision", j.maxRevision)
     }.getOrElse { JSONObject().put("managed", true).put("phase", "blocked").put("reason", "policy_store_unavailable") }
 }

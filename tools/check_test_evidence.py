@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=31
+    minimum=34
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -16,7 +16,7 @@ elif mode=="recovery":
     minimum=7
 elif mode=="policy":
     paths=list((root/"core/policy/build/test-results/test").glob("TEST-*.xml"))
-    minimum=9
+    minimum=11
 else: raise SystemExit("unknown evidence type")
 assert paths,"No JUnit XML evidence produced"
 cases=[]
@@ -45,6 +45,9 @@ if mode=="emulator":
                  "controllerDeathDuringApplyRollsBackOffline", "expiredLeaseBlocksWithoutDirectFallback",
                  "offlineControlPlaneRetainsAuthorizedPath"}
     required.add("duplicateEngineFieldsCannotReplaceConfiguration")
+    required.add("serviceRecreationKeepsIntentAndRejectsOldCallbacks")
+    required.add("signedManagementReleasePreservesLocalState")
+    required.add("externalConnectExtraCannotTurnVpnOn")
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"
 print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
 

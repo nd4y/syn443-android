@@ -33,7 +33,10 @@ class VpnTileService : TileService() {
         val current = status()
         if (current.optBoolean("desiredOn") && !current.optBoolean("resumeRequired")) contentResolver.call(uri, "disconnect", null, null)
         else {
-            val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("syn443.connect", true)
+            val result = contentResolver.call(uri, "connect", null, null)
+            if (result?.getBoolean("ok") != true || android.net.VpnService.prepare(this) == null) { onStartListening(); return }
+            val generation = JSONObject(checkNotNull(result.getString("json"))).getLong("generation")
+            val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("syn443.consentGeneration", generation)
             if (Build.VERSION.SDK_INT >= 34) startActivityAndCollapse(PendingIntent.getActivity(this, 443, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             else startActivityAndCollapse(intent)
         }

@@ -21,6 +21,15 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Hermetic real TUN -> Go TCP/IP stack -> HTTP CONNECT proxy -> synthetic HTTP response. */
 class VpnLifecycleTest {
+    @Test fun externalConnectExtraCannotTurnVpnOn() {
+        scenario.close()
+        scenario = ActivityScenario.launch(android.content.Intent(context, MainActivity::class.java)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("syn443.connect", true)
+            .putExtra("syn443.consentGeneration", status().optLong("generation")))
+        Thread.sleep(1500)
+        assertFalse(status().getBoolean("desiredOn"))
+        assertNull(pid())
+    }
     @Test fun duplicateEngineFieldsCannotReplaceConfiguration() {
         val before = status().getString("configRevision")
         val invalid = """{"outbounds":[{"type":"direct","tag":"direct","tag":"other"}]}"""

@@ -31,7 +31,7 @@ import org.json.JSONObject
 private val controlUri = "content://io.syn443.control".toUri()
 
 @Composable
-fun VpnControls(connectFromTile: Boolean = false) {
+fun VpnControls(consentGeneration: Long = -1) {
     val context = LocalContext.current
     var status by remember { mutableStateOf(JSONObject()) }
     var message by remember { mutableStateOf("") }
@@ -96,7 +96,16 @@ fun VpnControls(connectFromTile: Boolean = false) {
         val intent = VpnService.prepare(context)
         if (intent != null) consent.launch(intent) else askNotifications()
     }
-    LaunchedEffect(connectFromTile) { if (connectFromTile) requestConnect() }
+    LaunchedEffect(consentGeneration) {
+        if (consentGeneration >= 0) {
+            val raw = withContext(Dispatchers.IO) { context.contentResolver.call(controlUri, "status", null, null)?.getString("json") }
+            if (raw != null) {
+                val current = JSONObject(raw)
+                if (current.optBoolean("desiredOn") && current.optLong("generation") == consentGeneration)
+                    VpnService.prepare(context)?.let { consent.launch(it) }
+            }
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("VPN: " + if (status.optBoolean("desiredOn")) "включён пользователем" else "выключен", Modifier.testTag("vpn-intent"))
         if (status.optBoolean("alwaysOn") || status.optBoolean("lockdown")) Text("Android: Always-on=${status.optBoolean("alwaysOn")}; блокировка без VPN=${status.optBoolean("lockdown")}. Управляется в настройках Android.")

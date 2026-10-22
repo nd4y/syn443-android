@@ -10,6 +10,7 @@ class BootReceiver : BroadcastReceiver() {
         val store = StateStore.get(context)
         if (!store.checkpoint().desiredOn) return
         if (store.read().optBoolean("resumeRequired")) return
+        if (!OsIntentGate.bootTrigger(context, store, checkNotNull(intent.action))) return
         runCatching { context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE)) }
             .onFailure { store.event("NeedsAction", "os_start_restricted", store.read().optLong("networkEpoch")) }
     }

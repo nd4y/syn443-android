@@ -16,11 +16,17 @@ import (
 // It must resolve on the physical Network, never on the VPN's DNS listener.
 var PhysicalResolver func(context.Context, string) ([]net.IPAddr, error)
 
+// Installed once by the single owning runtime; reads only its atomic lease guard.
+var DiagnosticsAllowed func() bool
+
 var diagnosticAdmission atomic.Bool
 
 // One optional worker; a blocked SDK snapshot never blocks host control or
 // creates an unbounded queue of jobs from repeated UI taps.
 func RequestDiagnostics() bool {
+	if DiagnosticsAllowed != nil && !DiagnosticsAllowed() {
+		return false
+	}
 	if !diagnosticAdmission.CompareAndSwap(false, true) {
 		return false
 	}
@@ -191,7 +197,7 @@ func StartDiagnostics() string {
 				for i := range queue {
 					state := "cancelled"
 					var rtt time.Duration
-					if ctx.Err() == nil {
+					if ctx.Err() == nil && (DiagnosticsAllowed == nil || DiagnosticsAllowed()) {
 						o.diagMu.Lock()
 						o.job.Results[i].State = "checking"
 						o.diagMu.Unlock()

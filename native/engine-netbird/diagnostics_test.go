@@ -17,6 +17,15 @@ type diagnosticPeer struct {
 	concurrent, maximum atomic.Int32
 }
 
+func TestExpiredAuthorizationDoesNotAdmitDiagnosticTraffic(t *testing.T) {
+	previous := DiagnosticsAllowed
+	DiagnosticsAllowed = func() bool { return false }
+	defer func() { DiagnosticsAllowed = previous }()
+	if RequestDiagnostics() || diagnosticAdmission.Load() {
+		t.Fatal("expired authorization admitted diagnostic worker")
+	}
+}
+
 func (p *diagnosticPeer) ConnectionSnapshot() embed.ConnectionSnapshot {
 	s := embed.ConnectionSnapshot{ManagementConnected: true, Peers: []embed.PeerSnapshot{}}
 	for i := 0; i < 12; i++ {

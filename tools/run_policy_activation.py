@@ -71,7 +71,7 @@ def main():
                  'failedNativeCandidateRollsBackAndCannotReplay', 'requiredRegressionRollsBack',
                  'baselineOutageCanCommitDegraded', 'stopFencesPendingPolicy',
                  'controllerDeathDuringApplyRollsBackOffline', 'expiredLeaseBlocksWithoutDirectFallback',
-                 'offlineControlPlaneRetainsAuthorizedPath']
+                 'offlineControlPlaneRetainsAuthorizedPath', 'signedManagementReleasePreservesLocalState']
     try:
         for port in ports:
             adb('reverse', 'tcp:'+str(port), 'tcp:'+str(port))
@@ -81,9 +81,20 @@ def main():
                 setup(ttl=45 if name.startswith('expired') else 600)
                 original = pid(':engine'); active = call('status')['policy']['activeRevision']
                 if name.startswith('signed'):
-                    assert active == 1 and call('status')['policy']['lastKnownGoodRevision'] == 1
+                    if name.startswith('signedManagement'):
+                        stage(publisher.sign(config, revision=2, operation='release'))
+                        await_condition(lambda: not call('status')['policy']['managed'] and call('status')['policy']['phase'] == 'released')
+                        assert pid(':engine') == original and call('status')['desiredOn']
+                    else:
+                        assert active == 1 and call('status')['policy']['lastKnownGoodRevision'] == 1
                 elif name.startswith('invalid'):
-                    for bad in [delivery.envelope[:-2], publisher.sign(config).replace('device-ci-', 'other-')]:
+                    recipient = publisher.device
+                    try:
+                        publisher.device = 'other-device-example'
+                        wrong_recipient = publisher.sign(config, revision=2)
+                    finally:
+                        publisher.device = recipient
+                    for bad in [delivery.envelope[:-2], wrong_recipient]:
                         try:
                             stage(bad)
                         except AssertionError:

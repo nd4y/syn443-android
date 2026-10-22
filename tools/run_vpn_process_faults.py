@@ -147,7 +147,8 @@ def main():
         for name in ('twoHopTunTrafficCrossesBothProxies', 'ingressFailureRecoversWithoutNativeRestart',
                      'egressFailureRecoversWithoutNativeRestart', 'uiProcessDeathKeepsRealTunTraffic',
                      'forceStopWaitsForForegroundReopenAndPreservesIntent',
-                     'controllerDeathRetiresFrozenNativeAndPreservesIntent', 'controllerRestartBudgetSurvivesOwnerDeath'):
+                     'controllerDeathRetiresFrozenNativeAndPreservesIntent', 'serviceRecreationKeepsIntentAndRejectsOldCallbacks',
+                     'controllerRestartBudgetSurvivesOwnerDeath'):
             case = ET.SubElement(suite, 'testcase', classname='io.syn443.android.ExternalVpnProcessTest', name=name)
             try:
                 progress = proxy.progress
@@ -177,6 +178,11 @@ def main():
                     call('fault-controller')
                     await_condition(lambda: pid(':engine') not in ('', native) and
                                     call('status').get('phase') == 'Online' and proxy.progress > progress)
+                elif name.startswith('serviceRecreation'):
+                    previous = pid(':engine')
+                    call('fault-service')
+                    await_condition(lambda: pid(':engine') not in ('', previous) and call('status').get('phase') == 'Online' and proxy.progress > progress)
+                    native = pid(':engine')
                 elif name.startswith('forceStop'):
                     previous = pid(':engine')
                     adb('shell', 'am', 'force-stop', PACKAGE)

@@ -18,7 +18,7 @@ import java.util.Base64
     val revocationFloor: Long, val targetDevice: String, val audience: String, val issuedAtMs: Long,
     val notBeforeMs: Long, val refreshAfterMs: Long, val offlineUntilMs: Long,
     val requiredCapabilities: List<String>, val algorithmRevision: String,
-    val engineConfigB64: String, val contentHash: String, val activation: Gate)
+    val engineConfigB64: String, val contentHash: String, val activation: Gate, val operation: String = "configure")
 data class Verified(val envelope: String, val payload: Payload, val engineConfig: String)
 @Serializable data class Journal(val phase: String = "idle", val desired: String? = null,
     val active: String? = null, val lastGood: String? = null, val candidate: String? = null,
@@ -89,7 +89,7 @@ object Canonical {
 
 object Policy {
     val json = Canonical.json
-    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "netbird.direct", "netbird.vless")
+    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "tun.lease.v1", "netbird.direct", "netbird.vless")
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     fun decode64(value: String): ByteArray {
         require(value.matches(Regex("[A-Za-z0-9_-]+")))
@@ -121,12 +121,13 @@ object Policy {
             require(it.jsonObject.keys == setOf("id", "type", "target", "port", "expected", "required"))
         }
         val p = json.decodeFromJsonElement<Payload>(element)
+        require(element.jsonObject.containsKey("operation") && p.operation in setOf("configure", "release"))
         require(p.schemaVersion == 1 && p.audience == "syn443-device" && p.targetDevice == device)
         require(p.targetDevice.matches(Regex("[a-zA-Z0-9_-]{8,64}")))
         require(p.revision in 1..9_007_199_254_740_991L && p.securityEpoch in 0..9_007_199_254_740_991L && p.revocationFloor in 0..p.revision)
         require(p.issuedAtMs in 1..now + 300_000 && p.notBeforeMs >= p.issuedAtMs && p.notBeforeMs <= now)
         require(p.refreshAfterMs in p.notBeforeMs..p.offlineUntilMs && p.offlineUntilMs > now && p.offlineUntilMs - p.issuedAtMs <= 604_800_000)
-        require(p.algorithmRevision == "m1-local-v1" && p.requiredCapabilities.isNotEmpty() && p.requiredCapabilities.size <= 16 && p.requiredCapabilities.toSet().size == p.requiredCapabilities.size && capabilities.containsAll(p.requiredCapabilities))
+        require(p.algorithmRevision == "m1-local-v1" && p.requiredCapabilities.containsAll(setOf("engine-config.v1", "tun.lease.v1")) && p.requiredCapabilities.size <= 16 && p.requiredCapabilities.toSet().size == p.requiredCapabilities.size && capabilities.containsAll(p.requiredCapabilities))
         val engine = utf8(decode64(p.engineConfigB64)); require(engine.toByteArray().size in 1..262_144 && hash(engine) == p.contentHash)
         val g = p.activation; require(g.timeoutSeconds in 30..120 && g.checks.size in 1..8 && g.checks.map { it.id }.toSet().size == g.checks.size)
         require(g.checks.any { it.required && it.type == "https_204" })
@@ -158,10 +159,11 @@ object Policy {
         val failed = checks.indices.filter { checks[it].required && !actual[it] }
         val regression = failed.any { j.baseline[it] }
         if (!engineStarted || regression || (failed.isNotEmpty() && !v.payload.activation.allowDegraded)) return rollback(j, v.payload.revision, "activation_failed")
-        return j.copy(phase = if (failed.isEmpty()) "committed" else "degraded", active = v.envelope,
+        if (v.payload.operation == "release" && failed.isNotEmpty()) return rollback(j, v.payload.revision, "release_checks_failed")
+        return j.copy(phase = if (v.payload.operation == "release") "released" else if (failed.isEmpty()) "committed" else "degraded", active = v.envelope,
             lastGood = if (failed.isEmpty()) v.envelope else j.lastGood, candidate = null, baseline = emptyList(), reason = if (failed.isEmpty()) "checks_passed" else "baseline_also_unavailable")
     }
-    fun snapshot(p: Payload) = hash(p.contentHash + ":" + p.algorithmRevision + ":" + Canonical.encode(json.encodeToJsonElement(p.activation)))
+    fun snapshot(p: Payload) = hash(p.operation + ":" + p.contentHash + ":" + p.algorithmRevision + ":" + Canonical.encode(json.encodeToJsonElement(p.activation)))
     fun rollback(j: Journal, revision: Long, reason: String): Journal {
         val fingerprint = j.candidate?.let { snapshot(json.decodeFromString<Payload>(utf8(decode64(it.split('.')[1])))) }
         return j.copy(phase = "rolled_back", candidate = null, active = j.lastGood,

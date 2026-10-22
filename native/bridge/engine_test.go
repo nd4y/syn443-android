@@ -13,13 +13,13 @@ func (p *testProtector) PhysicalInterfaces() (string, error) { return "", nil }
 func (p *testProtector) Protect(fd int32) error                   { p.called = true; return errors.New("rejected") }
 func (p *testProtector) ExchangeDNS(query []byte) ([]byte, error) { return nil, errors.New("rejected") }
 func TestRejectsInvalidContextBeforeOpeningDescriptors(t *testing.T) {
-	if _, err := NewRuntime("{}", -1, &testProtector{}, "test", 1); err == nil {
+	if _, err := NewRuntime("{}", -1, &testProtector{}, "test", 1, 0); err == nil {
 		t.Fatal("negative FD accepted")
 	}
-	if _, err := NewRuntime("{}", 0, nil, "test", 1); err == nil {
+	if _, err := NewRuntime("{}", 0, nil, "test", 1, 0); err == nil {
 		t.Fatal("missing protector accepted")
 	}
-	if _, err := NewRuntime("not-json", 0, &testProtector{}, "test", 1); err == nil {
+	if _, err := NewRuntime("not-json", 0, &testProtector{}, "test", 1, 0); err == nil {
 		t.Fatal("invalid config accepted")
 	}
 }

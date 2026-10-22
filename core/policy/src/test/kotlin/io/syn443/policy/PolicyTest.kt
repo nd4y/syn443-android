@@ -17,7 +17,7 @@ class PolicyTest {
     private fun payload(revision: Long = 1): Payload {
         val config = """{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}"""
         return Payload(1, revision, 0, 0, "device-example", "syn443-device", now - 1000, now - 1000, now + 300000, now + 600000,
-            listOf("engine-config.v1"), "m1-local-v1", enc(config.toByteArray()), Policy.hash(config),
+            listOf("engine-config.v1", "tun.lease.v1"), "m1-local-v1", enc(config.toByteArray()), Policy.hash(config),
             Gate(30, false, listOf(Check("internet", "https_204", "https://health.example.org/generate_204"))))
     }
     private fun sign(p: Payload = payload(), header: String = """{"alg":"ES256","kid":"test-root","typ":"syn443-policy+jws"}"""): String = signText(Canonical.encode(Canonical.parse(Policy.json.encodeToString(p))), header)
@@ -52,6 +52,7 @@ class PolicyTest {
         invalid { verify(sign(payload().copy(notBeforeMs = now + 1))) }
         invalid { verify(sign(payload().copy(offlineUntilMs = now + 604800001))) }
         invalid { verify(sign(payload().copy(requiredCapabilities = listOf("remote.code")))) }
+        invalid { verify(sign(payload().copy(requiredCapabilities = listOf("engine-config.v1")))) }
         invalid { verify(sign(payload().copy(activation = Gate(121, false, payload().activation.checks)))) }
         invalid { verify(sign(payload().copy(activation = Gate(30, false, listOf(Check("bad", "https_204", "http://health.example.org")))))) }
         invalid { verify(sign(payload().copy(activation = Gate(30, false, listOf(Check("bad", "shell", "anything")))))) }
@@ -93,5 +94,27 @@ class PolicyTest {
         val root = Base64.getEncoder().encodeToString(bytes("spkiHex"))
         val verified = Policy.verify(wire, mapOf("test-root" to root), fixture.getValue("device").jsonPrimitive.content, fixture.getValue("nowMs").jsonPrimitive.long)
         assertEquals(verified.payload.contentHash, Policy.hash(verified.engineConfig))
+    }
+    @Test fun releaseStillNeedsAuthorizedRevisionAndHealthyChecks() {
+        val first = verify(sign())
+        val committed = Policy.finish(Policy.begin(Policy.stage(Journal(), first), listOf(true)), first, listOf(true), true)
+        val release = verify(sign(payload(2).copy(operation = "release")))
+        val applying = Policy.begin(Policy.stage(committed, release), listOf(true))
+        assertEquals("released", Policy.finish(applying, release, listOf(true), true).phase)
+        assertEquals("rolled_back", Policy.finish(applying, release, listOf(false), true).phase)
+        invalid { verify(sign(payload().copy(operation = "unrecognized"))) }
+    }
+    @Test fun trustedTimeCannotRewindOrSurviveBootWithoutFreshTime() {
+        val anchor = TimeAnchor(now, 5000, 1)
+        assertEquals(now + 1000, TrustedTime.estimate(anchor, 6000, 1))
+        invalid { TrustedTime.estimate(anchor, 4999, 1) }
+        invalid { TrustedTime.estimate(anchor, 6000, 2) }
+        val refreshed = TrustedTime.accept(anchor, now, 5500, 1)
+        assertEquals(now + 500, refreshed.wall)
+        assertEquals(now + 1000, TrustedTime.estimate(refreshed, 6000, 1))
+        invalid { TrustedTime.accept(refreshed, now - 1000, 6000, 1) }
+        val boot = TrustedTime.accept(refreshed, now + 10000, 20, 2)
+        assertEquals(now + 10000, TrustedTime.estimate(boot, 20, 2))
+        invalid { TrustedTime.estimate(TimeAnchor(TrustedTime.MAX, 0, 1), 1, 1) }
     }
 }

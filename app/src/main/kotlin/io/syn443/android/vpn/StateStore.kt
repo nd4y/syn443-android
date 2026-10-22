@@ -44,6 +44,12 @@ class StateStore private constructor(context: Context) {
         update(block)
         return true
     }
+    @Synchronized fun effectCurrent(generation: Long, block: () -> Unit): Boolean {
+        if (!io.syn443.recovery.Recovery.current(checkpoint(), generation)) return false
+        block()
+        return true
+    }
+    @Synchronized fun <T> serialized(block: () -> T): T = block()
     fun checkpoint(value: JSONObject = read()) = Checkpoint(
         value.optBoolean("desiredOn"), value.optLong("generation"), value.optInt("attempt"),
         value.optLong("nextWallMs"), value.optLong("lastEarlyWallMs"),

@@ -28,13 +28,13 @@ class Publisher:
     def close(self):
         self.temp.cleanup()
 
-    def sign(self, config, revision=1, checks=None, degraded=False, ttl=600, floor=0, epoch=0):
+    def sign(self, config, revision=1, checks=None, degraded=False, ttl=600, floor=0, epoch=0, operation='configure'):
         now = int(time.time() * 1000)
         engine = json.dumps(config, separators=(',', ':'), ensure_ascii=True).encode()
-        payload = {'schemaVersion': 1, 'revision': revision, 'securityEpoch': epoch, 'revocationFloor': floor,
+        payload = {'schemaVersion': 1, 'revision': revision, 'securityEpoch': epoch, 'revocationFloor': floor, 'operation': operation,
                    'targetDevice': self.device, 'audience': 'syn443-device', 'issuedAtMs': now - 5000,
                    'notBeforeMs': now - 5000, 'refreshAfterMs': now + min(10000, ttl*500),
-                   'offlineUntilMs': now + ttl*1000, 'requiredCapabilities': ['engine-config.v1'],
+                   'offlineUntilMs': now + ttl*1000, 'requiredCapabilities': ['engine-config.v1', 'tun.lease.v1'],
                    'algorithmRevision': 'm1-local-v1', 'engineConfigB64': b64(engine),
                    'contentHash': hashlib.sha256(engine).hexdigest(),
                    'activation': {'timeoutSeconds': 30, 'allowDegraded': degraded,
