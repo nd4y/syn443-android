@@ -116,6 +116,7 @@ class TunnelService : VpnService() {
         if (!foreground) { notifyForeground("Подключаемся"); foreground = true }
         if (intent?.action == STOP) store.update { store.put(it, Recovery.command(store.checkpoint(it), false)) }
         if (!store.checkpoint().desiredOn) { retire(false); return START_NOT_STICKY }
+        if (store.read().optBoolean("resumeRequired")) { phase("NeedsAction", "explicit_resume_required"); retire(false); return START_NOT_STICKY }
         if (intent?.action == "fault-crash" && io.syn443.android.BuildConfig.DEBUG) terminateOwned()
         if (intent?.action == "fault-hang" && io.syn443.android.BuildConfig.DEBUG && verifiedPid()) Process.sendSignal(hostPid, 19)
         if (intent?.action == "netbird-diagnose" && ready) token?.let { host?.diagnoseNetBird(it) }
@@ -208,6 +209,7 @@ class TunnelService : VpnService() {
     private fun reconcile() {
         val cp = store.adjustCheckpoint { Recovery.normalizeClock(it, System.currentTimeMillis()) }
         if (!cp.desiredOn) return
+        if (store.read().optBoolean("resumeRequired")) { phase("NeedsAction", "explicit_resume_required"); return }
         if (host != null && boundGeneration != cp.generation) { retire(false); return }
         if (host != null || binding || retiring) return
         if (network == null) { phase("NoNetwork", "network_unavailable"); return }

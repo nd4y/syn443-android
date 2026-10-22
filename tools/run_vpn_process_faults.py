@@ -186,6 +186,7 @@ def main():
                     adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
                     time.sleep(2)
                     assert not pid(':engine'), 'Opening UI after Force stop must require explicit Connect'
+                    assert call('status').get('resumeRequired'), 'Resume confirmation must survive a later boot'
                     call('connect')
                     generation = call('status')['generation']
                     await_condition(lambda: pid(':engine') not in ('', previous) and

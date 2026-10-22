@@ -80,6 +80,10 @@ fun VpnControls(connectFromTile: Boolean = false) {
     }
     LaunchedEffect(visible) {
         // Opening UI is never Connect, including after an Android Force stop.
+        if (visible) withContext(Dispatchers.IO) { runCatching {
+            val raw = context.contentResolver.call(controlUri, "status", null, null)?.getString("json")
+            if (raw != null) context.contentResolver.call(controlUri, "foreground-open", JSONObject(raw).optLong("generation").toString(), null)
+        } }
         while (visible) {
             val raw = withContext(Dispatchers.IO) { runCatching { context.contentResolver.call(controlUri, "status", null, null)?.getString("json") }.getOrNull() }
             if (raw != null) status = JSONObject(raw)

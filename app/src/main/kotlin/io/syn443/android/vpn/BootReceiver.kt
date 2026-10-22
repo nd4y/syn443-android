@@ -9,6 +9,7 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         val store = StateStore.get(context)
         if (!store.checkpoint().desiredOn) return
+        if (store.read().optBoolean("resumeRequired")) return
         runCatching { context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE)) }
             .onFailure { store.event("NeedsAction", "os_start_restricted", store.read().optLong("networkEpoch")) }
     }

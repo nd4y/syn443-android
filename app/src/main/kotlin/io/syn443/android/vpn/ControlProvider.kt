@@ -13,9 +13,10 @@ import io.syn443.recovery.Recovery
 
 /** One durable command writer in :controller. Shell access exists in debug builds only. */
 class ControlProvider : ContentProvider() {
+    companion object { @Volatile var explicitConnectInProcess = false }
     override fun onCreate(): Boolean {
         val store = StateStore.get(checkNotNull(context))
-        if (store.checkpoint().desiredOn) store.event("Recovering", "controller_recreated", store.read().optLong("networkEpoch"))
+        if (store.checkpoint().desiredOn) store.event(if (store.read().optBoolean("resumeRequired")) "NeedsAction" else "Recovering", if (store.read().optBoolean("resumeRequired")) "explicit_resume_required" else "controller_recreated", store.read().optLong("networkEpoch"))
         return true
     }
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
@@ -26,6 +27,16 @@ class ControlProvider : ContentProvider() {
         return try {
             when (method) {
                 "status", "logs" -> Unit
+                "foreground-open" -> {
+                    val generation = arg?.toLongOrNull()
+                    val cp = store.checkpoint()
+                    val serviceExists = checkNotNull(context.getSystemService(android.app.ActivityManager::class.java)).getRunningServices(16)
+                        .any { it.service.className == TunnelService::class.java.name }
+                    if (cp.desiredOn && cp.generation == generation && !serviceExists && !explicitConnectInProcess) {
+                        store.update { it.put("resumeRequired", true) }
+                        store.event("NeedsAction", "explicit_resume_required", store.read().optLong("networkEpoch"))
+                    }
+                }
                 "policy-bind-file", "policy-stage-file" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
                     val file = java.io.File(context.noBackupFilesDir, "operator-policy.json")
@@ -54,12 +65,14 @@ class ControlProvider : ContentProvider() {
                 }
                 "connect", "disconnect" -> {
                     val on = method == "connect"
-                    store.update { store.put(it, Recovery.command(store.checkpoint(it), on)); it.put("phase", if (on) "Connecting" else "Off") }
+                    explicitConnectInProcess = on
+                    store.update { store.put(it, Recovery.command(store.checkpoint(it), on)); it.put("resumeRequired", false).put("phase", if (on) "Connecting" else "Off") }
                     val intent = Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE)
                     if (on) context.startForegroundService(intent) else context.startService(intent)
                 }
                 "resume" -> {
                     require(store.checkpoint().desiredOn) { "newer Stop wins" }
+                    require(!store.read().optBoolean("resumeRequired")) { "explicit_connect_required" }
                     context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE))
                 }
                 "fault-crash", "fault-hang" -> {
