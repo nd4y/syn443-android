@@ -51,3 +51,20 @@ class PublicDataTest(unittest.TestCase):
             data = buffer.getvalue()
             rules = {rule for _, rule in scan_payload(data, 'synthetic.aar')}
             self.assertIn('archive-depth-exceeded' if depth == 3 else 'private-domain', rules)
+
+    def test_pinned_sdk_help_and_go_metadata_do_not_hide_real_endpoints(self):
+        diagnostic = ("Cumulative sum of memory allocated to the heap by the application." +
+                      "internal error: attempted to parse unknown event (please report):")
+        helpers = ("link-local (169.254." + "0.0/16, fe80::/10) addresses are anonymized too.\n" +
+                   "Internal IPv4 addresses are replaced with addresses starting from " +
+                   "198.18." + "0.0 and internal IPv6 addresses with addresses starting from 2001:db8:1::")
+        symbols = b'tcp.EndpointState.' + b'internal\0github.com/golang-jwt/jwt/v5.NumericDate.' + b'Local\0'
+        elf = b'\x7fELF\0' + diagnostic.encode() + helpers.encode() + symbols
+        self.assertFalse(findings(elf))
+        # Same-looking user configuration/assets still fail, including when
+        # appended to an otherwise reviewed ELF containing public SDK help.
+        private_ip = '.'.join(map(str, (100,106,1,2))).encode()
+        for domain in (b'application.'+b'internal', b'tcp.EndpointState.'+b'internal', b'v5.NumericDate.'+b'Local'):
+            self.assertIn('private-domain', findings(elf+b'\0https://'+domain+b'/path'))
+        self.assertIn('private-address', findings(elf+b'\0endpoint='+private_ip))
+        self.assertIn('private-address', findings(helpers.encode()))

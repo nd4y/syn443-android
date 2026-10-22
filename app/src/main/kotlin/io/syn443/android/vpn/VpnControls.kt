@@ -79,6 +79,15 @@ fun VpnControls(connectFromTile: Boolean = false) {
         }
     }
     LaunchedEffect(visible) {
+        if (visible) withContext(Dispatchers.IO) {
+            // Foreground launch is an allowed entry after Android Force stop.
+            // Resume reads current durable intent; a newer Stop still wins.
+            runCatching {
+                val current = context.contentResolver.call(controlUri, "status", null, null)?.getString("json")
+                if (current != null && JSONObject(current).optBoolean("desiredOn"))
+                    context.contentResolver.call(controlUri, "resume", null, null)
+            }
+        }
         while (visible) {
             val raw = withContext(Dispatchers.IO) { runCatching { context.contentResolver.call(controlUri, "status", null, null)?.getString("json") }.getOrNull() }
             if (raw != null) status = JSONObject(raw)

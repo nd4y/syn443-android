@@ -39,6 +39,9 @@ go mod tidy
 go get github.com/sagernet/gomobile/bind@v0.1.12
 gofmt -w ./*.go
 go test -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbird
+if [ "${SYN443_RACE:-0}" = 1 ]; then
+    go test -race -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbird
+fi
 go test github.com/netbirdio/netbird/client/internal/peer -run 'Test(DirectFirstDefersRelayUntilUnreachable|SuccessfulP2PDoesNotOpenRelayUntilLost|DirectFirstWaitCancelsWithEngine)$' -count=1
 go test github.com/netbirdio/netbird/client/underlay -count=1
 go test github.com/netbirdio/netbird/client/underlaytest -run '^TestControlAndRelayUseOnlyUnderlay$' -count=1

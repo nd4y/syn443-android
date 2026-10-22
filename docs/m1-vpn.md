@@ -35,7 +35,7 @@ available to hermetic emulator tests and visibly marked in the UI.
 ## Evidence and limits
 
 - Seven deterministic recovery-model tests cover Stop, retry/budget bounds and time changes.
-- Eight native instrumentation cases and six external-driver cases exercise real TUN/Go/HTTP CONNECT traffic, crash recovery,
+- Eight native instrumentation cases and seven external-driver cases exercise real TUN/Go/HTTP CONNECT traffic, crash recovery,
   full native SIGSTOP recovery, Stop precedence, Wi-Fi loss and actual UI/controller process death. They must
   actually pass on every configured API; compilation is not acceptance.
 - Physical acceptance uses a separate private operator driver. Real credentials,

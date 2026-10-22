@@ -146,6 +146,7 @@ def main():
         assert native
         for name in ('twoHopTunTrafficCrossesBothProxies', 'ingressFailureRecoversWithoutNativeRestart',
                      'egressFailureRecoversWithoutNativeRestart', 'uiProcessDeathKeepsRealTunTraffic',
+                     'forceStopWaitsForForegroundReopenAndPreservesIntent',
                      'controllerDeathRetiresFrozenNativeAndPreservesIntent', 'controllerRestartBudgetSurvivesOwnerDeath'):
             case = ET.SubElement(suite, 'testcase', classname='io.syn443.android.ExternalVpnProcessTest', name=name)
             try:
@@ -176,6 +177,16 @@ def main():
                     call('fault-controller')
                     await_condition(lambda: pid(':engine') not in ('', native) and
                                     call('status').get('phase') == 'Online' and proxy.progress > progress)
+                elif name.startswith('forceStop'):
+                    previous = pid(':engine')
+                    adb('shell', 'am', 'force-stop', PACKAGE)
+                    # Reading the provider here could itself unstop the app.
+                    time.sleep(2)
+                    assert not pid(':engine') and not pid(':controller')
+                    adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
+                    await_condition(lambda: pid(':engine') not in ('', previous) and
+                                    call('status').get('phase') == 'Online' and proxy.progress > progress)
+                    native = pid(':engine')
                 else:
                     remaining = 3 - len(call('status').get('heavyWallMs', []))
                     assert 0 <= remaining <= 3

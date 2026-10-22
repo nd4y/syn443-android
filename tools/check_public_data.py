@@ -31,6 +31,20 @@ def findings(data):
         text = text.replace("type:.hash." + "internal/", "type:.hash.<go-internal>/")
         text = text.replace("\0time.Time." + "Local\0", "\0<go-time-method>\0")
         text = text.replace("crypto/x509." + "local string; crypto/x509.domain string", "<go-x509-struct-fields>")
+        text = text.replace("tcp.EndpointState." + "internal\0", "tcp.EndpointState.<go-method>\0")
+        text = text.replace("github.com/golang-jwt/jwt/v5.NumericDate." + "Local\0", "<go-jwt-time-method>\0")
+        # Go/linker rodata concatenates independent public diagnostic strings.
+        # Match both sentences, never the hostname-like fragment on its own.
+        text = text.replace("Cumulative sum of memory allocated to the heap by the application." +
+                            "internal error: attempted to parse unknown event (please report):",
+                            "<public-runtime-metric-and-parser-diagnostics>")
+        # Exact help text from pinned NetBird client/internal/debug/debug.go;
+        # these are public allocation/anonymization descriptions, not endpoints.
+        text = text.replace("link-local (169.254." + "0.0/16, fe80::/10) addresses are anonymized too.",
+                            "<public-netbird-link-local-help>")
+        text = text.replace("Internal IPv4 addresses are replaced with addresses starting from " +
+                            "198.18." + "0.0 and internal IPv6 addresses with addresses starting from 2001:db8:1::",
+                            "<public-netbird-anonymization-help>")
     result = {name for name, pattern in PATTERNS.items() if pattern.search(text)}
     for match in IPV4.finditer(text):
         # The standard shared-address allocation itself is public documentation.
