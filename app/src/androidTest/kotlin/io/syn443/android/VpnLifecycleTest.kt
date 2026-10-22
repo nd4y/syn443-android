@@ -60,7 +60,10 @@ class VpnLifecycleTest {
             if (predicate()) return
             Thread.sleep(200)
         }
-        fail("VPN lifecycle deadline exceeded")
+        val s = status()
+        fail("VPN lifecycle deadline exceeded: phase=${s.optString("phase")}, reason=${s.optString("reason")}, " +
+            "desiredOn=${s.optBoolean("desiredOn")}, resumeRequired=${s.optBoolean("resumeRequired")}, " +
+            "attempt=${s.optInt("attempt")}, heavyCount=${s.optJSONArray("heavyWallMs")?.length()}, native=${pid()}, tunnels=${tunnels.get()}")
     }
     @Before fun setup() {
         val emulator = Build.HARDWARE in setOf("ranchu", "goldfish") || Build.FINGERPRINT.startsWith("generic")

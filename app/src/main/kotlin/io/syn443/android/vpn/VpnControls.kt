@@ -164,7 +164,7 @@ fun VpnControls(consentGeneration: Long = -1) {
         Button(onClick = { requestConnect() }, modifier = Modifier.testTag("vpn-connect")) { Text("Подключиться") }
         Button(onClick = { command("disconnect") }, modifier = Modifier.testTag("vpn-disconnect")) { Text("Отключить") }
         Button(onClick = { importer.launch(arrayOf("application/json", "text/plain")) }, enabled = !status.optBoolean("desiredOn") && policy?.optBoolean("managed") != true) { Text("Импорт конфигурации движка") }
-        Text("M1: прямой путь или импортированные профили. Регистрация и управляемый provisioning ещё не реализованы.")
+        Text("M1: импорт профилей и пилот управляемых политик. Регистрация устройства на сервере пока недоступна.")
         if (message.isNotEmpty()) Text(message)
     }
 }

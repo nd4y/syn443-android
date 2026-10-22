@@ -24,9 +24,11 @@ adb shell appops set io.syn443.android ACTIVATE_VPN allow
 if [ "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" -ge 33 ]; then
   adb shell pm grant io.syn443.android android.permission.POST_NOTIFICATIONS
 fi
-./gradlew :app:connectedDebugAndroidTest --info --stacktrace
+result=0
+./gradlew :app:connectedDebugAndroidTest --info --stacktrace || result=1
 adb install -r app/build/outputs/apk/debug/app-debug.apk
-python3 tools/run_vpn_process_faults.py
-python3 tools/run_policy_activation.py
-python3 tools/check_test_evidence.py emulator
+python3 tools/run_vpn_process_faults.py || result=1
+python3 tools/run_policy_activation.py || result=1
+python3 tools/check_test_evidence.py emulator || result=1
+exit "$result"
 

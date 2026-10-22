@@ -162,6 +162,9 @@ def main():
                     assert pid(':engine') == original and call('status')['policy']['activeRevision'] == 1
                 print(name + ': passed', flush=True)
             except Exception:
+                snapshot = call('status')
+                print('Policy failure state: ' + json.dumps({k: snapshot.get(k) for k in
+                      ('phase', 'reason', 'desiredOn', 'resumeRequired', 'policy', 'attempt', 'heavyWallMs', 'nextWallMs')}), flush=True)
                 ET.SubElement(case, 'failure', message='Managed policy scenario failed; see bounded job output')
                 raise
     finally:
