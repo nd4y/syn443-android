@@ -1,0 +1,10 @@
+--- a/transport/v2rayxhttp/client.go
++++ b/transport/v2rayxhttp/client.go
+@@ -608,7 +608,6 @@
+ 		}
+ 		if options != nil && options.Mode != "packet-up" {
+ 			transport.(*http2.Transport).MaxReadFrameSize = 64 * 1024
+-			transport.(*http2.Transport).MaxWriteFrameSize = 64 * 1024
+ 		}
+ 	default:
+ 		httpDialContext := func(ctxInner context.Context, network string, addr string) (net.Conn, error) {

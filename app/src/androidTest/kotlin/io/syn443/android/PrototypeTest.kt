@@ -34,7 +34,7 @@ class PrototypeTest {
                 .getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).top
         }
         assertTrue("Title overlaps system bars/cutout", titleTop >= safeTop)
-        compose.onNodeWithTag("prototype").assertTextContains("VPN ещё не подключается.", substring = true)
+        compose.onNodeWithTag("prototype").assertTextContains("тестовые данные", substring = true)
         compose.onNodeWithTag("state").assertTextEquals("Остановлено")
         compose.onNodeWithTag("start").performScrollTo().performClick()
         compose.onNodeWithTag("apply").performScrollTo().performClick()

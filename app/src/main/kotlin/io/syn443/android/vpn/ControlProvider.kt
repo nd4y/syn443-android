@@ -1,0 +1,62 @@
+package io.syn443.android.vpn
+
+import android.content.ContentProvider
+import android.content.ContentValues
+import android.content.Intent
+import android.database.Cursor
+import android.net.Uri
+import android.os.Binder
+import android.os.Bundle
+import android.os.Process
+import android.util.Base64
+import io.syn443.recovery.Recovery
+
+/** One durable command writer in :controller. Shell access exists in debug builds only. */
+class ControlProvider : ContentProvider() {
+    override fun onCreate() = true
+    override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+        val context = checkNotNull(context)
+        val caller = Binder.getCallingUid()
+        require(caller == Process.myUid() || (io.syn443.android.BuildConfig.DEBUG && caller == 2000)) { "unauthorized caller" }
+        val store = StateStore.get(context)
+        return try {
+            when (method) {
+                "status", "logs" -> Unit
+                "import" -> {
+                    require(!store.checkpoint().desiredOn) { "stop before importing" }
+                    val raw = Base64.decode(requireNotNull(arg), Base64.NO_WRAP).toString(Charsets.UTF_8)
+                    store.importConfig(raw)
+                    store.update { it.put("configRevision", java.security.MessageDigest.getInstance("SHA-256").digest(raw.toByteArray()).joinToString("") { b -> "%02x".format(b) }) }
+                }
+                "connect", "disconnect" -> {
+                    val on = method == "connect"
+                    store.update { store.put(it, Recovery.command(store.checkpoint(it), on)); it.put("phase", if (on) "Connecting" else "Off") }
+                    val intent = Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE)
+                    if (on) context.startForegroundService(intent) else context.startService(intent)
+                }
+                "resume" -> {
+                    require(store.checkpoint().desiredOn) { "newer Stop wins" }
+                    context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE))
+                }
+                "fault-crash", "fault-hang" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
+                    context.startService(Intent(context, TunnelService::class.java).setAction(method))
+                }
+                "test-health" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG)
+                    require(arg == "synthetic-http" || arg == "production-https")
+                    store.update { it.put("testHealth", arg == "synthetic-http") }
+                }
+                else -> error("unknown command")
+            }
+            Bundle().apply { putBoolean("ok", true); putString("json", store.read().toString()) }
+        } catch (_: Exception) {
+            Bundle().apply { putBoolean("ok", false); putString("error", "command_rejected") }
+        }
+    }
+    override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? = null
+    override fun getType(uri: Uri): String? = null
+    override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+    override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
+    override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0
+}

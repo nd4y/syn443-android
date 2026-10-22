@@ -24,14 +24,14 @@ class MainActivity : ComponentActivity() {
         val request = Decision.decode(input.toString())
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(Modifier.fillMaxSize()) { Prototype(request) }
+                Surface(Modifier.fillMaxSize()) { Prototype(request, intent.getBooleanExtra("syn443.connect", false)) }
             }
         }
     }
 }
 
 @Composable
-private fun Prototype(request: Request) {
+private fun Prototype(request: Request, connectFromTile: Boolean = false) {
     val coordinator = remember { Coordinator(request.context) }
     var state by remember { mutableStateOf(coordinator.snapshot()) }
     var pending by remember { mutableStateOf<Request?>(null) }
@@ -42,7 +42,8 @@ private fun Prototype(request: Request) {
     ) {
         Text("SYN443", style = MaterialTheme.typography.headlineLarge)
         Text("Secure Your Network")
-        Text("Диагностический прототип. VPN ещё не подключается.", Modifier.testTag("prototype"))
+        io.syn443.android.vpn.VpnControls(connectFromTile)
+        Text("Модель выбора маршрута (тестовые данные).", Modifier.testTag("prototype"))
         Text("Эпоха сети: " + state.context.networkEpoch, Modifier.testTag("epoch"))
         Text(if (state.desiredOn) "Модель запущена" else "Остановлено", Modifier.testTag("state"))
         Text(outcome, Modifier.testTag("outcome"))

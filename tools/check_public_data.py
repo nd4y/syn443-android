@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import zipfile
+import io
 
 ROOT = Path(__file__).resolve().parent.parent
 PATTERNS = {
@@ -23,6 +24,13 @@ FORBIDDEN = re.compile(r"(?:^|/)(?:\.env(?:\..*)?|local\.properties|[^/]*\.(?:jk
 
 def findings(data):
     text = data.decode("utf-8", errors="replace")
+    if data.startswith(b"\x7fELF"):
+        # Reviewed Go symbol/field spellings, not DNS names. Limit normalization
+        # to ELF and exact compiler syntax; ordinary domains in ELF still fail.
+        text = text.replace("type:.eq." + "internal/", "type:.eq.<go-internal>/")
+        text = text.replace("type:.hash." + "internal/", "type:.hash.<go-internal>/")
+        text = text.replace("\0time.Time." + "Local\0", "\0<go-time-method>\0")
+        text = text.replace("crypto/x509." + "local string; crypto/x509.domain string", "<go-x509-struct-fields>")
     result = {name for name, pattern in PATTERNS.items() if pattern.search(text)}
     for match in IPV4.finditer(text):
         # The standard shared-address allocation itself is public documentation.
@@ -65,19 +73,30 @@ def scan_history():
     return problems
 
 
+def scan_payload(data, location, depth=0):
+    if zipfile.is_zipfile(io.BytesIO(data)):
+        if depth >= 3:
+            return [(location, "archive-depth-exceeded")]
+        problems = []
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            members = archive.infolist()
+            if len(members) > 4096 or sum(m.file_size for m in members) > 256 * 1024 * 1024:
+                return [(location, "archive-budget-exceeded")]
+            for member in members:
+                problems.extend((location, rule) for rule in sorted(findings(member.filename.encode())))
+                if not member.is_dir():
+                    problems.extend(scan_payload(archive.read(member), location + ":" + member.filename, depth + 1))
+        return problems
+    return [(location, rule) for rule in sorted(findings(data))]
+
+
 def scan_files(paths):
     problems = []
     for path in paths:
         files = sorted(p for p in path.rglob("*") if p.is_file()) if path.is_dir() else [path]
         for file in files:
             data = file.read_bytes()
-            problems.extend((file.name, rule) for rule in sorted(findings(data)))
-            if file.suffix in {".apk", ".zip"}:
-                with zipfile.ZipFile(file) as archive:
-                    for member in archive.infolist():
-                        if not member.is_dir():
-                            problems.extend((file.name + ":" + member.filename, rule)
-                                            for rule in sorted(findings(archive.read(member))))
+            problems.extend(scan_payload(data, file.name))
     return problems
 
 

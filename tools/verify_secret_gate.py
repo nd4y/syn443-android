@@ -30,11 +30,12 @@ with tempfile.TemporaryDirectory() as directory:
     (work / 'unreviewed.json').write_text(json.dumps({'openapi.json': digest}, indent=2))
     scan(1)
     # A detector must inspect APK assets rather than silently skip the binary container.
-    apk = work / 'synthetic.apk'
-    for payload, expected in (({'safe': 'synthetic'}, 0), ({'openapi.json': digest}, 1)):
-        with zipfile.ZipFile(apk, 'w') as z:
-            z.writestr('assets/synthetic.json', json.dumps(payload, indent=2))
-        result = subprocess.run([sys.executable, str(root / 'tools/check_apk_secrets.py'), scanner, str(apk)],
-                                capture_output=True)
-        assert (result.returncode != 0) == bool(expected), 'APK asset scanner test outcome mismatch'
-print('Secret scanner: exact digest exception and APK asset detection verified')
+    for suffix in ('apk', 'aar'):
+        apk = work / ('synthetic.' + suffix)
+        for payload, expected in (({'safe': 'synthetic'}, 0), ({'openapi.json': digest}, 1)):
+            with zipfile.ZipFile(apk, 'w') as z:
+                z.writestr('assets/synthetic.json', json.dumps(payload, indent=2))
+            result = subprocess.run([sys.executable, str(root / 'tools/check_apk_secrets.py'), scanner, str(apk)],
+                                    capture_output=True)
+            assert (result.returncode != 0) == bool(expected), suffix + ' asset scanner test outcome mismatch'
+print('Secret scanner: exact digest exception and APK/AAR asset detection verified')
