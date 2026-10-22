@@ -13,10 +13,21 @@ import io.syn443.recovery.Recovery
 
 /** One durable command writer in :controller. Shell access exists in debug builds only. */
 class ControlProvider : ContentProvider() {
+    companion object { @Volatile var explicitConnectInProcess = false }
     override fun onCreate(): Boolean {
         val store = StateStore.get(checkNotNull(context))
-        if (store.checkpoint().desiredOn) store.event("Recovering", "controller_recreated", store.read().optLong("networkEpoch"))
+        OsIntentGate.observe(checkNotNull(context), store)
+        if (store.checkpoint().desiredOn) store.event(if (store.read().optBoolean("resumeRequired")) "NeedsAction" else "Recovering", if (store.read().optBoolean("resumeRequired")) "explicit_resume_required" else "controller_recreated", store.read().optLong("networkEpoch"))
         return true
+    }
+    private fun requestReconcile(context: android.content.Context, store: StateStore, action: String = TunnelService.RECONCILE) {
+        // A missing VPN grant also removes Android's background FGS exemption.
+        // Persist intent, but wait for the ordinary Activity permission dialog.
+        if (android.net.VpnService.prepare(context) != null) {
+            store.event("NeedsPermission", "vpn_permission_required", store.read().optLong("networkEpoch"))
+            return
+        }
+        context.startForegroundService(Intent(context, TunnelService::class.java).setAction(action))
     }
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         val context = checkNotNull(context)
@@ -26,6 +37,28 @@ class ControlProvider : ContentProvider() {
         return try {
             when (method) {
                 "status", "logs" -> Unit
+                "foreground-open" -> {
+                    val generation = arg?.toLongOrNull()
+                    val cp = store.checkpoint()
+                    val serviceExists = checkNotNull(context.getSystemService(android.app.ActivityManager::class.java)).getRunningServices(16)
+                        .any { it.service.className == TunnelService::class.java.name }
+                    if (cp.desiredOn && cp.generation == generation && !serviceExists && !explicitConnectInProcess) {
+                        store.update { it.put("resumeRequired", true) }
+                        store.event("NeedsAction", "explicit_resume_required", store.read().optLong("networkEpoch"))
+                    }
+                }
+                "policy-bind-file", "policy-stage-file" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
+                    val file = java.io.File(context.noBackupFilesDir, "operator-policy.json")
+                    val raw = try { require(file.length() in 1..524_288); file.readText(Charsets.UTF_8) } finally { file.delete() }
+                    val policy = ManagedPolicyStore.get(context)
+                    store.serialized { if (method == "policy-bind-file") policy.bind(raw) else policy.stage(raw.trim(), store.originalConfig()) }
+                    if (store.checkpoint().desiredOn) requestReconcile(context, store)
+                }
+                "policy-refresh" -> {
+                    require(ManagedPolicyStore.get(context).managed())
+                    if (store.checkpoint().desiredOn) requestReconcile(context, store, method)
+                }
                 "import", "import-file" -> {
                     require(!store.checkpoint().desiredOn) { "stop before importing" }
                     val raw = if (method == "import-file") {
@@ -42,15 +75,17 @@ class ControlProvider : ContentProvider() {
                 }
                 "connect", "disconnect" -> {
                     val on = method == "connect"
-                    store.update { store.put(it, Recovery.command(store.checkpoint(it), on)); it.put("phase", if (on) "Connecting" else "Off") }
+                    explicitConnectInProcess = on
+                    store.update { store.put(it, Recovery.command(store.checkpoint(it), on)); OsIntentGate.command(context, it, on); it.put("phase", if (on) "Connecting" else "Off") }
                     val intent = Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE)
-                    if (on) context.startForegroundService(intent) else context.startService(intent)
+                    if (on) requestReconcile(context, store) else context.startService(intent)
                 }
                 "resume" -> {
                     require(store.checkpoint().desiredOn) { "newer Stop wins" }
-                    context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE))
+                    require(!store.read().optBoolean("resumeRequired")) { "explicit_connect_required" }
+                    requestReconcile(context, store)
                 }
-                "fault-crash", "fault-hang" -> {
+                "fault-crash", "fault-hang", "fault-owner" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
                 }
@@ -72,6 +107,7 @@ class ControlProvider : ContentProvider() {
                 "test-health" -> {
                     require(io.syn443.android.BuildConfig.DEBUG)
                     require(arg == "synthetic-http" || arg == "production-https")
+                    require(arg != "synthetic-http" || android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
                     store.update { it.put("testHealth", arg == "synthetic-http") }
                 }
                 "test-reset" -> {
@@ -82,10 +118,15 @@ class ControlProvider : ContentProvider() {
                         store.put(value, Recovery.command(isolated, false))
                     }
                 }
+                "policy-test-reset" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller == 2000 && android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+                    require(!store.checkpoint().desiredOn && !store.read().optBoolean("engineActive"))
+                    ManagedPolicyStore.get(context).resetEmulator()
+                }
                 else -> error("unknown command")
             }
             val result = store.read()
-            if (method == "status") result.put("netbird", OverlaySnapshot.read())
+            if (method == "status") result.put("netbird", OverlaySnapshot.read()).put("policy", ManagedPolicyStore.get(context).status())
             Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
         } catch (_: Exception) {
             Bundle().apply { putBoolean("ok", false); putString("error", "command_rejected") }

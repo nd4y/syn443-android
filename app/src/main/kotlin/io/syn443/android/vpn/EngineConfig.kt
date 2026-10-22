@@ -6,6 +6,24 @@ import org.json.JSONObject
 object EngineConfig {
     private val supported = setOf("direct", "http", "socks", "vless", "ssh", "selector", "urltest", "netbird")
     fun validate(raw: String) {
+        // JSONObject alone silently drops duplicate keys; preserve their rejection.
+        android.util.JsonReader(java.io.StringReader(raw)).use { reader ->
+            fun value(depth: Int) {
+                require(depth <= 32)
+                when (reader.peek()) {
+                    android.util.JsonToken.BEGIN_OBJECT -> { reader.beginObject(); val keys = mutableSetOf<String>()
+                        while (reader.hasNext()) { require(keys.size < 256 && keys.add(reader.nextName())); value(depth + 1) }; reader.endObject() }
+                    android.util.JsonToken.BEGIN_ARRAY -> { reader.beginArray(); var n = 0
+                        while (reader.hasNext()) { require(++n <= 4096); value(depth + 1) }; reader.endArray() }
+                    android.util.JsonToken.NUMBER -> require(reader.nextString().toDouble().isFinite())
+                    android.util.JsonToken.STRING -> reader.nextString()
+                    android.util.JsonToken.BOOLEAN -> reader.nextBoolean()
+                    android.util.JsonToken.NULL -> reader.nextNull()
+                    else -> error("invalid_json")
+                }
+            }
+            value(0); require(reader.peek() == android.util.JsonToken.END_DOCUMENT)
+        }
         val value = JSONObject(raw)
         require(value.keys().asSequence().all { it in setOf("outbounds", "dns", "route") }) { "unsupported root field" }
         val outbounds = value.getJSONArray("outbounds")

@@ -29,6 +29,15 @@ with tempfile.TemporaryDirectory() as directory:
     target.unlink()
     (work / 'unreviewed.json').write_text(json.dumps({'openapi.json': digest}, indent=2))
     scan(1)
+    policy_digest = json.loads((root / 'contracts/lock.json').read_text())['files']['policy-openapi.json']
+    (work / 'unreviewed.json').unlink()
+    target.write_text(json.dumps({'policy-openapi.json': policy_digest}, indent=2))
+    scan(0)
+    target.write_text(json.dumps({'policy-openapi.json': ('0' if policy_digest[0] != '0' else '1') + policy_digest[1:]}, indent=2))
+    scan(1)
+    target.unlink()
+    (work / 'unreviewed.json').write_text(json.dumps({'policy-openapi.json': policy_digest}, indent=2))
+    scan(1)
     # A detector must inspect APK assets rather than silently skip the binary container.
     for suffix in ('apk', 'aar'):
         apk = work / ('synthetic.' + suffix)

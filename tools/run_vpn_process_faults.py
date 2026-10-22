@@ -131,6 +131,31 @@ def main():
         adb('shell', 'appops', 'set', PACKAGE, 'ACTIVATE_VPN', 'allow')
         adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
         call('disconnect')
+        case = ET.SubElement(suite, 'testcase', classname='io.syn443.android.ExternalVpnProcessTest',
+                             name='missingVpnConsentPreservesIntentWithoutStartingForegroundService')
+        try:
+            # External driver: changing this app-op kills instrumentation if done inside it.
+            adb('shell', 'appops', 'set', PACKAGE, 'ACTIVATE_VPN', 'ignore')
+            adb('shell', 'input', 'keyevent', 'KEYCODE_HOME')
+            before = call('status')
+            call('connect')
+            missing = call('status')
+            assert missing['desiredOn'] and missing['phase'] == 'NeedsPermission'
+            assert missing['reason'] == 'vpn_permission_required' and not pid(':engine')
+            assert missing.get('heavyWallMs', []) == before.get('heavyWallMs', [])
+            controller = pid(':controller')
+            call('resume')
+            time.sleep(2)
+            assert call('status')['phase'] == 'NeedsPermission' and not pid(':engine')
+            assert pid(':controller') == controller
+            print(case.get('name') + ': passed', flush=True)
+        except Exception as error:
+            ET.SubElement(case, 'failure', message=type(error).__name__).text = str(error)
+            raise
+        finally:
+            adb('shell', 'appops', 'set', PACKAGE, 'ACTIVATE_VPN', 'allow')
+        adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
+        call('disconnect')
         # Only ingress is forwarded to Android. A direct shortcut to egress
         # cannot pass: there is no Android listener on its host-only port.
         config = {'outbounds': [
@@ -147,7 +172,8 @@ def main():
         for name in ('twoHopTunTrafficCrossesBothProxies', 'ingressFailureRecoversWithoutNativeRestart',
                      'egressFailureRecoversWithoutNativeRestart', 'uiProcessDeathKeepsRealTunTraffic',
                      'forceStopWaitsForForegroundReopenAndPreservesIntent',
-                     'controllerDeathRetiresFrozenNativeAndPreservesIntent', 'controllerRestartBudgetSurvivesOwnerDeath'):
+                     'controllerDeathRetiresFrozenNativeAndPreservesIntent', 'nativeOwnerRecreationKeepsIntentAndRejectsOldCallbacks',
+                     'controllerRestartBudgetSurvivesOwnerDeath'):
             case = ET.SubElement(suite, 'testcase', classname='io.syn443.android.ExternalVpnProcessTest', name=name)
             try:
                 progress = proxy.progress
@@ -177,6 +203,11 @@ def main():
                     call('fault-controller')
                     await_condition(lambda: pid(':engine') not in ('', native) and
                                     call('status').get('phase') == 'Online' and proxy.progress > progress)
+                elif name.startswith('nativeOwnerRecreation'):
+                    previous = pid(':engine')
+                    call('fault-owner')
+                    await_condition(lambda: pid(':engine') not in ('', previous) and call('status').get('phase') == 'Online' and proxy.progress > progress)
+                    native = pid(':engine')
                 elif name.startswith('forceStop'):
                     previous = pid(':engine')
                     adb('shell', 'am', 'force-stop', PACKAGE)
@@ -184,6 +215,11 @@ def main():
                     time.sleep(2)
                     assert not pid(':engine') and not pid(':controller')
                     adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
+                    time.sleep(2)
+                    assert not pid(':engine'), 'Opening UI after Force stop must require explicit Connect'
+                    assert call('status').get('resumeRequired'), 'Resume confirmation must survive a later boot'
+                    call('connect')
+                    generation = call('status')['generation']
                     await_condition(lambda: pid(':engine') not in ('', previous) and
                                     call('status').get('phase') == 'Online' and proxy.progress > progress)
                     native = pid(':engine')
@@ -211,6 +247,9 @@ def main():
                 assert call('status')['desiredOn']
                 print(name + ': passed', flush=True)
             except Exception:
+                snapshot = call('status')
+                print('Recovery failure state: ' + json.dumps({k: snapshot.get(k) for k in
+                      ('phase', 'reason', 'desiredOn', 'generation', 'resumeRequired', 'attempt', 'heavyWallMs', 'nextWallMs')}), flush=True)
                 ET.SubElement(case, 'failure', message='External process recovery failed; see job log')
                 raise
     finally:

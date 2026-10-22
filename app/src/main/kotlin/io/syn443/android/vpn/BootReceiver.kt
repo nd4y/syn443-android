@@ -9,6 +9,11 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         val store = StateStore.get(context)
         if (!store.checkpoint().desiredOn) return
+        if (store.read().optBoolean("resumeRequired")) return
+        if (!OsIntentGate.bootTrigger(context, store, checkNotNull(intent.action))) return
+        if (android.net.VpnService.prepare(context) != null) {
+            store.event("NeedsPermission", "vpn_permission_required", store.read().optLong("networkEpoch")); return
+        }
         runCatching { context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE)) }
             .onFailure { store.event("NeedsAction", "os_start_restricted", store.read().optLong("networkEpoch")) }
     }

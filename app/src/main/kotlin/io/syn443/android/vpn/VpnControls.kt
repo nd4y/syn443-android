@@ -31,7 +31,7 @@ import org.json.JSONObject
 private val controlUri = "content://io.syn443.control".toUri()
 
 @Composable
-fun VpnControls(connectFromTile: Boolean = false) {
+fun VpnControls(consentGeneration: Long = -1) {
     val context = LocalContext.current
     var status by remember { mutableStateOf(JSONObject()) }
     var message by remember { mutableStateOf("") }
@@ -79,15 +79,11 @@ fun VpnControls(connectFromTile: Boolean = false) {
         }
     }
     LaunchedEffect(visible) {
-        if (visible) withContext(Dispatchers.IO) {
-            // Foreground launch is an allowed entry after Android Force stop.
-            // Resume reads current durable intent; a newer Stop still wins.
-            runCatching {
-                val current = context.contentResolver.call(controlUri, "status", null, null)?.getString("json")
-                if (current != null && JSONObject(current).optBoolean("desiredOn"))
-                    context.contentResolver.call(controlUri, "resume", null, null)
-            }
-        }
+        // Opening UI is never Connect, including after an Android Force stop.
+        if (visible) withContext(Dispatchers.IO) { runCatching {
+            val raw = context.contentResolver.call(controlUri, "status", null, null)?.getString("json")
+            if (raw != null) context.contentResolver.call(controlUri, "foreground-open", JSONObject(raw).optLong("generation").toString(), null)
+        } }
         while (visible) {
             val raw = withContext(Dispatchers.IO) { runCatching { context.contentResolver.call(controlUri, "status", null, null)?.getString("json") }.getOrNull() }
             if (raw != null) status = JSONObject(raw)
@@ -100,12 +96,24 @@ fun VpnControls(connectFromTile: Boolean = false) {
         val intent = VpnService.prepare(context)
         if (intent != null) consent.launch(intent) else askNotifications()
     }
-    LaunchedEffect(connectFromTile) { if (connectFromTile) requestConnect() }
+    LaunchedEffect(consentGeneration) {
+        if (consentGeneration >= 0) {
+            val raw = withContext(Dispatchers.IO) { context.contentResolver.call(controlUri, "status", null, null)?.getString("json") }
+            if (raw != null) {
+                val current = JSONObject(raw)
+                if (current.optBoolean("desiredOn") && current.optLong("generation") == consentGeneration)
+                    VpnService.prepare(context)?.let { consent.launch(it) }
+            }
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("VPN: " + if (status.optBoolean("desiredOn")) "включён пользователем" else "выключен", Modifier.testTag("vpn-intent"))
+        if (status.optBoolean("alwaysOn") || status.optBoolean("lockdown")) Text("Android: Always-on=${status.optBoolean("alwaysOn")}; блокировка без VPN=${status.optBoolean("lockdown")}. Управляется в настройках Android.")
         if (status.optBoolean("testHealth")) Text("ТЕСТОВЫЙ СТЕНД: синтетический HTTP, проверка TLS не выполняется")
         Text(when (status.optString("phase")) {
             "Online" -> "Работает"
+            "Degraded" -> "Частично работает"
+            "BlockedByPolicy" -> "Доступ ограничен политикой"
             "NoNetwork" -> "Ожидание сети"
             "Recovering" -> "Восстанавливаем соединение"
             "Connecting" -> "Подключаемся"
@@ -113,6 +121,13 @@ fun VpnControls(connectFromTile: Boolean = false) {
             else -> "Отключён"
         }, Modifier.testTag("vpn-status"))
         if (status.optString("reason").isNotEmpty()) Text("Диагностика: " + status.optString("reason"))
+        val policy = status.optJSONObject("policy")
+        if (policy?.optBoolean("managed") == true) {
+            Text("Политика: ${policy.optString("phase")}", Modifier.testTag("policy-status"))
+            Text("Желаемая: ${policy.optString("desiredRevision", "-")}; активная: ${policy.optString("activeRevision", "-")}; рабочая: ${policy.optString("lastKnownGoodRevision", "-")}")
+            if (policy.optString("reason").isNotEmpty()) Text("Политика: ${policy.optString("reason")}")
+            Button(onClick = { command("policy-refresh") }) { Text("Проверить обновление политики") }
+        }
         val overlay = status.optJSONObject("netbird")
         if (overlay?.optBoolean("active") == true) {
             val peerState = overlay.optJSONObject("peer_state") ?: JSONObject()
@@ -148,8 +163,8 @@ fun VpnControls(connectFromTile: Boolean = false) {
         if (status.optBoolean("desiredOn") && next > System.currentTimeMillis()) Text("Повтор не ранее чем через ${(next - System.currentTimeMillis()) / 1_000} с, при доступной сети")
         Button(onClick = { requestConnect() }, modifier = Modifier.testTag("vpn-connect")) { Text("Подключиться") }
         Button(onClick = { command("disconnect") }, modifier = Modifier.testTag("vpn-disconnect")) { Text("Отключить") }
-        Button(onClick = { importer.launch(arrayOf("application/json", "text/plain")) }, enabled = !status.optBoolean("desiredOn")) { Text("Импорт конфигурации движка") }
-        Text("M1: прямой путь или импортированные профили. Регистрация и управляемый provisioning ещё не реализованы.")
+        Button(onClick = { importer.launch(arrayOf("application/json", "text/plain")) }, enabled = !status.optBoolean("desiredOn") && policy?.optBoolean("managed") != true) { Text("Импорт конфигурации движка") }
+        Text("M1: импорт профилей и пилот управляемых политик. Регистрация устройства на сервере пока недоступна.")
         if (message.isNotEmpty()) Text(message)
     }
 }

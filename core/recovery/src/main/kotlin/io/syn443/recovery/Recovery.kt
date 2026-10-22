@@ -67,5 +67,12 @@ object Recovery {
         return state.copy(heavyWallMs = history + now) to true
     }
 
+    /** Read-only reservation check. A waiting policy must not consume native starts. */
+    fun replacementReady(state: Checkpoint, now: Long, slots: Int = 2): Boolean {
+        require(now >= 0 && slots in 1..3)
+        val recent = state.heavyWallMs.count { now - min(it, now) < WINDOW }
+        return state.desiredOn && now >= state.nextWallMs && recent + slots <= 3
+    }
+
     fun current(state: Checkpoint, generation: Long) = state.desiredOn && state.generation == generation
 }

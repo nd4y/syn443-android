@@ -21,6 +21,7 @@ class StateStore private constructor(context: Context) {
         @Synchronized fun get(context: Context): StateStore = instance ?: StateStore(context.applicationContext).also { instance = it }
     }
     private val directory = context.noBackupFilesDir
+    private val policyStore = ManagedPolicyStore.get(context)
     private val state = AtomicFile(File(directory, "vpn-intent.json"))
     private val config = AtomicFile(File(directory, "vpn-config.enc"))
     @Synchronized fun read(): JSONObject = if (!state.baseFile.exists()) JSONObject().put("desiredOn", false).put("generation", 0) else
@@ -43,6 +44,12 @@ class StateStore private constructor(context: Context) {
         update(block)
         return true
     }
+    @Synchronized fun effectCurrent(generation: Long, block: () -> Unit): Boolean {
+        if (!io.syn443.recovery.Recovery.current(checkpoint(), generation)) return false
+        block()
+        return true
+    }
+    @Synchronized fun <T> serialized(block: () -> T): T = block()
     fun checkpoint(value: JSONObject = read()) = Checkpoint(
         value.optBoolean("desiredOn"), value.optLong("generation"), value.optInt("attempt"),
         value.optLong("nextWallMs"), value.optLong("lastEarlyWallMs"),
@@ -77,6 +84,7 @@ class StateStore private constructor(context: Context) {
         }.generateKey()
     }
     @Synchronized fun importConfig(raw: String) {
+        require(!policyStore.managed()) { "managed_policy_locked" }
         require(!checkpoint().desiredOn) { "stop before importing" }
         require(raw.toByteArray().size <= 262_144) { "configuration too large" }
         EngineConfig.validate(raw)
@@ -87,7 +95,7 @@ class StateStore private constructor(context: Context) {
         catch (e: Exception) { config.failWrite(output); throw e }
         update { it.put("configRevision", revision(raw)) }
     }
-    @Synchronized fun config(): String? {
+    @Synchronized fun originalConfig(): String? {
         if (!config.baseFile.exists()) return null
         val bytes = config.openRead().use { it.readBytes() }
         require(bytes.size >= 30) { "stored configuration is truncated" }
@@ -97,8 +105,11 @@ class StateStore private constructor(context: Context) {
             init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(1, size + 1)))
         }.doFinal(bytes.copyOfRange(size + 1, bytes.size)).toString(Charsets.UTF_8)
         val digest = revision(raw)
-        if (read().optString("configRevision") != digest) update { it.put("configRevision", digest) }
+        if (!policyStore.managed() && read().optString("configRevision") != digest) update { it.put("configRevision", digest) }
         return raw
+    }
+    @Synchronized fun config(): String? = policyStore.config(originalConfig()).also { raw ->
+        if (raw != null && read().optString("configRevision") != revision(raw)) update { it.put("configRevision", revision(raw)) }
     }
     private fun revision(raw: String) = java.security.MessageDigest.getInstance("SHA-256")
         .digest(raw.toByteArray()).joinToString("") { "%02x".format(it) }

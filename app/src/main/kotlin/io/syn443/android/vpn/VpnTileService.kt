@@ -12,18 +12,31 @@ import org.json.JSONObject
 
 class VpnTileService : TileService() {
     private val uri = "content://io.syn443.control".toUri()
-    private fun on() = runCatching {
-        JSONObject(checkNotNull(contentResolver.call(uri, "status", null, null)?.getString("json"))).optBoolean("desiredOn")
-    }.getOrDefault(false)
+    private fun status() = runCatching {
+        JSONObject(checkNotNull(contentResolver.call(uri, "status", null, null)?.getString("json")))
+    }.getOrDefault(JSONObject())
     override fun onStartListening() {
-        qsTile?.apply { state = if (on()) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE; updateTile() }
+        val current = status()
+        qsTile?.apply {
+            state = if (current.optBoolean("desiredOn")) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+            subtitle = when (current.optString("phase")) {
+                "Online" -> "Работает"; "Degraded" -> "Частично работает"; "NoNetwork" -> "Ожидание сети"
+                "NeedsAction", "NeedsPermission", "BlockedByPolicy" -> "Требуется действие"
+                "Connecting", "Recovering" -> "Восстановление"; else -> "Отключён"
+            }
+            updateTile()
+        }
     }
     @Suppress("DEPRECATION")
     @SuppressLint("StartActivityAndCollapseDeprecated") // PendingIntent overload exists only on API34+; guarded legacy branch is required on API29-33.
     override fun onClick() {
-        if (on()) contentResolver.call(uri, "disconnect", null, null)
+        val current = status()
+        if (current.optBoolean("desiredOn") && !current.optBoolean("resumeRequired")) contentResolver.call(uri, "disconnect", null, null)
         else {
-            val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("syn443.connect", true)
+            val result = contentResolver.call(uri, "connect", null, null)
+            if (result?.getBoolean("ok") != true || android.net.VpnService.prepare(this) == null) { onStartListening(); return }
+            val generation = JSONObject(checkNotNull(result.getString("json"))).getLong("generation")
+            val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("syn443.consentGeneration", generation)
             if (Build.VERSION.SDK_INT >= 34) startActivityAndCollapse(PendingIntent.getActivity(this, 443, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             else startActivityAndCollapse(intent)
         }

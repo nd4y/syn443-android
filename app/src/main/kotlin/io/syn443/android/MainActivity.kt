@@ -24,14 +24,14 @@ class MainActivity : ComponentActivity() {
         val request = Decision.decode(input.toString())
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(Modifier.fillMaxSize()) { Prototype(request, intent.getBooleanExtra("syn443.connect", false)) }
+                Surface(Modifier.fillMaxSize()) { Prototype(request, intent.getLongExtra("syn443.consentGeneration", -1)) }
             }
         }
     }
 }
 
 @Composable
-private fun Prototype(request: Request, connectFromTile: Boolean = false) {
+private fun Prototype(request: Request, consentGeneration: Long = -1) {
     val coordinator = remember { Coordinator(request.context) }
     var state by remember { mutableStateOf(coordinator.snapshot()) }
     var pending by remember { mutableStateOf<Request?>(null) }
@@ -42,7 +42,7 @@ private fun Prototype(request: Request, connectFromTile: Boolean = false) {
     ) {
         Text("SYN443", style = MaterialTheme.typography.headlineLarge)
         Text("Secure Your Network")
-        io.syn443.android.vpn.VpnControls(connectFromTile)
+        io.syn443.android.vpn.VpnControls(consentGeneration)
         Text("Модель выбора маршрута (тестовые данные).", Modifier.testTag("prototype"))
         Text("Эпоха сети: " + state.context.networkEpoch, Modifier.testTag("epoch"))
         Text(if (state.desiredOn) "Модель запущена" else "Остановлено", Modifier.testTag("state"))

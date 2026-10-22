@@ -84,8 +84,13 @@ state and peer state from data-path proof. Manual peer diagnostics use at most f
 workers and a two-minute job deadline; they do not run on the heartbeat loop.
 UI exposes cache freshness; a stale sample cannot establish connectivity.
 
-M1 remains **partial**. Physical NetBird/internal-probe acceptance,
-signed policy/offline rollback, full per-route status, exhaustive OS lifecycle,
+The M1 [signed policy coordinator](managed-policy.md) adds authenticated scoped
+delivery, encrypted activation journal, baseline/candidate checks and offline
+rollback. Full policy enrollment/rotation/publication is a later gate. Physical
+Wi-Fi-only NetBird/internal TCP and ICMP recovery has bounded operator evidence;
+it does not cover cellular, endurance or energy.
+
+M1 remains **partial**. Full per-route status, exhaustive OS lifecycle,
 restricted cellular handover and measured energy gates remain open. Importing
 unsupported overlay configuration is rejected, never silently removed. The full
 control panel remains gated on these checks. Do not use the development APK as

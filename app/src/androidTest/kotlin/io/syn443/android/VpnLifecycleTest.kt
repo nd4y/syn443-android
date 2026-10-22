@@ -21,6 +21,37 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Hermetic real TUN -> Go TCP/IP stack -> HTTP CONNECT proxy -> synthetic HTTP response. */
 class VpnLifecycleTest {
+    @Test fun intentSentinelIsNonWakeupAndCancelledByStop() {
+        connect()
+        val alarm = shell("dumpsys alarm").toString(Charsets.UTF_8)
+        val action = alarm.indexOf("io.syn443.USER_INTENT_MARKER")
+        assertTrue("OS must retain the Force stop marker", action >= 0)
+        val start = alarm.lastIndexOf("Alarm{", action).coerceAtLeast(0)
+        val end = alarm.indexOf("Alarm{", action).takeIf { it >= 0 } ?: alarm.length
+        assertTrue("Sentinel must not wake the device", Regex("type[= ]3\\b").containsMatchIn(alarm.substring(start, end)))
+        call("disconnect")
+        await { pid() == null }
+        val marker = android.app.PendingIntent.getBroadcast(context, 4431,
+            android.content.Intent(context, io.syn443.android.vpn.BootReceiver::class.java).setAction("io.syn443.USER_INTENT_MARKER"),
+            android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE)
+        assertNull("Stop must cancel both marker and ownership sentinel", marker)
+    }
+    @Test fun externalConnectExtraCannotTurnVpnOn() {
+        scenario.close()
+        scenario = ActivityScenario.launch(android.content.Intent(context, MainActivity::class.java)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("syn443.connect", true)
+            .putExtra("syn443.consentGeneration", status().optLong("generation")))
+        Thread.sleep(1500)
+        assertFalse(status().getBoolean("desiredOn"))
+        assertNull(pid())
+    }
+    @Test fun duplicateEngineFieldsCannotReplaceConfiguration() {
+        val before = status().getString("configRevision")
+        val invalid = """{"outbounds":[{"type":"direct","tag":"direct","tag":"other"}]}"""
+        val result = context.contentResolver.call(uri, "import", Base64.encodeToString(invalid.toByteArray(), Base64.NO_WRAP), null)
+        assertFalse(result!!.getBoolean("ok"))
+        assertEquals(before, status().getString("configRevision"))
+    }
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val uri = "content://io.syn443.control".toUri()
@@ -44,7 +75,10 @@ class VpnLifecycleTest {
             if (predicate()) return
             Thread.sleep(200)
         }
-        fail("VPN lifecycle deadline exceeded")
+        val s = status()
+        fail("VPN lifecycle deadline exceeded: phase=${s.optString("phase")}, reason=${s.optString("reason")}, " +
+            "desiredOn=${s.optBoolean("desiredOn")}, resumeRequired=${s.optBoolean("resumeRequired")}, " +
+            "attempt=${s.optInt("attempt")}, heavyCount=${s.optJSONArray("heavyWallMs")?.length()}, native=${pid()}, tunnels=${tunnels.get()}")
     }
     @Before fun setup() {
         val emulator = Build.HARDWARE in setOf("ranchu", "goldfish") || Build.FINGERPRINT.startsWith("generic")

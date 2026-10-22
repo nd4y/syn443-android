@@ -47,10 +47,15 @@ type Runtime struct {
 	platform *platform
 }
 
-func NewRuntime(config string, fd int32, protector Protector, name string, index int32) (*Runtime, error) {
+func NewRuntime(config string, fd int32, protector Protector, name string, index int32, leaseDeadline int64) (*Runtime, error) {
 	if fd < 0 || protector == nil || name == "" || index <= 0 {
 		return nil, errors.New("invalid host context")
 	}
+	guard := &leaseGuard{clock: bootMillis}
+	if err := guard.set(leaseDeadline); err != nil {
+		return nil, err
+	}
+	netbird.DiagnosticsAllowed = guard.allowed
 	dialer.DoNotSelectInterface = true
 	installOverlayPlatform(protector)
 	ir := inbound.NewRegistry()
@@ -74,7 +79,7 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = box.Context(ctx, ir, or, endpoint.NewRegistry(), dr, boxservice.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
-	p := &platform{fd: int(fd), protector: protector, iface: control.Interface{Index: int(index), Name: name, MTU: 1500, Flags: net.FlagUp}}
+	p := &platform{fd: int(fd), protector: protector, iface: control.Interface{Index: int(index), Name: name, MTU: 1500, Flags: net.FlagUp}, lease: guard}
 	p.mon = &monitor{iface: p.iface}
 	service.MustRegister[adapter.PlatformInterface](ctx, p)
 	var options option.Options
@@ -111,6 +116,7 @@ func (e *Runtime) UpdateNetwork(name string, index int32) {
 }
 
 type platform struct {
+	lease     *leaseGuard
 	fd        int
 	protector Protector
 	iface     control.Interface
@@ -139,7 +145,10 @@ func (p *platform) OpenInterface(o *tun.Options, _ option.TunPlatformOptions) (t
 	if err != nil {
 		syscall.Close(fd)
 	}
-	return t, err
+	if err != nil {
+		return nil, err
+	}
+	return protectTun(t, p.lease), nil
 }
 func (p *platform) UsePlatformDefaultInterfaceMonitor() bool { return true }
 func (p *platform) CreateDefaultInterfaceMonitor(logger.Logger) tun.DefaultInterfaceMonitor {

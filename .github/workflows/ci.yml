@@ -87,10 +87,11 @@ jobs:
         with:
           cmdline-tools-version: '15859902'
           packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
-      - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :core:host-lifecycle:check :core:host-lifecycle:jacocoTestReport :core:recovery:test :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :core:host-lifecycle:check :core:host-lifecycle:jacocoTestReport :core:recovery:test :core:policy:test :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - run: python3 tools/check_test_evidence.py jvm
       - run: python3 tools/check_test_evidence.py host
       - run: python3 tools/check_test_evidence.py recovery
+      - run: python3 tools/check_test_evidence.py policy
       - run: python3 tools/check_apk.py app/build/outputs/apk/debug/app-debug.apk
       - run: '"$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 app/build/outputs/apk/debug/app-debug.apk'
       - name: Dependency inventory
@@ -102,7 +103,7 @@ jobs:
         if: always()
         run: |
           paths=()
-          for path in core/decision/build/reports core/decision/build/test-results core/host-lifecycle/build/reports core/host-lifecycle/build/test-results core/recovery/build/reports core/recovery/build/test-results app/build/reports dependency-inventory.txt; do
+          for path in core/decision/build/reports core/decision/build/test-results core/host-lifecycle/build/reports core/host-lifecycle/build/test-results core/recovery/build/reports core/recovery/build/test-results core/policy/build/reports core/policy/build/test-results app/build/reports dependency-inventory.txt; do
             if [ -e "$path" ]; then paths+=("$path"); fi
           done
           test "${#paths[@]}" -gt 0
@@ -120,6 +121,8 @@ jobs:
             core/host-lifecycle/build/test-results/
             core/recovery/build/reports/
             core/recovery/build/test-results/
+            core/policy/build/reports/
+            core/policy/build/test-results/
             app/build/reports/
             dependency-inventory.txt
           retention-days: 14
@@ -151,7 +154,7 @@ jobs:
   emulator:
     needs: jvm-and-apk
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

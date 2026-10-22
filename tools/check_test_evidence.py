@@ -7,13 +7,16 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=21
+    minimum=38
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
 elif mode=="recovery":
     paths=list((root/"core/recovery/build/test-results/test").glob("TEST-*.xml"))
-    minimum=7
+    minimum=8
+elif mode=="policy":
+    paths=list((root/"core/policy/build/test-results/test").glob("TEST-*.xml"))
+    minimum=12
 else: raise SystemExit("unknown evidence type")
 assert paths,"No JUnit XML evidence produced"
 cases=[]
@@ -36,6 +39,19 @@ if mode=="emulator":
               "controllerRestartBudgetSurvivesOwnerDeath", "notificationStopRetiresAFullyFrozenNativeHost",
               "unavailableOptionalOverlayDoesNotBlockVpnOrLeakPrivateRoute",
               "forceStopWaitsForForegroundReopenAndPreservesIntent"}
+    required |= {"signedPolicyBootstrapsCurrentConfig", "invalidPolicyAndImportCannotReplaceActive",
+                 "failedNativeCandidateRollsBackAndCannotReplay", "requiredRegressionRollsBack",
+                 "baselineOutageCanCommitDegraded", "stopFencesPendingPolicy",
+                 "controllerDeathDuringApplyRollsBackOffline", "expiredLeaseBlocksWithoutDirectFallback",
+                 "offlineControlPlaneRetainsAuthorizedPath"}
+    required.add("duplicateEngineFieldsCannotReplaceConfiguration")
+    required.add("nativeOwnerRecreationKeepsIntentAndRejectsOldCallbacks")
+    required.add("signedManagementReleasePreservesLocalState")
+    required.add("externalConnectExtraCannotTurnVpnOn")
+    required.add("healthyChangedCandidateCommits")
+    required.add("intentSentinelIsNonWakeupAndCancelledByStop")
+    required.add("localRestartBudgetDoesNotPoisonHealthyRenewal")
+    required.add("missingVpnConsentPreservesIntentWithoutStartingForegroundService")
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"
 print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
 
