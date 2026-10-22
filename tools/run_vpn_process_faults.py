@@ -23,14 +23,21 @@ def adb(*args, timeout=30):
     return subprocess.check_output(['adb', '-e', *args], stderr=subprocess.STDOUT, timeout=timeout)
 
 
+class ControlUnavailable(RuntimeError):
+    """The provider may briefly disappear while its process is being killed."""
+
+
 def call(method, arg=None):
     args = ['shell', 'content', 'call', '--uri', URI, '--method', method]
     if arg is not None:
         args += ['--arg', arg]
     raw = adb(*args).decode()
-    if 'ok=true' not in raw:
+    if 'ok=false' in raw:
         raise AssertionError('Control command rejected: ' + method)
-    return json.loads(re.search(r'json=(\{.*\})\}\]', raw)[1])
+    result = re.search(r'json=(\{.*\})\}\]', raw)
+    if 'ok=true' not in raw or result is None:
+        raise ControlUnavailable('Control provider has not returned a response')
+    return json.loads(result[1])
 
 
 def pid(suffix):
@@ -43,8 +50,13 @@ def pid(suffix):
 def await_condition(predicate, timeout=110):
     end = time.monotonic() + timeout
     while time.monotonic() < end:
-        if predicate():
-            return
+        try:
+            if predicate():
+                return
+        except ControlUnavailable:
+            # Poll only. Never replay a Connect/Stop/fault command after an
+            # ambiguous acknowledgement; the deadline and final assertions stay.
+            pass
         time.sleep(1)
     raise AssertionError('Process recovery deadline exceeded')
 
