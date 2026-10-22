@@ -184,6 +184,10 @@ def main():
                     time.sleep(2)
                     assert not pid(':engine') and not pid(':controller')
                     adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
+                    time.sleep(2)
+                    assert not pid(':engine'), 'Opening UI after Force stop must require explicit Connect'
+                    call('connect')
+                    generation = call('status')['generation']
                     await_condition(lambda: pid(':engine') not in ('', previous) and
                                     call('status').get('phase') == 'Online' and proxy.progress > progress)
                     native = pid(':engine')

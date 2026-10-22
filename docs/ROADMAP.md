@@ -9,6 +9,7 @@ Required before the full panel: REC-01-06 / AC82-AC90. Persist desiredOn/config/
 Every reproducible implemented scenario runs in GitHub Actions with controlled clock/jitter/fault injection; actual Wi-Fi/LTE/restricted LTE, Doze, OS behavior and energy budgets require separate physical evidence. The [M1 VPN checkpoint](m1-vpn.md) adds an embedded engine, TUN owner, durable recovery controller and full native fault tests; the complete gate remains partial.
 Do not build the full panel before this gate proves feasibility.
 The pure JVM [host ownership fence](host-lifecycle.md) now backs the Android supervisor. It does not by itself satisfy the physical gate.
+The [M1 managed-policy path](managed-policy.md) implements a bounded pilot issuer/delivery contract and transactional client activation; complete M2 enrollment, signer grants, rotation and control-plane persistence remain separate.
 The older [Android process fault harness](process-probe.md) exercises a synthetic worker; the newer native lifecycle tests separately exercise actual embedded Go/TUN traffic. Keep their evidence distinct.
 ## M2 - identity and provisioning
 Keycloak/QR device enrollment, DPoP, signed bundles/trust/lease, transactional activation, revoke/rollback and durable jobs.

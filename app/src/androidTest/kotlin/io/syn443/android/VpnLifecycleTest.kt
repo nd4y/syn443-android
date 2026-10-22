@@ -21,6 +21,13 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Hermetic real TUN -> Go TCP/IP stack -> HTTP CONNECT proxy -> synthetic HTTP response. */
 class VpnLifecycleTest {
+    @Test fun duplicateEngineFieldsCannotReplaceConfiguration() {
+        val before = status().getString("configRevision")
+        val invalid = """{"outbounds":[{"type":"direct","tag":"direct","tag":"other"}]}"""
+        val result = context.contentResolver.call(uri, "import", Base64.encodeToString(invalid.toByteArray(), Base64.NO_WRAP), null)
+        assertFalse(result!!.getBoolean("ok"))
+        assertEquals(before, status().getString("configRevision"))
+    }
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val uri = "content://io.syn443.control".toUri()

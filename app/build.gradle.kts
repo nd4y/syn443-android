@@ -10,8 +10,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 6
-        versionName = "0.2.1-m1-overlay"
+        versionCode = 7
+        versionName = "0.3.0-m1-policy"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }
@@ -25,6 +25,7 @@ android {
 }
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 dependencies {
+    implementation(project(":core:policy"))
     implementation(project(":core:host-lifecycle"))
     implementation(project(":core:recovery"))
     implementation(files(rootProject.file("native/build/engine.aar")))

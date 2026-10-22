@@ -31,11 +31,19 @@ import java.net.HttpURLConnection
 import java.util.UUID
 import java.util.concurrent.Executors
 import javax.net.ssl.HttpsURLConnection
+import io.syn443.policy.Policy
 
 /** Sole TUN owner, durable intent reconciler and native-process watchdog. Never loads Go. */
 class TunnelService : VpnService() {
     private val handler = Handler(Looper.getMainLooper())
     private val checks = Executors.newSingleThreadExecutor()
+    private val policyWorker = Executors.newSingleThreadExecutor()
+    private lateinit var policies: ManagedPolicyStore
+    private var policyJob: PolicyChecks? = null
+    private var policyFetchRunning = false
+    private var lastPolicyFetch = -300_000L
+    private var lastPolicyCheck = -10_000L
+    private var runningConfigHash = ""
     private val dnsCallbacks = Executors.newFixedThreadPool(2)
     private val dnsAdmission = java.util.concurrent.Semaphore(2)
     private lateinit var store: StateStore
@@ -90,6 +98,8 @@ class TunnelService : VpnService() {
         notifyForeground("Подключаемся")
         foreground = true
         store = StateStore.get(this)
+        policies = ManagedPolicyStore.get(this)
+        runCatching { policies.recover() }
         connectivity = getSystemService(ConnectivityManager::class.java)
         epoch = store.read().optLong("networkEpoch")
         retryHeavy = store.read().optBoolean("engineActive") || store.checkpoint().attempt > 0
@@ -100,6 +110,7 @@ class TunnelService : VpnService() {
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         latestStartId = startId
+        store.update { it.put("alwaysOn", isAlwaysOn).put("lockdown", isLockdownEnabled) }
         // A later foreground start may be queued on the same instance after a
         // previous Stop removed its notification. Re-promote before inspecting intent.
         if (!foreground) { notifyForeground("Подключаемся"); foreground = true }
@@ -108,6 +119,7 @@ class TunnelService : VpnService() {
         if (intent?.action == "fault-crash" && io.syn443.android.BuildConfig.DEBUG) terminateOwned()
         if (intent?.action == "fault-hang" && io.syn443.android.BuildConfig.DEBUG && verifiedPid()) Process.sendSignal(hostPid, 19)
         if (intent?.action == "netbird-diagnose" && ready) token?.let { host?.diagnoseNetBird(it) }
+        if (intent?.action == "policy-refresh") lastPolicyFetch = -300_000L
         refreshNetwork()
         reconcile()
         handler.removeCallbacks(tick)
@@ -115,6 +127,9 @@ class TunnelService : VpnService() {
         return START_STICKY
     }
     private fun phase(name: String, reason: String, generation: Long? = null) {
+        val policyPhase = runCatching { policies.read().journal.phase }.getOrDefault("blocked")
+        if (name == "Online" && policyPhase == "applying") { phase("Connecting", "policy_gate_pending", generation); return }
+        if (name == "Online" && policyPhase == "degraded") { phase("Degraded", "policy_baseline_degraded", generation); return }
         val previous = store.read()
         if (generation != null && !Recovery.current(store.checkpoint(previous), generation)) return
         if (!previous.optBoolean("desiredOn") && name != "Off") return
@@ -125,7 +140,8 @@ class TunnelService : VpnService() {
             "Online" -> "Работает"
             "NoNetwork" -> "Ожидание сети"
             "Recovering" -> "Восстанавливаем соединение"
-            "NeedsPermission", "NeedsAction" -> "Требуется действие пользователя"
+            "NeedsPermission", "NeedsAction", "BlockedByPolicy" -> "Требуется действие пользователя"
+            "Degraded" -> "Частично работает"
             else -> "Подключаемся"
         }
         if (foreground && notificationText != text) notifyForeground(text)
@@ -154,6 +170,7 @@ class TunnelService : VpnService() {
         linkSignature = signature
         network = selected
         epoch++
+        policyJob?.cancel()
         stableSince = 0; successes = 0
         store.update { value -> value.put("networkEpoch", epoch); store.put(value, Recovery.networkOpportunity(store.checkpoint(value), System.currentTimeMillis())) }
         if (selected == null) { phase("NoNetwork", "network_unavailable"); return }
@@ -174,6 +191,7 @@ class TunnelService : VpnService() {
         override fun run() {
             if (!store.checkpoint().desiredOn) { retire(false); return }
             val now = SystemClock.uptimeMillis()
+            policyTick()
             fence.tick(now).effects.forEach { if (it is HostFence.Effect.TerminateOwned) terminateOwned() }
             if (binding && host == null && now - bindingAt > 15_000 && !retiring) failed("native_binding_timeout")
             if (retiring) return // The bounded drain loop owns retirement progress.
@@ -183,7 +201,7 @@ class TunnelService : VpnService() {
                 if (ready && network != null && now - lastProbe >= 10_000) probe()
             } else reconcile()
             if (host == null && (network == null || store.read().optString("phase") in setOf("NeedsAction", "NeedsPermission"))) return
-            val delay = if (host == null) (store.checkpoint().nextWallMs - System.currentTimeMillis()).coerceIn(1_000, 60_000) else if (network == null) 10_000 else 1_000
+            val delay = if (host == null && store.read().optString("phase") == "BlockedByPolicy") 60_000L else if (host == null) (store.checkpoint().nextWallMs - System.currentTimeMillis()).coerceIn(1_000, 60_000) else if (network == null) 10_000 else 1_000
             handler.postDelayed(this, delay)
         }
     }
@@ -214,11 +232,12 @@ class TunnelService : VpnService() {
         try {
             val n = checkNotNull(network)
             val properties = checkNotNull(connectivity.getLinkProperties(n))
-            val rendered = EngineConfig.render(store.config(), noBackupFilesDir)
-            tun = tun ?: Builder().setSession("SYN443").setMtu(1400)
-                .addAddress("192.0.2.1", 30).addAddress("fd00:443::1", 126)
-                .addRoute("0.0.0.0", 0).addRoute("::", 0).addDnsServer("192.0.2.2")
-                .setBlocking(false).establish() ?: error("VPN unavailable")
+            val raw = try { store.config() } catch (_: Exception) {
+                blackhole(); phase("BlockedByPolicy", "policy_lease_time_or_scope_invalid", cp.generation); return
+            }
+            val rendered = EngineConfig.render(raw, noBackupFilesDir)
+            blackhole()
+            runningConfigHash = raw?.let { Policy.hash(it) }.orEmpty()
             token = UUID.randomUUID().toString()
             stableSince = 0; successes = 0; lastProbe = 0
             boundGeneration = cp.generation
@@ -300,7 +319,11 @@ class TunnelService : VpnService() {
                 }
                 EngineHostService.PULSE -> lastPulse = SystemClock.uptimeMillis()
                 EngineHostService.FAILED -> failed("native_start_failed")
-                EngineHostService.INVALID -> { phase("NeedsAction", "configuration_or_capability_invalid", boundGeneration); retire(false) }
+                EngineHostService.INVALID -> {
+                    if (policies.read().journal.phase == "applying") { policies.rollback("native_configuration_rejected"); phase("Recovering", "policy_rollback", boundGeneration) }
+                    else phase("NeedsAction", "configuration_or_capability_invalid", boundGeneration)
+                    retire(false)
+                }
             }
         } }
     }
@@ -350,6 +373,7 @@ class TunnelService : VpnService() {
         }
     }.getOrDefault(false)
     private fun retire(heavy: Boolean) {
+        policyJob?.cancel()
         OverlaySnapshot.clear()
         if (retiring) return
         ready = false; retiring = true; retryHeavy = heavy || retryHeavy || store.checkpoint().attempt > 0
@@ -389,6 +413,9 @@ class TunnelService : VpnService() {
     }
     private fun failed(code: String, expectedGeneration: Long? = null) {
         if (!store.checkpoint().desiredOn || retiring) return
+        if (policies.read().journal.phase == "applying") {
+            policies.rollback("native_activation_failed"); phase("Recovering", "policy_rollback"); retire(true); return
+        }
         val generation = expectedGeneration ?: boundGeneration.takeIf { it >= 0 } ?: store.checkpoint().generation
         if (!store.updateCurrent(generation) { store.put(it, Recovery.failed(store.checkpoint(it), System.currentTimeMillis(), Math.random())) }) return
         stableSince = 0; successes = 0
@@ -405,6 +432,7 @@ class TunnelService : VpnService() {
         }
         handler.removeCallbacks(earlyProbe)
         val currentToken = token; val currentEpoch = epoch; val generation = boundGeneration
+        val activation = policies.read().journal.activationGeneration
         lastProbe = SystemClock.uptimeMillis(); probeInFlight = true
         checks.execute {
             val result = runCatching {
@@ -425,7 +453,7 @@ class TunnelService : VpnService() {
             }
             handler.post {
                 probeInFlight = false
-                if (currentToken != token || currentEpoch != epoch || !Recovery.current(store.checkpoint(), generation)) return@post
+                if (currentToken != token || currentEpoch != epoch || activation != policies.read().journal.activationGeneration || !Recovery.current(store.checkpoint(), generation)) return@post
                 if (ok) {
                     val now = SystemClock.uptimeMillis()
                     if (stableSince == 0L) stableSince = now
@@ -442,6 +470,96 @@ class TunnelService : VpnService() {
         }
     }
     private val earlyProbe = Runnable { probe() }
+    private fun blackhole() {
+        tun = tun ?: Builder().setSession("SYN443").setMtu(1400)
+            .addAddress("192.0.2.1", 30).addAddress("fd00:443::1", 126)
+            .addRoute("0.0.0.0", 0).addRoute("::", 0).addDnsServer("192.0.2.2")
+            .setBlocking(false).establish() ?: error("VPN unavailable")
+    }
+    private fun policyTick() {
+        if (!store.checkpoint().desiredOn) { policyJob?.cancel(); return }
+        val d = runCatching { policies.read() }.getOrElse {
+            if (host != null) retire(false)
+            phase("BlockedByPolicy", "policy_store_unavailable"); return
+        }
+        val binding = d.binding ?: return
+        if (network != null && !policyFetchRunning && android.os.SystemClock.elapsedRealtime() - lastPolicyFetch >= 300_000) {
+            policyFetchRunning = true; lastPolicyFetch = android.os.SystemClock.elapsedRealtime()
+            val generation = store.checkpoint().generation; val physical = network; val currentEpoch = epoch
+            policyWorker.execute {
+                val response = runCatching {
+                    val c = checkNotNull(physical).openConnection(URL(binding.url)) as HttpURLConnection
+                    try {
+                        c.connectTimeout = 5_000; c.readTimeout = 5_000; c.instanceFollowRedirects = false
+                        val cancel = Runnable { c.disconnect() }; handler.postDelayed(cancel, 12_000)
+                        c.setRequestProperty("Authorization", "Bearer " + binding.bearer)
+                        c.setRequestProperty("X-SYN443-Device", binding.device)
+                        require(c.responseCode == 200 && c.date > 0)
+                        val bytes = try { c.inputStream.use { input ->
+                            val result = java.io.ByteArrayOutputStream(); val chunk = ByteArray(8192)
+                            while (true) { val n = input.read(chunk); if (n < 0) break; require(n > 0 && result.size() + n <= 524_288); result.write(chunk, 0, n) }
+                            result.toByteArray()
+                        } } finally { handler.removeCallbacks(cancel) }
+                        Policy.utf8(bytes).trim() to c.date
+                    } finally { c.disconnect() }
+                }
+                handler.post {
+                    policyFetchRunning = false
+                    if (!Recovery.current(store.checkpoint(), generation) || currentEpoch != epoch) return@post
+                    response.onSuccess { (raw, time) -> runCatching { policies.received(raw, time, store.originalConfig()) }
+                        .onFailure { store.event(store.read().optString("phase"), "policy_response_rejected", epoch) } }
+                    reconcile()
+                    handler.removeCallbacks(tick); handler.post(tick)
+                }
+            }
+        }
+        if (d.journal.phase == "applying" && android.os.SystemClock.elapsedRealtime() >= d.applyDeadlineElapsed) {
+            policies.rollback("activation_deadline"); retire(false); phase("Recovering", "policy_rollback"); return
+        }
+        if (d.journal.phase !in setOf("prepared", "applying")) {
+            if (runCatching { policies.config(null) }.isFailure) {
+                if (host != null) retire(false)
+                if (prepare(this) == null) runCatching { blackhole() }
+                phase("BlockedByPolicy", "policy_lease_time_or_scope_invalid")
+            }
+            return
+        }
+        val candidate = runCatching { policies.allowed(d.journal.candidate, d) }.getOrNull() ?: return
+        if (d.journal.phase == "prepared" && runningConfigHash != candidate.payload.contentHash && host != null) {
+            // Reserve headroom for one candidate start AND its rollback before retiring a working host.
+            val now = System.currentTimeMillis()
+            if (store.checkpoint().heavyWallMs.count { now - minOf(it, now) < 600_000 } > 1) return
+        }
+        if (d.journal.phase == "prepared" && runCatching { policies.allowed(d.journal.active, d) }.getOrNull() == null && d.journal.active != null) {
+            policies.begin(List(candidate.payload.activation.checks.size) { false }); retire(true); return
+        }
+        if (!ready || retiring || policyJob != null || network == null) return
+        if (d.journal.phase == "applying" && runningConfigHash != candidate.payload.contentHash) { retire(true); return }
+        if (android.os.SystemClock.elapsedRealtime() - lastPolicyCheck < 10_000) return
+        lastPolicyCheck = android.os.SystemClock.elapsedRealtime()
+        val job = PolicyChecks(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish") && store.read().optBoolean("testHealth")); policyJob = job
+        val generation = store.checkpoint().generation; val activation = d.journal.activationGeneration
+        val currentEpoch = epoch; val session = token
+        policyWorker.execute {
+            val results = job.run(candidate.payload.activation.checks)
+            handler.post {
+                if (policyJob === job) policyJob = null
+                if (!Recovery.current(store.checkpoint(), generation) || currentEpoch != epoch || session != token || activation != policies.read().journal.activationGeneration) return@post
+                if (policies.read().journal.phase == "prepared") {
+                    policies.begin(results)
+                    if (runningConfigHash != candidate.payload.contentHash) retire(true)
+                } else if (policies.read().journal.phase == "applying") {
+                    val passed = candidate.payload.activation.checks.indices.all { !candidate.payload.activation.checks[it].required || results[it] }
+                    val regressed = candidate.payload.activation.checks.indices.any { candidate.payload.activation.checks[it].required && !results[it] && policies.read().journal.baseline[it] }
+                    if (passed || (!regressed && candidate.payload.activation.allowDegraded) || android.os.SystemClock.elapsedRealtime() >= policies.read().applyDeadlineElapsed) {
+                        policies.finish(results, true)
+                        if (policies.read().journal.phase == "rolled_back") { retire(false); phase("Recovering", "policy_rollback") }
+                        else { store.config(); probe() }
+                    }
+                }
+            }
+        }
+    }
     override fun onRevoke() {
         store.update { store.put(it, Recovery.command(store.checkpoint(it), false)) }
         store.event("Off", "vpn_permission_revoked", epoch)
@@ -454,6 +572,7 @@ class TunnelService : VpnService() {
         if (binding) connection?.let { runCatching { unbindService(it) } }
         tun?.close(); tun = null
         checks.shutdownNow()
+        policyJob?.cancel(); policyWorker.shutdownNow()
         dnsCallbacks.shutdownNow()
         super.onDestroy()
     }

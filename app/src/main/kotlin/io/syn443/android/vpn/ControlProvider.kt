@@ -26,6 +26,18 @@ class ControlProvider : ContentProvider() {
         return try {
             when (method) {
                 "status", "logs" -> Unit
+                "policy-bind-file", "policy-stage-file" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
+                    val file = java.io.File(context.noBackupFilesDir, "operator-policy.json")
+                    val raw = try { require(file.length() in 1..524_288); file.readText(Charsets.UTF_8) } finally { file.delete() }
+                    val policy = ManagedPolicyStore.get(context)
+                    if (method == "policy-bind-file") policy.bind(raw) else policy.stage(raw.trim(), store.originalConfig())
+                    if (store.checkpoint().desiredOn) context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE))
+                }
+                "policy-refresh" -> {
+                    require(ManagedPolicyStore.get(context).managed())
+                    if (store.checkpoint().desiredOn) context.startForegroundService(Intent(context, TunnelService::class.java).setAction(method))
+                }
                 "import", "import-file" -> {
                     require(!store.checkpoint().desiredOn) { "stop before importing" }
                     val raw = if (method == "import-file") {
@@ -82,10 +94,15 @@ class ControlProvider : ContentProvider() {
                         store.put(value, Recovery.command(isolated, false))
                     }
                 }
+                "policy-test-reset" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller == 2000 && android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+                    require(!store.checkpoint().desiredOn && !store.read().optBoolean("engineActive"))
+                    ManagedPolicyStore.get(context).resetEmulator()
+                }
                 else -> error("unknown command")
             }
             val result = store.read()
-            if (method == "status") result.put("netbird", OverlaySnapshot.read())
+            if (method == "status") result.put("netbird", OverlaySnapshot.read()).put("policy", ManagedPolicyStore.get(context).status())
             Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
         } catch (_: Exception) {
             Bundle().apply { putBoolean("ok", false); putString("error", "command_rejected") }

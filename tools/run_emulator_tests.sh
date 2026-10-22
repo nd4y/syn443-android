@@ -27,5 +27,6 @@ fi
 ./gradlew :app:connectedDebugAndroidTest --info --stacktrace
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 python3 tools/run_vpn_process_faults.py
+python3 tools/run_policy_activation.py
 python3 tools/check_test_evidence.py emulator
 
