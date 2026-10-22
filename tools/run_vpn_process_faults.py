@@ -131,6 +131,31 @@ def main():
         adb('shell', 'appops', 'set', PACKAGE, 'ACTIVATE_VPN', 'allow')
         adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
         call('disconnect')
+        case = ET.SubElement(suite, 'testcase', classname='io.syn443.android.ExternalVpnProcessTest',
+                             name='missingVpnConsentPreservesIntentWithoutStartingForegroundService')
+        try:
+            # External driver: changing this app-op kills instrumentation if done inside it.
+            adb('shell', 'appops', 'set', PACKAGE, 'ACTIVATE_VPN', 'ignore')
+            adb('shell', 'input', 'keyevent', 'KEYCODE_HOME')
+            before = call('status')
+            call('connect')
+            missing = call('status')
+            assert missing['desiredOn'] and missing['phase'] == 'NeedsPermission'
+            assert missing['reason'] == 'vpn_permission_required' and not pid(':engine')
+            assert missing.get('heavyWallMs', []) == before.get('heavyWallMs', [])
+            controller = pid(':controller')
+            call('resume')
+            time.sleep(2)
+            assert call('status')['phase'] == 'NeedsPermission' and not pid(':engine')
+            assert pid(':controller') == controller
+            print(case.get('name') + ': passed', flush=True)
+        except Exception as error:
+            ET.SubElement(case, 'failure', message=type(error).__name__).text = str(error)
+            raise
+        finally:
+            adb('shell', 'appops', 'set', PACKAGE, 'ACTIVATE_VPN', 'allow')
+        adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
+        call('disconnect')
         # Only ingress is forwarded to Android. A direct shortcut to egress
         # cannot pass: there is no Android listener on its host-only port.
         config = {'outbounds': [

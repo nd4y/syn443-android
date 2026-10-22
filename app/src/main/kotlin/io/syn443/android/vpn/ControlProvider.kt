@@ -20,6 +20,15 @@ class ControlProvider : ContentProvider() {
         if (store.checkpoint().desiredOn) store.event(if (store.read().optBoolean("resumeRequired")) "NeedsAction" else "Recovering", if (store.read().optBoolean("resumeRequired")) "explicit_resume_required" else "controller_recreated", store.read().optLong("networkEpoch"))
         return true
     }
+    private fun requestReconcile(context: android.content.Context, store: StateStore, action: String = TunnelService.RECONCILE) {
+        // A missing VPN grant also removes Android's background FGS exemption.
+        // Persist intent, but wait for the ordinary Activity permission dialog.
+        if (android.net.VpnService.prepare(context) != null) {
+            store.event("NeedsPermission", "vpn_permission_required", store.read().optLong("networkEpoch"))
+            return
+        }
+        context.startForegroundService(Intent(context, TunnelService::class.java).setAction(action))
+    }
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         val context = checkNotNull(context)
         val caller = Binder.getCallingUid()
@@ -44,11 +53,11 @@ class ControlProvider : ContentProvider() {
                     val raw = try { require(file.length() in 1..524_288); file.readText(Charsets.UTF_8) } finally { file.delete() }
                     val policy = ManagedPolicyStore.get(context)
                     store.serialized { if (method == "policy-bind-file") policy.bind(raw) else policy.stage(raw.trim(), store.originalConfig()) }
-                    if (store.checkpoint().desiredOn) context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE))
+                    if (store.checkpoint().desiredOn) requestReconcile(context, store)
                 }
                 "policy-refresh" -> {
                     require(ManagedPolicyStore.get(context).managed())
-                    if (store.checkpoint().desiredOn) context.startForegroundService(Intent(context, TunnelService::class.java).setAction(method))
+                    if (store.checkpoint().desiredOn) requestReconcile(context, store, method)
                 }
                 "import", "import-file" -> {
                     require(!store.checkpoint().desiredOn) { "stop before importing" }
@@ -69,12 +78,12 @@ class ControlProvider : ContentProvider() {
                     explicitConnectInProcess = on
                     store.update { store.put(it, Recovery.command(store.checkpoint(it), on)); OsIntentGate.command(context, it, on); it.put("phase", if (on) "Connecting" else "Off") }
                     val intent = Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE)
-                    if (on) context.startForegroundService(intent) else context.startService(intent)
+                    if (on) requestReconcile(context, store) else context.startService(intent)
                 }
                 "resume" -> {
                     require(store.checkpoint().desiredOn) { "newer Stop wins" }
                     require(!store.read().optBoolean("resumeRequired")) { "explicit_connect_required" }
-                    context.startForegroundService(Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE))
+                    requestReconcile(context, store)
                 }
                 "fault-crash", "fault-hang", "fault-owner" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)

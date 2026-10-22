@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=37
+    minimum=38
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -51,6 +51,7 @@ if mode=="emulator":
     required.add("healthyChangedCandidateCommits")
     required.add("intentSentinelIsNonWakeupAndCancelledByStop")
     required.add("localRestartBudgetDoesNotPoisonHealthyRenewal")
+    required.add("missingVpnConsentPreservesIntentWithoutStartingForegroundService")
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"
 print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
 
