@@ -21,6 +21,21 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Hermetic real TUN -> Go TCP/IP stack -> HTTP CONNECT proxy -> synthetic HTTP response. */
 class VpnLifecycleTest {
+    @Test fun intentSentinelIsNonWakeupAndCancelledByStop() {
+        connect()
+        val alarm = shell("dumpsys alarm").toString(Charsets.UTF_8)
+        val action = alarm.indexOf("io.syn443.USER_INTENT_MARKER")
+        assertTrue("OS must retain the Force stop marker", action >= 0)
+        val start = alarm.lastIndexOf("Alarm{", action).coerceAtLeast(0)
+        val end = alarm.indexOf("Alarm{", action).takeIf { it >= 0 } ?: alarm.length
+        assertTrue("Sentinel must not wake the device", Regex("type[= ]3\\b").containsMatchIn(alarm.substring(start, end)))
+        call("disconnect")
+        await { pid() == null }
+        val marker = android.app.PendingIntent.getBroadcast(context, 4431,
+            android.content.Intent(context, io.syn443.android.vpn.BootReceiver::class.java).setAction("io.syn443.USER_INTENT_MARKER"),
+            android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE)
+        assertNull("Stop must cancel both marker and ownership sentinel", marker)
+    }
     @Test fun externalConnectExtraCannotTurnVpnOn() {
         scenario.close()
         scenario = ActivityScenario.launch(android.content.Intent(context, MainActivity::class.java)

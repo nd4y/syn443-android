@@ -4,6 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RecoveryTest {
+    @Test fun candidateWaitReservesRollbackWithoutConsumingAttempts() {
+        val full = Checkpoint(true, 7, nextWallMs = 600_000, heavyWallMs = listOf(0, 1000, 2000))
+        assertFalse(Recovery.replacementReady(full, 599_999))
+        assertFalse(Recovery.replacementReady(full, 600_000)) // only one slot is free
+        assertTrue(Recovery.replacementReady(full, 601_000))
+        assertEquals(3, full.heavyWallMs.size)
+        assertFalse(Recovery.replacementReady(full.copy(desiredOn = false), 700_000))
+        assertFalse(Recovery.replacementReady(full.copy(heavyWallMs = emptyList()), 599_999))
+        assertFalse(Recovery.replacementReady(Recovery.normalizeClock(full, 0), 0))
+    }
     @Test fun stopRejectsLateEffectsAndReconnectDoesNotEraseBudget() {
         val started = Recovery.command(Checkpoint(), true)
         val failed = Recovery.failed(started, 10_000, 0.5)

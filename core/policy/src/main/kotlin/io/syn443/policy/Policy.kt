@@ -20,6 +20,7 @@ import java.util.Base64
     val requiredCapabilities: List<String>, val algorithmRevision: String,
     val engineConfigB64: String, val contentHash: String, val activation: Gate, val operation: String = "configure")
 data class Verified(val envelope: String, val payload: Payload, val engineConfig: String)
+enum class Preparation { WAIT, REVOKE_OWNER, BEGIN_WITHOUT_BASELINE, CHECK_BASELINE }
 @Serializable data class Journal(val phase: String = "idle", val desired: String? = null,
     val active: String? = null, val lastGood: String? = null, val candidate: String? = null,
     val maxRevision: Long = 0, val epoch: Long = 0, val floor: Long = 0,
@@ -88,6 +89,18 @@ object Canonical {
 }
 
 object Policy {
+    /** Local scheduling is not evidence of a defective signed candidate. */
+    fun preparation(desiredOn: Boolean, activeExists: Boolean, activeAuthorized: Boolean,
+        ownerPresent: Boolean, ownerReady: Boolean, replacementRequired: Boolean, restartReady: Boolean): Preparation {
+        if (!desiredOn) return Preparation.WAIT
+        if (activeExists && !activeAuthorized) return when {
+            ownerPresent -> Preparation.REVOKE_OWNER
+            restartReady -> Preparation.BEGIN_WITHOUT_BASELINE
+            else -> Preparation.WAIT
+        }
+        if (replacementRequired && !restartReady) return Preparation.WAIT
+        return if (ownerReady) Preparation.CHECK_BASELINE else Preparation.WAIT
+    }
     val json = Canonical.json
     val capabilities = setOf("engine-config.v1", "policy.es256.v1", "tun.lease.v1", "netbird.direct", "netbird.vless")
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }

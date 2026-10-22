@@ -71,14 +71,15 @@ def main():
                  'failedNativeCandidateRollsBackAndCannotReplay', 'requiredRegressionRollsBack',
                  'baselineOutageCanCommitDegraded', 'stopFencesPendingPolicy',
                  'controllerDeathDuringApplyRollsBackOffline', 'expiredLeaseBlocksWithoutDirectFallback',
-                 'offlineControlPlaneRetainsAuthorizedPath', 'signedManagementReleasePreservesLocalState']
+                 'offlineControlPlaneRetainsAuthorizedPath', 'signedManagementReleasePreservesLocalState',
+                 'localRestartBudgetDoesNotPoisonHealthyRenewal']
     try:
         for port in ports:
             adb('reverse', 'tcp:'+str(port), 'tcp:'+str(port))
         for name in scenarios:
             case = ET.SubElement(suite, 'testcase', classname='io.syn443.android.ManagedPolicy', name=name)
             try:
-                setup(ttl=45 if name.startswith('expired') else 600)
+                setup(ttl=45 if name.startswith('expired') else 120 if name.startswith('localRestart') else 600)
                 original = pid(':engine'); active = call('status')['policy']['activeRevision']
                 if name.startswith('signed'):
                     if name.startswith('signedManagement'):
@@ -151,6 +152,21 @@ def main():
                     delivery.available = False; call('fault-controller')
                     await_condition(lambda: call('status')['policy']['phase'] == 'rolled_back' and call('status').get('phase') == 'Online', 110)
                     assert call('status')['policy']['activeRevision'] == 1
+                elif name.startswith('localRestart'):
+                    # Fill the real persisted budget; no reset, fabricated timestamps or clock jump.
+                    remaining = 3 - len(call('status').get('heavyWallMs', []))
+                    for _ in range(remaining):
+                        before = pid(':engine'); call('fault-owner')
+                        await_condition(lambda: pid(':engine') not in ('', before) and call('status').get('phase') == 'Online')
+                    delivery.available = False
+                    history = call('status')['heavyWallMs']; assert len(history) == 3
+                    await_condition(lambda: call('status').get('phase') == 'BlockedByPolicy' and not pid(':engine'), 150)
+                    stage(publisher.sign(config, revision=2))
+                    await_condition(lambda: call('status')['policy']['phase'] == 'prepared')
+                    time.sleep(35) # longer than this candidate's 30-second activation deadline
+                    value = call('status')
+                    assert value['policy']['phase'] == 'prepared' and value['policy']['candidateRevision'] == 2
+                    assert value['heavyWallMs'] == history and not pid(':engine') and value['desiredOn']
                 elif name.startswith('expired'):
                     delivery.available = False
                     await_condition(lambda: call('status').get('phase') == 'BlockedByPolicy' and not pid(':engine'), 75)

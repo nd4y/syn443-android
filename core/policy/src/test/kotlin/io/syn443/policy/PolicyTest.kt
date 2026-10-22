@@ -10,6 +10,19 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class PolicyTest {
+    @Test fun revokedAccessClosesBeforeBudgetWaitWithoutStartingCandidateDeadline() {
+        val v = verify(sign())
+        val staged = Policy.stage(Journal(active = "old", lastGood = "old"), v)
+        assertEquals(Preparation.REVOKE_OWNER, Policy.preparation(true, true, false, true, true, true, false))
+        assertEquals(Preparation.WAIT, Policy.preparation(true, true, false, false, false, true, false))
+        assertEquals("prepared", staged.phase)
+        assertTrue(staged.failedSnapshots.isEmpty())
+        assertEquals(Preparation.BEGIN_WITHOUT_BASELINE, Policy.preparation(true, true, false, false, false, true, true))
+        assertEquals("applying", Policy.begin(staged, listOf(false)).phase)
+        assertEquals(Preparation.WAIT, Policy.preparation(false, true, false, true, true, true, true))
+        assertEquals(Preparation.WAIT, Policy.preparation(true, true, true, true, true, true, false))
+        assertEquals(Preparation.CHECK_BASELINE, Policy.preparation(true, true, true, true, true, false, false))
+    }
     private val now = 1_800_000_000_000L
     private val key = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
     private val roots = mapOf("test-root" to Base64.getEncoder().encodeToString(key.public.encoded))
