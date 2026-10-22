@@ -55,7 +55,7 @@ jobs:
         with:
           cmdline-tools-version: '15859902'
           packages: 'platform-tools ndk;27.3.13750724'
-      - run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724" bash native/build_engine.sh
+      - run: GOMEMLIMIT=3GiB ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724" bash native/build_engine.sh
       - run: python3 tools/check_native.py native/build/engine.aar
       - run: python3 tools/check_public_data.py native/build/engine.aar
       - run: bash tools/scan_secrets.sh native/build/engine.aar

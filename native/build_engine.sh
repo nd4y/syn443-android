@@ -24,9 +24,12 @@ for name,source in lock['sources'].items():
         else: subprocess.run(['git','-C',str(target),'apply','--reverse','--check','-'],input=compat,check=True)
 PY
 mkdir -p "$work/bridge"
+gofmt -w "$root"/native/bridge/*.go "$root"/native/engine-netbird/*.go
+cp -R "$root/native/engine-netbird" "$work/"
 cp "$root"/native/bridge/*.go "$root"/native/bridge/go.mod "$root"/native/bridge/go.sum "$work/bridge/"
 cd "$work/bridge"
-export GOMAXPROCS="${GOMAXPROCS:-2}" GOFLAGS="-p=1" GOTOOLCHAIN=auto
+export GOMAXPROCS="${GOMAXPROCS:-2}" GOFLAGS="-p=1" GOTOOLCHAIN=local
+export GOMEMLIMIT="${GOMEMLIMIT:-1400MiB}" GOGC="${GOGC:-50}"
 export GOMODCACHE="$(go env GOPATH)/pkg/mod"
 export PATH="$(go env GOPATH)/bin:$PATH"
 go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.12
@@ -35,7 +38,10 @@ export GOBIND="$(go env GOPATH)/bin/gobind"
 go mod tidy
 go get github.com/sagernet/gomobile/bind@v0.1.12
 gofmt -w ./*.go
-go test -tags=with_gvisor,with_utls,with_quic ./...
-gomobile bind -target=android/arm64,android/amd64 -androidapi=29 -trimpath -tags=with_gvisor,with_utls,with_quic -ldflags='-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384' -o "$work/engine.aar" .
+go test -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbird
+go test github.com/netbirdio/netbird/client/internal/peer -run 'Test(DirectFirstDefersRelayUntilUnreachable|SuccessfulP2PDoesNotOpenRelayUntilLost|DirectFirstWaitCancelsWithEngine)$' -count=1
+go test github.com/netbirdio/netbird/client/underlay -count=1
+go test github.com/netbirdio/netbird/client/underlaytest -run '^TestControlAndRelayUseOnlyUnderlay$' -count=1
+gomobile bind -target=android/arm64,android/amd64 -androidapi=29 -trimpath -tags=with_gvisor,with_utls,with_quic -ldflags='-checklinkname=0 -s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384' -o "$work/engine.aar" .
 cp go.mod go.sum "$root/native/bridge/"
 echo 'Embedded engine AAR built from pinned source'

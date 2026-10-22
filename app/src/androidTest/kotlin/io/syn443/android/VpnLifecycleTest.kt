@@ -97,6 +97,29 @@ class VpnLifecycleTest {
         Thread.sleep(1_500)
         assertFalse(status().getBoolean("desiredOn"))
     }
+    @Test fun unavailableOptionalOverlayDoesNotBlockVpnOrLeakPrivateRoute() {
+        val config = """{"outbounds":[
+            {"type":"http","tag":"test-proxy","server":"127.0.0.1","server_port":${server.localPort}},
+            {"type":"netbird","tag":"overlay","management_url":"https://example.invalid","setup_key":"","state_directory":"/rejected-import-path"}],
+            "route":{"rules":[{"ip_cidr":["198.51.100.0/24"],"outbound":"overlay"}],"final":"test-proxy"}}"""
+        val rendered = JSONObject(io.syn443.android.vpn.EngineConfig.render(config, context.noBackupFilesDir))
+            .getJSONArray("outbounds").getJSONObject(1)
+        assertTrue(rendered.getString("state_directory").startsWith(context.noBackupFilesDir.absolutePath + "/netbird/"))
+        assertEquals("direct", rendered.getString("connection_mode"))
+        call("import", Base64.encodeToString(config.toByteArray(), Base64.NO_WRAP))
+        connect()
+        val native = pid()
+        await { status().optJSONObject("netbird")?.optString("reason") == "enrollment_required" }
+        // No identity or fallback may be constructed without enrollment.
+        val began = android.os.SystemClock.elapsedRealtime()
+        assertTrue(runCatching { Socket().use { it.connect(java.net.InetSocketAddress("198.51.100.7", 443), 3_000) } }.isFailure)
+        assertTrue(android.os.SystemClock.elapsedRealtime() - began < 5_000)
+        Thread.sleep(11_000)
+        assertEquals(native, pid())
+        assertEquals("Online", status().optString("phase"))
+        assertTrue(tunnels.get() >= 2)
+        assertFalse(context.contentResolver.call(uri, "logs", null, null)!!.getString("json")!!.contains("peer_state"))
+    }
     @Test fun nativeCrashRecoversButNewerStopWins() {
         connect()
         val old = pid()

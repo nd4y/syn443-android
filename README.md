@@ -20,5 +20,7 @@ Copyright (c) 2026 SYN443 contributors. This Android distribution includes GPL-3
 See [implementation status](docs/M0_IMPLEMENTATION.md) for implemented paths and limitations.
 
 Build the embedded engine first with Go 1.26.7 and Android NDK 27.3.13750724: `bash native/build_engine.sh` (set `ANDROID_NDK_HOME`). Then run `./gradlew :core:decision:test :core:host-lifecycle:check :core:recovery:test :app:lintDebug :app:assembleDebug`. `bash tools/run_emulator_tests.sh` runs instrumentation and the external process-death driver on a disposable emulator only.
+The source recipe defaults to a conservative Go memory budget for shared builders;
+CI overrides `GOMEMLIMIT=3GiB` on its dedicated runner for NetBird JNI generation.
 
 See [CI delivery limitations](docs/CI_DELIVERY.md) for current artifact-quota and private branch-protection constraints.

@@ -29,6 +29,14 @@
       "revision": "f4f4c999267437c3eb909e8d0e5278fb4596d9a7",
       "patchSha256": "3226ecede7b19b06856dcdfed8d29e0010db8696a1b3d2191fb9f36e68fd1b2d",
       "license": "upstream license retained"
+    },
+    "netbird": {
+      "url": "https://github.com/netbirdio/netbird.git",
+      "base": "cf017119711184a0661062a0c8ac2043e4e8d411",
+      "revision": "cf017119711184a0661062a0c8ac2043e4e8d411",
+      "patchSha256": "e508d5fd3b010f219ffbb27582e0dbc1e8cdd041a477b6144e96f50b5fc59f2f",
+      "localWorkingPatch": true,
+      "license": "BSD-3-Clause with upstream AGPL directory exceptions; original licenses retained"
     }
   },
   "compatibilityPatchSha256": "312d85698791190d3cfa0da988239e1d61ae0e68f442e34ef6d532cca639b47d",

@@ -5,6 +5,7 @@ package bridge
 import (
 	"context"
 	"errors"
+	netbird "io.syn443/engine-netbird"
 	"net"
 	"net/netip"
 	"sync"
@@ -37,6 +38,7 @@ import (
 type Protector interface {
 	Protect(fd int32) error
 	ExchangeDNS(query []byte) ([]byte, error)
+	PhysicalInterfaces() (string, error)
 }
 
 type Runtime struct {
@@ -50,6 +52,7 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 		return nil, errors.New("invalid host context")
 	}
 	dialer.DoNotSelectInterface = true
+	installOverlayPlatform(protector)
 	ir := inbound.NewRegistry()
 	tunin.RegisterInbound(ir)
 	or := outbound.NewRegistry()
@@ -60,8 +63,10 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 	ssh.RegisterOutbound(or)
 	group.RegisterSelector(or)
 	group.RegisterURLTest(or)
+	netbird.RegisterOutbound(or)
 	dr := dns.NewTransportRegistry()
 	registerPhysicalDNS(dr, protector)
+	netbird.RegisterDNSTransport(dr)
 	transport.RegisterUDP(dr)
 	transport.RegisterTCP(dr)
 	transport.RegisterTLS(dr)
@@ -90,6 +95,10 @@ func (e *Runtime) Close() error { e.cancel(); return e.box.Close() }
 
 // The supervisor additionally checks actual HTTPS data-path progress; this is only runtime liveness.
 func (e *Runtime) Pulse() int64 { return 1 }
+
+// No SDK locks on the native host control loop.
+func (e *Runtime) NetBirdStatus() string { return netbird.DeferredStatus() }
+func (e *Runtime) DiagnoseNetBird() bool { return netbird.RequestDiagnostics() }
 func (e *Runtime) UpdateNetwork(name string, index int32) {
 	e.platform.mu.Lock()
 	e.platform.iface.Name = name

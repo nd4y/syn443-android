@@ -54,6 +54,10 @@ class ControlProvider : ContentProvider() {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
                 }
+                "netbird-diagnose" -> {
+                    require(store.checkpoint().desiredOn)
+                    context.startService(Intent(context, TunnelService::class.java).setAction(method))
+                }
                 "fault-ui", "fault-controller" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
                     if (method == "fault-controller") {
@@ -80,7 +84,9 @@ class ControlProvider : ContentProvider() {
                 }
                 else -> error("unknown command")
             }
-            Bundle().apply { putBoolean("ok", true); putString("json", store.read().toString()) }
+            val result = store.read()
+            if (method == "status") result.put("netbird", OverlaySnapshot.read())
+            Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
         } catch (_: Exception) {
             Bundle().apply { putBoolean("ok", false); putString("error", "command_rejected") }
         }

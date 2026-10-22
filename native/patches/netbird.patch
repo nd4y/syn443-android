@@ -1,0 +1,1848 @@
+diff --git a/client/embed/diagnostics.go b/client/embed/diagnostics.go
+new file mode 100644
+index 0000000..a02d152
+--- /dev/null
++++ b/client/embed/diagnostics.go
+@@ -0,0 +1,128 @@
++package embed
++
++import (
++	"context"
++	"crypto/rand"
++	"encoding/binary"
++	"errors"
++	"net"
++	"sort"
++	"time"
++
++	"github.com/netbirdio/netbird/client/internal/stdnet"
++	"golang.org/x/net/icmp"
++	"golang.org/x/net/ipv4"
++)
++
++// ConnectionSnapshot is a cheap recorder snapshot. Unlike Status it never runs
++// health probes and never exports keys, credentials or endpoint addresses.
++type ConnectionSnapshot struct {
++	ManagementConnected bool           `json:"management_connected"`
++	SignalConnected     bool           `json:"signal_connected"`
++	IP                  string         `json:"ip"`
++	FQDN                string         `json:"fqdn"`
++	Peers               []PeerSnapshot `json:"peers"`
++}
++type PeerSnapshot struct {
++	IP            string    `json:"ip"`
++	FQDN          string    `json:"fqdn"`
++	State         string    `json:"state"`
++	Relayed       bool      `json:"relayed"`
++	LastHandshake time.Time `json:"last_handshake"`
++	BytesTx       int64     `json:"bytes_tx"`
++	BytesRx       int64     `json:"bytes_rx"`
++}
++
++func (c *Client) ConnectionSnapshot() ConnectionSnapshot {
++	_ = c.recorder.RefreshWireGuardStats()
++	s := c.recorder.GetFullStatus()
++	result := ConnectionSnapshot{ManagementConnected: s.ManagementState.Connected, SignalConnected: s.SignalState.Connected,
++		IP: s.LocalPeerState.IP, FQDN: s.LocalPeerState.FQDN, Peers: make([]PeerSnapshot, 0, len(s.Peers))}
++	for _, p := range s.Peers {
++		state := "disconnected"
++		if p.ConnStatus == 1 {
++			state = "connecting"
++		}
++		if p.ConnStatus == 2 {
++			state = "connected"
++		}
++		result.Peers = append(result.Peers, PeerSnapshot{IP: p.IP, FQDN: p.FQDN, State: state, Relayed: p.Relayed,
++			LastHandshake: p.LastWireguardHandshake, BytesTx: p.BytesTx, BytesRx: p.BytesRx})
++	}
++	sort.Slice(result.Peers, func(i, j int) bool {
++		return result.Peers[i].FQDN+result.Peers[i].IP < result.Peers[j].FQDN+result.Peers[j].IP
++	})
++	return result
++}
++
++// ProbePeer sends one ICMP echo inside the userspace WireGuard tunnel. Only
++// authorized recorder peers are accepted, never arbitrary diagnostic targets.
++func (c *Client) ProbePeer(ctx context.Context, address string) (time.Duration, error) {
++	allowed := false
++	for _, p := range c.ConnectionSnapshot().Peers {
++		if p.IP == address {
++			allowed = true
++			break
++		}
++	}
++	if !allowed || net.ParseIP(address).To4() == nil {
++		return 0, errors.New("not an authorized IPv4 peer")
++	}
++	conn, err := c.DialContext(ctx, "ping4", address)
++	if err != nil {
++		return 0, err
++	}
++	defer conn.Close()
++	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
++	defer stop()
++	deadline := time.Now().Add(12 * time.Second)
++	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
++		deadline = d
++	}
++	if err = conn.SetDeadline(deadline); err != nil {
++		return 0, err
++	}
++	nonce := make([]byte, 24)
++	if _, err = rand.Read(nonce); err != nil {
++		return 0, err
++	}
++	id := int(binary.BigEndian.Uint16(nonce[:2]))
++	seq := int(binary.BigEndian.Uint16(nonce[2:4]))
++	request := icmp.Message{Type: ipv4.ICMPTypeEcho, Body: &icmp.Echo{ID: id, Seq: seq, Data: nonce}}
++	wire, err := request.Marshal(nil)
++	if err != nil {
++		return 0, err
++	}
++	started := time.Now()
++	if _, err = conn.Write(wire); err != nil {
++		return 0, err
++	}
++	buffer := make([]byte, 1500)
++	for {
++		n, err := conn.Read(buffer)
++		if err != nil {
++			return 0, err
++		}
++		reply, err := icmp.ParseMessage(1, buffer[:n])
++		if err != nil {
++			continue
++		}
++		echo, ok := reply.Body.(*icmp.Echo)
++		// The netstack assigns the echo identifier when binding the socket.
++		if reply.Type == ipv4.ICMPTypeEchoReply && ok && echo.Seq == seq && string(echo.Data) == string(nonce) {
++			return time.Since(started), nil
++		}
++	}
++}
++func (c *Client) NotifyNetworkChange() {
++	engine, err := c.getEngine()
++	if err == nil {
++		engine.NotifyNetworkChange()
++	}
++}
++
++// SetPhysicalInterfaceDiscoverer supplies Android ConnectivityManager interface
++// data for direct ICE. Install before starting the single embedded client.
++func SetPhysicalInterfaceDiscoverer(fn func() (string, error)) {
++	stdnet.SetPhysicalInterfaceDiscoverer(fn)
++}
+diff --git a/client/embed/dns.go b/client/embed/dns.go
+new file mode 100644
+index 0000000..1a40c3b
+--- /dev/null
++++ b/client/embed/dns.go
+@@ -0,0 +1,63 @@
++package embed
++
++import (
++	"context"
++	"fmt"
++	"net"
++	"time"
++
++	"github.com/miekg/dns"
++)
++
++// LookupIP resolves a name using the overlay's DNS service, never the host resolver.
++func (c *Client) LookupIP(ctx context.Context, host string) ([]net.IP, error) {
++	nsnet, _, err := c.getNet()
++	if err != nil {
++		return nil, err
++	}
++	hosts, err := nsnet.LookupContextHost(ctx, host)
++	if err != nil {
++		return nil, err
++	}
++	ips := make([]net.IP, 0, len(hosts))
++	for _, host := range hosts {
++		if ip := net.ParseIP(host); ip != nil {
++			ips = append(ips, ip)
++		}
++	}
++	return ips, nil
++}
++
++// ExchangeDNS forwards a complete wire-format DNS query to the overlay DNS service.
++// TCP avoids truncation and stays wholly within the userspace network stack.
++func (c *Client) ExchangeDNS(ctx context.Context, packet []byte) ([]byte, error) {
++	query := new(dns.Msg)
++	if err := query.Unpack(packet); err != nil {
++		return nil, fmt.Errorf("parse DNS query: %w", err)
++	}
++	engine, err := c.getEngine()
++	if err != nil {
++		return nil, err
++	}
++	addr, err := engine.DNSAddress()
++	if err != nil {
++		return nil, err
++	}
++	nsnet, err := engine.GetNet()
++	if err != nil {
++		return nil, err
++	}
++	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
++	defer cancel()
++	conn, err := nsnet.DialContext(ctx, "tcp", net.JoinHostPort(addr.String(), "53"))
++	if err != nil {
++		return nil, fmt.Errorf("dial overlay DNS: %w", err)
++	}
++	defer conn.Close()
++	client := &dns.Client{Net: "tcp", Timeout: 10 * time.Second}
++	response, _, err := client.ExchangeWithConnContext(ctx, query, &dns.Conn{Conn: conn})
++	if err != nil {
++		return nil, fmt.Errorf("exchange overlay DNS: %w", err)
++	}
++	return response.Pack()
++}
+diff --git a/client/embed/embed.go b/client/embed/embed.go
+index 208e718..0690f69 100644
+--- a/client/embed/embed.go
++++ b/client/embed/embed.go
+@@ -24,6 +24,7 @@ import (
+ 	"github.com/netbirdio/netbird/client/mdm"
+ 	nbssh "github.com/netbirdio/netbird/client/ssh"
+ 	"github.com/netbirdio/netbird/client/system"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	"github.com/netbirdio/netbird/shared/management/domain"
+ 	mgmProto "github.com/netbirdio/netbird/shared/management/proto"
+ 	"github.com/netbirdio/netbird/util/capture"
+@@ -56,11 +57,20 @@ type Client struct {
+ 	recorder   *peer.Status
+ 	// inMemoryState is set when no StatePath was given in netstack mode,
+ 	// where the client changes nothing on the host that needs restoring.
+-	inMemoryState bool
++	inMemoryState   bool
++	underlayDialer  underlay.Dialer
++	directResolver  func(context.Context, string) ([]net.IPAddr, error)
++	releaseUnderlay func()
+ }
+ 
+ // Options configures a new Client.
+ type Options struct {
++	// UnderlayDialer forces all control and relay traffic through this TCP dialer.
++	// The client uses only WebSocket relay, never direct ICE/STUN or host DNS.
++	// Only one such client may run in the process at a time.
++	UnderlayDialer underlay.Dialer
++	// DirectResolver explicitly enables physical networking with Android socket protection.
++	DirectResolver func(context.Context, string) ([]net.IPAddr, error)
+ 	// DeviceName is this peer's name in the network
+ 	DeviceName string
+ 	// SetupKey is used for authentication
+@@ -156,7 +166,7 @@ func (opts *Options) validateCredentials() error {
+ 		credentialsProvided++
+ 	}
+ 
+-	if credentialsProvided == 0 {
++	if credentialsProvided == 0 && opts.ConfigPath == "" {
+ 		return fmt.Errorf("one of SetupKey, JWTToken, or PrivateKey must be provided")
+ 	}
+ 	if credentialsProvided > 1 {
+@@ -167,7 +177,12 @@ func (opts *Options) validateCredentials() error {
+ }
+ 
+ // New creates a new netbird embedded client.
++// Construction changes process-global netstack and state configuration. Callers
++// must serialize New and the complete Start/Stop lifecycle across all clients.
+ func New(opts Options) (*Client, error) {
++	if opts.UnderlayDialer != nil && (opts.NoUserspace || opts.EnableRosenpass) {
++		return nil, errors.New("underlay requires userspace mode without Rosenpass")
++	}
+ 	if err := opts.validateCredentials(); err != nil {
+ 		return nil, err
+ 	}
+@@ -241,6 +256,16 @@ func New(opts Options) (*Client, error) {
+ 	// MDM policy explicitly so a forced ManagementURL / PSK / other
+ 	// managed key takes effect on this embedded engine instance.
+ 	config.ApplyMDMPolicy(mdm.NewLoader(nil).Load())
++	if opts.UnderlayDialer != nil || opts.DirectResolver != nil {
++		if config.RosenpassEnabled {
++			return nil, errors.New("underlay cannot use Rosenpass")
++		}
++		// Embedded proxy peers must not execute jobs or expose a local SSH service.
++		disabled := false
++		config.DisableServerRoutes = true
++		config.RemoteJobsAllowed = &disabled
++		config.ServerSSHAllowed = &disabled
++	}
+ 
+ 	if opts.PrivateKey != "" {
+ 		config.PrivateKey = opts.PrivateKey
+@@ -263,11 +288,13 @@ func New(opts Options) (*Client, error) {
+ 	}
+ 
+ 	return &Client{
+-		deviceName: opts.DeviceName,
+-		setupKey:   opts.SetupKey,
+-		jwtToken:   opts.JWTToken,
+-		config:     config,
+-		recorder:   peer.NewRecorder(config.ManagementURL.String()),
++		deviceName:     opts.DeviceName,
++		underlayDialer: opts.UnderlayDialer,
++		directResolver: opts.DirectResolver,
++		setupKey:       opts.SetupKey,
++		jwtToken:       opts.JWTToken,
++		config:         config,
++		recorder:       peer.NewRecorder(config.ManagementURL.String()),
+ 		// Without a path the default would be the installed agent's state
+ 		// file, which this client must neither read nor overwrite.
+ 		inMemoryState: opts.StatePath == "" && !opts.NoUserspace,
+@@ -276,13 +303,38 @@ func New(opts Options) (*Client, error) {
+ 
+ // Start begins client operation and blocks until the engine has been started successfully or a startup error occurs.
+ // Pass a context with a deadline to limit the time spent waiting for the engine to start.
+-func (c *Client) Start(startCtx context.Context) error {
++func (c *Client) Start(startCtx context.Context) (retErr error) {
+ 	c.mu.Lock()
+ 	defer c.mu.Unlock()
+ 	if c.connect != nil {
+ 		return ErrClientAlreadyStarted
+ 	}
+ 
++	if err := startCtx.Err(); err != nil {
++		return err
++	}
++	if c.underlayDialer != nil || c.directResolver != nil {
++		if !netstack.IsEnabled() {
++			return errors.New("underlay requires the userspace network stack")
++		}
++		var release func()
++		var err error
++		if c.underlayDialer != nil {
++			release, err = underlay.Acquire(c.underlayDialer)
++		} else {
++			release, err = underlay.AcquireDirect(c.directResolver)
++		}
++		if err != nil {
++			return err
++		}
++		c.releaseUnderlay = release
++		defer func() {
++			if retErr != nil {
++				release()
++				c.releaseUnderlay = nil
++			}
++		}()
++	}
+ 	ctx, cancel := context.WithCancel(internal.CtxInitState(context.Background()))
+ 	defer func() {
+ 		if c.connect == nil {
+@@ -293,13 +345,17 @@ func (c *Client) Start(startCtx context.Context) error {
+ 	// nolint:staticcheck
+ 	ctx = context.WithValue(ctx, system.DeviceNameCtxKey, c.deviceName)
+ 
+-	authClient, err := auth.NewAuth(ctx, c.config.PrivateKey, c.config.ManagementURL, c.config)
++	authCtx, authCancel := context.WithCancel(ctx)
++	defer authCancel()
++	stopAuth := context.AfterFunc(startCtx, authCancel)
++	defer stopAuth()
++	authClient, err := auth.NewAuth(authCtx, c.config.PrivateKey, c.config.ManagementURL, c.config)
+ 	if err != nil {
+ 		return fmt.Errorf("create auth client: %w", err)
+ 	}
+ 	defer authClient.Close()
+ 
+-	if err, _ := authClient.Login(ctx, c.setupKey, c.jwtToken); err != nil {
++	if err, _ := authClient.Login(authCtx, c.setupKey, c.jwtToken); err != nil {
+ 		return fmt.Errorf("login: %w", err)
+ 	}
+ 	var connectOpts []internal.ConnectClientOption
+@@ -359,8 +415,14 @@ func (c *Client) Stop(ctx context.Context) error {
+ 
+ 	done := make(chan error, 1)
+ 	connect := c.connect
++	release := c.releaseUnderlay
++	c.releaseUnderlay = nil
+ 	go func() {
+-		done <- connect.Stop()
++		err := connect.Stop()
++		if release != nil {
++			release()
++		}
++		done <- err
+ 	}()
+ 
+ 	select {
+diff --git a/client/firewall/uspfilter/filter.go b/client/firewall/uspfilter/filter.go
+index 0c73400..45909d6 100644
+--- a/client/firewall/uspfilter/filter.go
++++ b/client/firewall/uspfilter/filter.go
+@@ -34,6 +34,7 @@ import (
+ 	nbid "github.com/netbirdio/netbird/client/internal/acl/id"
+ 	nftypes "github.com/netbirdio/netbird/client/internal/netflow/types"
+ 	"github.com/netbirdio/netbird/client/internal/statemanager"
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ const (
+@@ -283,7 +284,7 @@ func (d *decoder) decodeTransport(proto layers.IPProtocol, payload []byte) bool
+ 	return true
+ }
+ 
+-func parseCreateEnv() (bool, bool, bool) {
++func parseCreateEnv(strictUnderlay bool) (bool, bool, bool) {
+ 	var disableConntrack, enableLocalForwarding, disableMSSClamping bool
+ 	var err error
+ 	if val := os.Getenv(EnvDisableConntrack); val != "" {
+@@ -310,11 +311,15 @@ func parseCreateEnv() (bool, bool, bool) {
+ 		}
+ 	}
+ 
++	if strictUnderlay {
++		// Never hand overlay packets to native host sockets in a proxied client.
++		enableLocalForwarding = false
++	}
+ 	return disableConntrack, enableLocalForwarding, disableMSSClamping
+ }
+ 
+ func Create(cfg Config) (_ *Manager, err error) {
+-	disableConntrack, enableLocalForwarding, disableMSSClamping := parseCreateEnv()
++	disableConntrack, enableLocalForwarding, disableMSSClamping := parseCreateEnv(underlay.Enabled())
+ 
+ 	m := &Manager{
+ 		decoders: sync.Pool{
+diff --git a/client/firewall/uspfilter/filter_env_test.go b/client/firewall/uspfilter/filter_env_test.go
+new file mode 100644
+index 0000000..bc056c3
+--- /dev/null
++++ b/client/firewall/uspfilter/filter_env_test.go
+@@ -0,0 +1,21 @@
++package uspfilter
++
++import "testing"
++
++func TestStrictUnderlayRejectsNativeForwardingEnvironment(t *testing.T) {
++	for _, variable := range []string{EnvEnableNetstackLocalForwarding, EnvEnableLocalForwarding} {
++		t.Run(variable, func(t *testing.T) {
++			t.Setenv(EnvEnableNetstackLocalForwarding, "")
++			t.Setenv(EnvEnableLocalForwarding, "")
++			t.Setenv(variable, "true")
++			_, enabled, _ := parseCreateEnv(false)
++			if !enabled {
++				t.Fatal("ordinary clients must retain explicitly enabled local forwarding")
++			}
++			_, enabled, _ = parseCreateEnv(true)
++			if enabled {
++				t.Fatal("environment must not enable native sockets in strict underlay mode")
++			}
++		})
++	}
++}
+diff --git a/client/grpc/dialer.go b/client/grpc/dialer.go
+index 9a6bc06..eb09c60 100644
+--- a/client/grpc/dialer.go
++++ b/client/grpc/dialer.go
+@@ -15,6 +15,7 @@ import (
+ 	"google.golang.org/grpc/credentials/insecure"
+ 	"google.golang.org/grpc/keepalive"
+ 
++	"github.com/netbirdio/netbird/client/underlay"
+ 	"github.com/netbirdio/netbird/util/embeddedroots"
+ )
+ 
+@@ -57,6 +58,10 @@ func CreateConnection(ctx context.Context, addr string, tlsEnabled bool, compone
+ 	}
+ 	opts = append(opts, extraOpts...)
+ 
++	if underlay.Enabled() || underlay.DirectEnabled() {
++		addr = "passthrough:///" + addr
++		opts = append(opts, grpc.WithNoProxy())
++	}
+ 	conn, err := grpc.DialContext(connCtx, addr, opts...)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("dial context: %w", err)
+diff --git a/client/grpc/dialer_generic.go b/client/grpc/dialer_generic.go
+index 72b3538..2c6d32d 100644
+--- a/client/grpc/dialer_generic.go
++++ b/client/grpc/dialer_generic.go
+@@ -14,6 +14,7 @@ import (
+ 
+ 	nbnet "github.com/netbirdio/netbird/client/net"
+ 	"github.com/netbirdio/netbird/client/netevents/sweep"
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ // Sweeper registers in-flight dials for the network change sweep.
+@@ -45,7 +46,7 @@ func dialContext(ctx context.Context, addr string) (net.Conn, error) {
+ 	// The custom dialer requires root permissions which are not required for
+ 	// use cases run as non-root. The effective UID is read directly: a passwd
+ 	// lookup fails without cgo for a UID that has no entry, as on OpenShift.
+-	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
++	if !underlay.Enabled() && !underlay.DirectEnabled() && runtime.GOOS == "linux" && os.Geteuid() != 0 {
+ 		log.Debug("Not running as root, using standard dialer")
+ 		dialer := &net.Dialer{}
+ 		return dialer.DialContext(ctx, "tcp", addr)
+diff --git a/client/iface/bind/ice_bind.go b/client/iface/bind/ice_bind.go
+index cd1ed12..bc65f98 100644
+--- a/client/iface/bind/ice_bind.go
++++ b/client/iface/bind/ice_bind.go
+@@ -20,6 +20,7 @@ import (
+ 	"github.com/netbirdio/netbird/client/iface/udpmux"
+ 	"github.com/netbirdio/netbird/client/iface/wgaddr"
+ 	nbnet "github.com/netbirdio/netbird/client/net"
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ const (
+@@ -104,7 +105,12 @@ func (s *ICEBind) Open(uport uint16) ([]wgConn.ReceiveFunc, uint16, error) {
+ 	// open, and a Close arriving in that window would mark the bind closed
+ 	// while this call went on to install live sockets, after which every later
+ 	// Close returns early and never shuts them down.
+-	fns, port, err := s.StdNetBind.Open(uport)
++	var fns []wgConn.ReceiveFunc
++	port := uport
++	var err error
++	if !underlay.Enabled() {
++		fns, port, err = s.StdNetBind.Open(uport)
++	}
+ 	if err != nil {
+ 		return nil, 0, err
+ 	}
+@@ -158,6 +164,9 @@ func (s *ICEBind) ActivityRecorder() *ActivityRecorder {
+ func (s *ICEBind) GetICEMux() (*udpmux.UniversalUDPMuxDefault, error) {
+ 	s.muUDPMux.Lock()
+ 	defer s.muUDPMux.Unlock()
++	if underlay.Enabled() {
++		return nil, ErrUDPMUXNotSupported
++	}
+ 	if s.udpMux == nil {
+ 		return nil, fmt.Errorf("ICEBind has not been initialized yet")
+ 	}
+@@ -195,6 +204,9 @@ func (b *ICEBind) Send(bufs [][]byte, ep wgConn.Endpoint) error {
+ 	conn, ok := b.endpoints[ep.DstIP()]
+ 	b.endpointsMu.Unlock()
+ 	if !ok {
++		if underlay.Enabled() {
++			return underlay.ErrDirectBlocked
++		}
+ 		return b.StdNetBind.Send(bufs, ep)
+ 	}
+ 
+diff --git a/client/internal/connect.go b/client/internal/connect.go
+index 7173f68..f8c5169 100644
+--- a/client/internal/connect.go
++++ b/client/internal/connect.go
+@@ -22,6 +22,7 @@ import (
+ 	gstatus "google.golang.org/grpc/status"
+ 
+ 	"github.com/netbirdio/netbird/client/iface/wgaddr"
++	"github.com/netbirdio/netbird/client/underlay"
+ 
+ 	"github.com/netbirdio/netbird/client/iface"
+ 	"github.com/netbirdio/netbird/client/iface/device"
+@@ -826,6 +827,9 @@ func statusRecorderToSignalConnStateNotifier(statusRecorder *peer.Status) signal
+ 
+ // freePort attempts to determine if the provided port is available, if not it will ask the system for a free port.
+ func freePort(initPort int) (int, error) {
++	if underlay.Enabled() {
++		return 0, nil
++	}
+ 	addr := net.UDPAddr{Port: initPort}
+ 
+ 	conn, err := net.ListenUDP("udp", &addr)
+diff --git a/client/internal/connect_android_embed.go b/client/internal/connect_android_embed.go
+index 18f72e8..f7d6f94 100644
+--- a/client/internal/connect_android_embed.go
++++ b/client/internal/connect_android_embed.go
+@@ -4,6 +4,7 @@ package internal
+ 
+ import (
+ 	"net/netip"
++	"os"
+ 
+ 	"github.com/netbirdio/netbird/client/internal/dns"
+ 	"github.com/netbirdio/netbird/client/internal/listener"
+@@ -27,6 +28,7 @@ func (c *ConnectClient) runOnAndroidEmbed(
+ 		NetworkChangeListener: networkChangeListener,
+ 		HostDNSAddresses:      dnsAddresses,
+ 		DnsReadyListener:      dnsReadyListener,
++		StateFilePath:         os.Getenv("NB_DNS_STATE_FILE"),
+ 	}
+ 	return c.run(mobileDependency, runningChan, logPath)
+ }
+diff --git a/client/internal/dns/local/local.go b/client/internal/dns/local/local.go
+index fef35fd..7b72fac 100644
+--- a/client/internal/dns/local/local.go
++++ b/client/internal/dns/local/local.go
+@@ -17,6 +17,7 @@ import (
+ 
+ 	"github.com/netbirdio/netbird/client/internal/dns/resutil"
+ 	"github.com/netbirdio/netbird/client/internal/dns/types"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	nbdns "github.com/netbirdio/netbird/dns"
+ 	"github.com/netbirdio/netbird/shared/management/domain"
+ )
+@@ -471,6 +472,9 @@ func (d *Resolver) hasRecord(q dns.Question) bool {
+ // This is used to resolve CNAME targets that point outside our local zone,
+ // which is required for musl libc compatibility (musl expects complete answers).
+ func (d *Resolver) resolveExternal(logger *log.Entry, name string, qtype uint16) lookupResult {
++	if underlay.Enabled() {
++		return lookupResult{rcode: dns.RcodeServerFailure, hasExternalData: true}
++	}
+ 	network := resutil.NetworkForQtype(qtype)
+ 	if network == "" {
+ 		return lookupResult{rcode: dns.RcodeNotImplemented}
+diff --git a/client/internal/dns/mgmt/mgmt.go b/client/internal/dns/mgmt/mgmt.go
+index ddc8cf5..8c772b6 100644
+--- a/client/internal/dns/mgmt/mgmt.go
++++ b/client/internal/dns/mgmt/mgmt.go
+@@ -19,6 +19,7 @@ import (
+ 
+ 	dnsconfig "github.com/netbirdio/netbird/client/internal/dns/config"
+ 	"github.com/netbirdio/netbird/client/internal/dns/resutil"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	"github.com/netbirdio/netbird/shared/management/domain"
+ )
+ 
+@@ -412,6 +413,9 @@ func (m *Resolver) lookupViaChain(ctx context.Context, chain ChainResolver, maxP
+ // which disambiguates NODATA from NXDOMAIN and Unmaps v4-mapped-v6. NODATA
+ // returns (nil, nil).
+ func (m *Resolver) osLookup(ctx context.Context, d domain.Domain, dnsName string, qtype uint16) ([]dns.RR, error) {
++	if underlay.Enabled() {
++		return nil, underlay.ErrDirectBlocked
++	}
+ 	network := resutil.NetworkForQtype(qtype)
+ 	if network == "" {
+ 		return nil, fmt.Errorf("unsupported qtype %s", dns.TypeToString[qtype])
+diff --git a/client/internal/dns/upstream_android.go b/client/internal/dns/upstream_android.go
+index f7ab48b..917cf7a 100644
+--- a/client/internal/dns/upstream_android.go
++++ b/client/internal/dns/upstream_android.go
+@@ -8,15 +8,18 @@ import (
+ 	"time"
+ 
+ 	"github.com/miekg/dns"
++	"golang.zx2c4.com/wireguard/tun/netstack"
+ 
+ 	"github.com/netbirdio/netbird/client/internal/peer"
+ 	nbnet "github.com/netbirdio/netbird/client/net"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	"github.com/netbirdio/netbird/shared/management/domain"
+ )
+ 
+ type upstreamResolver struct {
+ 	*upstreamResolverBase
+ 	hostsDNSHolder *hostsDNSHolder
++	nsNet          *netstack.Net
+ }
+ 
+ // newUpstreamResolver in Android we need to distinguish the DNS servers to available through VPN or outside of VPN
+@@ -24,7 +27,7 @@ type upstreamResolver struct {
+ // first time, and we need to wait for a while to start to use again the proper DNS resolver.
+ func newUpstreamResolver(
+ 	ctx context.Context,
+-	_ WGIface,
++	wgIface WGIface,
+ 	statusRecorder *peer.Status,
+ 	hostsDNSHolder *hostsDNSHolder,
+ 	d domain.Domain,
+@@ -33,6 +36,7 @@ func newUpstreamResolver(
+ 	c := &upstreamResolver{
+ 		upstreamResolverBase: upstreamResolverBase,
+ 		hostsDNSHolder:       hostsDNSHolder,
++		nsNet:                wgIface.GetNet(),
+ 	}
+ 	upstreamResolverBase.upstreamClient = c
+ 	return c, nil
+@@ -41,6 +45,14 @@ func newUpstreamResolver(
+ // exchange in case of Android if the upstream is a local resolver then we do not need to mark the socket as protected.
+ // In other case the DNS resolvation goes through the VPN, so we need to force to use the
+ func (u *upstreamResolver) exchange(ctx context.Context, upstream string, r *dns.Msg) (rm *dns.Msg, t time.Duration, err error) {
++	if underlay.Enabled() {
++		if u.nsNet == nil {
++			return nil, 0, underlay.ErrDirectBlocked
++		}
++		start := time.Now()
++		reply, err := ExchangeWithNetstack(ctx, u.nsNet, r, upstream)
++		return reply, time.Since(start), err
++	}
+ 	if u.isLocalResolver(upstream) {
+ 		return u.exchangeWithoutVPN(ctx, upstream, r)
+ 	} else {
+@@ -88,6 +100,9 @@ func (u *upstreamResolver) isLocalResolver(upstream string) bool {
+ }
+ 
+ func GetClientPrivate(_ privateClientIface, _ netip.Addr, dialTimeout time.Duration) (*dns.Client, error) {
++	if underlay.Enabled() {
++		return nil, underlay.ErrDirectBlocked
++	}
+ 	return &dns.Client{
+ 		Timeout: dialTimeout,
+ 		Net:     "udp",
+diff --git a/client/internal/dns/upstream_general.go b/client/internal/dns/upstream_general.go
+index dc84175..9091ef7 100644
+--- a/client/internal/dns/upstream_general.go
++++ b/client/internal/dns/upstream_general.go
+@@ -12,6 +12,7 @@ import (
+ 	"golang.zx2c4.com/wireguard/tun/netstack"
+ 
+ 	"github.com/netbirdio/netbird/client/internal/peer"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	"github.com/netbirdio/netbird/shared/management/domain"
+ )
+ 
+@@ -40,8 +41,11 @@ func (u *upstreamResolver) exchange(ctx context.Context, upstream string, r *dns
+ 	// TODO: Check if upstream DNS server is routed through a peer before using netstack.
+ 	// Similar to iOS logic, we should determine if the DNS server is reachable directly
+ 	// or needs to go through the tunnel, and only use netstack when necessary.
+-	// For now, only use netstack on JS platform where direct access is not possible.
+-	if u.nsNet != nil && runtime.GOOS == "js" {
++	// Strict embedding must never fall back to a host DNS socket.
++	if underlay.Enabled() && u.nsNet == nil {
++		return nil, 0, underlay.ErrDirectBlocked
++	}
++	if u.nsNet != nil && (runtime.GOOS == "js" || underlay.Enabled()) {
+ 		start := time.Now()
+ 		reply, err := ExchangeWithNetstack(ctx, u.nsNet, r, upstream)
+ 		return reply, time.Since(start), err
+@@ -54,6 +58,9 @@ func (u *upstreamResolver) exchange(ctx context.Context, upstream string, r *dns
+ }
+ 
+ func GetClientPrivate(_ privateClientIface, _ netip.Addr, dialTimeout time.Duration) (*dns.Client, error) {
++	if underlay.Enabled() {
++		return nil, underlay.ErrDirectBlocked
++	}
+ 	return &dns.Client{
+ 		Timeout: dialTimeout,
+ 		Net:     "udp",
+diff --git a/client/internal/engine.go b/client/internal/engine.go
+index c4bdf51..c2f300f 100644
+--- a/client/internal/engine.go
++++ b/client/internal/engine.go
+@@ -65,6 +65,7 @@ import (
+ 	"github.com/netbirdio/netbird/client/netevents"
+ 	cProto "github.com/netbirdio/netbird/client/proto"
+ 	"github.com/netbirdio/netbird/client/system"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	nbdns "github.com/netbirdio/netbird/dns"
+ 	"github.com/netbirdio/netbird/route"
+ 	mgm "github.com/netbirdio/netbird/shared/management/client"
+@@ -683,7 +684,9 @@ func (e *Engine) Start(netbirdConfig *mgmProto.NetbirdConfig, mgmtURL *url.URL)
+ 	e.shutdownWg.Add(1)
+ 	go func() {
+ 		defer e.shutdownWg.Done()
+-		e.portForwardManager.Start(e.ctx, uint16(e.config.WgPort))
++		if !underlay.Enabled() {
++			e.portForwardManager.Start(e.ctx, uint16(e.config.WgPort))
++		}
+ 	}()
+ 
+ 	e.shutdownWg.Add(1)
+@@ -2290,7 +2293,9 @@ func (e *Engine) newDnsServer() (dns.Server, error) {
+ 			e.statusRecorder,
+ 			e.config.DisableDNS,
+ 		)
+-		go e.mobileDep.DnsReadyListener.OnReady()
++		if e.mobileDep.DnsReadyListener != nil {
++			go e.mobileDep.DnsReadyListener.OnReady()
++		}
+ 		return dnsServer, nil
+ 
+ 	case "ios":
+@@ -2435,7 +2440,7 @@ func (e *Engine) RunHealthProbes(ctx context.Context, waitForResult bool) bool {
+ 
+ 	// Skip STUN/TURN probing for JS/WASM as it's not available
+ 	relayHealthy := true
+-	if runtime.GOOS != "js" {
++	if runtime.GOOS != "js" && !underlay.Enabled() {
+ 		var results []relay.ProbeResult
+ 		if waitForResult {
+ 			results = e.probeStunTurn.ProbeAllWaitResult(ctx, stuns, turns)
+@@ -2461,6 +2466,9 @@ func (e *Engine) RunHealthProbes(ctx context.Context, waitForResult bool) bool {
+ // triggerClientRestart triggers a full client restart by cancelling the client context.
+ // Note: This does NOT just restart the engine - it cancels the entire client context,
+ // which causes the connect client's retry loop to create a completely new engine.
++// NotifyNetworkChange restarts ICE/control connections after the embedding VPN changes its physical network.
++func (e *Engine) NotifyNetworkChange() { e.triggerClientRestart() }
++
+ func (e *Engine) triggerClientRestart() {
+ 	e.syncMsgMux.Lock()
+ 	defer e.syncMsgMux.Unlock()
+@@ -2703,6 +2711,16 @@ func (e *Engine) stopDNSForwarder() {
+ 	e.dnsForwardMgr = nil
+ }
+ 
++// DNSAddress returns the internal overlay DNS service address.
++func (e *Engine) DNSAddress() (netip.Addr, error) {
++	e.syncMsgMux.Lock()
++	defer e.syncMsgMux.Unlock()
++	if e.dnsServer == nil {
++		return netip.Addr{}, errors.New("DNS service not initialized")
++	}
++	return e.dnsServer.DnsIP(), nil
++}
++
+ func (e *Engine) GetNet() (*netstack.Net, error) {
+ 	e.syncMsgMux.Lock()
+ 	intf := e.wgInterface
+diff --git a/client/internal/engine_generic.go b/client/internal/engine_generic.go
+index e293f16..5ca8480 100644
+--- a/client/internal/engine_generic.go
++++ b/client/internal/engine_generic.go
+@@ -4,10 +4,14 @@ package internal
+ 
+ import (
+ 	icemaker "github.com/netbirdio/netbird/client/internal/peer/ice"
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ // createICEConfig creates ICE configuration for non-WASM environments
+ func (e *Engine) createICEConfig() icemaker.Config {
++	if underlay.Enabled() {
++		return icemaker.Config{}
++	}
+ 	return icemaker.Config{
+ 		StunTurn:             &e.stunTurn,
+ 		InterfaceBlackList:   e.config.IFaceBlackList,
+diff --git a/client/internal/metrics/metrics.go b/client/internal/metrics/metrics.go
+index 5edf1d9..7a33adb 100644
+--- a/client/internal/metrics/metrics.go
++++ b/client/internal/metrics/metrics.go
+@@ -13,6 +13,7 @@ import (
+ 	log "github.com/sirupsen/logrus"
+ 
+ 	"github.com/netbirdio/netbird/client/internal/metrics/remoteconfig"
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ // AgentInfo holds static information about the agent
+@@ -259,6 +260,9 @@ func (c *ClientMetrics) UpdatePushFromMgm(ctx context.Context, enabled bool) {
+ 
+ // startPushLocked starts push. Caller must hold pushMu.
+ func (c *ClientMetrics) startPushLocked(ctx context.Context, config PushConfig) {
++	if underlay.Enabled() {
++		return
++	} // Embedded clients have no independent telemetry egress.
+ 	c.mu.RLock()
+ 	agentVersion := c.agentInfo.Version
+ 	peerID := c.agentInfo.peerID
+diff --git a/client/internal/peer/conn.go b/client/internal/peer/conn.go
+index b8a32b0..310b0a8 100644
+--- a/client/internal/peer/conn.go
++++ b/client/internal/peer/conn.go
+@@ -494,6 +494,11 @@ func (conn *Conn) onICEConnectionIsReady(priority conntype.ConnPriority, iceConn
+ }
+ 
+ func (conn *Conn) onICEStateDisconnected(sessionChanged bool) {
++	defer func() {
++		if conn.workerRelay != nil {
++			conn.workerRelay.NotifyDirectLost()
++		}
++	}()
+ 	conn.mu.Lock()
+ 	defer conn.mu.Unlock()
+ 
+diff --git a/client/internal/peer/direct_first_test.go b/client/internal/peer/direct_first_test.go
+new file mode 100644
+index 0000000..54c0ffe
+--- /dev/null
++++ b/client/internal/peer/direct_first_test.go
+@@ -0,0 +1,49 @@
++package peer
++
++import (
++	"context"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++func TestDirectFirstDefersRelayUntilUnreachable(t *testing.T) {
++	started := time.Now()
++	if !waitDirectFallback(context.Background(), 20*time.Millisecond, make(chan struct{}), func() bool { return false }) {
++		t.Fatal("fallback missing")
++	}
++	if time.Since(started) < 20*time.Millisecond {
++		t.Fatal("relay raced the direct connection")
++	}
++}
++func TestSuccessfulP2PDoesNotOpenRelayUntilLost(t *testing.T) {
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	lost := make(chan struct{}, 1)
++	var active atomic.Bool
++	active.Store(true)
++	done := make(chan bool, 1)
++	go func() { done <- waitDirectFallback(ctx, 5*time.Millisecond, lost, active.Load) }()
++	select {
++	case <-done:
++		t.Fatal("relay opened despite working P2P")
++	case <-time.After(25 * time.Millisecond):
++	}
++	active.Store(false)
++	lost <- struct{}{}
++	select {
++	case ok := <-done:
++		if !ok {
++			t.Fatal("fallback missing")
++		}
++	case <-time.After(time.Second):
++		t.Fatal("fallback blocked")
++	}
++}
++func TestDirectFirstWaitCancelsWithEngine(t *testing.T) {
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	if waitDirectFallback(ctx, time.Hour, make(chan struct{}), func() bool { return false }) {
++		t.Fatal("cancelled engine opened relay")
++	}
++}
+diff --git a/client/internal/peer/env.go b/client/internal/peer/env.go
+index ed6a3af..25a5240 100644
+--- a/client/internal/peer/env.go
++++ b/client/internal/peer/env.go
+@@ -4,6 +4,8 @@ import (
+ 	"os"
+ 	"runtime"
+ 	"strings"
++
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ const (
+@@ -12,7 +14,7 @@ const (
+ )
+ 
+ func IsForceRelayed() bool {
+-	if runtime.GOOS == "js" {
++	if underlay.Enabled() || runtime.GOOS == "js" {
+ 		return true
+ 	}
+ 	return strings.EqualFold(os.Getenv(EnvKeyNBForceRelay), "true")
+diff --git a/client/internal/peer/worker_relay.go b/client/internal/peer/worker_relay.go
+index 6942078..387c951 100644
+--- a/client/internal/peer/worker_relay.go
++++ b/client/internal/peer/worker_relay.go
+@@ -3,9 +3,11 @@ package peer
+ import (
+ 	"context"
+ 	"errors"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	"net/netip"
+ 	"sync"
+ 	"sync/atomic"
++	"time"
+ 
+ 	log "github.com/sirupsen/logrus"
+ 
+@@ -30,11 +32,16 @@ type WorkerRelay struct {
+ 	relayLock   sync.Mutex
+ 
+ 	relaySupportedOnRemotePeer atomic.Bool
++	directLost                 chan struct{}
++	pendingDirect              bool
++	pendingOffer               *OfferAnswer
++	fallbackAllowed            atomic.Bool
+ }
+ 
+ func NewWorkerRelay(ctx context.Context, log *log.Entry, ctrl bool, config ConnConfig, conn *Conn, relayManager *relayClient.Manager) *WorkerRelay {
+ 	r := &WorkerRelay{
+ 		peerCtx:      ctx,
++		directLost:   make(chan struct{}, 1),
+ 		log:          log,
+ 		isController: ctrl,
+ 		config:       config,
+@@ -45,6 +52,71 @@ func NewWorkerRelay(ctx context.Context, log *log.Entry, ctrl bool, config ConnC
+ }
+ 
+ func (w *WorkerRelay) OnNewOffer(remoteOfferAnswer *OfferAnswer) {
++	if underlay.DirectEnabled() && remoteOfferAnswer.hasICECredentials() && !w.fallbackAllowed.Load() {
++		offer := *remoteOfferAnswer
++		w.relayLock.Lock()
++		if w.fallbackAllowed.Load() {
++			w.relayLock.Unlock()
++			w.openOffer(remoteOfferAnswer)
++			return
++		}
++		w.pendingOffer = &offer
++		if w.pendingDirect {
++			w.relayLock.Unlock()
++			return
++		}
++		w.pendingDirect = true
++		w.relayLock.Unlock()
++		go func() {
++			active := func() bool { w.conn.mu.Lock(); defer w.conn.mu.Unlock(); return w.conn.isICEActive() }
++			if !waitDirectFallback(w.peerCtx, 8*time.Second, w.directLost, active) {
++				return
++			}
++			w.relayLock.Lock()
++			offer := w.pendingOffer
++			w.pendingOffer = nil
++			w.pendingDirect = false
++			w.fallbackAllowed.Store(true)
++			w.relayLock.Unlock()
++			if offer != nil && w.peerCtx.Err() == nil {
++				w.openOffer(offer)
++			}
++		}()
++		return
++	}
++	w.openOffer(remoteOfferAnswer)
++}
++
++// Relay negotiation is held back while ICE gets its initial connection window.
++// Once P2P succeeds, no per-peer relay is opened until that connection is lost.
++// Offers keep updating independently, so fallback uses the latest relay address.
++func waitDirectFallback(ctx context.Context, grace time.Duration, lost <-chan struct{}, active func() bool) bool {
++	timer := time.NewTimer(grace)
++	defer timer.Stop()
++	for {
++		select {
++		case <-ctx.Done():
++			return false
++		case <-timer.C:
++		case <-lost:
++		}
++		if ctx.Err() != nil {
++			return false
++		}
++		if !active() {
++			return true
++		}
++	}
++}
++
++func (w *WorkerRelay) NotifyDirectLost() {
++	select {
++	case w.directLost <- struct{}{}:
++	default:
++	}
++}
++
++func (w *WorkerRelay) openOffer(remoteOfferAnswer *OfferAnswer) {
+ 	if !w.isRelaySupported(remoteOfferAnswer) {
+ 		w.log.Infof("Relay is not supported by remote peer")
+ 		w.relaySupportedOnRemotePeer.Store(false)
+diff --git a/client/internal/routemanager/dynamic/route.go b/client/internal/routemanager/dynamic/route.go
+index bb3b1c5..db564c1 100644
+--- a/client/internal/routemanager/dynamic/route.go
++++ b/client/internal/routemanager/dynamic/route.go
+@@ -18,6 +18,7 @@ import (
+ 	"github.com/netbirdio/netbird/client/internal/routemanager/iface"
+ 	"github.com/netbirdio/netbird/client/internal/routemanager/refcounter"
+ 	"github.com/netbirdio/netbird/client/internal/routemanager/util"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	"github.com/netbirdio/netbird/route"
+ 	"github.com/netbirdio/netbird/shared/management/domain"
+ )
+@@ -366,7 +367,7 @@ func determinePrefixChanges(oldPrefixes, newPrefixes []netip.Prefix) (toAdd, toR
+ 
+ // lookupHostIPs resolves d via the system resolver, honoring ctx cancellation.
+ func lookupHostIPs(ctx context.Context, d domain.Domain) ([]net.IP, error) {
+-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, d.PunycodeString())
++	addrs, err := underlay.LookupIPAddr(ctx, d.PunycodeString())
+ 	if err != nil {
+ 		return nil, err
+ 	}
+diff --git a/client/internal/routemanager/manager.go b/client/internal/routemanager/manager.go
+index 7d699fb..4718b28 100644
+--- a/client/internal/routemanager/manager.go
++++ b/client/internal/routemanager/manager.go
+@@ -40,6 +40,7 @@ import (
+ 	"github.com/netbirdio/netbird/client/internal/routeselector"
+ 	"github.com/netbirdio/netbird/client/internal/statemanager"
+ 	nbnet "github.com/netbirdio/netbird/client/net"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	nbdns "github.com/netbirdio/netbird/dns"
+ 	"github.com/netbirdio/netbird/route"
+ 	relayClient "github.com/netbirdio/netbird/shared/relay/client"
+@@ -696,6 +697,9 @@ func isRouteSupported(route *route.Route) bool {
+ 
+ // resolveURLsToIPs takes a slice of URLs, resolves them to IP addresses and returns a slice of IPs.
+ func resolveURLsToIPs(urls []string) []net.IP {
++	if underlay.Enabled() {
++		return nil
++	} // Host routes are not used by the embedded netstack.
+ 	var ips []net.IP
+ 	for _, rawurl := range urls {
+ 		u, err := url.Parse(rawurl)
+diff --git a/client/internal/stdnet/discover_embed.go b/client/internal/stdnet/discover_embed.go
+new file mode 100644
+index 0000000..c5ac0a0
+--- /dev/null
++++ b/client/internal/stdnet/discover_embed.go
+@@ -0,0 +1,25 @@
++package stdnet
++
++import "sync"
++
++var physicalDiscover struct {
++	sync.RWMutex
++	fn func() (string, error)
++}
++
++type embeddedDiscover struct{ fn func() (string, error) }
++
++func (d embeddedDiscover) IFaces() (string, error) { return d.fn() }
++func SetPhysicalInterfaceDiscoverer(fn func() (string, error)) {
++	physicalDiscover.Lock()
++	physicalDiscover.fn = fn
++	physicalDiscover.Unlock()
++}
++func physicalInterfaceDiscoverer() ExternalIFaceDiscover {
++	physicalDiscover.RLock()
++	defer physicalDiscover.RUnlock()
++	if physicalDiscover.fn == nil {
++		return nil
++	}
++	return embeddedDiscover{physicalDiscover.fn}
++}
+diff --git a/client/internal/stdnet/stdnet.go b/client/internal/stdnet/stdnet.go
+index 32f0306..82769e7 100644
+--- a/client/internal/stdnet/stdnet.go
++++ b/client/internal/stdnet/stdnet.go
+@@ -18,6 +18,7 @@ import (
+ 	"github.com/pion/transport/v3/stdnet"
+ 
+ 	"github.com/netbirdio/netbird/client/iface/netstack"
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ const (
+@@ -55,7 +56,9 @@ func NewNetWithDiscover(ctx context.Context, iFaceDiscover ExternalIFaceDiscover
+ 	}
+ 	// current ExternalIFaceDiscover implement in android-client https://github.dev/netbirdio/android-client
+ 	// so in android cli use pionDiscover
+-	if netstack.IsEnabled() {
++	if discover := physicalInterfaceDiscoverer(); underlay.DirectEnabled() && discover != nil {
++		n.iFaceDiscover = newMobileIFaceDiscover(discover)
++	} else if netstack.IsEnabled() {
+ 		n.iFaceDiscover = pionDiscover{}
+ 	} else {
+ 		n.iFaceDiscover = newMobileIFaceDiscover(iFaceDiscover)
+@@ -109,7 +112,22 @@ func (n *Net) resolveAddr(network, address string) (netip.AddrPort, error) {
+ 	ctx, cancel := context.WithTimeout(n.ctx, dnsResolveTimeout)
+ 	defer cancel()
+ 
+-	addrs, err := net.DefaultResolver.LookupNetIP(ctx, ipNet, host)
++	if underlay.Enabled() {
++		return netip.AddrPort{}, underlay.ErrDirectBlocked
++	}
++	resolved, err := underlay.LookupIPAddr(ctx, host)
++	var addrs []netip.Addr
++	for _, addr := range resolved {
++		ip, ok := netip.AddrFromSlice(addr.IP)
++		if !ok {
++			continue
++		}
++		ip = ip.Unmap()
++		if ipNet == "ip4" && !ip.Is4() || ipNet == "ip6" && !ip.Is6() {
++			continue
++		}
++		addrs = append(addrs, ip)
++	}
+ 	if err != nil {
+ 		return netip.AddrPort{}, err
+ 	}
+diff --git a/client/net/dial.go b/client/net/dial.go
+index 17c9ff9..352be69 100644
+--- a/client/net/dial.go
++++ b/client/net/dial.go
+@@ -9,10 +9,15 @@ import (
+ 
+ 	"github.com/pion/transport/v3"
+ 	log "github.com/sirupsen/logrus"
++
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ func DialUDP(network string, laddr, raddr *net.UDPAddr) (transport.UDPConn, error) {
+-	if CustomRoutingDisabled() {
++	if underlay.Enabled() {
++		return nil, underlay.ErrDirectBlocked
++	}
++	if CustomRoutingDisabled() && !underlay.DirectEnabled() {
+ 		return net.DialUDP(network, laddr, raddr)
+ 	}
+ 
+@@ -47,7 +52,10 @@ func DialUDP(network string, laddr, raddr *net.UDPAddr) (transport.UDPConn, erro
+ }
+ 
+ func DialTCP(network string, laddr, raddr *net.TCPAddr) (transport.TCPConn, error) {
+-	if CustomRoutingDisabled() {
++	if underlay.Enabled() {
++		return nil, underlay.ErrDirectBlocked
++	}
++	if CustomRoutingDisabled() && !underlay.DirectEnabled() {
+ 		return net.DialTCP(network, laddr, raddr)
+ 	}
+ 
+diff --git a/client/net/dialer_dial.go b/client/net/dialer_dial.go
+index 1e27501..d762325 100644
+--- a/client/net/dialer_dial.go
++++ b/client/net/dialer_dial.go
+@@ -13,10 +13,38 @@ import (
+ 	nberrors "github.com/netbirdio/netbird/client/errors"
+ 	"github.com/netbirdio/netbird/client/internal/routemanager/util"
+ 	"github.com/netbirdio/netbird/client/net/hooks"
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ // DialContext wraps the net.Dialer's DialContext method to use the custom connection
+ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
++	if underlay.Enabled() {
++		return underlay.Dial(ctx, network, address)
++	}
++	if underlay.DirectEnabled() {
++		host, port, err := net.SplitHostPort(address)
++		if err != nil {
++			return nil, err
++		}
++		if net.ParseIP(host) == nil {
++			ips, err := underlay.LookupIPAddr(ctx, host)
++			if err != nil {
++				return nil, err
++			}
++			var last error
++			for _, ip := range ips {
++				conn, err := d.Dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
++				if err == nil {
++					return conn, nil
++				}
++				last = err
++			}
++			if last == nil {
++				last = fmt.Errorf("physical DNS returned no addresses")
++			}
++			return nil, last
++		}
++	}
+ 	log.Debugf("Dialing %s %s", network, address)
+ 
+ 	if CustomRoutingDisabled() || AdvancedRouting() {
+diff --git a/client/net/listen.go b/client/net/listen.go
+index da72628..0ffc6f7 100644
+--- a/client/net/listen.go
++++ b/client/net/listen.go
+@@ -10,12 +10,17 @@ import (
+ 
+ 	"github.com/pion/transport/v3"
+ 	log "github.com/sirupsen/logrus"
++
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ // ListenUDP listens on the network address and returns a transport.UDPConn
+ // which includes support for write and close hooks.
+ func ListenUDP(network string, laddr *net.UDPAddr) (transport.UDPConn, error) {
+-	if CustomRoutingDisabled() {
++	if underlay.Enabled() {
++		return nil, underlay.ErrDirectBlocked
++	}
++	if CustomRoutingDisabled() && !underlay.DirectEnabled() {
+ 		return net.ListenUDP(network, laddr)
+ 	}
+ 
+diff --git a/client/net/listener_listen.go b/client/net/listener_listen.go
+index a150172..3913107 100644
+--- a/client/net/listener_listen.go
++++ b/client/net/listener_listen.go
+@@ -15,11 +15,15 @@ import (
+ 	nberrors "github.com/netbirdio/netbird/client/errors"
+ 	"github.com/netbirdio/netbird/client/internal/routemanager/util"
+ 	"github.com/netbirdio/netbird/client/net/hooks"
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ // ListenPacket listens on the network address and returns a PacketConn
+ // which includes support for write hooks.
+ func (l *ListenerConfig) ListenPacket(ctx context.Context, network, address string) (net.PacketConn, error) {
++	if underlay.Enabled() {
++		return nil, underlay.ErrDirectBlocked
++	}
+ 	if CustomRoutingDisabled() || AdvancedRouting() {
+ 		return l.ListenConfig.ListenPacket(ctx, network, address)
+ 	}
+diff --git a/client/net/protectsocket_android.go b/client/net/protectsocket_android.go
+index 0007146..ae15feb 100644
+--- a/client/net/protectsocket_android.go
++++ b/client/net/protectsocket_android.go
+@@ -21,7 +21,10 @@ func SetAndroidProtectSocketFn(fn func(fd int32) bool) {
+ 
+ // ControlProtectSocket is a Control function that sets the fwmark on the socket
+ func ControlProtectSocket(_, _ string, c syscall.RawConn) error {
+-	if netstack.IsEnabled() {
++	androidProtectSocketLock.Lock()
++	hasProtector := androidProtectSocket != nil
++	androidProtectSocketLock.Unlock()
++	if netstack.IsEnabled() && !hasProtector {
+ 		return nil
+ 	}
+ 	var aErr error
+diff --git a/client/system/detect_cloud/detect.go b/client/system/detect_cloud/detect.go
+index 8a8de76..6173131 100644
+--- a/client/system/detect_cloud/detect.go
++++ b/client/system/detect_cloud/detect.go
+@@ -5,6 +5,8 @@ import (
+ 	"net/http"
+ 	"sync"
+ 	"time"
++
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ /*
+@@ -15,6 +17,9 @@ import (
+ var hc = &http.Client{Timeout: 300 * time.Millisecond}
+ 
+ func Detect(ctx context.Context) string {
++	if underlay.Enabled() {
++		return ""
++	}
+ 	subCtx, cancel := context.WithCancel(context.Background())
+ 	defer cancel()
+ 
+diff --git a/client/system/detect_platform/detect.go b/client/system/detect_platform/detect.go
+index 2eb72f3..e0f6284 100644
+--- a/client/system/detect_platform/detect.go
++++ b/client/system/detect_platform/detect.go
+@@ -5,11 +5,16 @@ import (
+ 	"net/http"
+ 	"sync"
+ 	"time"
++
++	"github.com/netbirdio/netbird/client/underlay"
+ )
+ 
+ var hc = &http.Client{Timeout: 300 * time.Millisecond}
+ 
+ func Detect(ctx context.Context) string {
++	if underlay.Enabled() {
++		return ""
++	}
+ 	subCtx, cancel := context.WithCancel(context.Background())
+ 	defer cancel()
+ 
+diff --git a/client/underlay/direct_test.go b/client/underlay/direct_test.go
+new file mode 100644
+index 0000000..5e8d754
+--- /dev/null
++++ b/client/underlay/direct_test.go
+@@ -0,0 +1,58 @@
++package underlay
++
++import (
++	"context"
++	"errors"
++	"net"
++	"testing"
++)
++
++func TestExplicitDirectLeaseCanSwitchBackToStrictWithoutFallback(t *testing.T) {
++	t.Cleanup(func() {
++		state.Lock()
++		state.dialer = nil
++		state.active = false
++		state.strict = false
++		state.resolver = nil
++		state.Unlock()
++	})
++	resolver := func(context.Context, string) ([]net.IPAddr, error) {
++		return []net.IPAddr{{IP: net.ParseIP("192.0.2.4")}}, nil
++	}
++	proxy := dialFunc(func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("proxy") })
++	release, err := Acquire(proxy)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err = AcquireDirect(resolver); !errors.Is(err, ErrInUse) {
++		t.Fatal("direct stole proxy lease", err)
++	}
++	release()
++	direct, err := AcquireDirect(resolver)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if Enabled() || !DirectEnabled() {
++		t.Fatal("direct did not enable P2P")
++	}
++	ips, err := LookupIPAddr(context.Background(), "physical.example")
++	if err != nil || len(ips) != 1 || ips[0].IP.String() != "192.0.2.4" {
++		t.Fatal(ips, err)
++	}
++	if _, err = Acquire(proxy); !errors.Is(err, ErrInUse) {
++		t.Fatal("proxy stole direct lease", err)
++	}
++	direct()
++	direct()
++	if !Enabled() || DirectEnabled() {
++		t.Fatal("late callbacks not blocked")
++	}
++	if _, err = LookupIPAddr(context.Background(), "physical.example"); !errors.Is(err, ErrDirectBlocked) {
++		t.Fatal(err)
++	}
++	release, err = Acquire(proxy)
++	if err != nil {
++		t.Fatal(err)
++	}
++	release()
++}
+diff --git a/client/underlay/underlay.go b/client/underlay/underlay.go
+new file mode 100644
+index 0000000..927ef56
+--- /dev/null
++++ b/client/underlay/underlay.go
+@@ -0,0 +1,116 @@
++// Package underlay provides the process-wide transport boundary for embedded clients.
++package underlay
++
++import (
++	"context"
++	"errors"
++	"net"
++	"sync"
++)
++
++// Dialer carries NetBird control and relay connections through an embedding proxy.
++// Hostnames are deliberately passed unchanged so DNS resolution happens at the proxy.
++type Dialer interface {
++	DialContext(context.Context, string, string) (net.Conn, error)
++}
++
++var (
++	ErrInUse         = errors.New("a proxied NetBird client is already running")
++	ErrDirectBlocked = errors.New("direct networking is disabled by the NetBird underlay")
++	state            struct {
++		sync.RWMutex
++		dialer   Dialer
++		strict   bool
++		active   bool
++		resolver func(context.Context, string) ([]net.IPAddr, error)
++	}
++)
++
++// Acquire installs a fail-closed TCP transport until its returned release function
++// is called. The owner must stop every engine goroutine before releasing the lease.
++// After release, late callbacks remain blocked until another transport is acquired.
++func Acquire(dialer Dialer) (func(), error) {
++	if dialer == nil {
++		return nil, errors.New("nil underlay dialer")
++	}
++	state.Lock()
++	defer state.Unlock()
++	if state.active {
++		return nil, ErrInUse
++	}
++	state.dialer = dialer
++	state.active = true
++	state.strict = true
++	var once sync.Once
++	return func() { once.Do(func() { state.Lock(); state.dialer = nil; state.active = false; state.Unlock() }) }, nil
++}
++
++// Enabled reports whether all host networking must stay inside the custom transport.
++func Enabled() bool {
++	state.RLock()
++	defer state.RUnlock()
++	return state.strict
++}
++
++// Dial calls only the configured transport. UDP and absent transports fail closed.
++func Dial(ctx context.Context, network, address string) (net.Conn, error) {
++	state.RLock()
++	dialer := state.dialer
++	state.RUnlock()
++	if err := ctx.Err(); err != nil {
++		return nil, err
++	}
++	if dialer == nil || (network != "tcp" && network != "tcp4" && network != "tcp6") {
++		return nil, ErrDirectBlocked
++	}
++	return dialer.DialContext(ctx, network, address)
++}
++
++// LookupIPAddr prevents an auxiliary cache or route updater from using host DNS.
++// Control/relay names are resolved by the proxy; overlay names use the netstack.
++func LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
++	if ip := net.ParseIP(host); ip != nil {
++		return []net.IPAddr{{IP: ip}}, nil
++	}
++	if Enabled() {
++		return nil, ErrDirectBlocked
++	}
++	state.RLock()
++	resolver := state.resolver
++	state.RUnlock()
++	if resolver != nil {
++		return resolver(ctx, host)
++	}
++	return net.DefaultResolver.LookupIPAddr(ctx, host)
++}
++
++// AcquireDirect explicitly owns protected physical networking. Release blocks late
++// callbacks; changing modes requires the previous engine to have completely stopped.
++func AcquireDirect(resolver func(context.Context, string) ([]net.IPAddr, error)) (func(), error) {
++	if resolver == nil {
++		return nil, errors.New("direct networking requires a physical resolver")
++	}
++	state.Lock()
++	defer state.Unlock()
++	if state.active {
++		return nil, ErrInUse
++	}
++	state.active = true
++	state.strict = false
++	state.resolver = resolver
++	var once sync.Once
++	return func() {
++		once.Do(func() {
++			state.Lock()
++			defer state.Unlock()
++			state.active = false
++			state.strict = true
++			state.resolver = nil
++		})
++	}, nil
++}
++func DirectEnabled() bool {
++	state.RLock()
++	defer state.RUnlock()
++	return state.active && !state.strict && state.resolver != nil
++}
+diff --git a/client/underlay/underlay_test.go b/client/underlay/underlay_test.go
+new file mode 100644
+index 0000000..28a8d41
+--- /dev/null
++++ b/client/underlay/underlay_test.go
+@@ -0,0 +1,67 @@
++package underlay
++
++import (
++	"context"
++	"errors"
++	"net"
++	"testing"
++)
++
++type dialFunc func(context.Context, string, string) (net.Conn, error)
++
++func (f dialFunc) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
++	return f(ctx, network, address)
++}
++
++func TestExclusiveFailClosedTransport(t *testing.T) {
++	t.Cleanup(func() { state.Lock(); state.dialer = nil; state.strict = false; state.Unlock() })
++	if _, err := Acquire(nil); err == nil {
++		t.Fatal("nil transport accepted")
++	}
++	wantErr := errors.New("proxy unavailable")
++	calls := 0
++	d := dialFunc(func(_ context.Context, network, address string) (net.Conn, error) {
++		calls++
++		if network != "tcp" || address != "unresolvable.example.invalid:443" {
++			t.Fatalf("proxy did not receive the untouched hostname: %s %s", network, address)
++		}
++		return nil, wantErr
++	})
++	release, err := Acquire(d)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err := Acquire(d); !errors.Is(err, ErrInUse) {
++		t.Fatalf("second owner: %v", err)
++	}
++	if _, err := Dial(context.Background(), "tcp", "unresolvable.example.invalid:443"); !errors.Is(err, wantErr) {
++		t.Fatalf("proxy error lost or direct fallback occurred: %v", err)
++	}
++	if _, err := Dial(context.Background(), "udp", "1.1.1.1:53"); !errors.Is(err, ErrDirectBlocked) {
++		t.Fatalf("UDP not blocked: %v", err)
++	}
++	if _, err := LookupIPAddr(context.Background(), "unresolvable.example.invalid"); !errors.Is(err, ErrDirectBlocked) {
++		t.Fatalf("host resolver not blocked: %v", err)
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	if _, err := Dial(ctx, "tcp", "unresolvable.example.invalid:443"); !errors.Is(err, context.Canceled) {
++		t.Fatalf("cancellation ignored: %v", err)
++	}
++	if calls != 1 {
++		t.Fatalf("unexpected proxy calls: %d", calls)
++	}
++	release()
++	release()
++	if !Enabled() {
++		t.Fatal("release re-enabled direct networking")
++	}
++	if _, err := Dial(context.Background(), "tcp", "unresolvable.example.invalid:443"); !errors.Is(err, ErrDirectBlocked) {
++		t.Fatalf("late dial did not fail closed: %v", err)
++	}
++	releaseAgain, err := Acquire(d)
++	if err != nil {
++		t.Fatalf("restart failed: %v", err)
++	}
++	releaseAgain()
++}
+diff --git a/client/underlaytest/transport_test.go b/client/underlaytest/transport_test.go
+new file mode 100644
+index 0000000..47ccf26
+--- /dev/null
++++ b/client/underlaytest/transport_test.go
+@@ -0,0 +1,145 @@
++// Package underlaytest exercises the proxy boundary without changing host routing
++// or opening network listeners. It is separate because strict mode is permanent
++// for a process after the first proxied client starts.
++package underlaytest
++
++import (
++	"context"
++	"errors"
++	"net"
++	"net/http"
++	"net/netip"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/coder/websocket"
++	wgconn "golang.zx2c4.com/wireguard/conn"
++	"google.golang.org/grpc"
++	"google.golang.org/grpc/health"
++	healthpb "google.golang.org/grpc/health/grpc_health_v1"
++	"google.golang.org/grpc/test/bufconn"
++
++	nbgrpc "github.com/netbirdio/netbird/client/grpc"
++	"github.com/netbirdio/netbird/client/iface/bind"
++	"github.com/netbirdio/netbird/client/iface/wgaddr"
++	"github.com/netbirdio/netbird/client/internal/peer"
++	nbnet "github.com/netbirdio/netbird/client/net"
++	"github.com/netbirdio/netbird/client/underlay"
++	"github.com/netbirdio/netbird/shared/relay/client/dialer/ws"
++)
++
++type proxyDialer struct {
++	mu           sync.Mutex
++	addresses    []string
++	grpcListener *bufconn.Listener
++	wsListener   *bufconn.Listener
++}
++
++func (p *proxyDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
++	p.mu.Lock()
++	p.addresses = append(p.addresses, address)
++	p.mu.Unlock()
++	if network != "tcp" {
++		return nil, errors.New("unexpected non-TCP underlay")
++	}
++	switch address {
++	case "management.invalid:443":
++		return p.grpcListener.DialContext(ctx)
++	case "relay.invalid:80":
++		return p.wsListener.DialContext(ctx)
++	default:
++		return nil, errors.New("proxy rejected destination")
++	}
++}
++
++func TestControlAndRelayUseOnlyUnderlay(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
++	defer cancel()
++	p := &proxyDialer{grpcListener: bufconn.Listen(65536), wsListener: bufconn.Listen(65536)}
++	defer p.grpcListener.Close()
++	defer p.wsListener.Close()
++	release, err := underlay.Acquire(p)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer release()
++	t.Setenv("HTTP_PROXY", "http://unreachable.invalid:1")
++	t.Setenv("HTTPS_PROXY", "http://unreachable.invalid:1")
++	server := grpc.NewServer()
++	healthpb.RegisterHealthServer(server, health.NewServer())
++	go server.Serve(p.grpcListener)
++	defer server.Stop()
++	conn, err := nbgrpc.CreateConnection(ctx, "management.invalid:443", false, "/management")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer conn.Close()
++	if _, err := healthpb.NewHealthClient(conn).Check(ctx, &healthpb.HealthCheckRequest{}); err != nil {
++		t.Fatal(err)
++	}
++
++	httpServer := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		c, err := websocket.Accept(w, r, nil)
++		if err != nil {
++			return
++		}
++		defer c.CloseNow()
++		typ, msg, err := c.Read(ctx)
++		if err == nil {
++			_ = c.Write(ctx, typ, msg)
++		}
++	})}
++	go httpServer.Serve(p.wsListener)
++	defer httpServer.Close()
++	relay, err := (ws.Dialer{}).Dial(ctx, "rel://relay.invalid:80", "")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer relay.Close()
++	if _, err := relay.Write([]byte("encrypted-wireguard-payload")); err != nil {
++		t.Fatal(err)
++	}
++	buf := make([]byte, 128)
++	n, err := relay.Read(buf)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if string(buf[:n]) != "encrypted-wireguard-payload" {
++		t.Fatal("relay payload changed")
++	}
++	if !peer.IsForceRelayed() {
++		t.Fatal("ICE is still permitted")
++	}
++
++	b := bind.NewICEBind(nil, wgaddr.Address{}, 1280)
++	receivers, _, err := b.Open(0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(receivers) != 1 {
++		t.Fatalf("host socket receivers opened: %d", len(receivers))
++	}
++	if _, err := b.GetICEMux(); !errors.Is(err, bind.ErrUDPMUXNotSupported) {
++		t.Fatalf("ICE mux enabled: %v", err)
++	}
++	ep := &wgconn.StdNetEndpoint{AddrPort: netip.MustParseAddrPort("192.0.2.1:51820")}
++	if err := b.Send([][]byte{{1, 2, 3}}, ep); !errors.Is(err, underlay.ErrDirectBlocked) {
++		t.Fatalf("direct WireGuard send: %v", err)
++	}
++	if err := b.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := nbnet.NewListener().ListenPacket(ctx, "udp", "127.0.0.1:0"); !errors.Is(err, underlay.ErrDirectBlocked) {
++		t.Fatalf("UDP listener bypass: %v", err)
++	}
++	release()
++	if _, err := nbnet.NewDialer().DialContext(ctx, "tcp", "management.invalid:443"); !errors.Is(err, underlay.ErrDirectBlocked) {
++		t.Fatalf("direct fallback after stop: %v", err)
++	}
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	if len(p.addresses) != 2 || p.addresses[0] != "management.invalid:443" || p.addresses[1] != "relay.invalid:80" {
++		t.Fatalf("unexpected proxy destinations: %v", p.addresses)
++	}
++}
+diff --git a/flow/client/client.go b/flow/client/client.go
+index fc07db8..a212382 100644
+--- a/flow/client/client.go
++++ b/flow/client/client.go
+@@ -18,6 +18,7 @@ import (
+ 	"google.golang.org/grpc/keepalive"
+ 
+ 	nbgrpc "github.com/netbirdio/netbird/client/grpc"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	"github.com/netbirdio/netbird/flow/proto"
+ 	"github.com/netbirdio/netbird/util/embeddedroots"
+ 	"github.com/netbirdio/netbird/util/wsproxy"
+@@ -74,6 +75,10 @@ func NewClient(addr, payload, signature string, interval time.Duration) (*GRPCCl
+ 	)
+ 
+ 	target := parsedURL.Host
++	if underlay.Enabled() {
++		target = "passthrough:///" + target
++		opts = append(opts, grpc.WithNoProxy())
++	}
+ 	conn, err := grpc.NewClient(target, opts...)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("creating new grpc client: %w", err)
+diff --git a/shared/relay/client/client.go b/shared/relay/client/client.go
+index 9bb061f..019db3a 100644
+--- a/shared/relay/client/client.go
++++ b/shared/relay/client/client.go
+@@ -15,6 +15,7 @@ import (
+ 	log "github.com/sirupsen/logrus"
+ 
+ 	"github.com/netbirdio/netbird/client/netevents/sweep"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	auth "github.com/netbirdio/netbird/shared/relay/auth/hmac"
+ 	"github.com/netbirdio/netbird/shared/relay/client/dialer"
+ 	netErr "github.com/netbirdio/netbird/shared/relay/client/dialer/net"
+@@ -408,7 +409,7 @@ func (c *Client) connect(ctx context.Context) (*RelayAddr, error) {
+ 	dialers := c.getDialers(mode)
+ 
+ 	var conn net.Conn
+-	if c.serverIP.IsValid() {
++	if c.serverIP.IsValid() && !underlay.Enabled() {
+ 		var err error
+ 		conn, err = c.dialRaceDirect(ctx, mode, dialers)
+ 		if err != nil {
+@@ -921,7 +922,9 @@ func (c *Client) handlePeersWentOfflineMsg(buf []byte) {
+ }
+ 
+ func connectedIP(conn net.Conn) netip.Addr {
+-	if conn == nil {
++	// A proxied connection reports the proxy endpoint, not the relay address.
++	// Keep the relay hostname intact for DNS resolution at the proxy.
++	if underlay.Enabled() || conn == nil {
+ 		return netip.Addr{}
+ 	}
+ 	addr := conn.RemoteAddr()
+diff --git a/shared/relay/client/dialer/quic/quic.go b/shared/relay/client/dialer/quic/quic.go
+index cbf6ea3..0f26e62 100644
+--- a/shared/relay/client/dialer/quic/quic.go
++++ b/shared/relay/client/dialer/quic/quic.go
+@@ -12,6 +12,7 @@ import (
+ 	log "github.com/sirupsen/logrus"
+ 
+ 	nbnet "github.com/netbirdio/netbird/client/net"
++	"github.com/netbirdio/netbird/client/underlay"
+ 	nbRelay "github.com/netbirdio/netbird/shared/relay"
+ 	quictls "github.com/netbirdio/netbird/shared/relay/tls"
+ )
+@@ -61,13 +62,25 @@ func (d Dialer) Dial(ctx context.Context, address, serverName string) (net.Conn,
+ 		return nil, fmt.Errorf("listen udp: %w", err)
+ 	}
+ 
+-	udpAddr, err := net.ResolveUDPAddr("udp", quicURL)
++	host, port, err := net.SplitHostPort(quicURL)
+ 	if err != nil {
++		udpConn.Close()
++		return nil, err
++	}
++	ips, err := underlay.LookupIPAddr(ctx, host)
++	if err != nil || len(ips) == 0 {
++		udpConn.Close()
++		return nil, fmt.Errorf("physical relay DNS failed")
++	}
++	udpAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(ips[0].String(), port))
++	if err != nil {
++		udpConn.Close()
+ 		return nil, fmt.Errorf("resolve %s: %w", quicURL, err)
+ 	}
+ 
+ 	session, err := quic.Dial(ctx, udpConn, udpAddr, tlsClientConfig, quicConfig)
+ 	if err != nil {
++		udpConn.Close()
+ 		if errors.Is(err, context.Canceled) {
+ 			return nil, err
+ 		}
+diff --git a/shared/relay/client/transport.go b/shared/relay/client/transport.go
+index 0027074..a5d1731 100644
+--- a/shared/relay/client/transport.go
++++ b/shared/relay/client/transport.go
+@@ -8,6 +8,7 @@ import (
+ 
+ 	log "github.com/sirupsen/logrus"
+ 
++	"github.com/netbirdio/netbird/client/underlay"
+ 	"github.com/netbirdio/netbird/shared/relay/client/dialer"
+ )
+ 
+@@ -41,6 +42,9 @@ const (
+ // transportModeFromEnv reads EnvRelayTransport, defaulting to auto for an empty
+ // or unrecognized value.
+ func transportModeFromEnv() TransportMode {
++	if underlay.Enabled() {
++		return TransportModeWS
++	}
+ 	switch TransportMode(strings.ToLower(strings.TrimSpace(os.Getenv(EnvRelayTransport)))) {
+ 	case "", TransportModeAuto:
+ 		return TransportModeAuto

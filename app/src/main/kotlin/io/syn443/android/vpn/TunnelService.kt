@@ -107,6 +107,7 @@ class TunnelService : VpnService() {
         if (!store.checkpoint().desiredOn) { retire(false); return START_NOT_STICKY }
         if (intent?.action == "fault-crash" && io.syn443.android.BuildConfig.DEBUG) terminateOwned()
         if (intent?.action == "fault-hang" && io.syn443.android.BuildConfig.DEBUG && verifiedPid()) Process.sendSignal(hostPid, 19)
+        if (intent?.action == "netbird-diagnose" && ready) token?.let { host?.diagnoseNetBird(it) }
         refreshNetwork()
         reconcile()
         handler.removeCallbacks(tick)
@@ -213,7 +214,7 @@ class TunnelService : VpnService() {
         try {
             val n = checkNotNull(network)
             val properties = checkNotNull(connectivity.getLinkProperties(n))
-            val rendered = EngineConfig.render(store.config())
+            val rendered = EngineConfig.render(store.config(), noBackupFilesDir)
             tun = tun ?: Builder().setSession("SYN443").setMtu(1400)
                 .addAddress("192.0.2.1", 30).addAddress("fd00:443::1", 126)
                 .addRoute("0.0.0.0", 0).addRoute("::", 0).addDnsServer("192.0.2.2")
@@ -238,6 +239,23 @@ class TunnelService : VpnService() {
     private var pendingConfig = ""
     private var linkSignature: String? = null // RAM only; never log physical addresses.
     private val platform = object : IPlatform.Stub() {
+        override fun physicalInterfaces(session: String): String {
+            check(session == token && Recovery.current(store.checkpoint(), boundGeneration))
+            val selected = checkNotNull(network)
+            val selectedEpoch = epoch
+            val properties = checkNotNull(connectivity.getLinkProperties(selected))
+            val name = checkNotNull(properties.interfaceName)
+            val iface = checkNotNull(NetworkInterface.getByName(name))
+            val addresses = properties.linkAddresses.filter { it.address is java.net.Inet4Address && !it.address.isLoopbackAddress && !it.address.isLinkLocalAddress }
+                .joinToString(" ") { "${it.address.hostAddress}/${it.prefixLength}" }
+            check(selected == network && selectedEpoch == epoch && session == token && Recovery.current(store.checkpoint(), boundGeneration))
+            if (addresses.isEmpty()) return ""
+            return "$name ${iface.index} ${iface.mtu} ${iface.isUp} true false ${iface.isPointToPoint} ${iface.supportsMulticast()}|$addresses"
+        }
+        override fun overlayState(session: String, raw: String) { handler.post {
+            if (session == token && Recovery.current(store.checkpoint(), boundGeneration) && !retiring)
+                runCatching { OverlaySnapshot.update(raw) }
+        } }
         override fun exchangeDNS(query: ByteArray, session: String): ByteArray {
             check(query.size in 12..4096 && session == token && Recovery.current(store.checkpoint(), boundGeneration))
             val selected = checkNotNull(network)
@@ -332,6 +350,7 @@ class TunnelService : VpnService() {
         }
     }.getOrDefault(false)
     private fun retire(heavy: Boolean) {
+        OverlaySnapshot.clear()
         if (retiring) return
         ready = false; retiring = true; retryHeavy = heavy || retryHeavy || store.checkpoint().attempt > 0
         retirementAt = SystemClock.uptimeMillis()

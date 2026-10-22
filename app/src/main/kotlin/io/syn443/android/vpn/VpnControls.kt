@@ -104,6 +104,36 @@ fun VpnControls(connectFromTile: Boolean = false) {
             else -> "Отключён"
         }, Modifier.testTag("vpn-status"))
         if (status.optString("reason").isNotEmpty()) Text("Диагностика: " + status.optString("reason"))
+        val overlay = status.optJSONObject("netbird")
+        if (overlay?.optBoolean("active") == true) {
+            val peerState = overlay.optJSONObject("peer_state") ?: JSONObject()
+            val age = overlay.optLong("snapshotAgeMs", Long.MAX_VALUE)
+            val sampledAge = runCatching { System.currentTimeMillis() - java.time.Instant.parse(peerState.getString("sampled_at")).toEpochMilli() }.getOrDefault(Long.MAX_VALUE)
+            Text("NetBird: ${overlay.optString("phase", "Unknown")}", Modifier.testTag("netbird-status"))
+            Text(if (overlay.optString("mode") == "direct") "Подключение напрямую; relay используется как резерв" else
+                "Через VLESS: ${peerState.optString("selected_proxy", "ожидание")}")
+            Text("Cloud: ${peerState.optBoolean("management_connected")}; signal: ${peerState.optBoolean("signal_connected")}")
+            if (age > 25_000 || sampledAge !in 0..25_000) Text("Статус NetBird устарел или ещё не получен")
+            if (overlay.optString("reason").isNotEmpty()) Text("NetBird: ${overlay.optString("reason")}")
+            val peers = peerState.optJSONArray("peers")
+            Text("Пиры: ${peers?.length() ?: 0}. Наличие пира не подтверждает доступность приложения.")
+            if (peers != null) for (i in 0 until minOf(peers.length(), 128)) {
+                val peer = peers.getJSONObject(i)
+                Text("${peer.optString("fqdn")} ${peer.optString("ip")}: ${peer.optString("state")}, " +
+                    if (peer.optBoolean("relayed")) "relay" else "direct/ожидание")
+            }
+            Button(onClick = { command("netbird-diagnose") }, enabled = peerState.optBoolean("active")) { Text("Проверить пиры NetBird") }
+            val diagnostics = overlay.optJSONObject("diagnostics")
+            if (diagnostics != null) {
+                Text("Проверка пиров: ${diagnostics.optString("state")}")
+                if (diagnostics.optBoolean("stale")) Text("Результат проверки относится к предыдущей сети")
+                val results = diagnostics.optJSONArray("results")
+                if (results != null) for (i in 0 until minOf(results.length(), 128)) {
+                    val result = results.getJSONObject(i)
+                    Text("${result.optString("fqdn")}: ${result.optString("state")}, ${result.optLong("rtt_ms")} мс")
+                }
+            }
+        }
         val next = status.optLong("nextWallMs")
         if (status.optBoolean("desiredOn") && next > System.currentTimeMillis()) Text("Повтор не ранее чем через ${(next - System.currentTimeMillis()) / 1_000} с, при доступной сети")
         Button(onClick = { requestConnect() }, modifier = Modifier.testTag("vpn-connect")) { Text("Подключиться") }

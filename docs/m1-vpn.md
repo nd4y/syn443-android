@@ -14,7 +14,7 @@ progress is required before clearing failure history. Binder death and a native
 progress timeout retire the old process before another identity owner starts.
 
 The current engine configuration accepts `outbounds`, `dns` and `route` with
-direct, HTTP, SOCKS, VLESS/XHTTP, SSH, selector and URL-test outbounds. The adapter
+direct, HTTP, SOCKS, VLESS/XHTTP, SSH, selector, URL-test and a single NetBird outbound. The adapter
 injects its sole TUN and DNS interception. This is a development import format,
 not signed managed provisioning. The production readiness check requires an
 actual HTTPS 204 response through the TUN. Engine liveness alone never means Online.
@@ -35,7 +35,7 @@ available to hermetic emulator tests and visibly marked in the UI.
 ## Evidence and limits
 
 - Seven deterministic recovery-model tests cover Stop, retry/budget bounds and time changes.
-- Seven instrumentation cases and six external-driver cases exercise real TUN/Go/HTTP CONNECT traffic, crash recovery,
+- Eight native instrumentation cases and six external-driver cases exercise real TUN/Go/HTTP CONNECT traffic, crash recovery,
   full native SIGSTOP recovery, Stop precedence, Wi-Fi loss and actual UI/controller process death. They must
   actually pass on every configured API; compilation is not acceptance.
 - Physical acceptance uses a separate private operator driver. Real credentials,
@@ -59,7 +59,32 @@ have a two-query concurrency bound, three-second cancellation deadline and
 session/network fencing; native tests reject cancelled, malformed and mismatched
 replies. Explicit configured UDP/TCP/TLS/HTTPS DNS transports remain separate.
 
-M1 remains **partial**. NetBird, optional private-route startup/failure isolation,
+## Optional NetBird module
+
+NetBird starts asynchronously after global engine construction. A missing setup
+key or failed enrollment cannot hold startup of other outbounds. Private routes
+remain attached to NetBird and fail closed while it is unready. One identity is
+allowed per process; identity files live only under an app-owned no-backup path,
+regardless of imported `state_directory`. Setup configuration is Keystore-encrypted;
+SDK identity files currently rely on Android app sandbox/file encryption, not an
+additional application encryption layer. These files must not enter diagnostics.
+
+Normal mode is `connection_mode: direct`: protected sockets, physical DNS and
+physical interface discovery avoid routing the underlay back into the TUN. Direct
+P2P is attempted before per-peer relay fallback. `connection_mode: vless` requires
+a separate VLESS-only detour; it cannot fall back to direct sockets. A failed start
+has bounded cleanup, a persisted jittered retry deadline and an exclusive SDK lease.
+Unconfirmed teardown requires action rather than starting another identity owner.
+The global native watchdog remains responsible for a frozen process.
+
+Cached status and peer roster travel through the existing session/generation
+fence, stay in controller RAM and are excluded from durable logs. UI status shows
+the actual mode and selected proxy. It distinguishes a started SDK, Cloud/signal
+state and peer state from data-path proof. Manual peer diagnostics use at most four
+workers and a two-minute job deadline; they do not run on the heartbeat loop.
+UI exposes cache freshness; a stale sample cannot establish connectivity.
+
+M1 remains **partial**. Physical NetBird/internal-probe acceptance,
 signed policy/offline rollback, full per-route status, exhaustive OS lifecycle,
 restricted cellular handover and measured energy gates remain open. Importing
 unsupported overlay configuration is rejected, never silently removed. The full

@@ -45,6 +45,7 @@ class EngineHostService : Service() {
                             ParcelFileDescriptor.fromFd(socket).use { if (!platform.protect(it, session)) error("socket protection rejected") }
                         }
                         override fun exchangeDNS(query: ByteArray): ByteArray = platform.exchangeDNS(query, session)
+                        override fun physicalInterfaces(): String = platform.physicalInterfaces(session)
                     }, name, index)
                     engine!!.start()
                     platform.event(session, READY)
@@ -57,13 +58,20 @@ class EngineHostService : Service() {
         }
         override fun pulse(session: String) {
             if (session != token) return
-            worker.post { if (session == token && engine?.pulse() == 1L) callback?.event(session, PULSE) }
+            worker.post { if (session == token && engine?.pulse() == 1L) {
+                callback?.event(session, PULSE)
+                engine?.netBirdStatus()?.let { callback?.overlayState(session, it) }
+            } }
         }
         override fun networkChanged(session: String, name: String, index: Int) {
             if (session != token) return
             latestNetwork = NetworkUpdate(session, name, index)
             worker.removeCallbacks(applyNetwork)
             worker.post(applyNetwork)
+        }
+        override fun diagnoseNetBird(session: String) {
+            if (session != token) return
+            worker.post { if (session == token) engine?.diagnoseNetBird() }
         }
     }
     @Volatile private var callback: IPlatform? = null
@@ -74,6 +82,7 @@ class EngineHostService : Service() {
         }
         override fun stop(token: String) = binder.stop(token)
         override fun pulse(token: String) = binder.pulse(token)
+        override fun diagnoseNetBird(token: String) = binder.diagnoseNetBird(token)
         override fun networkChanged(token: String, name: String, index: Int) = binder.networkChanged(token, name, index)
     }
     private fun finishHost() {

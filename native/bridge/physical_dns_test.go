@@ -9,6 +9,8 @@ import (
 
 type dnsProtector struct{ exchange func([]byte) ([]byte, error) }
 
+func (d dnsProtector) PhysicalInterfaces() (string, error) { return "", nil }
+
 func (d dnsProtector) Protect(int32) error                  { return nil }
 func (d dnsProtector) ExchangeDNS(q []byte) ([]byte, error) { return d.exchange(q) }
 func TestPhysicalDNSPreservesQuestionAndRejectsMismatchedReplies(t *testing.T) {
