@@ -32,6 +32,17 @@ class StateStore private constructor(context: Context) {
         catch (e: Exception) { state.failWrite(output); throw e }
         return value
     }
+    @Synchronized fun adjustCheckpoint(block: (Checkpoint) -> Checkpoint): Checkpoint {
+        val before = checkpoint()
+        val after = block(before)
+        if (after != before) update { put(it, after) }
+        return after
+    }
+    @Synchronized fun updateCurrent(generation: Long, block: (JSONObject) -> Unit): Boolean {
+        if (!io.syn443.recovery.Recovery.current(checkpoint(), generation)) return false
+        update(block)
+        return true
+    }
     fun checkpoint(value: JSONObject = read()) = Checkpoint(
         value.optBoolean("desiredOn"), value.optLong("generation"), value.optInt("attempt"),
         value.optLong("nextWallMs"), value.optLong("lastEarlyWallMs"),
@@ -41,13 +52,21 @@ class StateStore private constructor(context: Context) {
         value.put("desiredOn", cp.desiredOn).put("generation", cp.generation).put("attempt", cp.attempt)
             .put("nextWallMs", cp.nextWallMs).put("lastEarlyWallMs", cp.lastEarlyWallMs).put("heavyWallMs", JSONArray(cp.heavyWallMs))
     }
-    fun event(phase: String, code: String, epoch: Long) = update { value ->
-        value.put("phase", phase).put("reason", code).put("networkEpoch", epoch)
-        val events = value.optJSONArray("events") ?: JSONArray()
-        events.put(JSONObject().put("at", System.currentTimeMillis()).put("phase", phase).put("code", code)
-            .put("intentGeneration", value.optLong("generation")).put("networkEpoch", epoch))
-        while (events.length() > 64) events.remove(0)
-        value.put("events", events)
+    @Synchronized fun event(phase: String, code: String, epoch: Long, generation: Long? = null): Boolean {
+        if (generation != null) {
+            val cp = checkpoint()
+            if (cp.generation != generation) return false
+            if ((phase == "Off" && cp.desiredOn) || (phase != "Off" && !cp.desiredOn)) return false
+        }
+        update { value ->
+            value.put("phase", phase).put("reason", code).put("networkEpoch", epoch)
+            val events = value.optJSONArray("events") ?: JSONArray()
+            events.put(JSONObject().put("at", System.currentTimeMillis()).put("phase", phase).put("code", code)
+                .put("intentGeneration", value.optLong("generation")).put("networkEpoch", epoch))
+            while (events.length() > 64) events.remove(0)
+            value.put("events", events)
+        }
+        return true
     }
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -58,6 +77,7 @@ class StateStore private constructor(context: Context) {
         }.generateKey()
     }
     @Synchronized fun importConfig(raw: String) {
+        require(!checkpoint().desiredOn) { "stop before importing" }
         require(raw.toByteArray().size <= 262_144) { "configuration too large" }
         EngineConfig.validate(raw)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
@@ -65,14 +85,21 @@ class StateStore private constructor(context: Context) {
         val output = config.startWrite()
         try { output.write(cipher.iv.size); output.write(cipher.iv); output.write(ciphertext); config.finishWrite(output) }
         catch (e: Exception) { config.failWrite(output); throw e }
+        update { it.put("configRevision", revision(raw)) }
     }
     @Synchronized fun config(): String? {
         if (!config.baseFile.exists()) return null
         val bytes = config.openRead().use { it.readBytes() }
+        require(bytes.size >= 30) { "stored configuration is truncated" }
         val size = bytes[0].toInt() and 255
         require(size == 12 && bytes.size > size + 17)
-        return Cipher.getInstance("AES/GCM/NoPadding").apply {
+        val raw = Cipher.getInstance("AES/GCM/NoPadding").apply {
             init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(1, size + 1)))
         }.doFinal(bytes.copyOfRange(size + 1, bytes.size)).toString(Charsets.UTF_8)
+        val digest = revision(raw)
+        if (read().optString("configRevision") != digest) update { it.put("configRevision", digest) }
+        return raw
     }
+    private fun revision(raw: String) = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(raw.toByteArray()).joinToString("") { "%02x".format(it) }
 }

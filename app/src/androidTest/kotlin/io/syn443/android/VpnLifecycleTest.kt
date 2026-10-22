@@ -52,6 +52,10 @@ class VpnLifecycleTest {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         assertNull("Emulator harness must grant VPN permission before instrumentation starts", VpnService.prepare(context))
         call("disconnect")
+        await { pid() == null && !status().optBoolean("engineActive") }
+        // Each scenario starts with an independent synthetic budget. No reset
+        // occurs inside a scenario; real-device and release calls are rejected.
+        call("test-reset")
         server = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
         workers.execute { while (serving) runCatching { val socket = server.accept(); workers.execute { respond(socket) } } }
         val config = """{"outbounds":[{"type":"http","tag":"test-proxy","server":"127.0.0.1","server_port":${server.localPort}}],"route":{"final":"test-proxy"}}"""
@@ -146,6 +150,17 @@ class VpnLifecycleTest {
         repeat(3) { call("connect"); call("disconnect") }
         await { !status().optBoolean("desiredOn") && pid() == null }
         Thread.sleep(8_000)
+        assertFalse(status().getBoolean("desiredOn"))
+        assertNull(pid())
+    }
+    @Test fun notificationStopRetiresAFullyFrozenNativeHost() {
+        connect()
+        shell("content call --uri content://io.syn443.control --method fault-hang")
+        val notification = context.getSystemService(android.app.NotificationManager::class.java)
+            .activeNotifications.first { it.id == 443 }.notification
+        checkNotNull(notification.actions.first().actionIntent).send()
+        await { !status().optBoolean("desiredOn") && pid() == null && !status().optBoolean("engineActive") }
+        Thread.sleep(4_000)
         assertFalse(status().getBoolean("desiredOn"))
         assertNull(pid())
     }

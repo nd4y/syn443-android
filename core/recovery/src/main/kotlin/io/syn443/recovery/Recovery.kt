@@ -42,6 +42,15 @@ object Recovery {
     fun stable(state: Checkpoint, durationMs: Long, successfulChecks: Int): Checkpoint =
         if (durationMs >= 30_000 && successfulChecks >= 3) state.copy(attempt = 0, nextWallMs = 0) else state
 
+    fun normalizeClock(state: Checkpoint, now: Long): Checkpoint {
+        require(now >= 0)
+        // Rebase once after clock rollback; a previously valid wall deadline
+        // must never postpone recovery for hours or slide forward on each poll.
+        val horizon = if (state.heavyWallMs.size >= 3) WINDOW else 60_000L
+        return state.copy(nextWallMs = min(state.nextWallMs, add(now, horizon)),
+            lastEarlyWallMs = min(state.lastEarlyWallMs, now), heavyWallMs = state.heavyWallMs.map { min(it, now) })
+    }
+
     fun networkOpportunity(state: Checkpoint, now: Long): Checkpoint {
         require(now >= 0)
         if (!state.desiredOn || now < state.lastEarlyWallMs || now - state.lastEarlyWallMs < 5_000) return state

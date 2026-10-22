@@ -13,7 +13,11 @@ import io.syn443.recovery.Recovery
 
 /** One durable command writer in :controller. Shell access exists in debug builds only. */
 class ControlProvider : ContentProvider() {
-    override fun onCreate() = true
+    override fun onCreate(): Boolean {
+        val store = StateStore.get(checkNotNull(context))
+        if (store.checkpoint().desiredOn) store.event("Recovering", "controller_recreated", store.read().optLong("networkEpoch"))
+        return true
+    }
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         val context = checkNotNull(context)
         val caller = Binder.getCallingUid()
@@ -35,7 +39,6 @@ class ControlProvider : ContentProvider() {
                         } finally { file.delete() }
                     } else Base64.decode(requireNotNull(arg), Base64.NO_WRAP).toString(Charsets.UTF_8)
                     store.importConfig(raw)
-                    store.update { it.put("configRevision", java.security.MessageDigest.getInstance("SHA-256").digest(raw.toByteArray()).joinToString("") { b -> "%02x".format(b) }) }
                 }
                 "connect", "disconnect" -> {
                     val on = method == "connect"
@@ -51,10 +54,29 @@ class ControlProvider : ContentProvider() {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
                 }
+                "fault-ui", "fault-controller" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
+                    if (method == "fault-controller") {
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ Process.killProcess(Process.myPid()) }, 100)
+                    } else {
+                        val process = checkNotNull(context.getSystemService(android.app.ActivityManager::class.java).runningAppProcesses
+                            ?.firstOrNull { it.uid == Process.myUid() && it.processName == context.packageName })
+                        require(java.io.File("/proc/${process.pid}/cmdline").readText().trimEnd('\u0000') == context.packageName)
+                        Process.killProcess(process.pid)
+                    }
+                }
                 "test-health" -> {
                     require(io.syn443.android.BuildConfig.DEBUG)
                     require(arg == "synthetic-http" || arg == "production-https")
                     store.update { it.put("testHealth", arg == "synthetic-http") }
+                }
+                "test-reset" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+                    store.update { value ->
+                        require(!store.checkpoint(value).desiredOn && !value.optBoolean("engineActive"))
+                        val isolated = io.syn443.recovery.Checkpoint(generation = store.checkpoint(value).generation)
+                        store.put(value, Recovery.command(isolated, false))
+                    }
                 }
                 else -> error("unknown command")
             }

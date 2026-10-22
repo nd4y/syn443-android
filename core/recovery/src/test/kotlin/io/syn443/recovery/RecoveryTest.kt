@@ -43,5 +43,15 @@ class RecoveryTest {
         assertEquals(Long.MAX_VALUE, Recovery.failed(s, Long.MAX_VALUE - 1, 1.0).nextWallMs)
     }
     @Test(expected = IllegalArgumentException::class) fun rejectsNonFiniteJitter() { Recovery.delay(0, Double.NaN) }
+    @Test fun wallRollbackCannotCreateAnUnlimitedOrSlidingBan() {
+        val original = Checkpoint(true, 7, 4, Long.MAX_VALUE, 99_000, listOf(50_000, 51_000, 52_000))
+        val bounded = Recovery.normalizeClock(original, 1_000)
+        assertEquals(601_000L, bounded.nextWallMs)
+        assertEquals(listOf(1_000L, 1_000L, 1_000L), bounded.heavyWallMs)
+        assertEquals(1_000L, bounded.lastEarlyWallMs)
+        assertEquals(7L, bounded.generation)
+        assertEquals(bounded, Recovery.normalizeClock(bounded, 1_001))
+        assertEquals(61_000L, Recovery.normalizeClock(original.copy(heavyWallMs = emptyList()), 1_000).nextWallMs)
+    }
     @Test(expected = IllegalStateException::class) fun generationNeverWraps() { Recovery.command(Checkpoint(generation = Long.MAX_VALUE), true) }
 }

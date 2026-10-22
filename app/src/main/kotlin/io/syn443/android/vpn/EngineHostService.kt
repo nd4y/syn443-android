@@ -23,6 +23,11 @@ class EngineHostService : Service() {
     private var tun: ParcelFileDescriptor? = null
     private var lockFile: RandomAccessFile? = null
     private var lock: FileLock? = null
+    private data class NetworkUpdate(val session: String, val name: String, val index: Int)
+    @Volatile private var latestNetwork: NetworkUpdate? = null
+    private val applyNetwork = Runnable {
+        latestNetwork?.let { if (it.session == token) engine?.updateNetwork(it.name, it.index) }
+    }
 
     override fun onCreate() { super.onCreate(); workerThread.start(); worker = Handler(workerThread.looper) }
     private val binder = object : IEngineHost.Stub() {
@@ -56,7 +61,9 @@ class EngineHostService : Service() {
         }
         override fun networkChanged(session: String, name: String, index: Int) {
             if (session != token) return
-            worker.post { if (session == token) engine?.updateNetwork(name, index) }
+            latestNetwork = NetworkUpdate(session, name, index)
+            worker.removeCallbacks(applyNetwork)
+            worker.post(applyNetwork)
         }
     }
     @Volatile private var callback: IPlatform? = null

@@ -21,9 +21,11 @@ actual HTTPS 204 response through the TUN. Engine liveness alone never means Onl
 
 The debug-only shell API uses `content://io.syn443.control` with `status`,
 `connect`, `disconnect`, `resume`, `import` (base64 JSON), and bounded `logs`.
-For real credentials, use debug shell `import-file`: pipe JSON through `adb exec-in
-run-as io.syn443.android sh -c 'umask 077; cat > no_backup/operator-import.json'`,
-then call `import-file` without arguments. The fixed private staging file is bounded
+For real credentials, use debug shell `import-file`: create the fixed private
+`no_backup/operator-import.json` with `run-as io.syn443.android touch`, set mode
+600 with `run-as ... chmod`, then pipe JSON through `adb shell -T run-as
+io.syn443.android dd of=no_backup/operator-import.json`. Verify its SHA-256 before
+calling `import-file` without arguments. The fixed private staging file is bounded
 and removed after reading. Base64 shell arguments are for synthetic fixtures only.
 Only the same UID or ADB shell may call the provider; the exported debug provider additionally
 requires DUMP. Release builds do not export it. Debug `fault-crash` and `fault-hang`
@@ -32,8 +34,8 @@ available to hermetic emulator tests and visibly marked in the UI.
 
 ## Evidence and limits
 
-- Six deterministic recovery-model tests cover Stop, retry/budget bounds and time changes.
-- Six instrumentation cases and two external-driver cases exercise real TUN/Go/HTTP CONNECT traffic, crash recovery,
+- Seven deterministic recovery-model tests cover Stop, retry/budget bounds and time changes.
+- Seven instrumentation cases and six external-driver cases exercise real TUN/Go/HTTP CONNECT traffic, crash recovery,
   full native SIGSTOP recovery, Stop precedence, Wi-Fi loss and actual UI/controller process death. They must
   actually pass on every configured API; compilation is not acceptance.
 - Physical acceptance uses a separate private operator driver. Real credentials,
@@ -41,6 +43,15 @@ available to hermetic emulator tests and visibly marked in the UI.
 - Initial physical HTTPS connectivity and native crash/hang recovery have been
   observed on Android 14 and Android 17. This is bounded evidence, not endurance
   or energy acceptance.
+
+Independent emulator scenarios reset their synthetic checkpoint only while Off and
+after native ownership is released. This reset is debug/emulator-only; physical
+devices and release builds reject it. Budgets are never reset inside a scenario.
+The external controller-death case exhausts the persisted three-restart window
+and proves that another controller restart cannot launch a fourth native owner.
+Process-loss injection currently uses SIGKILL and full-process suspension uses
+SIGSTOP. Fatal JNI/Go signals and Android crash-loop suppression remain separate
+unverified OS gates.
 
 Default DNS uses Android's raw resolver bound explicitly to the selected physical
 Network. It never retains a Wi-Fi DNS server across a network change. Requests
