@@ -124,6 +124,7 @@ fun VpnControls(connectFromTile: Boolean = false) {
             Text("Cloud: ${peerState.optBoolean("management_connected")}; signal: ${peerState.optBoolean("signal_connected")}")
             if (age > 25_000 || sampledAge !in 0..25_000) Text("Статус NetBird устарел или ещё не получен")
             if (overlay.optString("reason").isNotEmpty()) Text("NetBird: ${overlay.optString("reason")}")
+            if (overlay.optString("last_failure").isNotEmpty()) Text("Ошибка NetBird: ${overlay.optString("last_failure")}")
             val peers = peerState.optJSONArray("peers")
             Text("Пиры: ${peers?.length() ?: 0}. Наличие пира не подтверждает доступность приложения.")
             if (peers != null) for (i in 0 until minOf(peers.length(), 128)) {

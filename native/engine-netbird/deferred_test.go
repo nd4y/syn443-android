@@ -2,11 +2,16 @@ package netbird
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/netbirdio/netbird/client/embed"
 	"github.com/sagernet/sing-box/adapter"
@@ -127,4 +132,36 @@ func TestCorruptedRetryCheckpointRequiresActionWithoutEnrollment(t *testing.T) {
 		t.Fatal("invalid checkpoint was silently reset")
 	}
 	d.Close()
+}
+
+type rejectedPeer struct{ peerClient }
+
+func (*rejectedPeer) Start(context.Context) error {
+	return status.Error(codes.PermissionDenied, "enrollment rejected")
+}
+func (*rejectedPeer) Stop(context.Context) error { return embed.ErrClientNotStarted }
+func TestRejectedEnrollmentRequiresActionInsteadOfRetryingForever(t *testing.T) {
+	d := deferredFixture(t)
+	d.current.newClient = func(embed.Options) (peerClient, error) { return &rejectedPeer{}, nil }
+	d.makePeer = func() (*Outbound, error) { t.Error("authorization rejection retried"); return nil, net.ErrClosed }
+	d.Start(adapter.StartStateStarted)
+	select {
+	case <-d.done:
+	case <-time.After(time.Second):
+		t.Fatal("authorization rejection did not finish")
+	}
+	state := d.state.Load().(moduleState)
+	if state.Phase != "NeedsAction" || state.Reason != "enrollment_rejected" || !strings.Contains(state.Failure, "PermissionDenied") {
+		t.Fatal("missing actionable diagnostic")
+	}
+	d.Close()
+}
+func TestStartupFailureRedactsCredentialsBeforeBoundingText(t *testing.T) {
+	key := "synthetic-enrollment-value"
+	secret := strings.Repeat("A", 43) + "="
+	message := "setup_key=" + strings.ToUpper(key) + " " + secret + " https://" + "user:placeholder@" + "example.invalid/path\n" + strings.Repeat("x", 600)
+	result := redactStartupFailure(errors.New(message), key)
+	if strings.Contains(result, strings.ToUpper(key)) || strings.Contains(result, secret) || strings.Contains(result, "placeholder") || strings.Contains(result, "\n") || len([]rune(result)) > 512 {
+		t.Fatal("unsafe startup diagnostic")
+	}
 }

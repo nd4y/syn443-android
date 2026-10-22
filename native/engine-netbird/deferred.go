@@ -9,10 +9,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/log"
@@ -33,6 +37,7 @@ type Deferred struct {
 	state          atomic.Value
 	report         atomic.Value
 	diagnostics    atomic.Value
+	failure        atomic.Value
 	options        OutboundOptions
 	startupTimeout time.Duration
 	cleanupTimeout time.Duration
@@ -48,6 +53,7 @@ type moduleState struct {
 	Mode    string     `json:"mode"`
 	Retry   retryState `json:"retry"`
 	Sampled int64      `json:"sampled_at_ms"`
+	Failure string     `json:"last_failure,omitempty"`
 }
 
 var deferredPeer struct {
@@ -73,13 +79,14 @@ func NewDeferredOutbound(ctx context.Context, router adapter.Router, logger log.
 	d.state.Store(moduleState{Active: true, Phase: "Configured", Mode: peer.options.ConnectionMode})
 	d.report.Store(`{"active":false,"peers":[]}`)
 	d.diagnostics.Store(`{"state":"unavailable","results":[]}`)
+	d.failure.Store("")
 	deferredPeer.Lock()
 	deferredPeer.current = d
 	deferredPeer.Unlock()
 	return d, nil
 }
 func (d *Deferred) set(phase, reason string, retry retryState) {
-	d.state.Store(moduleState{true, phase, reason, d.options.ConnectionMode, retry, time.Now().UnixMilli()})
+	d.state.Store(moduleState{Active: true, Phase: phase, Reason: reason, Mode: d.options.ConnectionMode, Retry: retry, Sampled: time.Now().UnixMilli(), Failure: d.failure.Load().(string)})
 }
 func (d *Deferred) Start(stage adapter.StartStage) error {
 	if stage == adapter.StartStateStarted {
@@ -201,6 +208,7 @@ func (d *Deferred) run() {
 			err = errors.New("overlay startup deadline")
 		}
 		if err == nil {
+			d.failure.Store("")
 			d.set("Started", "client_started", retry)
 			// One sampler only. If recorder access stalls, cache age reveals stale
 			// diagnostics; neither the native host heartbeat nor other routes block.
@@ -242,6 +250,7 @@ func (d *Deferred) run() {
 			_ = stopBounded(peer, d.cleanupTimeout)
 			return
 		}
+		d.failure.Store(redactStartupFailure(err, d.options.SetupKey))
 		if stopBounded(peer, d.cleanupTimeout) != nil {
 			d.set("NeedsAction", "cleanup_unconfirmed", retry)
 			return
@@ -250,6 +259,11 @@ func (d *Deferred) run() {
 		d.current = nil
 		d.mu.Unlock()
 		if d.ctx.Err() != nil {
+			return
+		}
+		switch status.Code(err) {
+		case codes.Unauthenticated, codes.PermissionDenied, codes.InvalidArgument, codes.FailedPrecondition:
+			d.set("NeedsAction", "enrollment_rejected", retry)
 			return
 		}
 		retry.Attempt = min(30, retry.Attempt+1)
@@ -261,6 +275,34 @@ func (d *Deferred) run() {
 		}
 		d.set("Recovering", "overlay_unavailable", retry)
 	}
+}
+
+var failureUUID = regexp.MustCompile(`[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}`)
+var failureKey = regexp.MustCompile(`[A-Za-z0-9+/]{43}=`)
+var failureUserinfo = regexp.MustCompile(`([a-z][a-z0-9+.-]*://)[^\s/"<>]+:[^\s/"<>]+@`)
+
+// Authorized runtime diagnostics only. No error text goes into durable logs.
+func redactStartupFailure(err error, setupKey string) string {
+	message := err.Error()
+	if setupKey != "" {
+		for _, key := range []string{setupKey, strings.ToLower(setupKey), strings.ToUpper(setupKey)} {
+			message = strings.ReplaceAll(message, key, "[redacted]")
+		}
+	}
+	message = failureUUID.ReplaceAllString(message, "[redacted-id]")
+	message = failureKey.ReplaceAllString(message, "[redacted-key]")
+	message = failureUserinfo.ReplaceAllString(message, "${1}[redacted]@")
+	message = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return ' '
+		}
+		return r
+	}, message)
+	runes := []rune(message)
+	if len(runes) > 512 {
+		message = string(runes[:512])
+	}
+	return message
 }
 func writeRetry(path string, state retryState) error {
 	data, err := json.Marshal(state)
