@@ -67,7 +67,7 @@ def main():
         await_condition(lambda: call('status').get('phase') == 'Online')
         private_input(json.dumps(publisher.binding(ports[1])), 'policy-bind-file')
         await_condition(lambda: call('status').get('policy', {}).get('phase') == 'committed' and call('status')['policy'].get('activeRevision') == 1)
-    scenarios = ['signedPolicyBootstrapsCurrentConfig', 'invalidPolicyAndImportCannotReplaceActive',
+    scenarios = ['signedPolicyBootstrapsCurrentConfig', 'healthyChangedCandidateCommits', 'invalidPolicyAndImportCannotReplaceActive',
                  'failedNativeCandidateRollsBackAndCannotReplay', 'requiredRegressionRollsBack',
                  'baselineOutageCanCommitDegraded', 'stopFencesPendingPolicy',
                  'controllerDeathDuringApplyRollsBackOffline', 'expiredLeaseBlocksWithoutDirectFallback',
@@ -87,6 +87,15 @@ def main():
                         assert pid(':engine') == original and call('status')['desiredOn']
                     else:
                         assert active == 1 and call('status')['policy']['lastKnownGoodRevision'] == 1
+                elif name.startswith('healthyChanged'):
+                    changed = copy.deepcopy(config)
+                    changed['outbounds'][0]['tag'] = 'new-proxy'
+                    changed['route']['final'] = 'new-proxy'
+                    before = proxy.progress
+                    stage(publisher.sign(changed, revision=2))
+                    await_condition(lambda: call('status')['policy']['phase'] == 'committed' and call('status')['policy']['activeRevision'] == 2 and call('status').get('phase') == 'Online', 90)
+                    assert pid(':engine') != original and proxy.progress > before
+                    assert call('status')['policy']['lastKnownGoodRevision'] == 2
                 elif name.startswith('invalid'):
                     recipient = publisher.device
                     try:
