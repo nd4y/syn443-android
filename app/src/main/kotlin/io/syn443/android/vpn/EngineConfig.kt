@@ -19,14 +19,14 @@ object EngineConfig {
         val final = value.optJSONObject("route")?.optString("final").orEmpty()
         require(final.isEmpty() || final in tags)
     }
-    fun render(raw: String?, dns: String): String {
+    fun render(raw: String?): String {
         val value = if (raw == null) JSONObject("""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}""") else JSONObject(raw).also { validate(raw) }
         value.put("log", JSONObject().put("disabled", true))
         value.put("inbounds", JSONArray().put(JSONObject().put("type", "tun").put("tag", "tun")
             .put("address", JSONArray().put("192.0.2.1/30").put("fd00:443::1/126"))
             .put("mtu", 1400).put("auto_route", false).put("stack", "gvisor")))
         if (!value.has("dns")) value.put("dns", JSONObject().put("servers", JSONArray().put(
-            JSONObject().put("type", "udp").put("tag", "physical-dns").put("server", dns))).put("final", "physical-dns"))
+            JSONObject().put("type", "local").put("tag", "physical-dns"))).put("final", "physical-dns"))
         val route = value.optJSONObject("route") ?: JSONObject()
         val rules = route.optJSONArray("rules") ?: JSONArray()
         val combined = JSONArray().put(JSONObject().put("port", 53).put("action", "hijack-dns"))

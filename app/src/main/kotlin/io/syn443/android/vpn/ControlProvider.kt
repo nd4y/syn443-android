@@ -22,9 +22,18 @@ class ControlProvider : ContentProvider() {
         return try {
             when (method) {
                 "status", "logs" -> Unit
-                "import" -> {
+                "import", "import-file" -> {
                     require(!store.checkpoint().desiredOn) { "stop before importing" }
-                    val raw = Base64.decode(requireNotNull(arg), Base64.NO_WRAP).toString(Charsets.UTF_8)
+                    val raw = if (method == "import-file") {
+                        require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
+                        // Fixed private staging path. Credentials travel over ADB stdin,
+                        // never shell arguments, shared storage or an arbitrary path.
+                        val file = java.io.File(context.noBackupFilesDir, "operator-import.json")
+                        try {
+                            require(file.length() in 1..262_144)
+                            file.readText(Charsets.UTF_8)
+                        } finally { file.delete() }
+                    } else Base64.decode(requireNotNull(arg), Base64.NO_WRAP).toString(Charsets.UTF_8)
                     store.importConfig(raw)
                     store.update { it.put("configRevision", java.security.MessageDigest.getInstance("SHA-256").digest(raw.toByteArray()).joinToString("") { b -> "%02x".format(b) }) }
                 }

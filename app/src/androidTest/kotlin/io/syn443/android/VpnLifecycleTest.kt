@@ -50,8 +50,7 @@ class VpnLifecycleTest {
         val emulator = Build.HARDWARE in setOf("ranchu", "goldfish") || Build.FINGERPRINT.startsWith("generic")
         require(emulator) { "Hermetic tests may overwrite synthetic config; physical acceptance uses a separate operator driver" }
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        if (VpnService.prepare(context) != null) shell("appops set ${context.packageName} ACTIVATE_VPN allow")
-        assertNull("Emulator VPN permission missing", VpnService.prepare(context))
+        assertNull("Emulator harness must grant VPN permission before instrumentation starts", VpnService.prepare(context))
         call("disconnect")
         server = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
         workers.execute { while (serving) runCatching { val socket = server.accept(); workers.execute { respond(socket) } } }
@@ -142,5 +141,12 @@ class VpnLifecycleTest {
         await(60_000) { status().optString("phase") == "Online" }
         assertEquals(old, pid())
         assertTrue(status().optLong("networkEpoch") > epoch)
+    }
+    @Test fun stopDuringForegroundServiceStartupNeverCrashesController() {
+        repeat(3) { call("connect"); call("disconnect") }
+        await { !status().optBoolean("desiredOn") && pid() == null }
+        Thread.sleep(8_000)
+        assertFalse(status().getBoolean("desiredOn"))
+        assertNull(pid())
     }
 }

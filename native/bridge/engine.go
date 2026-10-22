@@ -34,7 +34,10 @@ import (
 	"github.com/sagernet/sing/service"
 )
 
-type Protector interface{ Protect(fd int32) error }
+type Protector interface {
+	Protect(fd int32) error
+	ExchangeDNS(query []byte) ([]byte, error)
+}
 
 type Runtime struct {
 	box      *box.Box
@@ -58,6 +61,7 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 	group.RegisterSelector(or)
 	group.RegisterURLTest(or)
 	dr := dns.NewTransportRegistry()
+	registerPhysicalDNS(dr, protector)
 	transport.RegisterUDP(dr)
 	transport.RegisterTCP(dr)
 	transport.RegisterTLS(dr)

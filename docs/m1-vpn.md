@@ -21,7 +21,11 @@ actual HTTPS 204 response through the TUN. Engine liveness alone never means Onl
 
 The debug-only shell API uses `content://io.syn443.control` with `status`,
 `connect`, `disconnect`, `resume`, `import` (base64 JSON), and bounded `logs`.
-Only the same UID or ADB shell may call it; the exported debug provider additionally
+For real credentials, use debug shell `import-file`: pipe JSON through `adb exec-in
+run-as io.syn443.android sh -c 'umask 077; cat > no_backup/operator-import.json'`,
+then call `import-file` without arguments. The fixed private staging file is bounded
+and removed after reading. Base64 shell arguments are for synthetic fixtures only.
+Only the same UID or ADB shell may call the provider; the exported debug provider additionally
 requires DUMP. Release builds do not export it. Debug `fault-crash` and `fault-hang`
 target only a verified owned native PID. A fixed synthetic HTTP readiness mode is
 available to hermetic emulator tests and visibly marked in the UI.
@@ -29,14 +33,20 @@ available to hermetic emulator tests and visibly marked in the UI.
 ## Evidence and limits
 
 - Six deterministic recovery-model tests cover Stop, retry/budget bounds and time changes.
-- Four emulator cases exercise real TUN/Go/HTTP CONNECT traffic, crash recovery,
-  full native SIGSTOP recovery, Stop precedence and activity closure. They must
+- Six instrumentation cases and two external-driver cases exercise real TUN/Go/HTTP CONNECT traffic, crash recovery,
+  full native SIGSTOP recovery, Stop precedence, Wi-Fi loss and actual UI/controller process death. They must
   actually pass on every configured API; compilation is not acceptance.
 - Physical acceptance uses a separate private operator driver. Real credentials,
   device identifiers, screenshots, raw logs and signing keys never enter CI.
 - Initial physical HTTPS connectivity and native crash/hang recovery have been
   observed on Android 14 and Android 17. This is bounded evidence, not endurance
   or energy acceptance.
+
+Default DNS uses Android's raw resolver bound explicitly to the selected physical
+Network. It never retains a Wi-Fi DNS server across a network change. Requests
+have a two-query concurrency bound, three-second cancellation deadline and
+session/network fencing; native tests reject cancelled, malformed and mismatched
+replies. Explicit configured UDP/TCP/TLS/HTTPS DNS transports remain separate.
 
 M1 remains **partial**. NetBird, optional private-route startup/failure isolation,
 signed policy/offline rollback, full per-route status, exhaustive OS lifecycle,

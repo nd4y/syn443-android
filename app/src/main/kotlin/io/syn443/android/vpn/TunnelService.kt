@@ -36,6 +36,8 @@ import javax.net.ssl.HttpsURLConnection
 class TunnelService : VpnService() {
     private val handler = Handler(Looper.getMainLooper())
     private val checks = Executors.newSingleThreadExecutor()
+    private val dnsCallbacks = Executors.newFixedThreadPool(2)
+    private val dnsAdmission = java.util.concurrent.Semaphore(2)
     private lateinit var store: StateStore
     private lateinit var connectivity: ConnectivityManager
     @Volatile private var network: Network? = null
@@ -81,6 +83,10 @@ class TunnelService : VpnService() {
     }
     override fun onCreate() {
         super.onCreate()
+        // Satisfy every pending startForegroundService request even when a newer
+        // Stop arrives before onStartCommand, or a network callback arrives first.
+        notifyForeground("Подключаемся")
+        foreground = true
         store = StateStore.get(this)
         connectivity = getSystemService(ConnectivityManager::class.java)
         epoch = store.read().optLong("networkEpoch")
@@ -131,7 +137,9 @@ class TunnelService : VpnService() {
         }
         val selected = candidates.firstOrNull { connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true }
             ?: candidates.firstOrNull()
-        if (selected == network) return
+        val signature = selected?.let { connectivity.getLinkProperties(it)?.toString() }
+        if (selected == network && signature == linkSignature) return
+        linkSignature = signature
         network = selected
         epoch++
         stableSince = 0; successes = 0
@@ -153,7 +161,7 @@ class TunnelService : VpnService() {
     private val tick = object : Runnable {
         override fun run() {
             if (!store.checkpoint().desiredOn) { retire(false); stopSelf(); return }
-            val now = SystemClock.elapsedRealtime()
+            val now = SystemClock.uptimeMillis()
             fence.tick(now).effects.forEach { if (it is HostFence.Effect.TerminateOwned) terminateOwned() }
             if (binding && host == null && now - bindingAt > 15_000 && !retiring) failed("native_binding_timeout")
             if (retiring) { completeRetirement(); handler.postDelayed(this, 250); return }
@@ -191,8 +199,7 @@ class TunnelService : VpnService() {
         try {
             val n = checkNotNull(network)
             val properties = checkNotNull(connectivity.getLinkProperties(n))
-            val dns = properties.dnsServers.firstOrNull()?.hostAddress ?: error("DNS unavailable")
-            val rendered = EngineConfig.render(store.config(), dns)
+            val rendered = EngineConfig.render(store.config())
             tun = tun ?: Builder().setSession("SYN443").setMtu(1400)
                 .addAddress("192.0.2.1", 30).addAddress("fd00:443::1", 126)
                 .addRoute("0.0.0.0", 0).addRoute("::", 0).addDnsServer("192.0.2.2")
@@ -200,20 +207,39 @@ class TunnelService : VpnService() {
             token = UUID.randomUUID().toString()
             boundGeneration = cp.generation
             pendingConfig = rendered
-            startAt = SystemClock.elapsedRealtime(); lastPulse = startAt
+            startAt = SystemClock.uptimeMillis(); lastPulse = startAt
             val reservation = fence.reserveStart(startAt)
             check(reservation.rejection == null)
             hostToken = reservation.snapshot.token
             val newConnection = connectionFor(checkNotNull(token), cp.generation)
             connection = newConnection
             binding = bindService(Intent(this, EngineHostService::class.java), newConnection, Context.BIND_AUTO_CREATE)
-            bindingAt = SystemClock.elapsedRealtime()
+            bindingAt = SystemClock.uptimeMillis()
             if (!binding) failed("native_bind_failed") else phase("Connecting", "native_start")
         } catch (_: IllegalArgumentException) { phase("NeedsAction", "configuration_invalid") }
         catch (_: Exception) { failed("start_failed") }
     }
     private var pendingConfig = ""
+    private var linkSignature: String? = null // RAM only; never log physical addresses.
     private val platform = object : IPlatform.Stub() {
+        override fun exchangeDNS(query: ByteArray, session: String): ByteArray {
+            check(query.size in 12..4096 && session == token && Recovery.current(store.checkpoint(), boundGeneration))
+            val selected = checkNotNull(network)
+            check(dnsAdmission.tryAcquire()) { "DNS budget exhausted" }
+            val cancellation = android.os.CancellationSignal()
+            try {
+                val answer = java.util.concurrent.CompletableFuture<ByteArray>()
+                android.net.DnsResolver.getInstance().rawQuery(selected, query, android.net.DnsResolver.FLAG_NO_RETRY,
+                    dnsCallbacks, cancellation, object : android.net.DnsResolver.Callback<ByteArray> {
+                        override fun onAnswer(response: ByteArray, rcode: Int) { answer.complete(response) }
+                        override fun onError(error: android.net.DnsResolver.DnsException) { answer.completeExceptionally(error) }
+                    })
+                val response = answer.get(3, java.util.concurrent.TimeUnit.SECONDS)
+                check(selected == network && session == token && Recovery.current(store.checkpoint(), boundGeneration))
+                check(response.size <= 65535)
+                return response
+            } finally { cancellation.cancel(); dnsAdmission.release() }
+        }
         override fun protect(fd: ParcelFileDescriptor, session: String): Boolean = fd.use {
             if (session != token || !store.checkpoint().let { it.desiredOn && it.generation == boundGeneration }) return false
             val n = network ?: return false
@@ -223,11 +249,11 @@ class TunnelService : VpnService() {
             if (session != token || !Recovery.current(store.checkpoint(), boundGeneration)) return@post
             when (kind) {
                 EngineHostService.READY -> {
-                    val transition = fence.started(checkNotNull(hostToken), SystemClock.elapsedRealtime())
-                    if (transition.snapshot.phase == HostFence.Phase.RUNNING) { ready = true; lastPulse = SystemClock.elapsedRealtime(); probe() }
+                    val transition = fence.started(checkNotNull(hostToken), SystemClock.uptimeMillis())
+                    if (transition.snapshot.phase == HostFence.Phase.RUNNING) { ready = true; lastPulse = SystemClock.uptimeMillis(); probe() }
                     else { terminateOwned(); failed("native_late_start") }
                 }
-                EngineHostService.PULSE -> lastPulse = SystemClock.elapsedRealtime()
+                EngineHostService.PULSE -> lastPulse = SystemClock.uptimeMillis()
                 EngineHostService.FAILED -> failed("native_start_failed")
                 EngineHostService.INVALID -> { phase("NeedsAction", "configuration_or_capability_invalid"); retire(false) }
             }
@@ -240,7 +266,10 @@ class TunnelService : VpnService() {
             }
             host = IEngineHost.Stub.asInterface(binder)
             try {
-                hostPid = checkNotNull(host).pid()
+                // Do not make a synchronous IPC on the watchdog's looper: a host
+                // frozen before the handshake must not freeze the supervisor.
+                hostPid = checkNotNull(getSystemService(android.app.ActivityManager::class.java).runningAppProcesses
+                    ?.firstOrNull { it.uid == Process.myUid() && it.processName == "$packageName:engine" }).pid
                 pidIdentity = processIdentity(hostPid)
                 check(verifiedPid())
                 binder.linkToDeath({ handler.post { if (session == token && !retiring) failed("native_died") } }, 0)
@@ -277,17 +306,17 @@ class TunnelService : VpnService() {
     private fun retire(heavy: Boolean) {
         if (retiring) return
         ready = false; retiring = true; retryHeavy = heavy
-        retirementAt = SystemClock.elapsedRealtime()
+        retirementAt = SystemClock.uptimeMillis()
         fence.requestStop(retirementAt)
         token?.let { runCatching { host?.stop(it) } }
         handler.postDelayed({ if (retiring) { terminateOwned(); completeRetirement() } }, 3_000)
         completeRetirement()
     }
     private fun completeRetirement() {
-        if (binding && hostPid == 0 && SystemClock.elapsedRealtime() - retirementAt < 3_000) return
+        if (binding && hostPid == 0 && SystemClock.uptimeMillis() - retirementAt < 3_000) return
         if (verifiedPid() || !ownerReleased()) return
         if (binding) connection?.let { runCatching { unbindService(it) } }
-        hostToken?.let { fence.confirmedExit(it, true, SystemClock.elapsedRealtime()) }
+        hostToken?.let { fence.confirmedExit(it, true, SystemClock.uptimeMillis()) }
         hostToken = null
         connection = null
         binding = false; host = null; token = null; hostPid = 0; pidIdentity = null; retiring = false
@@ -304,7 +333,7 @@ class TunnelService : VpnService() {
     private fun probe() {
         if (probeInFlight || !ready || network == null || System.currentTimeMillis() < store.checkpoint().nextWallMs) return
         val currentToken = token; val currentEpoch = epoch; val generation = boundGeneration
-        lastProbe = SystemClock.elapsedRealtime(); probeInFlight = true
+        lastProbe = SystemClock.uptimeMillis(); probeInFlight = true
         checks.execute {
             val result = runCatching {
                 val synthetic = io.syn443.android.BuildConfig.DEBUG && store.read().optBoolean("testHealth")
@@ -326,7 +355,7 @@ class TunnelService : VpnService() {
                 probeInFlight = false
                 if (currentToken != token || currentEpoch != epoch || !Recovery.current(store.checkpoint(), generation)) return@post
                 if (ok) {
-                    val now = SystemClock.elapsedRealtime()
+                    val now = SystemClock.uptimeMillis()
                     if (stableSince == 0L) stableSince = now
                     successes++
                     store.update { store.put(it, Recovery.stable(store.checkpoint(it), now - stableSince, successes)) }
@@ -352,6 +381,7 @@ class TunnelService : VpnService() {
         if (binding) connection?.let { runCatching { unbindService(it) } }
         tun?.close(); tun = null
         checks.shutdownNow()
+        dnsCallbacks.shutdownNow()
         super.onDestroy()
     }
     companion object {

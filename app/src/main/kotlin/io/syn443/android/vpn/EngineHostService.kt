@@ -39,6 +39,7 @@ class EngineHostService : Service() {
                         override fun protect(socket: Int) {
                             ParcelFileDescriptor.fromFd(socket).use { if (!platform.protect(it, session)) error("socket protection rejected") }
                         }
+                        override fun exchangeDNS(query: ByteArray): ByteArray = platform.exchangeDNS(query, session)
                     }, name, index)
                     engine!!.start()
                     platform.event(session, READY)

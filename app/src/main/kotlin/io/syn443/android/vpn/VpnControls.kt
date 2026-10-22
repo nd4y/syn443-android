@@ -19,6 +19,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -33,6 +36,13 @@ fun VpnControls(connectFromTile: Boolean = false) {
     var status by remember { mutableStateOf(JSONObject()) }
     var message by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val lifecycle = (context as LifecycleOwner).lifecycle
+    var visible by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, _ -> visible = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     fun command(method: String, arg: String? = null) {
         val result = context.contentResolver.call(controlUri, method, arg, null)
         message = if (result?.getBoolean("ok") == true) "Команда принята" else "Не удалось выполнить команду"
@@ -68,8 +78,8 @@ fun VpnControls(connectFromTile: Boolean = false) {
             }
         }
     }
-    LaunchedEffect(Unit) {
-        while (true) {
+    LaunchedEffect(visible) {
+        while (visible) {
             val raw = withContext(Dispatchers.IO) { runCatching { context.contentResolver.call(controlUri, "status", null, null)?.getString("json") }.getOrNull() }
             if (raw != null) status = JSONObject(raw)
             delay(1_000)

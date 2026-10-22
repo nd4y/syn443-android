@@ -8,7 +8,8 @@ import (
 
 type testProtector struct{ called bool }
 
-func (p *testProtector) Protect(fd int32) error { p.called = true; return errors.New("rejected") }
+func (p *testProtector) Protect(fd int32) error                   { p.called = true; return errors.New("rejected") }
+func (p *testProtector) ExchangeDNS(query []byte) ([]byte, error) { return nil, errors.New("rejected") }
 func TestRejectsInvalidContextBeforeOpeningDescriptors(t *testing.T) {
 	if _, err := NewRuntime("{}", -1, &testProtector{}, "test", 1); err == nil {
 		t.Fatal("negative FD accepted")
