@@ -35,8 +35,38 @@ jobs:
       - run: python3 tools/check_contracts.py
       - run: python3 -m unittest discover -s tools -p 'test_*.py'
       - run: bash -n tools/run_emulator_tests.sh tools/prepare_android_tools.sh
-  jvm-and-apk:
+  native:
     needs: public-data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.26.7'
+          cache-dependency-path: native/bridge/go.sum
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '15859902'
+          packages: 'platform-tools ndk;27.3.13750724'
+      - run: SYN443_RACE=1 GOMEMLIMIT=3GiB ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.3.13750724" bash native/build_engine.sh
+      - run: python3 tools/check_native.py native/build/engine.aar
+      - run: python3 tools/check_public_data.py native/build/engine.aar
+      - run: bash tools/scan_secrets.sh native/build/engine.aar
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: embedded-native-engine
+          path: native/build/engine.aar
+          if-no-files-found: error
+          retention-days: 7
+  jvm-and-apk:
+    needs: [public-data, native]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -47,15 +77,20 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: embedded-native-engine
+          path: native/build
       - uses: gradle/actions/wrapper-validation@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
           cmdline-tools-version: '15859902'
           packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
-      - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :core:host-lifecycle:check :core:host-lifecycle:jacocoTestReport :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :core:host-lifecycle:check :core:host-lifecycle:jacocoTestReport :core:recovery:test :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - run: python3 tools/check_test_evidence.py jvm
       - run: python3 tools/check_test_evidence.py host
+      - run: python3 tools/check_test_evidence.py recovery
       - run: python3 tools/check_apk.py app/build/outputs/apk/debug/app-debug.apk
       - run: '"$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 app/build/outputs/apk/debug/app-debug.apk'
       - name: Dependency inventory
@@ -67,7 +102,7 @@ jobs:
         if: always()
         run: |
           paths=()
-          for path in core/decision/build/reports core/decision/build/test-results core/host-lifecycle/build/reports core/host-lifecycle/build/test-results app/build/reports dependency-inventory.txt; do
+          for path in core/decision/build/reports core/decision/build/test-results core/host-lifecycle/build/reports core/host-lifecycle/build/test-results core/recovery/build/reports core/recovery/build/test-results app/build/reports dependency-inventory.txt; do
             if [ -e "$path" ]; then paths+=("$path"); fi
           done
           test "${#paths[@]}" -gt 0
@@ -83,6 +118,8 @@ jobs:
             core/decision/build/test-results/
             core/host-lifecycle/build/reports/
             core/host-lifecycle/build/test-results/
+            core/recovery/build/reports/
+            core/recovery/build/test-results/
             app/build/reports/
             dependency-inventory.txt
           retention-days: 14
@@ -147,6 +184,10 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: embedded-native-engine
+          path: native/build
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
           cmdline-tools-version: '15859902'

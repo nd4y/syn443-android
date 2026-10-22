@@ -1,0 +1,44 @@
+{
+  "go": "1.26.7",
+  "gomobile": "v0.1.12",
+  "sources": {
+    "sing-box": {
+      "url": "https://github.com/AlwaysBusyStack/sing-box.git",
+      "base": "476d2436e84995f97fb3af605934cf07d3f95907",
+      "revision": "f4cd71253d9ce90126dcd78d58dd7428a6e622a0",
+      "patchSha256": "e8ed9e5a4bdd0cefb24950c069affcd3c6b993a91eeedf3433265e67710825bc",
+      "license": "GPL-3.0-or-later"
+    },
+    "net": {
+      "url": "https://github.com/golang/net.git",
+      "base": "7770ec48d03fec35e378665337b4faca93c38423",
+      "revision": "8edc62a8e0e68124c043843895b35ec522931f3e",
+      "patchSha256": "04ca1587c5db4e921bcecbf6cd1a18e1588d3d27fb89e0f96ea650e2fcca6c93",
+      "license": "upstream license retained"
+    },
+    "utls": {
+      "url": "https://github.com/AlwaysBusyStack/utls.git",
+      "base": "4da93ccb72d66ca8e949a3aadb8388b4e645dc6d",
+      "revision": "4da93ccb72d66ca8e949a3aadb8388b4e645dc6d",
+      "patchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "license": "upstream license retained"
+    },
+    "amneziawg-go": {
+      "url": "https://github.com/amnezia-vpn/amneziawg-go.git",
+      "base": "b5928efb6ca19f0153958460c3d141f04abc5c2e",
+      "revision": "f4f4c999267437c3eb909e8d0e5278fb4596d9a7",
+      "patchSha256": "3226ecede7b19b06856dcdfed8d29e0010db8696a1b3d2191fb9f36e68fd1b2d",
+      "license": "upstream license retained"
+    },
+    "netbird": {
+      "url": "https://github.com/netbirdio/netbird.git",
+      "base": "cf017119711184a0661062a0c8ac2043e4e8d411",
+      "revision": "cf017119711184a0661062a0c8ac2043e4e8d411",
+      "patchSha256": "e508d5fd3b010f219ffbb27582e0dbc1e8cdd041a477b6144e96f50b5fc59f2f",
+      "localWorkingPatch": true,
+      "license": "BSD-3-Clause with upstream AGPL directory exceptions; original licenses retained"
+    }
+  },
+  "compatibilityPatchSha256": "312d85698791190d3cfa0da988239e1d61ae0e68f442e34ef6d532cca639b47d",
+  "omittedUnrelatedTest": "common/urltest/udp_test.go (contains synthetic credential URL; not a copied recovery test)"
+}

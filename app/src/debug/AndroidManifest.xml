@@ -1,5 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <application android:usesCleartextTraffic="true">
+        <provider android:name=".vpn.ControlProvider" android:exported="true"
+            android:permission="android.permission.DUMP" tools:replace="android:exported" />
         <service
             android:name=".HostProbeService"
             android:exported="false"

@@ -6,5 +6,5 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "SYN443"
-include(":core:decision", ":core:host-lifecycle", ":app")
+include(":core:decision", ":core:host-lifecycle", ":core:recovery", ":app")
 

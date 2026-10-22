@@ -7,10 +7,13 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=6
+    minimum=21
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
+elif mode=="recovery":
+    paths=list((root/"core/recovery/build/test-results/test").glob("TEST-*.xml"))
+    minimum=7
 else: raise SystemExit("unknown evidence type")
 assert paths,"No JUnit XML evidence produced"
 cases=[]
@@ -24,7 +27,15 @@ assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="emulator":
     required={"selectionAndStaleNetworkResult", "explicitStopRejectsLateCompletion", "darkThemeByDefault",
               "workerRunsInSeparateProcessAndStops", "wedgedWorkerCanBeTerminatedAndRebound",
-              "foreignSessionCannotTerminateHost"}
+              "foreignSessionCannotTerminateHost", "realTunTrafficAndExplicitStop",
+              "nativeCrashRecoversButNewerStopWins", "fullyFrozenNativeProcessIsKilledOutsideItsControlLoop",
+              "closingActivityDoesNotStopVpn", "lostNetworkCannotRemainSelectedFromAStaleSystemSnapshot",
+              "uiProcessDeathKeepsRealTunTraffic", "controllerDeathRetiresFrozenNativeAndPreservesIntent",
+              "stopDuringForegroundServiceStartupNeverCrashesController", "twoHopTunTrafficCrossesBothProxies",
+              "ingressFailureRecoversWithoutNativeRestart", "egressFailureRecoversWithoutNativeRestart",
+              "controllerRestartBudgetSurvivesOwnerDeath", "notificationStopRetiresAFullyFrozenNativeHost",
+              "unavailableOptionalOverlayDoesNotBlockVpnOrLeakPrivateRoute",
+              "forceStopWaitsForForegroundReopenAndPreservesIntent"}
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"
 print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
 

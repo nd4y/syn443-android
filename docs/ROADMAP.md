@@ -6,10 +6,10 @@ A buildable Android diagnostic shell and CI tests are deliverables, not proof of
 Single VpnService/TUN owner and isolated native host; direct path, two-hop ingress/exit, NetBird/internal probe.
 Real Wi-Fi/cellular handover, fault attribution, native hang/crash, offline config recovery and energy budgets.
 Required before the full panel: REC-01-06 / AC82-AC90. Persist desiredOn/config/intentGeneration across UI, tile, notification and API; reconcile with bounded exponential backoff/jitter and shared budgets. Stop fences every pending/current effect. Prove optional-outbound startup/recovery without private-route leaks, full native hang detection, controller/service death and exclusive TUN/identity ownership. Validate reboot/unlock, Force stop, revoke, competing VPN, Always-on/lockdown and truthful per-route status with minimal redacted events.
-At implementation, every reproducible scenario runs in GitHub Actions with controlled clock/jitter/fault injection; actual Wi-Fi/LTE/restricted LTE, Doze, OS behavior and energy budgets require separate Pixel evidence. These requirements are planned; the existing JVM fence and responsive-control process harness do not implement them.
+Every reproducible implemented scenario runs in GitHub Actions with controlled clock/jitter/fault injection; actual Wi-Fi/LTE/restricted LTE, Doze, OS behavior and energy budgets require separate physical evidence. The [M1 VPN checkpoint](m1-vpn.md) adds an embedded engine, TUN owner, durable recovery controller and full native fault tests; the complete gate remains partial.
 Do not build the full panel before this gate proves feasibility.
-The first M1 building block is the pure JVM [host ownership fence](host-lifecycle.md). It does not satisfy the physical gate or connect a VPN; Android process/TUN integration remains pending.
-The [Android process fault harness](process-probe.md) exercises real Binder death and a blocked synthetic worker in debug builds. Production native ownership and all TUN/traffic paths remain pending.
+The pure JVM [host ownership fence](host-lifecycle.md) now backs the Android supervisor. It does not by itself satisfy the physical gate.
+The older [Android process fault harness](process-probe.md) exercises a synthetic worker; the newer native lifecycle tests separately exercise actual embedded Go/TUN traffic. Keep their evidence distinct.
 ## M2 - identity and provisioning
 Keycloak/QR device enrollment, DPoP, signed bundles/trust/lease, transactional activation, revoke/rollback and durable jobs.
 ## M3 - engines, sources and administration
