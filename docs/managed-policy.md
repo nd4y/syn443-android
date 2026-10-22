@@ -6,7 +6,9 @@ behind a separately provisioned bearer capability. Full Keycloak/device enrollme
 RBAC, signing-job authorization, root rotation and cohort publication remain M2+.
 The API executable binds loopback only; external delivery requires authenticated
 TLS termination. Android debug builds additionally allow a specifically provisioned
-127.0.0.1 transport for USB tests; release delivery requires HTTPS.
+127.0.0.1 transport only on disposable emulators. Physical and release delivery
+require HTTPS. A separately trusted operator CA may be installed in the initial
+binding for a private pilot; normal chain/expiry and hostname checks remain enabled.
 
 Compact JWS has exactly three protected header members: alg=ES256,
 kid=<pinned publication key>, typ=syn443-policy+jws. Unknown headers, algorithms,

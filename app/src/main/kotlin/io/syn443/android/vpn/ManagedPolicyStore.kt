@@ -11,7 +11,7 @@ import org.json.JSONObject
 import java.net.URI
 
 @Serializable data class PolicyBinding(val device: String, val keys: Map<String, String>, val url: String,
-    val bearer: String, val serverTimeMs: Long)
+    val bearer: String, val serverTimeMs: Long, val tlsCaDer: String = "")
 @Serializable data class PolicyDisk(val binding: PolicyBinding? = null, val journal: Journal = Journal(),
     val anchorWall: Long = 0, val anchorElapsed: Long = 0, val anchorBoot: Int = -1,
     val applyDeadlineElapsed: Long = 0)
@@ -42,10 +42,25 @@ class ManagedPolicyStore private constructor(context: Context) {
         val b = Policy.json.decodeFromJsonElement<PolicyBinding>(Canonical.parse(raw))
         require(b.device.matches(Regex("[a-zA-Z0-9_-]{8,64}")) && b.keys.size in 1..4 && b.keys.keys.all { it.matches(Regex("[a-zA-Z0-9_-]{1,64}")) } && b.keys.values.all { it.length in 80..256 })
         require(b.bearer.length in 24..256 && b.bearer.all { it.code in 33..126 } && b.serverTimeMs > 0)
+        require(b.tlsCaDer.length <= 8192)
         val u = URI(b.url)
         require(u.userInfo == null && u.fragment == null && u.host != null &&
-            (u.scheme == "https" || (io.syn443.android.BuildConfig.DEBUG && u.scheme == "http" && u.host == "127.0.0.1")))
+            (u.scheme == "https" || (io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish") && u.scheme == "http" && u.host == "127.0.0.1")))
         save(PolicyDisk(binding = b, anchorWall = b.serverTimeMs, anchorElapsed = SystemClock.elapsedRealtime(), anchorBoot = boot()))
+    }
+    fun deliveryConnection(network: android.net.Network, binding: PolicyBinding): java.net.HttpURLConnection {
+        val connection = network.openConnection(java.net.URL(binding.url)) as java.net.HttpURLConnection
+        if (binding.tlsCaDer.isNotEmpty()) {
+            require(connection is javax.net.ssl.HttpsURLConnection)
+            val der = java.util.Base64.getDecoder().decode(binding.tlsCaDer)
+            val certificate = java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(der.inputStream()) as java.security.cert.X509Certificate
+            certificate.checkValidity()
+            val trust = java.security.KeyStore.getInstance(java.security.KeyStore.getDefaultType()).apply { load(null); setCertificateEntry("operator-control-plane-ca", certificate) }
+            val managers = javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm()).apply { init(trust) }
+            connection.sslSocketFactory = javax.net.ssl.SSLContext.getInstance("TLS").apply { init(null, managers.trustManagers, null) }.socketFactory
+            // Default HTTPS hostname verification remains in force.
+        }
+        return connection
     }
     @Synchronized fun verify(raw: String, d: PolicyDisk = read(), time: Long = now(d)): Verified {
         val v = verified[raw] ?: Policy.verify(raw, checkNotNull(d.binding).keys, d.binding.device, time).also {

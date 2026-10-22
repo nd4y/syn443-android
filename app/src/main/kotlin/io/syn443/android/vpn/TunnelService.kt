@@ -490,7 +490,7 @@ class TunnelService : VpnService() {
             val generation = store.checkpoint().generation; val physical = network; val currentEpoch = epoch
             policyWorker.execute {
                 val response = runCatching {
-                    val c = checkNotNull(physical).openConnection(URL(binding.url)) as HttpURLConnection
+                    val c = policies.deliveryConnection(checkNotNull(physical), binding)
                     try {
                         c.connectTimeout = 5_000; c.readTimeout = 5_000; c.instanceFollowRedirects = false
                         val cancel = Runnable { c.disconnect() }; handler.postDelayed(cancel, 12_000)
