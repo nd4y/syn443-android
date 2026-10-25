@@ -7,6 +7,7 @@ python3 - "$root/native" "$work" <<'PY'
 import hashlib,json,pathlib,subprocess,sys
 root,work=map(pathlib.Path,sys.argv[1:])
 lock=json.loads((root/'engine-lock.json').read_text())
+assert subprocess.check_output(['go','env','GOVERSION'],text=True).strip()=='go'+lock['go'], 'Use the exact patched Go toolchain from engine-lock.json'
 for name,source in lock['sources'].items():
     patch=(root/'patches'/f'{name}.patch').read_bytes()
     assert hashlib.sha256(patch).hexdigest()==source['patchSha256']

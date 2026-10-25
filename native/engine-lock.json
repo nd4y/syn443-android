@@ -1,5 +1,5 @@
 {
-  "go": "1.26.7",
+  "go": "1.26.10",
   "gomobile": "v0.1.12",
   "sources": {
     "sing-box": {

@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=42
+    minimum=44
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -23,6 +23,9 @@ elif mode=="observability":
 elif mode=="health":
     paths=list((root/"core/health/build/test-results/test").glob("TEST-*.xml"))
     minimum=18
+elif mode=="identity":
+    paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
+    minimum=13
 else: raise SystemExit("unknown evidence type")
 assert paths,"No JUnit XML evidence produced"
 cases=[]
@@ -34,6 +37,7 @@ for path in paths:
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="emulator":
+    identity_required={"keystoreIdentityPersistsSignsAndCannotExportPrivateMaterial", "identityKeysAreIndependentAndCannotDeleteUnrelatedAliases"}
     required={"selectionAndStaleNetworkResult", "explicitStopRejectsLateCompletion", "darkThemeByDefault",
               "workerRunsInSeparateProcessAndStops", "wedgedWorkerCanBeTerminatedAndRebound",
               "foreignSessionCannotTerminateHost", "realTunTrafficAndExplicitStop",
@@ -60,6 +64,7 @@ if mode=="emulator":
     required.add("missingVpnConsentPreservesIntentWithoutStartingForegroundService")
     required |= {"resourceRequestsAreBoundedRedactedAndDoNotChangeIntent", "resourceSnapshotIsExplicitAndVisible"}
     required |= {"slowAndroidSocketReadHasAnAbsoluteDeadline", "cancelledAndroidBatchCannotBecomeAFalseBaseline"}
+    required |= identity_required
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"
 print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
 
