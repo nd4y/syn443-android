@@ -49,6 +49,22 @@ class ResourcesTest {
         assertEquals(3000L, sampler.sample(30_000, 30_000).processes[0].window.cpuPermille)
     }
 
+    @Test fun sequentialClockReadsAndMillisecondQuantizationDoNotResetWindow() {
+        val sampler = ResourceSampler { reading() }
+        sampler.sample(100, 99)
+        val rounded = sampler.sample(30_100, 30_100)
+        assertEquals("measured", rounded.processes[0].window.state)
+        assertEquals(30_000L, rounded.processes[0].window.awakeMs)
+        val bracketed = ResourceSampler { reading() }
+        bracketed.sample(100, 80, 20)
+        assertEquals("measured", bracketed.sample(30_100, 30_100).processes[0].window.state)
+        val invalid = ResourceSampler { reading() }
+        invalid.sample(100, 78, 20)
+        assertEquals("clock_reset", invalid.sample(30_100, 30_100).processes[0].window.state)
+        rejected { sampler.sample(60_100, 60_100, -1) }
+        rejected { sampler.sample(60_100, 60_100, 1001) }
+    }
+
     @Test fun processReplacementAndCounterResetCreateNewBaselines() {
         var id = "a"; var cpu = 40L
         val sampler = ResourceSampler { reading(id, cpu) }

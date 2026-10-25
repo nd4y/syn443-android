@@ -11,7 +11,7 @@ All automatable implemented behavior must run on pull requests and main in GitHu
 
 Physical-only release gates: real restricted LTE, RF handover, vendor power management, measured idle energy, external-provider availability and long endurance.
 CI must list these as pending rather than skip them and report success.
-Resource observations add nine JVM cases with a 90% line-coverage gate and two Android cases for the real proc source/cache/intent invariants and manual UI. See [measurement semantics and limits](resource-observation.md).
+Resource observations add ten JVM cases with a 90% line-coverage gate and two Android cases for the real proc source/cache/intent invariants and manual UI. See [measurement semantics and limits](resource-observation.md).
 Coverage applies to implemented code; line coverage alone is not behavioral coverage.
 All fixtures use synthetic endpoints, identifiers and secrets. No real provider credentials are needed in CI.
 Every later feature PR updates requirements-register with scope and concrete evidence.

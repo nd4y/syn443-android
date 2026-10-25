@@ -18,6 +18,7 @@ Fields:
 | Field | Meaning |
 | --- | --- |
 | sampledElapsedMs / sampledUptimeMs | Local monotonic observation times, with / without suspend |
+| clockReadSpanMs | Elapsed-time bracket around the sequential uptime/elapsed reads |
 | sampleAgeMs / cached / minIntervalMs | Age at the request, cache admission and minimum spacing |
 | processes[].role / state | Fixed role; available, not_running, unavailable or process_changed |
 | cpuTimeMs | Process user + system CPU time from proc ticks; excludes child processes |
@@ -35,7 +36,10 @@ exception, process name, PID, file name, command line or credentials are returne
 Separate-role failure does not discard the other role. CPU uses an elapsed-time
 denominator that includes suspend; awake time is exposed separately. Multicore
 usage may exceed 100%. Replacement, decreasing counters or clock reset prevent
-comparison across incompatible samples. A cached sample is explicitly historical
+comparison across incompatible samples. Sequential clock reads have a measured
+bracket (maximum one second), plus one millisecond of quantization uncertainty.
+An awake delta exceeding elapsed only within that uncertainty is clamped to
+elapsed; a larger inconsistency resets the window. A cached sample is explicitly historical
 and may refer to a previous engine; it is never a connectivity/health verdict.
 
 The UI renders a manual snapshot and instructs the user to take two readings at
@@ -43,7 +47,7 @@ least 30 seconds apart. Values stay historical until another explicit request.
 No automatic upload, resource history, diagnostic bundle, native Go heap metrics,
 remote retention or fleet telemetry pipeline is implemented in this increment.
 
-Acceptance: nine JVM cases cover admission, exact spacing, suspend/multicore math,
+Acceptance: ten JVM cases cover admission, exact spacing, clock-read uncertainty, suspend/multicore math,
 replacement/reset, unknown sources, PID/UID/parser bounds and arithmetic overflow;
 the module has a 90% line-coverage gate. Android tests check the real proc source,
 strict field allowlists, shared cache, unchanged intent/config and the manual UI.

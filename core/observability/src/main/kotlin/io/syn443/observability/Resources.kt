@@ -11,15 +11,16 @@ data class Window(val state: String, val elapsedMs: Long? = null, val awakeMs: L
     val cpuPermille: Long? get() = if (elapsedMs != null && cpuMs != null) (cpuMs.toDouble() * 1000 / elapsedMs).toLong() else null
 }
 data class Observation(val role: Role, val reading: Reading, val window: Window)
-data class ResourceReport(val elapsedMs: Long, val uptimeMs: Long, val ageMs: Long, val cached: Boolean, val processes: List<Observation>)
+data class ResourceReport(val elapsedMs: Long, val uptimeMs: Long, val ageMs: Long, val cached: Boolean,
+    val processes: List<Observation>, val clockReadSpanMs: Long = 0)
 
 /** No timers, IO, persistence or network. A controller owns exactly one bounded cache. */
 class ResourceSampler(private val source: (Role) -> Reading) {
     companion object { const val MIN_INTERVAL_MS = 30_000L }
     private var last: ResourceReport? = null
 
-    @Synchronized fun sample(elapsedMs: Long, uptimeMs: Long): ResourceReport {
-        require(elapsedMs >= 0 && uptimeMs in 0..elapsedMs)
+    @Synchronized fun sample(elapsedMs: Long, uptimeMs: Long, clockReadSpanMs: Long = 0): ResourceReport {
+        require(elapsedMs >= 0 && uptimeMs in 0..elapsedMs && clockReadSpanMs in 0..1000)
         val previous = last
         if (previous != null && elapsedMs >= previous.elapsedMs && uptimeMs >= previous.uptimeMs &&
             elapsedMs - previous.elapsedMs < MIN_INTERVAL_MS) {
@@ -33,16 +34,18 @@ class ResourceSampler(private val source: (Role) -> Reading) {
                 current == null -> "unavailable"
                 previous == null || old == null -> "baseline"
                 elapsedMs <= previous.elapsedMs || uptimeMs < previous.uptimeMs ||
-                    uptimeMs - previous.uptimeMs > elapsedMs - previous.elapsedMs -> "clock_reset"
+                    uptimeMs - previous.uptimeMs - (elapsedMs - previous.elapsedMs) > previous.clockReadSpanMs + 1 -> "clock_reset"
                 current.identity != old.identity -> "process_changed"
                 current.cpuMs < old.cpuMs -> "counter_reset"
                 else -> "measured"
             }
             val window = if (state == "measured") Window(state, elapsedMs - previous!!.elapsedMs,
-                uptimeMs - previous.uptimeMs, current!!.cpuMs - old!!.cpuMs) else Window(state)
+                // The uptime read precedes the elapsed read. Previous read span and
+                // millisecond quantization can make awake exceed elapsed slightly.
+                (uptimeMs - previous.uptimeMs).coerceAtMost(elapsedMs - previous.elapsedMs), current!!.cpuMs - old!!.cpuMs) else Window(state)
             Observation(role, if (current == null) reading.copy(counters = null) else reading, window)
         }
-        return ResourceReport(elapsedMs, uptimeMs, 0, false, observations).also { last = it }
+        return ResourceReport(elapsedMs, uptimeMs, 0, false, observations, clockReadSpanMs).also { last = it }
     }
 }
 

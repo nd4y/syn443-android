@@ -59,8 +59,10 @@ class ResourceDiagnostics(private val context: Context) {
     }
 
     fun snapshot(): JSONObject {
+        val before = SystemClock.elapsedRealtime()
         val uptime = SystemClock.uptimeMillis()
-        val report = sampler.sample(SystemClock.elapsedRealtime(), uptime)
+        val elapsed = SystemClock.elapsedRealtime()
+        val report = sampler.sample(elapsed, uptime, elapsed - before)
         val processes = JSONArray()
         for (observation in report.processes) {
             val counters = observation.reading.counters
@@ -76,6 +78,7 @@ class ResourceDiagnostics(private val context: Context) {
                     .put("cpuMs", window.cpuMs ?: JSONObject.NULL).put("cpuPermille", window.cpuPermille ?: JSONObject.NULL)))
         }
         return JSONObject().put("schemaVersion", 1).put("sampledElapsedMs", report.elapsedMs)
+            .put("clockReadSpanMs", report.clockReadSpanMs)
             .put("sampledUptimeMs", report.uptimeMs).put("sampleAgeMs", report.ageMs).put("cached", report.cached)
             .put("minIntervalMs", ResourceSampler.MIN_INTERVAL_MS).put("processes", processes)
     }
