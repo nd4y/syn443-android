@@ -604,10 +604,15 @@ class TunnelService : VpnService() {
         val generation = store.checkpoint().generation; val activation = d.journal.activationGeneration
         val currentEpoch = epoch; val session = token
         policyWorker.execute {
-            val results = job.run(candidate.payload.activation.checks)
+            val batch = job.run(candidate.payload.activation.checks)
             handler.post {
                 if (policyJob === job) policyJob = null
                 if (destroyed || retiring || !ready || !Recovery.current(store.checkpoint(), generation) || currentEpoch != epoch || session != token || activation != policies.read().journal.activationGeneration) return@post
+                if (!batch.complete) {
+                    store.event(store.read().optString("phase"), "policy_checks_incomplete", epoch)
+                    return@post
+                }
+                val results = batch.values()
                 if (policies.read().journal.phase == "prepared") {
                     var began = false
                     store.effectCurrent(generation) {
