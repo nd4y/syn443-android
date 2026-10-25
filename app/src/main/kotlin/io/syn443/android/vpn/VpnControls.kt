@@ -35,6 +35,8 @@ fun VpnControls(consentGeneration: Long = -1) {
     val context = LocalContext.current
     var status by remember { mutableStateOf(JSONObject()) }
     var message by remember { mutableStateOf("") }
+    var resources by remember { mutableStateOf<JSONObject?>(null) }
+    var resourcesBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val lifecycle = (context as LifecycleOwner).lifecycle
     var visible by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
@@ -163,6 +165,34 @@ fun VpnControls(consentGeneration: Long = -1) {
         if (status.optBoolean("desiredOn") && next > System.currentTimeMillis()) Text("Повтор не ранее чем через ${(next - System.currentTimeMillis()) / 1_000} с, при доступной сети")
         Button(onClick = { requestConnect() }, modifier = Modifier.testTag("vpn-connect")) { Text("Подключиться") }
         Button(onClick = { command("disconnect") }, modifier = Modifier.testTag("vpn-disconnect")) { Text("Отключить") }
+        Button(onClick = {
+            resourcesBusy = true
+            scope.launch {
+                resources = withContext(Dispatchers.IO) { runCatching {
+                    val result = context.contentResolver.call(controlUri, "resources", null, null)
+                    check(result?.getBoolean("ok") == true)
+                    JSONObject(checkNotNull(result?.getString("json")))
+                }.getOrNull() }
+                resourcesBusy = false
+                if (resources == null) message = "Не удалось получить показатели ресурсов"
+            }
+        }, enabled = !resourcesBusy, modifier = Modifier.testTag("resource-refresh")) { Text("Измерить ресурсы") }
+        resources?.let { snapshot ->
+            Text("Ресурсы: снимок по запросу, без фонового сбора", Modifier.testTag("resource-status"))
+            Text("Возраст при запросе: ${snapshot.optLong("sampleAgeMs")} мс. CPU: 100% = одно логическое ядро. Это не замер батареи.")
+            val processes = snapshot.getJSONArray("processes")
+            for (i in 0 until processes.length()) {
+                val process = processes.getJSONObject(i)
+                val role = if (process.getString("role") == "controller") "Контроллер" else "Движок"
+                if (process.getString("state") != "available") Text("$role: показатели недоступны (${process.getString("state")})")
+                else {
+                    val rss = if (process.isNull("rssBytes")) "н/д" else "${process.getLong("rssBytes") / 1_048_576} MiB"
+                    val window = process.getJSONObject("window")
+                    val cpu = if (window.isNull("cpuPermille")) "нужно два измерения с интервалом от 30 с" else "${window.getLong("cpuPermille") / 10.0}% за ${window.getLong("elapsedMs") / 1000} с"
+                    Text("$role: RSS $rss; CPU $cpu; потоки ${process.opt("threads")}; дескрипторы ${process.opt("fileDescriptors")}")
+                }
+            }
+        }
         Button(onClick = { importer.launch(arrayOf("application/json", "text/plain")) }, enabled = !status.optBoolean("desiredOn") && policy?.optBoolean("managed") != true) { Text("Импорт конфигурации движка") }
         Text("M1: импорт профилей и пилот управляемых политик. Регистрация устройства на сервере пока недоступна.")
         if (message.isNotEmpty()) Text(message)

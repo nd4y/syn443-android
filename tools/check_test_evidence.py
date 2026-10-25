@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=38
+    minimum=40
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -17,6 +17,9 @@ elif mode=="recovery":
 elif mode=="policy":
     paths=list((root/"core/policy/build/test-results/test").glob("TEST-*.xml"))
     minimum=12
+elif mode=="observability":
+    paths=list((root/"core/observability/build/test-results/test").glob("TEST-*.xml"))
+    minimum=9
 else: raise SystemExit("unknown evidence type")
 assert paths,"No JUnit XML evidence produced"
 cases=[]
@@ -52,6 +55,7 @@ if mode=="emulator":
     required.add("intentSentinelIsNonWakeupAndCancelledByStop")
     required.add("localRestartBudgetDoesNotPoisonHealthyRenewal")
     required.add("missingVpnConsentPreservesIntentWithoutStartingForegroundService")
+    required |= {"resourceRequestsAreBoundedRedactedAndDoNotChangeIntent", "resourceSnapshotIsExplicitAndVisible"}
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"
 print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
 

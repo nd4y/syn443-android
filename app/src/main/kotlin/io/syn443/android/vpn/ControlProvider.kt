@@ -13,6 +13,7 @@ import io.syn443.recovery.Recovery
 
 /** One durable command writer in :controller. Shell access exists in debug builds only. */
 class ControlProvider : ContentProvider() {
+    private val resources by lazy { ResourceDiagnostics(checkNotNull(context).applicationContext) }
     companion object { @Volatile var explicitConnectInProcess = false }
     override fun onCreate(): Boolean {
         val store = StateStore.get(checkNotNull(context))
@@ -36,6 +37,7 @@ class ControlProvider : ContentProvider() {
         val store = StateStore.get(context)
         return try {
             when (method) {
+                "resources" -> return Bundle().apply { putBoolean("ok", true); putString("json", resources.snapshot().toString()) }
                 "status", "logs" -> Unit
                 "foreground-open" -> {
                     val generation = arg?.toLongOrNull()
