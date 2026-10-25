@@ -10,5 +10,6 @@ class PolicyChecks(synthetic: Boolean = false) {
     private val job = CheckJob(pool, NetworkProbe(synthetic), { android.os.SystemClock.elapsedRealtime() })
     fun cancel() = job.cancel()
     fun run(checks: List<Check>) = job.run(checks)
+    val failure get() = job.failure
     companion object { private val pool = ProbePool() }
 }

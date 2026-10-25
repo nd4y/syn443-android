@@ -22,7 +22,7 @@ elif mode=="observability":
     minimum=10
 elif mode=="health":
     paths=list((root/"core/health/build/test-results/test").glob("TEST-*.xml"))
-    minimum=12
+    minimum=18
 else: raise SystemExit("unknown evidence type")
 assert paths,"No JUnit XML evidence produced"
 cases=[]

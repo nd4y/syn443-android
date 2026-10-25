@@ -59,7 +59,7 @@ internal fun status204(input: java.io.InputStream): Boolean {
     fun line(): String {
         val result = StringBuilder()
         while (remaining-- > 0) {
-            val value = input.read(); require(value >= 0)
+            val value = input.read(); if (value < 0) throw java.io.EOFException()
             if (value == 10) { require(result.endsWith("\r")); return result.dropLast(1).toString() }
             require(value == 13 || value in 32..126); result.append(value.toChar())
         }

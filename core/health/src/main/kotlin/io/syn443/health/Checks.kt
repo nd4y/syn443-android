@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 enum class Outcome { PASS, FAIL, UNAVAILABLE, CANCELLED, DEADLINE }
+enum class Failure { DNS, TLS, EOF, TIMEOUT, TRANSPORT }
 data class Batch(val outcomes: List<Outcome>) {
     val complete: Boolean get() = outcomes.all { it == Outcome.PASS || it == Outcome.FAIL }
     fun values(): List<Boolean> { check(complete); return outcomes.map { it == Outcome.PASS } }
@@ -45,6 +46,8 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
     private val cancelled = AtomicBoolean()
     private val active = AtomicReference<ProbeScope?>()
     private val pending = AtomicReference<Future<Boolean>?>()
+    @Volatile var failure: Failure? = null
+        private set
     init { require(checkMillis in 1..3_000 && batchMillis in 1..30_000) }
     fun cancel() {
         cancelled.set(true)
@@ -85,9 +88,17 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
         } catch (_: CancellationException) { Outcome.CANCELLED
         } catch (_: InterruptedException) { Thread.currentThread().interrupt(); cancel(); Outcome.CANCELLED
         } catch (_: TimeoutException) {
+            failure = Failure.TIMEOUT
             if (cancelled.get()) Outcome.CANCELLED else if (clockMillis() >= deadline) Outcome.DEADLINE
             else if (!started.get()) Outcome.UNAVAILABLE else Outcome.FAIL
-        } catch (_: ExecutionException) {
+        } catch (error: ExecutionException) {
+            failure = when (error.cause) {
+                is java.net.UnknownHostException -> Failure.DNS
+                is javax.net.ssl.SSLException -> Failure.TLS
+                is java.io.EOFException -> Failure.EOF
+                is java.net.SocketTimeoutException -> Failure.TIMEOUT
+                else -> Failure.TRANSPORT
+            }
             if (cancelled.get()) Outcome.CANCELLED else Outcome.FAIL
         } finally {
             scope.cancel(); future?.cancel(true)

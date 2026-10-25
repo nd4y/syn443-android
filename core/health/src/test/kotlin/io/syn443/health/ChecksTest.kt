@@ -115,8 +115,22 @@ class ChecksTest {
         assertTrue(status("HTTP/1.0 204\r\n\r\n"))
         assertFalse(status("HTTP/1.1 302 Found\r\nLocation: https://example.org/\r\n\r\n"))
         assertFalse(status("HTTP/1.1 2040 Invalid\r\n\r\n"))
-        for (invalid in listOf("HTTP/1.1 204\n\n", "HTTP/1.1 204\r\n", "HTTP/1.1 204\r\nNoColon\r\n\r\n", "HTTP/1.1 204\r\nX: "+"a".repeat(16_384)+"\r\n\r\n")) {
+        assertThrows(java.io.EOFException::class.java) { status("HTTP/1.1 204\r\n") }
+        for (invalid in listOf("HTTP/1.1 204\n\n", "HTTP/1.1 204\r\nNoColon\r\n\r\n", "HTTP/1.1 204\r\nX: "+"a".repeat(16_384)+"\r\n\r\n")) {
             assertThrows(IllegalArgumentException::class.java) { status(invalid) }
+        }
+    }
+    @Test fun onlyFixedFailureClassesLeaveTheWorker() {
+        ProbePool().use { pool ->
+            for ((error, expected) in listOf(
+                java.net.UnknownHostException("sensitive-target") to Failure.DNS,
+                javax.net.ssl.SSLException("sensitive-certificate") to Failure.TLS,
+                java.io.EOFException() to Failure.EOF,
+                java.net.SocketTimeoutException() to Failure.TIMEOUT,
+                IllegalArgumentException("sensitive-input") to Failure.TRANSPORT)) {
+                val job = CheckJob(pool, Probe { _, _ -> throw error })
+                assertEquals(Outcome.FAIL, job.run(listOf(check)).outcomes.single()); assertEquals(expected, job.failure)
+            }
         }
     }
 }
