@@ -13,6 +13,13 @@ import org.junit.Test
 class PrototypeTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    @Test fun resourceSnapshotIsExplicitAndVisible() {
+        compose.onNodeWithTag("resource-status").assertDoesNotExist()
+        compose.onNodeWithTag("resource-refresh").performScrollTo().performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("resource-status").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("resource-status").assertTextContains("без фонового сбора", substring = true)
+    }
+
     @OptIn(ExperimentalTestApi::class)
     @Test fun darkThemeByDefault() {
         compose.onNodeWithTag("prototype").assertExists()
