@@ -10,8 +10,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 8
-        versionName = "0.3.1-m1-resources"
+        versionCode = 9
+        versionName = "0.3.2-m1-checks"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }
@@ -25,6 +25,7 @@ android {
 }
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 dependencies {
+    implementation(project(":core:health"))
     implementation(project(":core:observability"))
     implementation(project(":core:policy"))
     implementation(project(":core:host-lifecycle"))

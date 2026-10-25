@@ -63,7 +63,7 @@ class TunnelService : VpnService() {
     private var startAt = 0L
     private var stableSince = 0L
     private var successes = 0
-    private var probeInFlight = false
+    private var healthJob: PolicyChecks? = null
     private var retryHeavy = false
     private var retiring = false
     @Volatile private var boundGeneration = -1L
@@ -176,6 +176,7 @@ class TunnelService : VpnService() {
         network = selected
         epoch++
         policyJob?.cancel()
+        healthJob?.cancel(); healthJob = null
         stableSince = 0; successes = 0
         store.update { value -> value.put("networkEpoch", epoch); store.put(value, Recovery.networkOpportunity(store.checkpoint(value), System.currentTimeMillis())) }
         if (selected == null) { phase("NoNetwork", "network_unavailable"); return }
@@ -398,6 +399,7 @@ class TunnelService : VpnService() {
     }.getOrDefault(false)
     private fun retire(heavy: Boolean) {
         policyJob?.cancel()
+        healthJob?.cancel(); healthJob = null
         OverlaySnapshot.clear()
         if (retiring) return
         token?.let { runCatching { host?.leaseDeadline(it, 1L) } }
@@ -448,7 +450,7 @@ class TunnelService : VpnService() {
         retire(true)
     }
     private fun probe() {
-        if (probeInFlight || !ready || network == null || System.currentTimeMillis() < store.checkpoint().nextWallMs) return
+        if (healthJob != null || !ready || network == null || System.currentTimeMillis() < store.checkpoint().nextWallMs) return
         val remaining = 5_000 - (SystemClock.uptimeMillis() - lastProbe)
         if (lastProbe > 0 && remaining > 0) {
             handler.removeCallbacks(earlyProbe)
@@ -458,27 +460,25 @@ class TunnelService : VpnService() {
         handler.removeCallbacks(earlyProbe)
         val currentToken = token; val currentEpoch = epoch; val generation = boundGeneration
         val activation = policies.read().journal.activationGeneration
-        lastProbe = SystemClock.uptimeMillis(); probeInFlight = true
+        val synthetic = io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish") && store.read().optBoolean("testHealth")
+        val job = PolicyChecks(synthetic); healthJob = job
+        lastProbe = SystemClock.uptimeMillis()
         checks.execute {
-            val result = runCatching {
-                val synthetic = io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish") && store.read().optBoolean("testHealth")
-                val connection = URL(if (synthetic) "http://203.0.113.10/generate_204" else "https://www.gstatic.com/generate_204")
-                    .openConnection() as HttpURLConnection
-                try { connection.connectTimeout = 5_000; connection.readTimeout = 5_000; connection.instanceFollowRedirects = false
-                    connection.responseCode == 204 } finally { connection.disconnect() }
-            }
-            val ok = result.getOrDefault(false)
-            val code = when (result.exceptionOrNull()) {
-                is java.net.UnknownHostException -> "dns_resolution_failed"
-                is javax.net.ssl.SSLException -> "tls_failed"
-                is java.io.EOFException -> "transport_eof"
-                is java.net.SocketTimeoutException -> "network_timeout"
+            val result = job.run(listOf(io.syn443.policy.Check("internet", "https_204", if (synthetic) "https://health.example.org/generate_204" else "https://www.gstatic.com/generate_204")))
+            val ok = result.complete && result.values().single()
+            val code = when (job.failure) {
+                io.syn443.health.Failure.DNS -> "dns_resolution_failed"
+                io.syn443.health.Failure.TLS -> "tls_failed"
+                io.syn443.health.Failure.EOF -> "transport_eof"
+                io.syn443.health.Failure.TIMEOUT -> "network_timeout"
                 null -> "required_https_failed"
                 else -> "transport_failed"
             }
             handler.post {
-                probeInFlight = false
+                if (healthJob !== job) return@post
+                healthJob = null
                 if (destroyed || retiring || !ready || currentToken != token || currentEpoch != epoch || activation != policies.read().journal.activationGeneration || !Recovery.current(store.checkpoint(), generation)) return@post
+                if (!result.complete) { phase("Recovering", "health_check_incomplete", generation); return@post }
                 if (ok) {
                     val now = SystemClock.uptimeMillis()
                     if (stableSince == 0L) stableSince = now
@@ -604,10 +604,15 @@ class TunnelService : VpnService() {
         val generation = store.checkpoint().generation; val activation = d.journal.activationGeneration
         val currentEpoch = epoch; val session = token
         policyWorker.execute {
-            val results = job.run(candidate.payload.activation.checks)
+            val batch = job.run(candidate.payload.activation.checks)
             handler.post {
                 if (policyJob === job) policyJob = null
                 if (destroyed || retiring || !ready || !Recovery.current(store.checkpoint(), generation) || currentEpoch != epoch || session != token || activation != policies.read().journal.activationGeneration) return@post
+                if (!batch.complete) {
+                    store.event(store.read().optString("phase"), "policy_checks_incomplete", epoch)
+                    return@post
+                }
+                val results = batch.values()
                 if (policies.read().journal.phase == "prepared") {
                     var began = false
                     store.effectCurrent(generation) {
@@ -645,6 +650,7 @@ class TunnelService : VpnService() {
         tun?.close(); tun = null
         checks.shutdownNow()
         policyJob?.cancel(); policyWorker.shutdownNow()
+        healthJob?.cancel(); healthJob = null
         dnsCallbacks.shutdownNow()
         super.onDestroy()
     }
