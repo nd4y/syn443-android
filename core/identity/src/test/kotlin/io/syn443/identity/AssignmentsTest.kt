@@ -107,6 +107,79 @@ class AssignmentsTest {
         invalid {Assignments.receive(state,current,payload,PolicyReply(signed(),TrustedTime(1,1000,now+40_000,now+41_000)),1,1000)}
         invalid {receive(state.copy(journal=state.journal.copy(epoch=1)),policy(2),current)}
     }
+    @Test fun runtimePermitStartsOnlyAfterDurableBeginAndUsesConservativeMonotonicDeadline() {
+        val prepared=receive();val current=acknowledged(prepared)
+        assertThrows(IllegalStateException::class.java) {Assignments.permit(prepared,current,payload,1,1000)}
+        val applying=Assignments.begin(prepared,current,payload,listOf(false),1,1000)
+        val permit=Assignments.permit(applying,current,payload,1,1000)
+        assertEquals(31_000L,permit.deadlineElapsed)
+        assertEquals(engine,permit.authorized(current,applying,1,1000).engineConfig)
+        assertEquals(engine,permit.authorized(current,applying,1,permit.deadlineElapsed-1).engineConfig)
+        invalid {permit.authorized(current,applying,1,permit.deadlineElapsed)}
+        invalid {permit.authorized(current,applying,1,999)};invalid {permit.authorized(current,applying,2,1000)}
+        assertEquals("AssignmentPermit([redacted])",permit.toString())
+        val committed=Assignments.finish(applying,current,payload,listOf(true),true,1,1000)
+        invalid {permit.authorized(current,committed,1,1000)}
+        assertEquals(engine,Assignments.permit(committed,current,payload,1,1000).authorized(current,committed,1,1000).engineConfig)
+    }
+    @Test fun runtimePermitFencesLogoutDifferentReceiptIdentityActivationAndRevocation() {
+        val prepared=receive();val current=acknowledged(prepared)
+        val applying=Assignments.begin(prepared,current,payload,listOf(false),1,1000)
+        val permit=Assignments.permit(applying,current,payload,1,1000)
+        for(changed in listOf(LoginRecovery.cancel(current,1),current.copy(policyHash=Identity.random()),current.copy(generation=2),
+            current.copy(authority=Identity.random()),current.copy(deviceId=Identity.random()),current.copy(thumbprint=Identity.random())))
+            invalid {permit.authorized(changed,applying,1,1000)}
+        for(changed in listOf(applying.copy(identity=null),applying.copy(journal=applying.journal.copy(activationGeneration=2)),
+            applying.copy(journal=applying.journal.copy(floor=2)),applying.copy(journal=applying.journal.copy(epoch=1)),
+            applying.copy(journal=applying.journal.copy(candidate="different envelope"))))invalid {permit.authorized(current,changed,1,1000)}
+        val refreshing=LoginRecovery.beginRefresh(current,1,1,1000)
+        assertEquals(engine,permit.authorized(refreshing,applying,1,1000).engineConfig)
+        invalid {permit.authorized(refreshing.copy(refreshReturnPhase=LoginPhase.PROVISIONING),applying,1,1000)}
+    }
+    @Test fun leaseRenewalCannotResurrectAnExpiredNativeReaderOrChangeItsIdentityOrConfig() {
+        val prepared=receive();val current=acknowledged(prepared)
+        val good=Assignments.finish(Assignments.begin(prepared,current,payload,listOf(false),1,1000),current,payload,listOf(true),true,1,1000)
+        val old=Assignments.permit(good,current,payload,1,1000)
+        val renewed=receive(good,policy(2).copy(offlineUntilMs=now+7_200_000),current);val newer=acknowledged(renewed)
+        val applying=Assignments.begin(renewed,newer,payload,listOf(true),1,1000)
+        val next=Assignments.permit(applying,newer,payload,1,1000)
+        assertSame(next,old.renew(next,newer,applying,1,2000))
+        invalid {old.renew(next,newer,applying,1,old.deadlineElapsed)}
+        invalid {old.renew(next,newer,applying,2,1000)}
+        val otherEngine=engine.replace("direct","alternate")
+        val changed=receive(good,policy(2).copy(engineConfigB64=Identity.encode(otherEngine.toByteArray()),contentHash=Policy.hash(otherEngine)),current)
+        val otherLogin=acknowledged(changed);val otherApplying=Assignments.begin(changed,otherLogin,payload,listOf(true),1,1000)
+        invalid {old.renew(Assignments.permit(otherApplying,otherLogin,payload,1,1000),otherLogin,otherApplying,1,2000)}
+        // A separately verified owner still cannot replace a live native lease in place.
+        val foreignState=applying.copy(identity=applying.identity!!.copy(loginGeneration=2))
+        val foreignLogin=newer.copy(generation=2)
+        invalid {old.renew(Assignments.permit(foreignState,foreignLogin,payload,1,1000),foreignLogin,foreignState,1,2000)}
+    }
+    @Test fun lateChecksAndRebootCannotCommitAnExpiredActivation() {
+        val first=receive();val current=acknowledged(first)
+        val applying=Assignments.begin(first,current,payload,listOf(false),1,1000)
+        assertEquals(31_000L,applying.applyDeadlineElapsed);assertEquals(1,applying.applyBoot)
+        for((boot,elapsed) in listOf(1 to 31_000L,2 to 1000L)) {
+            val rejected=Assignments.finish(applying,current,payload,listOf(true),true,boot,elapsed)
+            assertEquals("rolled_back",rejected.journal.phase);assertNull(rejected.journal.active)
+            assertEquals(0L,rejected.applyDeadlineElapsed);assertEquals(-1,rejected.applyBoot)
+            invalid {Assignments.permit(applying,current,payload,boot,elapsed)}
+        }
+        val committed=Assignments.finish(applying,current,payload,listOf(true),true,1,30_999)
+        assertEquals("committed",committed.journal.phase);assertEquals(0L,committed.applyDeadlineElapsed)
+        assertTrue(Assignments.permit(committed,current,payload,1,30_999).deadlineElapsed>31_000)
+    }
+    @Test fun interruptedCandidateIsPoisonedWithoutWallClockOrAnUnsignedFallback() {
+        val first=receive();val current=acknowledged(first)
+        assertSame(first,Assignments.abort(first,current,payload,"interrupted_activation"))
+        val applying=Assignments.begin(first,current,payload,listOf(false),1,1000)
+        val aborted=Assignments.abort(applying,current,payload,"interrupted_activation")
+        assertEquals("rolled_back",aborted.journal.phase);assertNull(aborted.journal.active)
+        assertTrue(aborted.journal.failedRevisions.contains(1));assertEquals(0L,aborted.applyDeadlineElapsed)
+        invalid {Assignments.abort(applying,current,payload,"arbitrary sensitive reason")}
+        invalid {Assignments.abort(applying,LoginRecovery.cancel(current,1),payload,"interrupted_activation")}
+        invalid {receive(aborted,policy(2),current)}
+    }
     @Test fun erasureRequiresNewerLogoutAndConfirmedNativeAndNamespaceRetirement() {
         val state=receive();val retired=LoginRecovery.cancel(login,1)
         invalid {Assignments.retire(state,login,true,true)}

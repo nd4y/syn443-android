@@ -20,7 +20,7 @@ tasks.jacocoTestCoverageVerification {
             "io.syn443.identity.IdentityOperation", "io.syn443.identity.IdentityOperation.Companion",
             "io.syn443.identity.LoginRecovery", "io.syn443.identity.LoginIntent", "io.syn443.identity.RegistrationTombstone",
             "io.syn443.identity.LoginPayload", "io.syn443.identity.LoginPayload.Companion",
-            "io.syn443.identity.Assignments", "io.syn443.identity.AssignmentIdentity", "io.syn443.identity.AssignmentState")
+            "io.syn443.identity.Assignments", "io.syn443.identity.AssignmentIdentity", "io.syn443.identity.AssignmentState", "io.syn443.identity.AssignmentPermit")
         limit { counter = "LINE"; minimum = "0.90".toBigDecimal() }
     } }
 }
