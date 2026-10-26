@@ -47,6 +47,10 @@ class ControlProvider : ContentProvider() {
                 }
                 "auth-start" -> LoginController.get(context).start(requireNotNull(arg?.toLongOrNull()))
                 "auth-retry" -> LoginController.get(context).retry(requireNotNull(arg?.toLongOrNull()))
+                "auth-poll" -> return Bundle().apply {
+                    putBoolean("ok",true)
+                    putBoolean("admitted",LoginController.get(context).pollProvisioning(requireNotNull(arg?.toLongOrNull())))
+                }
                 "auth-browser" -> {
                     require(caller==Process.myUid())
                     return Bundle().apply {putBoolean("ok",true);putString("url",LoginController.get(context).browserUrl(requireNotNull(arg?.toLongOrNull())))}

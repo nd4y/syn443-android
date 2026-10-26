@@ -203,6 +203,27 @@ class LoginControllerTest {
         val f=Fixture(beforeQueue=beforeQueue)
         try {f.controller.configure(Canonical.json.encodeToString(f.server.bootstrap));f.idle();block(f)} finally {f.cleanup()}
     }
+    @Test fun pendingPollFencesStaleGenerationAndCannotReviveLogout() {
+        val pause=AtomicBoolean();val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        fixture(beforeQueue={if(pause.compareAndSet(true,false)) {entered.countDown();check(release.await(5,TimeUnit.SECONDS))}}) {f->
+            f.controller.callback(f.begin());f.idle()
+            val generation=f.journal.snapshot().generation
+            assertEquals(LoginPhase.PROVISIONING,f.journal.snapshot().phase)
+            assertFalse(f.controller.pollProvisioning(generation+1));assertFalse(f.controller.pollProvisioning(generation))
+            val requests=f.server.paths.count {it=="/v1/device/policy"}
+            val caller=java.util.concurrent.Executors.newSingleThreadExecutor()
+            try {
+                pause.set(true)
+                val polling=caller.submit {until {f.controller.pollProvisioning(generation)}}
+                assertTrue(entered.await(12,TimeUnit.SECONDS));assertTrue(f.controller.status().getBoolean("busy"))
+                assertFalse(f.controller.pollProvisioning(generation))
+                f.controller.cancel();release.countDown();polling.get(10,TimeUnit.SECONDS);f.idle()
+                assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+                assertFalse(f.controller.pollProvisioning(generation))
+                assertEquals(requests,f.server.paths.count {it=="/v1/device/policy"})
+            } finally {release.countDown();caller.shutdownNow()}
+        }
+    }
     @Test fun acceptedCommandIsBusyBeforeExecutorAdmissionAndCancellationDrainsItExactlyOnce() {
         val pause=java.util.concurrent.atomic.AtomicBoolean()
         val entered=CountDownLatch(1);val release=CountDownLatch(1)

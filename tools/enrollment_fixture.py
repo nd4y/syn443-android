@@ -112,6 +112,7 @@ class Fixture:
         assert token==session['accessToken']
         if parsed.path=='/v1/device/revoke':self.sessions.pop(thumb);return 204,None,{}
         assert method=='GET' and parsed.path=='/v1/device/policy';self.policy_requests+=1
+        if self.policy_requests<=getattr(self,'pending_policy_requests',0):return 202,{'code':'provisioning_pending'},{}
         if self.policy_status!=200:return self.policy_status,{'code':'fixture_unavailable'},{}
         key=(thumb,self.revision)
         if key not in self.envelopes:

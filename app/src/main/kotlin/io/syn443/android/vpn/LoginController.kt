@@ -51,6 +51,7 @@ class LoginController private constructor(private val context:android.app.Applic
     @Volatile private var browser:Pair<Long,String>?=null
     @Volatile private var cached:Pair<LoginIntent,LoginPayload>?=null
     @Volatile private var lastAssignmentFetch= -300_000L
+    private var provisioningRetry=ProvisioningRetry()
     @Volatile private var policyListener:(()->Unit)?=null
     internal fun observePolicy(listener:()->Unit):()->Unit {
         synchronized(commands) {policyListener=listener}
@@ -86,9 +87,9 @@ class LoginController private constructor(private val context:android.app.Applic
     private fun enqueue(task:Command) {
         try {testBeforeQueue?.invoke();worker.execute(task)} catch(e:Exception) {task.complete();throw e}
     }
-    private fun submitIfIdle(onAdmission:()->Unit={},block:()->Unit):Boolean {
+    private fun submitIfIdle(onAdmission:()->Unit={},admit:()->Boolean={true},block:()->Unit):Boolean {
         val task=synchronized(commands) {
-            if(pendingCommands.get()!=0)return false
+            if(pendingCommands.get()!=0 || !admit())return false
             onAdmission()
             pendingCommands.incrementAndGet();Command(commandEpoch,block)
         }
@@ -314,6 +315,23 @@ class LoginController private constructor(private val context:android.app.Applic
         // erase the current account's permit; the worker independently checks the journal again.
         return transitionAssignment(ticket,true) {before,s,p->Assignments.abort(before,s,p,reason)}
     }
+    /** Visible UI asks; controller owns rate/queue/generation fences. Hidden UI has no timer. */
+    fun pollProvisioning(expectedGeneration:Long):Boolean {
+        lateinit var expected:LoginIntent
+        var next:ProvisioningRetry?=null
+        return submitIfIdle(admit={
+            val s=journal.snapshot()
+            if(s.generation!=expectedGeneration || s.phase!=LoginPhase.PROVISIONING ||
+                error !in setOf("PENDING","TRANSPORT","THROTTLED","UNAVAILABLE"))false
+            else {
+                expected=s
+                next=provisioningRetry.admit(s.generation,elapsed(),lastAssignmentFetch,error=="THROTTLED")
+                next!=null
+            }
+        },onAdmission={provisioningRetry=checkNotNull(next)}) {
+            current(expected);resumeWorker(expected)
+        }
+    }
     internal fun refreshAssignment(force:Boolean):Boolean {
         val s=journal.snapshot()
         if(s.phase !in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))return false
@@ -351,6 +369,7 @@ class LoginController private constructor(private val context:android.app.Applic
         assignedRuntime.clear();commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null;policyChanged()
     }}
     private fun resumeWorker(s:LoginIntent) {
+        if(s.phase==LoginPhase.PROVISIONING)lastAssignmentFetch=elapsed()
         val p=payload(s)
         if(s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING)) {
             var assignment=journal.readAssignment(s)

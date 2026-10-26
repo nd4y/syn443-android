@@ -1,0 +1,9 @@
+# Waiting for the first assigned policy
+
+Enrollment can finish before the publisher produces a signed policy. A 202 response leaves the account registered and VPN Off. While the login screen is visible, it asks the controller to retry pending provisioning. The controller admits only the current generation in PROVISIONING after PENDING, TRANSPORT, THROTTLED or UNAVAILABLE; permission, authentication and malformed-response failures require explicit action.
+
+An immutable admission plan imposes a five-second initial floor, exponential delays capped at one minute, and no more than six automatic requests per rolling five-minute window. Throttling requires at least one minute. Budget belongs to the controller, so hiding/showing the UI does not reset it. The UI creates no background timer or wakeup; an already admitted bounded operation may finish after the screen hides. Process recovery makes one existing durable-session attempt, then starts a fresh process-local retry budget. No poll starts VPN, creates another registration or resets native recovery limits.
+
+The pending-command ticket and generation fence apply before executor admission. Logout invalidates a poll even if it was admitted but not yet queued. Successful receipt moves to POLICY_CACHED and ends provisioning polls. Explicit Connect is still required, and the normal signed-policy activation/rollback path is unchanged.
+
+Five JVM methods cover delay boundaries, rolling-window exhaustion/refill, throttling, generation/time changes and overflow. An Android controller test cancels an admitted but unqueued poll and requires no further policy request. A TLS emulator scenario returns 202 on the first policy request, then requires the visible UI to obtain the policy and start real TUN traffic without a manual retry. These are synthetic checks; live Keycloak/browser enrollment and physical network acceptance are recorded separately.

@@ -55,6 +55,7 @@ class EnrollmentDriver:AndroidJUnitRunner() {
             } finally {connection.disconnect()}
             stage="callback"
             require(callback.startsWith("syn443://oauth/callback?"));call("auth-callback",callback)
+            targetContext.startActivity(android.content.Intent(targetContext,MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
             stage="assignment"
             val registered=await {it.getString("phase")=="POLICY_CACHED" && !it.getBoolean("busy")}
             stage="candidate_validated"

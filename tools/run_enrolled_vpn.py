@@ -25,12 +25,13 @@ def main():
         nonlocal fixture
         if fixture:
             adb('reverse','--remove','tcp:'+str(fixture.server.server_port));fixture.close();fixture=None
-    def setup():
+    def setup(pending=False):
         nonlocal fixture
         logout();close_fixture();call('policy-test-reset');call('test-reset')
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
         fixture=Fixture(config);fixture_port=fixture.server.server_port
+        fixture.pending_policy_requests=1 if pending else 0
         adb('reverse','tcp:'+str(fixture_port),'tcp:'+str(fixture_port))
         data=json.dumps(fixture.bootstrap(),separators=(',',':')).encode()
         subprocess.run(['adb','-e','shell','-T','run-as',PACKAGE,'dd','of=no_backup/operator-identity.json'],input=data,capture_output=True,check=True,timeout=15)
@@ -47,15 +48,18 @@ def main():
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')
         before=proxy.progress;call('connect')
         await_condition(lambda:call('status').get('phase')=='Online' and call('status').get('policy',{}).get('phase')=='committed' and proxy.progress>before)
-    names=['enrolledSignedAssignmentStartsRealTun','enrolledControllerDeathRecoversAuthorizedCache',
+    names=['enrolledPendingAssignmentRetriesWhileVisible','enrolledSignedAssignmentStartsRealTun','enrolledControllerDeathRecoversAuthorizedCache',
            'enrolledCandidateRegressionRollsBack','enrolledRevocationStopsNativeWithoutLocalFallback',
            'enrolledLogoutRetiresFrozenNativeBeforeAcknowledging']
     try:
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
             try:
-                setup();before=proxy.progress;generation=call('auth-status')['generation']
-                if name=='enrolledSignedAssignmentStartsRealTun':
+                setup(name=='enrolledPendingAssignmentRetriesWhileVisible');before=proxy.progress;generation=call('auth-status')['generation']
+                if name=='enrolledPendingAssignmentRetriesWhileVisible':
+                    assert fixture.policy_requests>=2 and fixture.registrations==1
+                    assert call('status')['policy']['activeRevision']==1
+                elif name=='enrolledSignedAssignmentStartsRealTun':
                     assert call('status')['policy']['activeRevision']==1 and fixture.policy_requests>=1
                     call('disconnect');await_condition(stopped)
                     try:call('import',base64.b64encode(json.dumps(config).encode()).decode());raise RuntimeError('managed import unexpectedly accepted')
