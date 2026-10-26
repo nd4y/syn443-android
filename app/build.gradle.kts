@@ -1,7 +1,30 @@
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
+
 plugins {
     id("com.android.application")
     kotlin("plugin.serialization")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+abstract class PrototypeAssets : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val inputFile: RegularFileProperty
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+    @TaskAction fun generate() {
+        val output=outputDirectory.get().asFile
+        output.mkdirs()
+        output.resolve("decision-vectors.json").writeBytes(inputFile.get().asFile.readBytes())
+    }
+}
+// Runtime uses only the decision example. Wire/signature evidence remains a JVM test resource.
+val prototypeAssets = tasks.register<PrototypeAssets>("preparePrototypeAssets") {
+    inputFile.set(rootProject.layout.projectDirectory.file("contracts/v1/decision-vectors.json"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/prototypeAssets"))
+}
+androidComponents.onVariants { variant ->
+    variant.sources.assets?.addGeneratedSourceDirectory(prototypeAssets, PrototypeAssets::outputDirectory)
 }
 android {
     namespace = "io.syn443.android"
@@ -19,7 +42,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    sourceSets["main"].assets.srcDir(rootProject.file("contracts/v1"))
     testOptions { animationsDisabled = true }
     lint { abortOnError = true; warningsAsErrors = true }
 }
