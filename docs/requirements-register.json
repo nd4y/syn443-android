@@ -160,7 +160,13 @@
         "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt",
         "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt",
-        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt"
+        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt",
+        "docs/enrolled-vpn.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RuntimePolicies.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/NativeRetirement.kt",
+        "tools/enrollment_fixture.py",
+        "tools/test_enrollment_fixture.py",
+        "tools/run_enrolled_vpn.py"
       ]
     },
     {
@@ -188,7 +194,13 @@
         "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt",
         "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt",
-        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt"
+        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt",
+        "docs/enrolled-vpn.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RuntimePolicies.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/NativeRetirement.kt",
+        "tools/enrollment_fixture.py",
+        "tools/test_enrollment_fixture.py",
+        "tools/run_enrolled_vpn.py"
       ]
     },
     {
@@ -245,14 +257,27 @@
         "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt",
         "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt",
-        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt"
+        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt",
+        "docs/enrolled-vpn.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RuntimePolicies.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/NativeRetirement.kt",
+        "tools/enrollment_fixture.py",
+        "tools/test_enrollment_fixture.py",
+        "tools/run_enrolled_vpn.py"
       ]
     },
     {
       "id": "ONB-03",
       "text": "После разрешённой регистрации клиент автоматически получает эффективную конфигурацию и показывает готовность к включению VPN. Повторный запуск использует действующую сессию либо разрешённую offline lease. Необходимость повторного входа, отсутствие назначений и отсутствие сети различаются.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/enrolled-vpn.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RuntimePolicies.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/NativeRetirement.kt",
+        "tools/enrollment_fixture.py",
+        "tools/test_enrollment_fixture.py",
+        "tools/run_enrolled_vpn.py"
+      ]
     },
     {
       "id": "ONB-04",
@@ -1729,7 +1754,13 @@
         "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt",
         "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt",
-        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt"
+        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt",
+        "docs/enrolled-vpn.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RuntimePolicies.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/NativeRetirement.kt",
+        "tools/enrollment_fixture.py",
+        "tools/test_enrollment_fixture.py",
+        "tools/run_enrolled_vpn.py"
       ]
     },
     {

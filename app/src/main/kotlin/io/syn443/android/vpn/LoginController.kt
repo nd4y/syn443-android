@@ -50,6 +50,13 @@ class LoginController private constructor(private val context:android.app.Applic
     @Volatile private var error=""
     @Volatile private var browser:Pair<Long,String>?=null
     @Volatile private var cached:Pair<LoginIntent,LoginPayload>?=null
+    @Volatile private var lastAssignmentFetch= -300_000L
+    @Volatile private var policyListener:(()->Unit)?=null
+    internal fun observePolicy(listener:()->Unit):()->Unit {
+        synchronized(commands) {policyListener=listener}
+        return {synchronized(commands) {if(policyListener===listener)policyListener=null}}
+    }
+    private fun policyChanged() {runCatching {policyListener?.invoke()}}
     private fun boot()=Settings.Global.getInt(context.contentResolver,Settings.Global.BOOT_COUNT,-1).also {require(it>=0)}
     private fun elapsed()=SystemClock.elapsedRealtime()
     private val pendingCommands=java.util.concurrent.atomic.AtomicInteger()
@@ -60,7 +67,13 @@ class LoginController private constructor(private val context:android.app.Applic
             val reason=try {
                 if(synchronized(commands) {if(admitted!=commandEpoch)true else {workerEpoch=admitted;false}})return
                 block();""
-            } catch(e:AuthException) {e.reason.name}
+            } catch(e:AuthException) {
+                if(e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))runCatching {
+                    val s=journal.snapshot()
+                    if(s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))reauthenticate(s)
+                }
+                e.reason.name
+            }
             catch(e:LoginStorageException) {if(e.reason==LoginStorageFailure.STALE)"" else e.reason.name}
             catch(_:Exception) {"LOGIN_UNAVAILABLE"}
             synchronized(commands) {if(admitted==commandEpoch)error=reason}
@@ -99,7 +112,16 @@ class LoginController private constructor(private val context:android.app.Applic
     private fun commit(s:LoginIntent,next:LoginIntent):LoginIntent=synchronized(commands) {current(s);journal.commit(s,next)}
     private fun state()=StateStore.get(context)
     private fun noVpn() {require(!state().checkpoint().desiredOn && !state().read().optBoolean("engineActive"))}
-    fun allowsConnect():Boolean = journal.snapshot().phase==LoginPhase.SIGNED_OUT
+    internal fun loginIntent()=journal.snapshot()
+    /** Memory/public-intent reads only. Never call StateStore, Keystore or network in this block. */
+    internal fun <T> assignedRead(block:(LoginIntent)->T):T=synchronized(commands) {block(journal.snapshot())}
+    internal fun ownsPolicy()=runCatching {journal.snapshot().phase!=LoginPhase.SIGNED_OUT}.getOrDefault(true)
+    fun allowsConnect():Boolean = runCatching {
+        val s=journal.snapshot()
+        s.phase==LoginPhase.SIGNED_OUT || assignedRuntime.status(s).let {
+            it.optBoolean("candidateValidated") || it.optBoolean("runtimeAuthorized")
+        }
+    }.getOrDefault(false)
     fun status():JSONObject = runCatching {
         val s=journal.snapshot()
         JSONObject().put("phase",s.phase.name).put("generation",s.generation).put("configured",configured)
@@ -212,10 +234,9 @@ class LoginController private constructor(private val context:android.app.Applic
         fun admitted() {
             val current=journal.snapshot()
             require(workerEpoch==commandEpoch && current.generation==generation && (current.phase==LoginPhase.RETIRING)==retiring && cancelledGeneration!=generation)
-            noVpn()
+            if(current.phase !in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))noVpn()
         }
-        // Native managed activation remains separately gated. Every real request already uses
-        // physical-network DNS and fresh per-address sockets, without process-route fallback.
+        // Established account requests use a physical Network even while its TUN is running.
         admitted();val uri=Identity.https(url)
         if(testExchange!=null)return@IdentityExchange testExchange.request(method,url,headers,body,child,maxBody)
         val physical=PhysicalIdentityRoute.capture(context)
@@ -246,6 +267,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     private fun fetchAssignment(s:LoginIntent,p:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
         current(s)
+        lastAssignmentFetch=elapsed()
         val response=protocol.policy(checkNotNull(p.session),scope)
         val next=Assignments.receive(journal.readAssignment(s)?:AssignmentState(),s,p,response,boot(),elapsed())
         val receipt=Assignments.receipt(next,s,p,boot(),elapsed())
@@ -260,13 +282,14 @@ class LoginController private constructor(private val context:android.app.Applic
             val accepted=if(target==s)s else commit(s,target)
             cached=accepted to p;assignedRuntime.publish(runtime)
         }}
+        policyChanged()
     }
-    internal fun assignmentTicket():AssignedPolicyRuntime.Ticket = assignedRuntime.ticket(journal.snapshot())
+    internal fun assignmentTicket():AssignedPolicyRuntime.Ticket = assignedRead {assignedRuntime.ticket(it)}
     /** Commands persist on the identity worker. The native caller observes the resulting view;
      * acceptance is not a completed transition, and a lost/stale command grants no new permit. */
     private fun transitionAssignment(ticket:AssignedPolicyRuntime.Ticket,invalidate:Boolean=false,
         change:(AssignmentState,LoginIntent,LoginPayload)->AssignmentState):Boolean = submitIfIdle(onAdmission={
-        if(invalidate && runCatching {assignmentTicket()==ticket}.getOrDefault(false))assignedRuntime.clear()
+        if(invalidate && runCatching {assignmentTicket()==ticket}.getOrDefault(false)) {assignedRuntime.clear();policyChanged()}
     }) {
         val s=journal.snapshot();current(s)
         require(s.phase==LoginPhase.POLICY_CACHED && s.generation==ticket.loginGeneration && s.policyHash==ticket.receipt)
@@ -291,6 +314,20 @@ class LoginController private constructor(private val context:android.app.Applic
         // erase the current account's permit; the worker independently checks the journal again.
         return transitionAssignment(ticket,true) {before,s,p->Assignments.abort(before,s,p,reason)}
     }
+    internal fun refreshAssignment(force:Boolean):Boolean {
+        val s=journal.snapshot()
+        if(s.phase !in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))return false
+        val interval=if(force)5_000L else runCatching {
+            val view=assignedRuntime.read(s);val raw=view.state.journal.active ?: view.state.journal.candidate
+            val policy=checkNotNull(assignedRuntime.allowed(s,raw))
+            (policy.payload.refreshAfterMs-checkNotNull(view.state.time).window(boot(),elapsed()).upperMs).coerceIn(30_000,300_000)
+        }.getOrDefault(30_000L)
+        if(elapsed()-lastAssignmentFetch<interval)return false
+        if(runCatching {assignedRuntime.read(s).state.journal.phase=="applying"}.getOrDefault(false))return false
+        return submitIfIdle(onAdmission={lastAssignmentFetch=elapsed()}) {
+            current(s);resumeWorker(s)
+        }
+    }
     private fun resumeSession(initial:LoginIntent,original:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
         var s=initial;var p=original;var session=checkNotNull(p.session)
         val reanchor=session.time.boot!=boot()
@@ -311,7 +348,7 @@ class LoginController private constructor(private val context:android.app.Applic
         fetchAssignment(s,p,protocol,scope)
     }
     private fun reauthenticate(s:LoginIntent) {synchronized(commands) {
-        assignedRuntime.clear();commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null
+        assignedRuntime.clear();commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null;policyChanged()
     }}
     private fun resumeWorker(s:LoginIntent) {
         val p=payload(s)
@@ -324,6 +361,7 @@ class LoginController private constructor(private val context:android.app.Applic
                 } else {
                     val prepared=assignedRuntime.prepare(s,p,assignment)
                     synchronized(commands) {current(s);assignedRuntime.publish(prepared)}
+                    policyChanged()
                 }
             }
         }
@@ -345,7 +383,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }}
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
-        commandEpoch++;browser=null;val previous=cached;cached=null;assignedRuntime.clear();discardQueued()
+        commandEpoch++;browser=null;val previous=cached;cached=null;assignedRuntime.clear();discardQueued();policyChanged()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {
@@ -365,7 +403,15 @@ class LoginController private constructor(private val context:android.app.Applic
         retiring
     }
     private fun retire(expected:LoginIntent,previous:Pair<LoginIntent,LoginPayload>?=null) {
-        current(expected);noVpn();check(journal.eraseRetired(expected))
+        // Cancel already fenced the runtime view and persisted Off. Native death/lock release
+        // must precede key retirement acknowledgement; keep the UI responsive while it drains.
+        val deadline=elapsed()+10_000
+        while(true) {
+            current(expected)
+            if(runCatching {noVpn();NativeRetirement.released(context)}.getOrDefault(false))break
+            check(elapsed()<deadline) {"native_retirement_pending"};Thread.sleep(100)
+        }
+        check(journal.eraseRetired(expected))
         var s=expected
         val session=previous?.second?.session
         if(previous!=null && session!=null && previous.first.keyAlias in s.retiringAliases) {

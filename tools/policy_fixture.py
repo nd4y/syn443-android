@@ -28,7 +28,7 @@ class Publisher:
     def close(self):
         self.temp.cleanup()
 
-    def sign(self, config, revision=1, checks=None, degraded=False, ttl=600, floor=0, epoch=0, operation='configure'):
+    def sign(self, config, revision=1, checks=None, degraded=False, ttl=600, floor=0, epoch=0, operation='configure', key_thumbprint=None):
         now = int(time.time() * 1000)
         engine = json.dumps(config, separators=(',', ':'), ensure_ascii=True).encode()
         payload = {'schemaVersion': 1, 'revision': revision, 'securityEpoch': epoch, 'revocationFloor': floor, 'operation': operation,
@@ -42,6 +42,10 @@ class Publisher:
                                                        'target': 'https://health.example.org/generate_204',
                                                        'port': 0, 'expected': '', 'required': True}]}}
         header = {'alg': 'ES256', 'kid': 'test-root', 'typ': 'syn443-policy+jws'}
+        if key_thumbprint is not None:
+            assert len(key_thumbprint)==43
+            payload['schemaVersion']=2;payload['keyThumbprint']=key_thumbprint
+            payload['requiredCapabilities'].append('policy.keybound.v2')
         canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
         content = b64(canonical(header)) + '.' + b64(canonical(payload))
         der = subprocess.check_output(['openssl', 'dgst', '-sha256', '-sign', str(self.key)], input=content.encode())

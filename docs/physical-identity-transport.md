@@ -8,4 +8,4 @@ A request tries at most four distinct DNS addresses in resolver order. Each fail
 
 Tests cover actual TLS with address fallback, socket closure, cancellation and stale-route reply rejection; Android tests cover route eligibility, bounded inventory, DNS/bind identity and loss, platform binding without process changes, and a running real TUN whose synthetic proxy sees the ordinary socket but not the physically bound control socket. These are controlled network tests, not physical cellular or battery acceptance.
 
-The login controller still requires VPN Off while the native assigned-policy lifecycle is being integrated. This transport is the prerequisite for refreshing an authenticated session during that future managed VPN lifecycle; it does not itself enable activation or background polling.
+Initial browser login requires VPN Off. The [enrolled native lifecycle](enrolled-vpn.md) now uses this transport for bounded session/policy refresh during an established account VPN. Transport tests alone do not establish that full lifecycle or physical enrollment acceptance.

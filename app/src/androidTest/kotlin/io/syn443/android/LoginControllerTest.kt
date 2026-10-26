@@ -57,6 +57,7 @@ class LoginControllerTest {
         @Volatile var overlayPolicy=false
         @Volatile var policyRevision=1L
         @Volatile var engineTag="direct"
+        @Volatile var policyStatus=200
         @Volatile var shortAccess=false
         @Volatile var dropRefresh=false
         val enrollmentEntered=CountDownLatch(1);val release=CountDownLatch(1)
@@ -144,6 +145,7 @@ class LoginControllerTest {
                 return reply(text=receipt.second)
             }
             if(url.endsWith("/device/policy")) {
+                if(policyStatus!=200)return reply(policyStatus,"""{"code":"test_failure"}""")
                 if(!policyReady)return reply(202,"""{"code":"provisioning_pending"}""")
                 val session=sessions.getValue(thumb);check(headers.getValue("Authorization")=="DPoP "+session.accessToken)
                 val envelope=policies.getOrPut(thumb+foreignPolicyKey+policyRevision) {
@@ -250,7 +252,7 @@ class LoginControllerTest {
         val value=checkNotNull(f.journal.readAssignment(current))
         val protected=LoginPayload.decode(f.journal.readProtected(current),current)
         assertEquals(current.policyHash,Assignments.receipt(value,current,protected,protected.session!!.time.boot,SystemClock.elapsedRealtime()))
-        assertFalse(f.controller.allowsConnect()) // Native handoff is a separate acceptance gate.
+        assertTrue(f.controller.allowsConnect()) // Explicit Connect is possible; fetch never turns it on.
         val view=f.controller.status().getJSONObject("assignedPolicy")
         assertEquals("prepared",view.getString("phase"));assertTrue(view.getBoolean("candidateValidated"));assertFalse(view.getBoolean("runtimeAuthorized"))
         assertThrows(IllegalStateException::class.java) {f.controller.assignedRuntime.config(current)}
@@ -303,7 +305,7 @@ class LoginControllerTest {
         assertEquals(committed.journal.active,committed.journal.lastGood)
         f.restart();assertEquals(config,f.controller.assignedRuntime.config(f.journal.snapshot()))
         assertEquals("committed",f.journal.readAssignment(f.journal.snapshot())!!.journal.phase)
-        assertFalse(f.controller.allowsConnect()) // Native integration remains separately gated.
+        assertTrue(f.controller.allowsConnect())
     }
     @Test fun assignedFailedReplacementRollsBackAndRejectsStaleActivationResults() = fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
@@ -361,6 +363,31 @@ class LoginControllerTest {
             assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()
             assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/assignment.bin").exists())
         }
+    }
+    @Test fun assignedTransportOutageRetainsLeaseButConfirmedDenialWithdrawsIt() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val ticket=f.controller.assignmentTicket()
+        assertTrue(f.controller.beginAssignment(ticket,listOf(false)));f.idle()
+        assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()
+        val config=f.controller.assignedRuntime.config(f.journal.snapshot())
+        f.server.policyStatus=503;f.controller.retry(f.journal.snapshot().generation);f.idle()
+        assertEquals(config,f.controller.assignedRuntime.config(f.journal.snapshot()));assertTrue(f.controller.allowsConnect())
+        f.server.policyStatus=403;f.controller.retry(f.journal.snapshot().generation);f.idle()
+        assertEquals(LoginPhase.NEEDS_REAUTH,f.journal.snapshot().phase);assertFalse(f.controller.allowsConnect())
+        assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("runtimeAuthorized"))
+    }
+    @Test fun logoutCannotAcknowledgeRetirementWhileTheNativeOwnerLockIsHeld() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val alias=f.journal.snapshot().keyAlias
+        java.io.RandomAccessFile(File(context.noBackupFilesDir,"engine-owner.lock"),"rw").use {file->
+            file.channel.lock().use {
+                f.controller.cancel();Thread.sleep(250)
+                assertEquals(LoginPhase.RETIRING,f.journal.snapshot().phase)
+                assertTrue(f.controller.status().getBoolean("busy"));DeviceKey.open(alias)
+            }
+        }
+        f.idle();assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+        assertThrows(IllegalStateException::class.java) {DeviceKey.open(alias)}
     }
     @Test fun wrongKeyAssignmentNeverGetsAReceiptOrUsableConfiguration() = fixture {f->
         f.server.policyReady=true;f.server.foreignPolicyKey=true
