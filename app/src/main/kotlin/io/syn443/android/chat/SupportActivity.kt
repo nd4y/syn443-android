@@ -155,7 +155,7 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
         Text("Сообщения доступны администраторам сервиса. Файлы до 25 МБ.",style=MaterialTheme.typography.bodySmall)
         if(admin) {
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                Button(onClick={conversation="";messages=emptyList()},enabled=!busy) {Text("Все диалоги")}
+                Button(onClick={conversation="";messages=emptyList()},enabled=!busy && text.isBlank() && files.isEmpty()) {Text("Все диалоги")}
                 Text("Администратор")
             }
         }

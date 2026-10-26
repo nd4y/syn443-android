@@ -61,6 +61,7 @@ class LoginControllerTest {
         @Volatile var policyStatus=200
         @Volatile var shortAccess=false
         @Volatile var dropRefresh=false
+        @Volatile var chatStatus=200
         val enrollmentEntered=CountDownLatch(1);val release=CountDownLatch(1)
         val revokeEntered=CountDownLatch(1);val releaseRevoke=CountDownLatch(1)
         val receipts=linkedMapOf<String,String>();val enrollBodies=mutableListOf<String>();val paths=mutableListOf<String>()
@@ -114,6 +115,10 @@ class LoginControllerTest {
                 put("kid","test");put("kty","RSA");put("alg","RS256");put("use","sig");put("n",Identity.encode(bytes));put("e","AQAB")
             })}}))
             val thumb=checkedProof(method,url,headers,body)
+            if(java.net.URI(url).path.startsWith("/v1/chat/")) {
+                check(headers.getValue("Authorization")=="DPoP "+sessions.getValue(thumb).accessToken)
+                return reply(chatStatus,"""{"admin":false}""")
+            }
             if(url.endsWith("/token")) {
                 val form=checkNotNull(body).toString(Charsets.UTF_8).split('&').associate {row->val p=row.split('=',limit=2);p[0] to URLDecoder.decode(p[1],"UTF-8")}
                 check(Identity.hash(form.getValue("code_verifier").toByteArray())==authorization.toUri().getQueryParameter("code_challenge"))
@@ -272,6 +277,38 @@ class LoginControllerTest {
         f.controller.cancel();f.idle()
         assertTrue(f.server.activeKeys.isEmpty());assertTrue(f.journal.snapshot().tombstones.isEmpty())
         assertThrows(IllegalStateException::class.java) {DeviceKey.open(s.keyAlias)}
+    }
+    @Test fun chatReplyIsPrivateAndDenialDoesNotWithdrawAssignedPolicy()=fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val before=f.journal.snapshot();val id="a".repeat(32)
+        assertTrue(f.controller.chatStart(id,before.generation,"self","{}"));f.idle()
+        assertEquals("done",f.controller.chatResult(id,before.generation).getString("state"))
+        assertEquals("gone",f.controller.chatResult(id,before.generation+1).getString("state"))
+        assertFalse(f.controller.status().toString().contains("admin"))
+        f.server.chatStatus=403
+        assertTrue(f.controller.chatStart("b".repeat(32),before.generation,"inbox","{}"));f.idle()
+        assertEquals("ACCESS_DENIED",f.controller.chatResult("b".repeat(32),before.generation).getString("reason"))
+        assertEquals(LoginPhase.POLICY_CACHED,f.journal.snapshot().phase)
+        assertEquals(before.generation,f.journal.snapshot().generation)
+        assertNotNull(f.controller.assignedRuntime.read(f.journal.snapshot()).candidate)
+        f.controller.cancel();f.idle()
+        assertEquals("gone",f.controller.chatResult(id,before.generation).getString("state"))
+    }
+    @Test fun cancelledQueuedChatNeverTransmitsAndDoesNotPoisonNextRequest() {
+        val pause=AtomicBoolean();val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        fixture(beforeQueue={if(pause.compareAndSet(true,false)) {entered.countDown();check(release.await(5,TimeUnit.SECONDS))}}) {f->
+            f.controller.callback(f.begin());f.idle();val generation=f.journal.snapshot().generation
+            val caller=java.util.concurrent.Executors.newSingleThreadExecutor();val id="c".repeat(32)
+            try {
+                pause.set(true);val request=caller.submit<Boolean> {f.controller.chatStart(id,generation,"send","{}")}
+                assertTrue(entered.await(3,TimeUnit.SECONDS));f.controller.chatCancel(id)
+                release.countDown();assertTrue(request.get(3,TimeUnit.SECONDS));f.idle()
+                assertFalse(f.server.paths.any {it.startsWith("/v1/chat/")})
+                assertEquals("gone",f.controller.chatResult(id,generation).getString("state"))
+                assertTrue(f.controller.chatStart("d".repeat(32),generation,"self","{}"));f.idle()
+                assertEquals("done",f.controller.chatResult("d".repeat(32),generation).getString("state"))
+            } finally {release.countDown();caller.shutdownNow()}
+        }
     }
     @Test fun verifiedAssignmentPersistsAcrossControllerDeathAndIsErasedOnLogout() = fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()

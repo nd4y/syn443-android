@@ -181,6 +181,9 @@ def main():
                 snapshot = call('status')
                 print('Policy failure state: ' + json.dumps({k: snapshot.get(k) for k in
                       ('phase', 'reason', 'desiredOn', 'resumeRequired', 'policy', 'attempt', 'heavyWallMs', 'nextWallMs')}), flush=True)
+                # Status events contain only bounded internal reason codes and
+                # counters; never print raw engine config or provider logs.
+                print('Policy failure events: ' + json.dumps(snapshot.get('events', [])[-64:]), flush=True)
                 ET.SubElement(case, 'failure', message='Managed policy scenario failed; see bounded job output')
                 raise
     finally:
