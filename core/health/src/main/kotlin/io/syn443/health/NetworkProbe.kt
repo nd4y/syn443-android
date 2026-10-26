@@ -16,11 +16,15 @@ class NetworkProbe(private val synthetic: Boolean = false,
             scope.requireActive(); socket.soTimeout = 3_000
             return when (check.type) {
                 "tcp_banner" -> {
-                    socket.connect(InetSocketAddress(check.target, check.port), 3_000)
+                    scope.enter(Stage.RESOLVE)
+                    val address = InetSocketAddress(check.target, check.port)
+                    scope.enter(Stage.CONNECT)
+                    socket.connect(address, 3_000)
                     scope.requireActive()
                     val expected = check.expected.toByteArray(Charsets.US_ASCII)
                     val received = ByteArray(expected.size)
                     var size = 0
+                    scope.enter(Stage.RESPONSE)
                     while (size < received.size) {
                         scope.requireActive()
                         val n = socket.getInputStream().read(received, size, received.size - size)
@@ -34,8 +38,12 @@ class NetworkProbe(private val synthetic: Boolean = false,
                     val uri = URI(if (fake) "http://203.0.113.10/generate_204" else check.target)
                     require(uri.scheme == "https" || fake)
                     val port = if (uri.port > 0) uri.port else if (fake) 80 else 443
-                    socket.connect(InetSocketAddress(uri.host, port), 3_000)
+                    scope.enter(Stage.RESOLVE)
+                    val address = InetSocketAddress(uri.host, port)
+                    scope.enter(Stage.CONNECT)
+                    socket.connect(address, 3_000)
                     scope.requireActive()
+                    scope.enter(Stage.TLS)
                     val factory = tls ?: SSLSocketFactory.getDefault() as SSLSocketFactory
                     val transport = if (fake) socket else (factory.createSocket(socket, uri.host, port, true) as SSLSocket).apply {
                         soTimeout = 3_000
@@ -45,7 +53,9 @@ class NetworkProbe(private val synthetic: Boolean = false,
                     scope.requireActive()
                     val path = (uri.rawPath.takeUnless { it.isNullOrEmpty() } ?: "/") + (uri.rawQuery?.let { "?$it" } ?: "")
                     val host = uri.host + if (uri.port > 0) ":${uri.port}" else ""
+                    scope.enter(Stage.REQUEST)
                     transport.getOutputStream().write("GET $path HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n".toByteArray(Charsets.US_ASCII))
+                    scope.enter(Stage.RESPONSE)
                     status204(transport.getInputStream())
                 }
                 else -> false

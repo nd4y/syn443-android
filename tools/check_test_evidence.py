@@ -22,7 +22,7 @@ elif mode=="observability":
     minimum=10
 elif mode=="health":
     paths=list((root/"core/health/build/test-results/test").glob("TEST-*.xml"))
-    minimum=18
+    minimum=21
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
     minimum=77

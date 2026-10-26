@@ -78,6 +78,53 @@ class ChecksTest {
             val clock = AtomicLong(0)
             val job = CheckJob(pool, Probe { _, _ -> clock.set(200); true }, { clock.get() }, 100, 1_000)
             assertEquals(Outcome.FAIL, job.run(listOf(check)).outcomes.single())
+            assertEquals(Failure.TIMEOUT, job.failure)
+        }
+    }
+    @Test fun timeoutFreezesEachStageAndLateResolverCannotAdvanceIt() {
+        for (stage in Stage.entries.filter { it != Stage.QUEUED }) ProbePool().use { pool ->
+            val release = CountDownLatch(1); val finished = CountDownLatch(1)
+            lateinit var scope: ProbeScope
+            val job = CheckJob(pool, Probe { _, current ->
+                scope = current; current.enter(stage)
+                while (release.count > 0) try { release.await() } catch (_: InterruptedException) { }
+                try { current.enter(Stage.RESPONSE); true } finally { finished.countDown() }
+            }, checkMillis = 100)
+            try {
+                assertEquals(Outcome.FAIL, job.run(listOf(check)).outcomes.single())
+                assertEquals(Failure.TIMEOUT, job.failure); assertEquals(stage, job.failureStage)
+                release.countDown(); assertTrue(finished.await(2, TimeUnit.SECONDS))
+                assertEquals(stage, scope.stage); assertEquals(stage, job.failureStage)
+            } finally { release.countDown() }
+        }
+    }
+    @Test fun queuedTimeoutIsCapacityFailureWithoutNetworkAttribution() {
+        ProbePool().use { pool ->
+            val entered = CountDownLatch(2); val release = CountDownLatch(1)
+            repeat(2) { pool.executor.submit { entered.countDown(); release.await() } }
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS))
+                val job = CheckJob(pool, Probe { _, _ -> error("queued probe must not execute") }, checkMillis = 100)
+                assertEquals(Outcome.UNAVAILABLE, job.run(listOf(check)).outcomes.single())
+                assertNull(job.failure); assertNull(job.failureStage)
+                assertEquals(0, pool.executor.queue.size)
+            } finally { release.countDown() }
+        }
+    }
+    @Test fun cancellingQueuedProbeRemovesItWithoutNetworkAttribution() {
+        ProbePool().use { pool ->
+            val entered = CountDownLatch(2); val release = CountDownLatch(1)
+            val caller = Executors.newSingleThreadExecutor()
+            repeat(2) { pool.executor.submit { entered.countDown(); release.await() } }
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS))
+                val job = CheckJob(pool, Probe { _, _ -> error("cancelled probe must not execute") })
+                val result = caller.submit<Batch> { job.run(listOf(check)) }
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+                while (pool.executor.queue.size != 1) { assertTrue(System.nanoTime() < deadline); Thread.yield() }
+                job.cancel(); assertEquals(Outcome.CANCELLED, result.get(2, TimeUnit.SECONDS).outcomes.single())
+                assertNull(job.failure); assertNull(job.failureStage); assertEquals(0, pool.executor.queue.size)
+            } finally { release.countDown(); caller.shutdownNow() }
         }
     }
     @Test fun nonInterruptibleResolverCannotGrowWorkersOrPoisonUnexecutedChecks() {

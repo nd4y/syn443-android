@@ -8,6 +8,8 @@ import java.util.concurrent.atomic.AtomicReference
 
 enum class Outcome { PASS, FAIL, UNAVAILABLE, CANCELLED, DEADLINE }
 enum class Failure { DNS, TLS, EOF, TIMEOUT, TRANSPORT }
+/** Fixed vocabulary only: never contains an endpoint, exception message or response bytes. */
+enum class Stage { QUEUED, RESOLVE, CONNECT, TLS, REQUEST, RESPONSE }
 data class Batch(val outcomes: List<Outcome>) {
     val complete: Boolean get() = outcomes.all { it == Outcome.PASS || it == Outcome.FAIL }
     fun values(): List<Boolean> { check(complete); return outcomes.map { it == Outcome.PASS } }
@@ -17,12 +19,15 @@ data class Batch(val outcomes: List<Outcome>) {
 class ProbeScope {
     private val cancelled = AtomicBoolean()
     private val socket = AtomicReference<Socket?>()
+    @Volatile var stage: Stage = Stage.QUEUED
+        private set
+    @Synchronized fun enter(value: Stage) { requireActive(); stage = value }
     fun attach(value: Socket) {
         check(socket.compareAndSet(null, value))
         if (cancelled.get()) socket.getAndSet(null)?.let { runCatching { it.close() } }
     }
     fun cancel() {
-        cancelled.set(true)
+        synchronized(this) { cancelled.set(true) }
         socket.getAndSet(null)?.let { runCatching { it.close() } }
     }
     fun requireActive() { check(!cancelled.get()) }
@@ -47,6 +52,8 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
     private val active = AtomicReference<ProbeScope?>()
     private val pending = AtomicReference<Future<Boolean>?>()
     @Volatile var failure: Failure? = null
+        private set
+    @Volatile var failureStage: Stage? = null
         private set
     init { require(checkMillis in 1..3_000 && batchMillis in 1..30_000) }
     fun cancel() {
@@ -80,7 +87,7 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
             when {
                 cancelled.get() -> Outcome.CANCELLED
                 clockMillis() >= deadline -> Outcome.DEADLINE
-                clockMillis() >= checkDeadline -> Outcome.FAIL
+                clockMillis() >= checkDeadline -> { failure = Failure.TIMEOUT; failureStage = scope.stage; Outcome.FAIL }
                 value -> Outcome.PASS
                 else -> Outcome.FAIL
             }
@@ -88,10 +95,13 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
         } catch (_: CancellationException) { Outcome.CANCELLED
         } catch (_: InterruptedException) { Thread.currentThread().interrupt(); cancel(); Outcome.CANCELLED
         } catch (_: TimeoutException) {
-            failure = Failure.TIMEOUT
+            // Freeze progress before attribution: a cancelled resolver may return later.
+            scope.cancel()
+            if (started.get() && !cancelled.get()) { failure = Failure.TIMEOUT; failureStage = scope.stage }
             if (cancelled.get()) Outcome.CANCELLED else if (clockMillis() >= deadline) Outcome.DEADLINE
             else if (!started.get()) Outcome.UNAVAILABLE else Outcome.FAIL
         } catch (error: ExecutionException) {
+            failureStage = scope.stage
             failure = when (error.cause) {
                 is java.net.UnknownHostException -> Failure.DNS
                 is javax.net.ssl.SSLException -> Failure.TLS
