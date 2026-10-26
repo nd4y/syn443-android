@@ -18,8 +18,11 @@ class DeviceKey private constructor(val alias: String):ProofKey {
         private val lock=Any()
         private fun store()=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
         fun newAlias()="syn443-dpop-"+Identity.random()
-        fun create(alias:String=newAlias()):DeviceKey = synchronized(lock) {
+        fun create(alias:String=newAlias()):DeviceKey = checkNotNull(createIfCurrent(alias) {true})
+        /** The predicate takes only the short public-intent lock, never crypto/network locks. */
+        fun createIfCurrent(alias:String,current:()->Boolean):DeviceKey? = synchronized(lock) {
             require(pattern.matches(alias))
+            if(!current())return@synchronized null
             check(!store().containsAlias(alias))
             KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC,"AndroidKeyStore").apply {
                 initialize(KeyGenParameterSpec.Builder(alias,KeyProperties.PURPOSE_SIGN)
@@ -30,6 +33,10 @@ class DeviceKey private constructor(val alias: String):ProofKey {
         }
         fun open(alias:String):DeviceKey = synchronized(lock) {
             require(pattern.matches(alias));check(store().containsAlias(alias));DeviceKey(alias)
+        }
+        /** Also works when cancellation precedes creation. Never accepts another subsystem's alias. */
+        fun deleteOwned(alias:String) = synchronized(lock) {
+            require(pattern.matches(alias));store().deleteEntry(alias);check(!store().containsAlias(alias))
         }
     }
     fun publicKey():ECPublicKey = synchronized(lock) {
@@ -43,5 +50,5 @@ class DeviceKey private constructor(val alias: String):ProofKey {
         check(key.encoded==null)
         Signature.getInstance("SHA256withECDSA").run {initSign(key);update(input);sign()}
     }
-    fun delete() = synchronized(lock) {store().deleteEntry(alias)}
+    fun delete() = deleteOwned(alias)
 }

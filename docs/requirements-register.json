@@ -144,7 +144,11 @@
         "docs/identity-lifecycle.md",
         "core/identity/src/main/kotlin/io/syn443/identity/AuthProtocol.kt",
         "core/identity/src/main/kotlin/io/syn443/identity/TrustedTime.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/LoginRecoveryTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginJournal.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt"
       ]
     },
     {
@@ -156,7 +160,11 @@
         "docs/identity-lifecycle.md",
         "core/identity/src/main/kotlin/io/syn443/identity/AuthProtocol.kt",
         "core/identity/src/main/kotlin/io/syn443/identity/TrustedTime.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/LoginRecoveryTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginJournal.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt"
       ]
     },
     {
@@ -197,7 +205,11 @@
         "docs/identity-lifecycle.md",
         "core/identity/src/main/kotlin/io/syn443/identity/AuthProtocol.kt",
         "core/identity/src/main/kotlin/io/syn443/identity/TrustedTime.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/LoginRecoveryTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginJournal.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt"
       ]
     },
     {
@@ -1665,7 +1677,11 @@
         "docs/identity-lifecycle.md",
         "core/identity/src/main/kotlin/io/syn443/identity/AuthProtocol.kt",
         "core/identity/src/main/kotlin/io/syn443/identity/TrustedTime.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/LoginRecoveryTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginJournal.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt"
       ]
     },
     {

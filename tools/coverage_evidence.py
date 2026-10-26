@@ -4,7 +4,8 @@ import xml.etree.ElementTree as ET
 IDENTITY_CLASSES = {'io.syn443.identity.' + name for name in (
     'Identity', 'Bootstrap', 'Pending', 'BoundedHttp', 'BoundedHttpKt', 'BoundedHttp.Scope',
     'AuthProtocol', 'IdentityScope', 'TrustedTime', 'TrustedTime.Companion',
-    'IdentityOperation', 'IdentityOperation.Companion')}
+    'IdentityOperation', 'IdentityOperation.Companion',
+    'LoginRecovery', 'LoginIntent', 'RegistrationTombstone')}
 
 
 def verify_classes(path, required):
