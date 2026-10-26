@@ -34,6 +34,7 @@ class LoginController private constructor(private val context:android.app.Applic
         }
     }
     private val journal=LoginJournal(context,namespace)
+    internal val assignedRuntime=AssignedPolicyRuntime(::boot,::elapsed)
     private val commands=Any()
     @Volatile private var commandEpoch=0L
     @Volatile private var workerEpoch= -1L
@@ -93,7 +94,7 @@ class LoginController private constructor(private val context:android.app.Applic
         JSONObject().put("phase",s.phase.name).put("generation",s.generation).put("configured",configured)
             .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
-            .put("cleanupPending",s.tombstones.size)
+            .put("cleanupPending",s.tombstones.size).put("assignedPolicy",assignedRuntime.status(s))
     }.getOrElse {JSONObject().put("phase","BLOCKED").put("reason","LOGIN_STORE_UNAVAILABLE")
         .put("busy",pendingCommands.get()>0)}
     fun configure(raw:String) {
@@ -237,11 +238,13 @@ class LoginController private constructor(private val context:android.app.Applic
         val response=protocol.policy(checkNotNull(p.session),scope)
         val next=Assignments.receive(journal.readAssignment(s)?:AssignmentState(),s,p,response,boot(),elapsed())
         val receipt=Assignments.receipt(next,s,p,boot(),elapsed())
+        val target=if(s.phase==LoginPhase.POLICY_CACHED && s.policyHash==receipt)s
+            else LoginRecovery.policyCached(s,s.generation,receipt,s.protectedHash)
+        val runtime=assignedRuntime.prepare(target,p,next)
         journal.prepareAssignment(s,next).use {prepared->synchronized(commands) {
             current(s);journal.commitAssignment(s,prepared)
-            val accepted=if(s.phase==LoginPhase.POLICY_CACHED && s.policyHash==receipt)s
-                else commit(s,LoginRecovery.policyCached(s,s.generation,receipt,s.protectedHash))
-            cached=accepted to p
+            val accepted=if(target==s)s else commit(s,target)
+            cached=accepted to p;assignedRuntime.publish(runtime)
         }}
     }
     private fun resumeSession(initial:LoginIntent,original:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
@@ -264,10 +267,17 @@ class LoginController private constructor(private val context:android.app.Applic
         fetchAssignment(s,p,protocol,scope)
     }
     private fun reauthenticate(s:LoginIntent) {synchronized(commands) {
-        commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null
+        assignedRuntime.clear();commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null
     }}
     private fun resumeWorker(s:LoginIntent) {
         val p=payload(s)
+        if(s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING)) {
+            val assignment=journal.readAssignment(s)
+            if(assignment!=null) {
+                val prepared=assignedRuntime.prepare(s,p,assignment)
+                synchronized(commands) {current(s);assignedRuntime.publish(prepared)}
+            }
+        }
         when(LoginRecovery.resume(s,true,true,boot(),elapsed(),p.pending,p.user?.time?.boot?:p.session?.time?.boot?: -1)) {
             LoginResume.BROWSER->synchronized(commands) {current(s);browser=s.generation to Identity.authorization(p.bootstrap,checkNotNull(p.pending))}
             LoginResume.AUTHENTICATED,LoginResume.RETRY_CLEANUP,LoginResume.RETRY_ENROLLMENT->withProtocol(s,p.bootstrap) {protocol,scope->provision(s,p,protocol,scope)}
@@ -286,7 +296,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }}
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
-        commandEpoch++;browser=null;val previous=cached;cached=null;discardQueued()
+        commandEpoch++;browser=null;val previous=cached;cached=null;assignedRuntime.clear();discardQueued()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {

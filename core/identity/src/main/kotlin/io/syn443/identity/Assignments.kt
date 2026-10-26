@@ -4,15 +4,19 @@ import io.syn443.policy.Journal
 import io.syn443.policy.Policy
 import io.syn443.policy.Verified
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 
 /** No token/key is duplicated into the separately encrypted activation journal. */
 @Serializable data class AssignmentIdentity(val authority:String,val loginGeneration:Long,
     val deviceId:String,val keyThumbprint:String) {
     override fun toString()="AssignmentIdentity([redacted])"
 }
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class AssignmentState(val identity:AssignmentIdentity?=null,
     val journal:Journal=Journal(),val time:TrustedTime?=null,
-    val applyDeadlineElapsed:Long=0,val applyBoot:Int=-1) {
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val applyDeadlineElapsed:Long=0,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val applyBoot:Int=-1) {
     override fun toString()="AssignmentState(phase=${journal.phase}, [redacted])"
 }
 

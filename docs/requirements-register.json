@@ -159,7 +159,8 @@
         "docs/physical-identity-transport.md",
         "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt",
-        "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt"
+        "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt"
       ]
     },
     {
@@ -186,7 +187,8 @@
         "docs/physical-identity-transport.md",
         "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt",
-        "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt"
+        "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt"
       ]
     },
     {
@@ -242,7 +244,8 @@
         "docs/physical-identity-transport.md",
         "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt",
-        "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt"
+        "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt"
       ]
     },
     {
@@ -1725,7 +1728,8 @@
         "docs/physical-identity-transport.md",
         "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt",
-        "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt"
+        "core/identity/src/main/kotlin/io/syn443/identity/AssignmentPermit.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/AssignedPolicyRuntime.kt"
       ]
     },
     {

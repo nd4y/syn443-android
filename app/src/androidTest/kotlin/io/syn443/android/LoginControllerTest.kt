@@ -53,6 +53,7 @@ class LoginControllerTest {
         @Volatile var holdEnrollment=false
         @Volatile var policyReady=false
         @Volatile var foreignPolicyKey=false
+        @Volatile var overlayPolicy=false
         @Volatile var shortAccess=false
         @Volatile var dropRefresh=false
         val enrollmentEntered=CountDownLatch(1);val release=CountDownLatch(1)
@@ -143,7 +144,8 @@ class LoginControllerTest {
                 if(!policyReady)return reply(202,"""{"code":"provisioning_pending"}""")
                 val session=sessions.getValue(thumb);check(headers.getValue("Authorization")=="DPoP "+session.accessToken)
                 val envelope=policies.getOrPut(thumb+foreignPolicyKey) {
-                    val engine="""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}"""
+                    val engine=if(overlayPolicy)"""{"outbounds":[{"type":"netbird","tag":"overlay","management_url":"https://overlay.example.invalid"}],"route":{"final":"overlay"}}"""
+                        else """{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}"""
                     val payload=Payload(2,1,0,0,session.deviceId,"syn443-device",now(),now(),now()+30_000,now()+3_600_000,
                         IdentityOperation.requiredCapabilities,"m1-local-v1",Identity.encode(engine.toByteArray()),Policy.hash(engine),
                         Gate(30,false,listOf(Check("internet","https_204","https://health.example.org/generate_204"))),
@@ -246,11 +248,44 @@ class LoginControllerTest {
         val protected=LoginPayload.decode(f.journal.readProtected(current),current)
         assertEquals(current.policyHash,Assignments.receipt(value,current,protected,protected.session!!.time.boot,SystemClock.elapsedRealtime()))
         assertFalse(f.controller.allowsConnect()) // Native handoff is a separate acceptance gate.
+        val view=f.controller.status().getJSONObject("assignedPolicy")
+        assertEquals("prepared",view.getString("phase"));assertTrue(view.getBoolean("candidateValidated"));assertFalse(view.getBoolean("runtimeAuthorized"))
+        assertThrows(IllegalStateException::class.java) {f.controller.assignedRuntime.config(current)}
         f.restart();assertEquals(current.generation,f.journal.snapshot().generation);assertEquals(1,f.server.enrollBodies.size)
         assertEquals(value.journal,f.journal.readAssignment(f.journal.snapshot())!!.journal)
-        f.controller.cancel();f.idle()
+        assertTrue(f.controller.status().getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+        f.controller.cancel();assertEquals("unavailable",f.controller.status().getJSONObject("assignedPolicy").getString("phase"));f.idle()
         assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/assignment.bin").exists())
         assertTrue(f.server.activeKeys.isEmpty());assertTrue(f.journal.snapshot().tombstones.isEmpty())
+    }
+    @Test fun managedOverlayWithoutItsCredentialNamespaceCannotBecomeARuntimeCandidate() = fixture {f->
+        f.server.policyReady=true;f.server.overlayPolicy=true;f.controller.callback(f.begin());f.idle()
+        val s=f.journal.snapshot();assertEquals(LoginPhase.POLICY_CACHED,s.phase)
+        val view=f.controller.status().getJSONObject("assignedPolicy")
+        assertFalse(view.getBoolean("candidateValidated"));assertFalse(view.getBoolean("runtimeAuthorized"))
+        assertThrows(IllegalStateException::class.java) {f.controller.assignedRuntime.config(s)}
+    }
+    @Test fun assignedRuntimeViewIsWorkerPreparedAndCannotOutliveLogout() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val s=f.journal.snapshot();val p=LoginPayload.decode(f.journal.readProtected(s),s)
+        val state=checkNotNull(f.journal.readAssignment(s));val boot=p.session!!.time.boot
+        val applying=Assignments.begin(state,s,p,listOf(false),boot,SystemClock.elapsedRealtime())
+        val runtime=f.controller.assignedRuntime
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            assertThrows(IllegalStateException::class.java) {runtime.prepare(s,p,applying)}
+        }
+        val prepared=runtime.prepare(s,p,applying);runtime.publish(prepared)
+        val raw=runtime.config(s);val deadline=runtime.leaseDeadline(s,Policy.hash(raw))
+        assertTrue(deadline>SystemClock.elapsedRealtime())
+        assertTrue(runtime.status(s).getBoolean("runtimeAuthorized"))
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            assertEquals(raw,runtime.config(s)) // Already verified; reads do no Keystore/disk work.
+        }
+        assertThrows(IllegalArgumentException::class.java) {runtime.leaseDeadline(s,Policy.hash("different"))}
+        assertThrows(IllegalArgumentException::class.java) {runtime.config(s.copy(generation=s.generation+1))}
+        f.controller.cancel();f.idle()
+        assertThrows(IllegalStateException::class.java) {runtime.config(s)}
+        assertFalse(runtime.status(f.journal.snapshot()).getBoolean("runtimeAuthorized"))
     }
     @Test fun wrongKeyAssignmentNeverGetsAReceiptOrUsableConfiguration() = fixture {f->
         f.server.policyReady=true;f.server.foreignPolicyKey=true

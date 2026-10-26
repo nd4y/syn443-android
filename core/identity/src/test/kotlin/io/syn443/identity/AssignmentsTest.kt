@@ -2,6 +2,7 @@ package io.syn443.identity
 
 import io.syn443.policy.*
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.security.KeyPairGenerator
@@ -179,6 +180,19 @@ class AssignmentsTest {
         invalid {Assignments.abort(applying,current,payload,"arbitrary sensitive reason")}
         invalid {Assignments.abort(applying,LoginRecovery.cancel(current,1),payload,"interrupted_activation")}
         invalid {receive(aborted,policy(2),current)}
+    }
+    @Test fun existingCanonicalCacheShapeSurvivesTheActivationDeadlineExtension() {
+        val state=receive();val raw=Policy.json.encodeToString(state)
+        // Existing encrypted records are compared with their exact pre-upgrade encoding on read.
+        assertEquals(setOf("identity","journal","time"),Policy.json.parseToJsonElement(raw).jsonObject.keys)
+        val restored=Policy.json.decodeFromString<AssignmentState>(raw)
+        assertEquals(raw,Policy.json.encodeToString(restored));assertEquals(0L,restored.applyDeadlineElapsed)
+        val current=acknowledged(restored);val applying=Assignments.begin(restored,current,payload,listOf(false),1,1000)
+        val running=Policy.json.encodeToString(applying)
+        assertEquals(setOf("identity","journal","time","applyDeadlineElapsed","applyBoot"),Policy.json.parseToJsonElement(running).jsonObject.keys)
+        assertEquals(applying,Policy.json.decodeFromString<AssignmentState>(running))
+        val aborted=Assignments.abort(applying,current,payload,"interrupted_activation")
+        assertEquals(setOf("identity","journal","time"),Policy.json.parseToJsonElement(Policy.json.encodeToString(aborted)).jsonObject.keys)
     }
     @Test fun erasureRequiresNewerLogoutAndConfirmedNativeAndNamespaceRetirement() {
         val state=receive();val retired=LoginRecovery.cancel(login,1)
