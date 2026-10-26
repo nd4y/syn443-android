@@ -229,8 +229,10 @@
     {
       "id": "ONB-01",
       "text": "При отсутствии действующей регистрации на первом экране есть «Войти» и «Сканировать QR / открыть приглашение». Обычный запуск предлагает Keycloak, а запуск по корректному приглашению сразу ведёт в ручную привязку без страницы IdP.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/provisioning-retry.md"
+      ]
     },
     {
       "id": "ONB-02",
@@ -263,7 +265,8 @@
         "app/src/main/kotlin/io/syn443/android/vpn/NativeRetirement.kt",
         "tools/enrollment_fixture.py",
         "tools/test_enrollment_fixture.py",
-        "tools/run_enrolled_vpn.py"
+        "tools/run_enrolled_vpn.py",
+        "docs/provisioning-retry.md"
       ]
     },
     {

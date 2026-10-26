@@ -52,6 +52,7 @@ class LoginControllerTest {
         @Volatile var authorization=""
         @Volatile var dropEnrollment=false
         @Volatile var holdEnrollment=false
+        @Volatile var holdRevoke=false
         @Volatile var policyReady=false
         @Volatile var foreignPolicyKey=false
         @Volatile var overlayPolicy=false
@@ -61,6 +62,7 @@ class LoginControllerTest {
         @Volatile var shortAccess=false
         @Volatile var dropRefresh=false
         val enrollmentEntered=CountDownLatch(1);val release=CountDownLatch(1)
+        val revokeEntered=CountDownLatch(1);val releaseRevoke=CountDownLatch(1)
         val receipts=linkedMapOf<String,String>();val enrollBodies=mutableListOf<String>();val paths=mutableListOf<String>()
         val activeKeys=mutableSetOf<String>()
         val sessions=mutableMapOf<String,DeviceSession>()
@@ -166,7 +168,11 @@ class LoginControllerTest {
                 Identity.objectJSON(checkNotNull(body).toString(Charsets.UTF_8)).getValue("thumbprints").jsonArray.forEach {activeKeys.remove(it.jsonPrimitive.content)}
                 return reply(204,"")
             }
-            if(url.endsWith("/device/revoke")) {activeKeys.remove(thumb);return reply(204,"")}
+            if(url.endsWith("/device/revoke")) {
+                revokeEntered.countDown()
+                if(holdRevoke)check(releaseRevoke.await(10,TimeUnit.SECONDS))
+                activeKeys.remove(thumb);return reply(204,"")
+            }
             error("unexpected synthetic endpoint")
         }
     }
@@ -188,7 +194,7 @@ class LoginControllerTest {
         }
         fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue);controller.recover();idle()}
         fun cleanup() {
-            server.release.countDown();controller.cancel();idle();check(journal.snapshot().phase==LoginPhase.SIGNED_OUT)
+            server.release.countDown();server.releaseRevoke.countDown();controller.cancel();idle();check(journal.snapshot().phase==LoginPhase.SIGNED_OUT)
             controller.shutdownTest();check(File(context.noBackupFilesDir,"login/$namespace").deleteRecursively())
             check(File(context.noBackupFilesDir,"$namespace-bootstrap.json").delete())
         }
@@ -202,6 +208,27 @@ class LoginControllerTest {
         }
         val f=Fixture(beforeQueue=beforeQueue)
         try {f.controller.configure(Canonical.json.encodeToString(f.server.bootstrap));f.idle();block(f)} finally {f.cleanup()}
+    }
+    @Test fun pendingPollFencesStaleGenerationAndCannotReviveLogout() {
+        val pause=AtomicBoolean();val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        fixture(beforeQueue={if(pause.compareAndSet(true,false)) {entered.countDown();check(release.await(5,TimeUnit.SECONDS))}}) {f->
+            f.controller.callback(f.begin());f.idle()
+            val generation=f.journal.snapshot().generation
+            assertEquals(LoginPhase.PROVISIONING,f.journal.snapshot().phase)
+            assertFalse(f.controller.pollProvisioning(generation+1));assertFalse(f.controller.pollProvisioning(generation))
+            val requests=f.server.paths.count {it=="/v1/device/policy"}
+            val caller=java.util.concurrent.Executors.newSingleThreadExecutor()
+            try {
+                pause.set(true)
+                val polling=caller.submit {until {f.controller.pollProvisioning(generation)}}
+                assertTrue(entered.await(12,TimeUnit.SECONDS));assertTrue(f.controller.status().getBoolean("busy"))
+                assertFalse(f.controller.pollProvisioning(generation))
+                f.controller.cancel();release.countDown();polling.get(10,TimeUnit.SECONDS);f.idle()
+                assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+                assertFalse(f.controller.pollProvisioning(generation))
+                assertEquals(requests,f.server.paths.count {it=="/v1/device/policy"})
+            } finally {release.countDown();caller.shutdownNow()}
+        }
     }
     @Test fun acceptedCommandIsBusyBeforeExecutorAdmissionAndCancellationDrainsItExactlyOnce() {
         val pause=java.util.concurrent.atomic.AtomicBoolean()
@@ -349,15 +376,20 @@ class LoginControllerTest {
             val ticket=f.controller.assignmentTicket()
             assertTrue(f.controller.beginAssignment(ticket,listOf(false)));f.idle()
             pause.set(true)
-            val accepted=AtomicBoolean(false)
-            val thread=Thread {accepted.set(f.controller.abortAssignment(ticket,"native_activation_failed"))}.also {it.start()}
+            val caller=java.util.concurrent.Executors.newSingleThreadExecutor()
+            val accepted=caller.submit<Boolean> {f.controller.abortAssignment(ticket,"native_activation_failed")}
             try {
                 assertTrue(admission.await(10,TimeUnit.SECONDS))
                 assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("runtimeAuthorized"))
                 assertFalse(f.controller.finishAssignment(ticket,listOf(true),true))
-                f.controller.cancel()
-            } finally {release.countDown();thread.join(10_000)}
-            assertFalse(thread.isAlive);assertTrue(accepted.get());f.idle()
+                f.server.holdRevoke=true;f.controller.cancel()
+                assertTrue(f.server.revokeEntered.await(10,TimeUnit.SECONDS))
+                // Retirement occupies the worker; this current-generation retry fills its queue.
+                f.controller.retry(f.journal.snapshot().generation)
+                release.countDown();assertTrue(accepted.get(5,TimeUnit.SECONDS))
+                assertTrue(f.controller.status().getBoolean("busy"))
+            } finally {release.countDown();f.server.releaseRevoke.countDown();caller.shutdownNow()}
+            f.idle()
             assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
             assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/assignment.bin").exists())
             assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()

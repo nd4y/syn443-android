@@ -39,6 +39,10 @@ import org.json.JSONObject
         if(visible)while(true) {
             val result=command("auth-status")
             status=runCatching {JSONObject(result?.getString("json")?:"{}")} .getOrDefault(JSONObject())
+            if(status.optString("phase")=="PROVISIONING" && !status.optBoolean("busy") &&
+                lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                command("auth-poll",status.optLong("generation",-1).toString())
+            }
             delay(1000)
         }
     }
