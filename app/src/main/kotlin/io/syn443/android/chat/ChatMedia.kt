@@ -74,6 +74,7 @@ object ChatMedia {
             progress("Сжатие видео на устройстве")
             withContext(Dispatchers.Main.immediate) {withTimeout(300_000) {
                 var transformer:Transformer?=null
+                var monitor:Job?=null
                 try {
                     suspendCancellableCoroutine<Unit> {cont->
                         val encoder=DefaultEncoderFactory.Builder(context)
@@ -87,9 +88,19 @@ object ChatMedia {
                             }).build()
                         val edited=EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(raw)))
                             .setEffects(Effects(emptyList(),listOf(Presentation.createForWidthAndHeight(1280,720,Presentation.LAYOUT_SCALE_TO_FIT),FrameDropEffect.createDefaultFrameDropEffect(30f)))).build()
-                        transformer!!.start(edited,output.path)
+                        val activeTransformer=requireNotNull(transformer)
+                        activeTransformer.start(edited,output.path)
+                        progress("Сжатие видео: 0%")
+                        monitor=launch {
+                            val holder=ProgressHolder()
+                            while(isActive) {
+                                delay(250)
+                                if(activeTransformer.getProgress(holder)==Transformer.PROGRESS_STATE_AVAILABLE)
+                                    progress("Сжатие видео: ${holder.progress}%")
+                            }
+                        }
                     }
-                } finally {transformer?.cancel()}
+                } finally {monitor?.cancel();transformer?.cancel()}
             }}
             require(output.length() in 1..ChatLimits.file.toLong())
             return PreparedMedia(output,name.substringBeforeLast('.',name)+".mp4","video/mp4","video")

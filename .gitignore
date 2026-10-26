@@ -16,3 +16,4 @@ coverage.out
 __pycache__/
 node_modules/
 dist/
+/app/src/androidTest/assets/chat-fixture.mp4

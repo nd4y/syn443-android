@@ -20,6 +20,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -29,7 +30,12 @@ import java.io.File
 
 class SupportActivity:ComponentActivity() {
     override fun onCreate(savedInstanceState:Bundle?) {super.onCreate(savedInstanceState)
-        setContent {MaterialTheme(colorScheme=darkColorScheme()) {Surface(Modifier.fillMaxSize()) {SupportChat()}}}
+        // Only private chat preparation files from an interrupted UI operation.
+        // Durable drafts/parts live in the encrypted no-backup SQL store.
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {cacheDir.listFiles()?.filter {it.isFile && it.name.startsWith("chat-") && (it.name.endsWith(".input") || it.name.endsWith(".output") || it.name.startsWith("chat-download-"))}?.take(256)?.forEach {it.delete()}}
+            setContent {MaterialTheme(colorScheme=darkColorScheme()) {Surface(Modifier.fillMaxSize()) {SupportChat()}}}
+        }
     }
 }
 private fun JSONArray.objects()=(0 until length()).map {getJSONObject(it)}
@@ -123,7 +129,7 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
                     status="Для чата войдите в SYN443 на главном экране."
                 } else {
                     if(generation!=next || client==null) {
-                        generation=next;client=ChatClient(context,next);messages=emptyList();conversation="";files=emptyList();text=""
+                        generation=next;client=ChatClient(context,next);messages=emptyList();conversation="";files=emptyList();text="";inbox=emptyList();pending=emptyList();admin=false
                         store=withContext(Dispatchers.IO) {ChatOutbox(context,next)}
                     }
                     if(conversation.isEmpty()) {

@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import androidx.core.database.sqlite.transaction
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import org.json.JSONObject
@@ -16,13 +17,17 @@ import javax.crypto.spec.GCMParameterSpec
 
 /** Single UI-process writer, ciphertext-only SQLite under noBackupFilesDir. */
 class ChatOutbox(context:Context,private val generation:Long,private val namespace:String="support-chat"):AutoCloseable {
+    init {
+        require(generation>=0)
+        require(namespace=="support-chat" || namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
+    }
     companion object {
         fun erase(context:Context,namespace:String="support-chat") {
             require(namespace=="support-chat" || namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
             try {
                 val file=File(context.noBackupFilesDir,"$namespace.db")
                 if(file.exists())SQLiteDatabase.openDatabase(file.path,null,SQLiteDatabase.OPEN_READWRITE).use {db->
-                    db.beginTransaction();try {db.execSQL("DELETE FROM chunks");db.execSQL("DELETE FROM files");db.execSQL("DELETE FROM drafts");db.setTransactionSuccessful()} finally {db.endTransaction()}
+                    db.transaction {execSQL("DELETE FROM chunks");execSQL("DELETE FROM files");execSQL("DELETE FROM drafts")}
                 }
             } finally {
                 val keys=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
@@ -43,8 +48,6 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
     private val alias="syn443-chat-$namespace-$generation"
     private val key:SecretKey
     init {
-        require(generation>=0)
-        require(namespace=="support-chat" || namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
         // A new login never resumes a previous account's sends. All local contents
         // are ciphertext; deleting old keys also covers SQLite free pages/WAL.
         val keys=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
@@ -54,6 +57,11 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
             init(KeyGenParameterSpec.Builder(alias,KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
+        // A process restart loses the unsent composer, but keeps durable drafts.
+        // Reclaim only files that are not referenced by any encrypted draft.
+        val referenced=drafts().flatMap {(_,body)->val files=body.getJSONArray("files");(0 until files.length()).map {files.getJSONObject(it).getString("localId")}}.toSet()
+        val orphaned=db.rawQuery("SELECT id FROM files WHERE generation=?",arrayOf(generation.toString())).use {c->buildList {while(c.moveToNext())if(c.getString(0) !in referenced)add(c.getString(0))}}
+        db.transaction {orphaned.forEach {removeFile(it)}}
     }
     private fun crypt(id:String,bytes:ByteArray,decrypt:Boolean=false):ByteArray {
         val c=Cipher.getInstance("AES/GCM/NoPadding")
@@ -83,8 +91,7 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
         file.inputStream().use {input->val buffer=ByteArray(ChatLimits.chunk);while(true) {val n=input.read(buffer);if(n<0)break;hash.update(buffer,0,n)}}
         val info=JSONObject().put("localId",id).put("clientId",id).put("name",name).put("mime",mime).put("kind",kind).put("size",file.length())
             .put("sha256",hash.digest().joinToString("") {"%02x".format(it)})
-        db.beginTransaction()
-        try {
+        db.transaction {
             check(db.insertOrThrow("files",null,ContentValues().apply {put("id",id);put("generation",generation);put("size",file.length());put("body",crypt("file/$id",info.toString().toByteArray()))})!=-1L)
             file.inputStream().buffered().use {input->var part=0;while(true) {
                 val data=ByteArray(ChatLimits.chunk);var n=0
@@ -93,8 +100,7 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
                 db.insertOrThrow("chunks",null,ContentValues().apply {put("file",id);put("part",part);put("data",crypt("$id/$part",data.copyOf(n)))})
                 part++
             }}
-            db.setTransactionSuccessful()
-        } finally {db.endTransaction()}
+        }
         return info
     }
     fun chunk(id:String,part:Int):ByteArray=db.rawQuery("SELECT c.data FROM chunks c JOIN files f ON f.id=c.file WHERE f.id=? AND f.generation=? AND c.part=?",arrayOf(id,generation.toString(),part.toString())).use {
