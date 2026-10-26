@@ -3,6 +3,7 @@ package io.syn443.android
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.syn443.android.vpn.DeviceKey
 import io.syn443.identity.Identity
+import io.syn443.identity.ProofKey
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,7 +17,8 @@ class DeviceKeyTest {
         try {
             val public=key.publicKey();val reopened=DeviceKey.open(key.alias)
             assertArrayEquals(public.encoded,reopened.publicKey().encoded)
-            val bytes="synthetic request".toByteArray();val signature=reopened.sign(bytes)
+            val adapter:ProofKey=reopened;assertArrayEquals(public.encoded,adapter.publicKey.encoded)
+            val bytes="synthetic request".toByteArray();val signature=adapter.sign(bytes)
             assertTrue(Signature.getInstance("SHA256withECDSA").run {initVerify(public);update(bytes);verify(signature)})
             assertEquals(64,Identity.derToRaw(signature).size)
             val store=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}

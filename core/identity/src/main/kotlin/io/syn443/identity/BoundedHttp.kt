@@ -15,6 +15,7 @@ import javax.net.ssl.SSLSocketFactory
 enum class DeliveryFailure { CAPACITY, CANCELLED, DEADLINE, DNS, TLS, EOF, TRANSPORT, PROTOCOL }
 class DeliveryException(val reason: DeliveryFailure):Exception(reason.name)
 data class Reply(val status: Int, val headers: Map<String,List<String>>, val body: ByteArray) {
+    override fun toString()="Reply(status=$status, [redacted])"
     fun single(name:String):String? {
         val values=headers[name.lowercase()]?:return null
         if(values.size!=1)throw DeliveryException(DeliveryFailure.PROTOCOL)

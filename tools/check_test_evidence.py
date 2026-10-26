@@ -25,7 +25,9 @@ elif mode=="health":
     minimum=18
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=21
+    minimum=37
+    from coverage_evidence import IDENTITY_CLASSES, verify_classes
+    verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
 assert paths,"No JUnit XML evidence produced"
 cases=[]
