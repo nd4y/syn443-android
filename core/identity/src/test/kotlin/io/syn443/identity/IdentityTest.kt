@@ -7,10 +7,12 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.math.BigInteger
 import java.security.KeyPairGenerator
+import java.security.KeyFactory
 import java.security.Signature
 import java.security.interfaces.ECPublicKey
 import java.security.interfaces.RSAPublicKey
 import java.security.spec.ECGenParameterSpec
+import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 
 class IdentityTest {
@@ -123,5 +125,16 @@ class IdentityTest {
         fail {Identity.rsaKeys(jwks().replace("AQAB","Aw"))};fail {Identity.rsaKeys("""{"keys":[]}""")}
         val value=Identity.objectJSON(jwks()).getValue("keys").jsonArray[0]
         fail {Identity.rsaKeys(Canonical.encode(buildJsonObject {put("keys",JsonArray(listOf(value,value)))}))}
+    }
+    @Test fun goIssuedPolicyBindsTheActualDevicePublicKey() {
+        val fixture=Identity.objectJSON(checkNotNull(javaClass.classLoader?.getResourceAsStream("policy-device-signature.json")).bufferedReader().use {it.readText()})
+        fun bytes(name:String)=fixture.getValue(name).jsonPrimitive.content.chunked(2).map {it.toInt(16).toByte()}.toByteArray()
+        val pub=KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(bytes("deviceSpkiHex"))) as ECPublicKey
+        val thumb=Identity.thumbprint(pub);val root=Base64.getEncoder().encodeToString(bytes("spkiHex"))
+        val wire=listOf("headerHex","payloadHex","signatureHex").joinToString("."){Identity.encode(bytes(it))}
+        val device=fixture.getValue("device").jsonPrimitive.content;val time=fixture.getValue("nowMs").jsonPrimitive.long
+        val result=Policy.verifyBound(wire,mapOf("test-root" to root),device,thumb,time)
+        assertEquals(2,result.payload.schemaVersion);assertEquals(thumb,result.payload.keyThumbprint)
+        fail {Policy.verifyBound(wire,mapOf("test-root" to root),device,Identity.thumbprint(publicEC),time)}
     }
 }

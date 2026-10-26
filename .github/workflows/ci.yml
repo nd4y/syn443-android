@@ -138,6 +138,7 @@ jobs:
       - run: test -s app/build/outputs/apk/debug/app-debug.apk && test -s app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       - name: Scan APK payloads
         run: |
+          python3 tools/check_apk_assets.py
           python3 tools/check_public_data.py app/build/outputs/apk/
           bash tools/scan_secrets.sh app/build/outputs/apk/
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

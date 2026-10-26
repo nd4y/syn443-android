@@ -16,7 +16,7 @@ elif mode=="recovery":
     minimum=8
 elif mode=="policy":
     paths=list((root/"core/policy/build/test-results/test").glob("TEST-*.xml"))
-    minimum=12
+    minimum=14
 elif mode=="observability":
     paths=list((root/"core/observability/build/test-results/test").glob("TEST-*.xml"))
     minimum=10
@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=18
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=13
+    minimum=21
 else: raise SystemExit("unknown evidence type")
 assert paths,"No JUnit XML evidence produced"
 cases=[]

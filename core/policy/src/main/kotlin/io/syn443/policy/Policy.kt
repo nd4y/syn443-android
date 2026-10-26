@@ -1,6 +1,8 @@
 package io.syn443.policy
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.*
 import java.math.BigInteger
 import java.net.URI
@@ -14,11 +16,13 @@ import java.util.Base64
 @Serializable data class Check(val id: String, val type: String, val target: String, val port: Int = 0,
     val expected: String = "", val required: Boolean = true)
 @Serializable data class Gate(val timeoutSeconds: Int, val allowDegraded: Boolean, val checks: List<Check>)
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class Payload(val schemaVersion: Int, val revision: Long, val securityEpoch: Long,
     val revocationFloor: Long, val targetDevice: String, val audience: String, val issuedAtMs: Long,
     val notBeforeMs: Long, val refreshAfterMs: Long, val offlineUntilMs: Long,
     val requiredCapabilities: List<String>, val algorithmRevision: String,
-    val engineConfigB64: String, val contentHash: String, val activation: Gate, val operation: String = "configure")
+    val engineConfigB64: String, val contentHash: String, val activation: Gate, val operation: String = "configure",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val keyThumbprint: String = "")
 data class Verified(val envelope: String, val payload: Payload, val engineConfig: String)
 enum class Preparation { WAIT, REVOKE_OWNER, BEGIN_WITHOUT_BASELINE, CHECK_BASELINE }
 @Serializable data class Journal(val phase: String = "idle", val desired: String? = null,
@@ -102,7 +106,7 @@ object Policy {
         return if (ownerReady) Preparation.CHECK_BASELINE else Preparation.WAIT
     }
     val json = Canonical.json
-    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "tun.lease.v1", "netbird.direct", "netbird.vless")
+    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless")
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     fun decode64(value: String): ByteArray {
         require(value.matches(Regex("[A-Za-z0-9_-]+")))
@@ -130,12 +134,26 @@ object Policy {
         val der = byteArrayOf(0x30, integers.size.toByte()) + integers
         require(Signature.getInstance("SHA256withECDSA").run { initVerify(key); update((parts[0] + "." + parts[1]).toByteArray(Charsets.US_ASCII)); verify(der) })
         val text = utf8(decode64(parts[1])); val element = Canonical.parse(text); require(Canonical.encode(element) == text)
+        val objectValue=element.jsonObject
+        fun integer(value:JsonElement?) {require(value is JsonPrimitive && !value.isString && value.longOrNull!=null)}
+        fun string(value:JsonElement?) {require(value is JsonPrimitive && value.isString)}
+        fun boolean(value:JsonElement?) {require(value is JsonPrimitive && !value.isString && value.booleanOrNull!=null)}
+        listOf("schemaVersion","revision","securityEpoch","revocationFloor","issuedAtMs","notBeforeMs","refreshAfterMs","offlineUntilMs").forEach {integer(objectValue[it])}
+        listOf("targetDevice","audience","algorithmRevision","engineConfigB64","contentHash","operation").forEach {string(objectValue[it])}
+        objectValue["keyThumbprint"]?.let {string(it)}
+        objectValue.getValue("requiredCapabilities").jsonArray.forEach {string(it)}
+        val activation=objectValue.getValue("activation").jsonObject
+        integer(activation["timeoutSeconds"]);boolean(activation["allowDegraded"])
         element.jsonObject.getValue("activation").jsonObject.getValue("checks").jsonArray.forEach {
             require(it.jsonObject.keys == setOf("id", "type", "target", "port", "expected", "required"))
+            listOf("id","type","target","expected").forEach {name->string(it.jsonObject[name])}
+            integer(it.jsonObject["port"]);boolean(it.jsonObject["required"])
         }
         val p = json.decodeFromJsonElement<Payload>(element)
         require(element.jsonObject.containsKey("operation") && p.operation in setOf("configure", "release"))
-        require(p.schemaVersion == 1 && p.audience == "syn443-device" && p.targetDevice == device)
+        require(p.schemaVersion in 1..2 && p.audience == "syn443-device" && p.targetDevice == device)
+        if(p.schemaVersion==1)require("keyThumbprint" !in element.jsonObject && "policy.keybound.v2" !in p.requiredCapabilities)
+        else require(p.keyThumbprint.length==43 && decode64(p.keyThumbprint).size==32 && "policy.keybound.v2" in p.requiredCapabilities)
         require(p.targetDevice.matches(Regex("[a-zA-Z0-9_-]{8,64}")))
         require(p.revision in 1..9_007_199_254_740_991L && p.securityEpoch in 0..9_007_199_254_740_991L && p.revocationFloor in 0..p.revision)
         require(p.issuedAtMs in 1..now + 300_000 && p.notBeforeMs >= p.issuedAtMs && p.notBeforeMs <= now)
@@ -154,6 +172,8 @@ object Policy {
         }
         return Verified(raw, p, engine)
     }
+    fun verifyBound(raw:String,keys:Map<String,String>,device:String,ownThumbprint:String,now:Long):Verified =
+        verify(raw,keys,device,now).also {require(it.payload.schemaVersion==2 && it.payload.keyThumbprint==ownThumbprint)}
     fun stage(j: Journal, v: Verified): Journal {
         val p = v.payload
         require(j.phase !in setOf("prepared", "applying"))

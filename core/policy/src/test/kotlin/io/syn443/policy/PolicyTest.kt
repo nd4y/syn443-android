@@ -47,6 +47,25 @@ class PolicyTest {
         val parts = signed.split('.'); invalid { verify(parts[0] + "." + enc("{}".toByteArray()) + "." + parts[2]) }
         invalid { verify(sign(payload().copy(contentHash = "0".repeat(64)))) }
     }
+    @Test fun enrollmentRequiresSignedClientKeyEvenWhenDeliveryProvidesAValidDeviceId() {
+        val own=enc(ByteArray(32));val other=enc(ByteArray(32){1})
+        val bound=payload().copy(schemaVersion=2,keyThumbprint=own,requiredCapabilities=payload().requiredCapabilities+"policy.keybound.v2")
+        assertEquals(own,Policy.verifyBound(sign(bound),roots,"device-example",own,now).payload.keyThumbprint)
+        invalid {Policy.verifyBound(sign(bound),roots,"device-example",other,now)}
+        invalid {Policy.verifyBound(sign(),roots,"device-example",own,now)}
+        invalid {verify(sign(bound.copy(keyThumbprint="")))}
+        invalid {verify(sign(bound.copy(schemaVersion=1)))}
+        invalid {verify(sign(bound.copy(requiredCapabilities=payload().requiredCapabilities)))}
+        invalid {verify(sign(bound.copy(keyThumbprint="x".repeat(43))))}
+        assertFalse(Policy.json.encodeToString(payload()).contains("keyThumbprint"))
+    }
+    @Test fun signedNumericAndBooleanStringsAreNotCoercedAcrossPlatforms() {
+        val original=Canonical.encode(Canonical.parse(Policy.json.encodeToString(payload())))
+        for((from,to) in listOf("\"revision\":1" to "\"revision\":\"1\"", "\"schemaVersion\":1" to "\"schemaVersion\":\"1\"",
+            "\"port\":0" to "\"port\":\"0\"", "\"allowDegraded\":false" to "\"allowDegraded\":\"false\"", "\"required\":true" to "\"required\":\"true\"")) {
+            assertTrue(original.contains(from));invalid {verify(signText(original.replace(from,to)))}
+        }
+    }
     @Test fun unknownRootAlgorithmAndHeadersRejected() {
         invalid { Policy.verify(sign(), emptyMap(), "device-example", now) }
         invalid { verify(sign(header = """{"alg":"none","kid":"test-root","typ":"syn443-policy+jws"}""")) }
