@@ -12,7 +12,8 @@ class ApkAssetsTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         for name, value in [('app/src/main/assets/licenses/fixture.txt', b'synthetic license'),
-                            ('contracts/v1/decision-vectors.json', b'{"cases":[]}')]:
+                            ('contracts/v1/decision-vectors.json', b'{"cases":[]}'),
+                            ('app/src/androidTest/assets/chat-fixture.mp4', b'synthetic fixture')]:
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(value)
@@ -28,7 +29,7 @@ class ApkAssetsTest(unittest.TestCase):
 
     def test_runtime_assets_and_license_bytes_are_preserved(self):
         check(self.apk(list(expected_assets(self.root).items())), self.root)
-        check(self.apk([], 'app-debug-androidTest.apk'), self.root)
+        check(self.apk([('assets/chat-fixture.mp4', b'synthetic fixture')], 'app-debug-androidTest.apk'), self.root)
 
     def test_extra_missing_altered_and_duplicate_assets_are_rejected(self):
         values = list(expected_assets(self.root).items())
@@ -40,3 +41,9 @@ class ApkAssetsTest(unittest.TestCase):
     def test_instrumentation_cannot_silently_bundle_runtime_assets(self):
         with self.assertRaises(AssertionError):
             check(self.apk(list(expected_assets(self.root).items()), 'app-debug-androidTest.apk'), self.root)
+
+    def test_instrumentation_fixture_cannot_be_replaced_or_extended(self):
+        for values in [[], [('assets/chat-fixture.mp4', b'changed')],
+                       [('assets/chat-fixture.mp4', b'synthetic fixture'), ('assets/private.mp4', b'not allowed')]]:
+            with self.assertRaises(AssertionError):
+                check(self.apk(values, 'app-debug-androidTest.apk'), self.root)

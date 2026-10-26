@@ -13,7 +13,14 @@ def expected_assets(root):
 
 
 def check(path, root):
-    expected = {} if path.name.endswith('-androidTest.apk') else expected_assets(root)
+    if path.name.endswith('-androidTest.apk'):
+        # Generated from the public testsrc/sine recipe on this build worker.
+        # No directory/prefix exception: admit this single file byte-for-byte.
+        fixture = root / 'app/src/androidTest/assets/chat-fixture.mp4'
+        assert fixture.is_file() and 0 < fixture.stat().st_size < 25*1024*1024
+        expected = {'assets/chat-fixture.mp4': fixture.read_bytes()}
+    else:
+        expected = expected_assets(root)
     with zipfile.ZipFile(path) as archive:
         names = [i.filename for i in archive.infolist() if i.filename.startswith('assets/')]
         assert len(names) == len(set(names)), 'Duplicate APK asset'
