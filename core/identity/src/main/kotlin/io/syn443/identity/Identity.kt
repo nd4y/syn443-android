@@ -3,6 +3,7 @@ package io.syn443.identity
 import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.io.ByteArrayOutputStream
 import java.math.BigInteger
@@ -62,6 +63,10 @@ object Identity {
     }
     fun encode(raw: ByteArray): String = encoder.encodeToString(raw)
     fun hash(raw: ByteArray): String = encode(MessageDigest.getInstance("SHA-256").digest(raw))
+    fun bootstrapAuthority(bootstrap:Bootstrap):String {
+        bootstrap.validate()
+        return hash(Canonical.encode(Canonical.parse(Canonical.json.encodeToString(bootstrap))).toByteArray(Charsets.UTF_8))
+    }
     fun random(): String = ByteArray(32).also { SecureRandom().nextBytes(it) }.let(::encode)
     fun https(raw: String): URI {
         require(raw.length in 1..2048 && raw.all { it.code in 33..126 })

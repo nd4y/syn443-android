@@ -17,7 +17,8 @@ tasks.jacocoTestCoverageVerification {
         includes = listOf("io.syn443.identity.Identity", "io.syn443.identity.Bootstrap", "io.syn443.identity.Pending",
             "io.syn443.identity.BoundedHttp", "io.syn443.identity.BoundedHttpKt", "io.syn443.identity.BoundedHttp.Scope", "io.syn443.identity.AuthProtocol", "io.syn443.identity.IdentityScope",
             "io.syn443.identity.TrustedTime", "io.syn443.identity.TrustedTime.Companion",
-            "io.syn443.identity.IdentityOperation", "io.syn443.identity.IdentityOperation.Companion")
+            "io.syn443.identity.IdentityOperation", "io.syn443.identity.IdentityOperation.Companion",
+            "io.syn443.identity.LoginRecovery", "io.syn443.identity.LoginIntent", "io.syn443.identity.RegistrationTombstone")
         limit { counter = "LINE"; minimum = "0.90".toBigDecimal() }
     } }
 }

@@ -3,7 +3,6 @@ package io.syn443.identity
 import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.security.interfaces.ECPublicKey
 import java.security.interfaces.RSAPublicKey
@@ -32,7 +31,7 @@ class IdentityScope {
 }
 
 class IssuerState internal constructor(internal val keys:Map<String,RSAPublicKey>,val time:TrustedTime,internal val authority:String)
-class UserCredential internal constructor(val accessToken:String,val subject:String,val keyThumbprint:String,val time:TrustedTime,internal val authority:String) {
+@Serializable class UserCredential internal constructor(val accessToken:String,val subject:String,val keyThumbprint:String,val time:TrustedTime,internal val authority:String) {
     override fun toString()="UserCredential([redacted])"
 }
 @Serializable data class DeviceSession(val deviceId:String,val accessToken:String,val refreshToken:String,
@@ -95,7 +94,7 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     private val bootstrap=bootstrap.copy(roots=bootstrap.roots.toMap())
     init {this.bootstrap.validate()}
     val thumbprint:String get()=Identity.thumbprint(key.publicKey)
-    internal val authority:String=Identity.hash(Canonical.encode(Canonical.parse(Canonical.json.encodeToString(bootstrap))).toByteArray(Charsets.UTF_8))
+    internal val authority:String=Identity.bootstrapAuthority(this.bootstrap)
     private fun request(scope:IdentityScope,method:String,url:String,headers:Map<String,String>,body:ByteArray?,maxBody:Int):Reply =
         scope.request {exchange.request(method,url,headers,body,it,maxBody)}
     private val oidcBase=bootstrap.issuer+"/protocol/openid-connect"
