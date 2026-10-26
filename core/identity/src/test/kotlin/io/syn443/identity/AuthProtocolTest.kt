@@ -83,6 +83,7 @@ class AuthProtocolTest {
     }
     @Test fun trustedClockBoundsPrecisionRttDriftAndNeverUsesWallClock() {
         val a=TrustedTime.observe(date(),2,1000,2000)
+        assertEquals(a,Policy.json.decodeFromString<TrustedTime>(Policy.json.encodeToString(a)))
         assertEquals(TimeWindow(now,now+2000),a.window(2,2000))
         val w=a.window(2,7000);assertEquals(now+4999,w.lowerMs);assertEquals(now+7001,w.upperMs)
         assertEquals(now/1000+6,a.proofSecond(2,7000))
