@@ -1,6 +1,6 @@
 package io.syn443.android
 
-import android.app.Instrumentation
+import androidx.test.runner.AndroidJUnitRunner
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
@@ -12,11 +12,16 @@ import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 
-/** Test APK only. Exercises the real controller via its own UID; never installed in release. */
-class EnrollmentDriver:Instrumentation() {
-    private lateinit var arguments:Bundle
-    override fun onCreate(args:Bundle?) {super.onCreate(args);arguments=checkNotNull(args);start()}
+/** Test APK only. Ordinary runs retain AndroidJUnitRunner; explicit fixture runs enroll by own UID. */
+class EnrollmentDriver:AndroidJUnitRunner() {
+    private var fixtureArguments:Bundle?=null
+    override fun onCreate(args:Bundle?) {
+        fixtureArguments=args?.takeIf {it.containsKey("fixturePort")}
+        super.onCreate(args)
+    }
     override fun onStart() {
+        if(fixtureArguments==null) {super.onStart();return}
+        val arguments=checkNotNull(fixtureArguments)
         var stage="preflight"
         val ok=runCatching {
             require(BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish"))

@@ -589,7 +589,7 @@ class TunnelService : VpnService() {
             val activeAuthorized = runCatching { policies.allowed(d.journal.active, d) }.getOrNull() != null
             when (Policy.preparation(store.checkpoint().desiredOn, d.journal.active != null, activeAuthorized,
                 host != null || binding || retiring, ready && !retiring, runningConfigHash != candidate.payload.contentHash,
-                Recovery.replacementReady(store.checkpoint(), System.currentTimeMillis()))) {
+                Recovery.replacementReady(store.checkpoint(), System.currentTimeMillis()), unsignedBaselineAllowed = !d.enrolled)) {
                 Preparation.REVOKE_OWNER -> { terminateOwned(); retire(true); return }
                 Preparation.BEGIN_WITHOUT_BASELINE -> { policies.begin(List(candidate.payload.activation.checks.size) { false }); return }
                 Preparation.WAIT -> {

@@ -63,9 +63,9 @@ def main():
                     before=proxy.progress;call('connect')
                     await_condition(lambda:call('status').get('phase')=='Online' and proxy.progress>before)
                 elif name=='enrolledControllerDeathRecoversAuthorizedCache':
-                    old_controller=pid('');old_engine=pid(':engine');assert old_controller and old_engine
+                    old_controller=pid(':controller');old_engine=pid(':engine');assert old_controller and old_engine
                     fixture.policy_status=503;call('fault-controller')
-                    await_condition(lambda:bool(pid('')) and pid('')!=old_controller and bool(pid(':engine')) and pid(':engine')!=old_engine)
+                    await_condition(lambda:bool(pid(':controller')) and pid(':controller')!=old_controller and bool(pid(':engine')) and pid(':engine')!=old_engine)
                     before=proxy.progress
                     await_condition(lambda:call('auth-status').get('generation')==generation and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert fixture.registrations==1

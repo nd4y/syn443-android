@@ -35,7 +35,7 @@ android {
         targetSdk = 37
         versionCode = 18
         versionName = "0.4.8-m2-enrolled-vpn"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }
     compileOptions {

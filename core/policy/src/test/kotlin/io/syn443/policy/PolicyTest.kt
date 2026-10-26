@@ -23,6 +23,20 @@ class PolicyTest {
         assertEquals(Preparation.WAIT, Policy.preparation(true, true, true, true, true, true, false))
         assertEquals(Preparation.CHECK_BASELINE, Policy.preparation(true, true, true, true, true, false, false))
     }
+    @Test fun firstSignedAssignmentNeedsNoUnsignedBaselineAndStillHonorsStopOwnerAndBudget() {
+        for (desired in listOf(false,true)) for (owner in listOf(false,true)) for (budget in listOf(false,true)) {
+            val expected=when {
+                !desired -> Preparation.WAIT
+                owner -> Preparation.REVOKE_OWNER
+                budget -> Preparation.BEGIN_WITHOUT_BASELINE
+                else -> Preparation.WAIT
+            }
+            assertEquals(expected,Policy.preparation(desired,false,false,owner,owner,true,budget,unsignedBaselineAllowed=false))
+        }
+        // An operator's first policy can still measure its existing unmanaged baseline.
+        assertEquals(Preparation.CHECK_BASELINE,Policy.preparation(true,false,false,true,true,true,true))
+        assertEquals(Preparation.WAIT,Policy.preparation(true,false,false,false,false,true,true))
+    }
     private val now = 1_800_000_000_000L
     private val key = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
     private val roots = mapOf("test-root" to Base64.getEncoder().encodeToString(key.public.encoded))
