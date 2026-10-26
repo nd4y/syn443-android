@@ -24,13 +24,14 @@ import javax.net.ssl.TrustManagerFactory
 
 /** Controller-process pilot. One bounded worker; intent writes never wait for Keystore/network. */
 class LoginController private constructor(private val context:android.app.Application,
-    private val namespace:String="device-login-v1",private val testExchange:IdentityExchange?=null) {
+    private val namespace:String="device-login-v1",private val testExchange:IdentityExchange?=null,
+    private val testBeforeQueue:(()->Unit)?=null) {
     companion object {
         @Volatile private var instance:LoginController?=null
         @Synchronized fun get(context:Context):LoginController = instance ?: LoginController(context.applicationContext as android.app.Application).also {instance=it}
-        internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange):LoginController {
+        internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange,beforeQueue:(()->Unit)?=null):LoginController {
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") && namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
-            return LoginController(context.applicationContext as android.app.Application,namespace,exchange)
+            return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue)
         }
     }
     private val journal=LoginJournal(context,namespace)
@@ -51,17 +52,27 @@ class LoginController private constructor(private val context:android.app.Applic
     @Volatile private var cached:Pair<LoginIntent,LoginPayload>?=null
     private fun boot()=Settings.Global.getInt(context.contentResolver,Settings.Global.BOOT_COUNT,-1).also {require(it>=0)}
     private fun elapsed()=SystemClock.elapsedRealtime()
-    private fun submit(block:()->Unit) {
-        val admitted=synchronized(commands) {commandEpoch}
-        worker.execute {
+    private val pendingCommands=java.util.concurrent.atomic.AtomicInteger()
+    private inner class Command(private val admitted:Long,private val block:()->Unit):Runnable {
+        private val completed=java.util.concurrent.atomic.AtomicBoolean()
+        fun complete() {if(completed.compareAndSet(false,true))check(pendingCommands.decrementAndGet()>=0)}
+        override fun run() {try {
             val reason=try {
-                if(synchronized(commands) {if(admitted!=commandEpoch)true else {workerEpoch=admitted;false}})return@execute
+                if(synchronized(commands) {if(admitted!=commandEpoch)true else {workerEpoch=admitted;false}})return
                 block();""
             } catch(e:AuthException) {e.reason.name}
             catch(e:LoginStorageException) {if(e.reason==LoginStorageFailure.STALE)"" else e.reason.name}
             catch(_:Exception) {"LOGIN_UNAVAILABLE"}
             synchronized(commands) {if(admitted==commandEpoch)error=reason}
-        }
+        } finally {complete()}}
+    }
+    private fun submit(block:()->Unit) {
+        val task=synchronized(commands) {pendingCommands.incrementAndGet();Command(commandEpoch,block)}
+        try {testBeforeQueue?.invoke();worker.execute(task)} catch(e:Exception) {task.complete();throw e}
+    }
+    private fun discardQueued() {
+        val dropped=arrayListOf<Runnable>();worker.queue.drainTo(dropped)
+        dropped.forEach {(it as Command).complete()}
     }
     private fun bootstrap():Bootstrap {
         val raw=setup.openRead().use {stream->
@@ -81,11 +92,11 @@ class LoginController private constructor(private val context:android.app.Applic
     fun status():JSONObject = runCatching {
         val s=journal.snapshot()
         JSONObject().put("phase",s.phase.name).put("generation",s.generation).put("configured",configured)
-            .put("busy",worker.activeCount>0 || worker.queue.isNotEmpty()).put("reason",error)
+            .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
             .put("cleanupPending",s.tombstones.size)
     }.getOrElse {JSONObject().put("phase","BLOCKED").put("reason","LOGIN_STORE_UNAVAILABLE")
-        .put("busy",worker.activeCount>0 || worker.queue.isNotEmpty())}
+        .put("busy",pendingCommands.get()>0)}
     fun configure(raw:String) {
         require(io.syn443.android.BuildConfig.DEBUG && raw.toByteArray(Charsets.UTF_8).size<=16_384)
         submit {
@@ -112,7 +123,7 @@ class LoginController private constructor(private val context:android.app.Applic
     fun start(expectedGeneration:Long) {
         val epoch=synchronized(commands) {
             val s=journal.snapshot()
-            require(s.phase==LoginPhase.SIGNED_OUT && s.generation==expectedGeneration && worker.activeCount==0 && worker.queue.isEmpty())
+            require(s.phase==LoginPhase.SIGNED_OUT && s.generation==expectedGeneration && pendingCommands.get()==0)
             ++commandEpoch
         }
         submit {
@@ -214,7 +225,40 @@ class LoginController private constructor(private val context:android.app.Applic
         val next=LoginRecovery.beginEnrollment(s,s.generation,public,boot(),elapsed())
         if(next!=s)s=commit(s,next)
         val reply=protocol.enroll(checkNotNull(s.operation),user,scope)
-        protect(s,LoginPayload(p.bootstrap,session=reply)) {hash->LoginRecovery.enrolled(s,s.generation,reply,hash)}
+        val sessionPayload=LoginPayload(p.bootstrap,session=reply)
+        val registered=protect(s,sessionPayload) {hash->LoginRecovery.enrolled(s,s.generation,reply,hash)}
+        fetchAssignment(registered,sessionPayload,protocol,scope)
+    }
+    private fun fetchAssignment(s:LoginIntent,p:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
+        current(s)
+        val response=protocol.policy(checkNotNull(p.session),scope)
+        val next=Assignments.receive(journal.readAssignment(s)?:AssignmentState(),s,p,response,boot(),elapsed())
+        val receipt=Assignments.receipt(next,s,p,boot(),elapsed())
+        journal.prepareAssignment(s,next).use {prepared->synchronized(commands) {
+            current(s);journal.commitAssignment(s,prepared)
+            val accepted=if(s.phase==LoginPhase.POLICY_CACHED && s.policyHash==receipt)s
+                else commit(s,LoginRecovery.policyCached(s,s.generation,receipt,s.protectedHash))
+            cached=accepted to p
+        }}
+    }
+    private fun resumeSession(initial:LoginIntent,original:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
+        var s=initial;var p=original;var session=checkNotNull(p.session)
+        val reanchor=session.time.boot!=boot()
+        val refresh=s.phase==LoginPhase.REFRESHING || reanchor || Math.addExact(session.time.window(boot(),elapsed()).upperMs,30_000)>=session.session.accessUntilMs
+        if(refresh) {
+            val next=LoginRecovery.beginRefresh(s,s.generation,boot(),elapsed())
+            if(next!=s)s=commit(s,next)
+            // A newly pinned issuer HTTPS Date is only a proof/expiry anchor. The device API
+            // must still verify the old refresh credential and return a rotated session.
+            if(reanchor)session=session.copy(time=protocol.discover(scope).time)
+            val operation=checkNotNull(s.operation)
+            val reply=protocol.refresh(operation,session,scope)
+            val refreshed=LoginPayload(p.bootstrap,session=reply)
+            val previous=s
+            s=protect(previous,refreshed) {hash->LoginRecovery.refreshed(previous,previous.generation,operation.body,reply,hash)}
+            p=refreshed
+        }
+        fetchAssignment(s,p,protocol,scope)
     }
     private fun reauthenticate(s:LoginIntent) {synchronized(commands) {
         commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null
@@ -224,7 +268,7 @@ class LoginController private constructor(private val context:android.app.Applic
         when(LoginRecovery.resume(s,true,true,boot(),elapsed(),p.pending,p.user?.time?.boot?:p.session?.time?.boot?: -1)) {
             LoginResume.BROWSER->synchronized(commands) {current(s);browser=s.generation to Identity.authorization(p.bootstrap,checkNotNull(p.pending))}
             LoginResume.AUTHENTICATED,LoginResume.RETRY_CLEANUP,LoginResume.RETRY_ENROLLMENT->withProtocol(s,p.bootstrap) {protocol,scope->provision(s,p,protocol,scope)}
-            LoginResume.SESSION,LoginResume.REANCHOR_SESSION->Unit // Registered, pending policy handoff; never enroll again.
+            LoginResume.SESSION,LoginResume.REANCHOR_SESSION,LoginResume.RETRY_REFRESH->withProtocol(s,p.bootstrap) {protocol,scope->resumeSession(s,p,protocol,scope)}
             else->reauthenticate(s)
         }
     }
@@ -239,7 +283,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }}
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
-        commandEpoch++;browser=null;val previous=cached;cached=null;worker.queue.clear()
+        commandEpoch++;browser=null;val previous=cached;cached=null;discardQueued()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {
@@ -284,6 +328,6 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     internal fun shutdownTest() {
         require(testExchange!=null && namespace.startsWith("test-") && io.syn443.android.BuildConfig.DEBUG)
-        check(worker.activeCount==0 && worker.queue.isEmpty());worker.shutdownNow();http.close()
+        check(pendingCommands.get()==0);worker.shutdownNow();http.close()
     }
 }
