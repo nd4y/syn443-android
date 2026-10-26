@@ -132,13 +132,14 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
                         generation=next;client=ChatClient(context,next);messages=emptyList();conversation="";files=emptyList();text="";inbox=emptyList();pending=emptyList();admin=false
                         store=withContext(Dispatchers.IO) {ChatOutbox(context,next)}
                     }
-                    if(conversation.isEmpty()) {
-                        val own=requireNotNull(client).objectCall("self");admin=own.getBoolean("admin")
-                        if(!admin)conversation=own.getJSONObject("conversation").getString("id")
-                    }
+                    val own=requireNotNull(client).objectCall("self")
+                    val permittedAdmin=own.getBoolean("admin")
+                    if(admin && !permittedAdmin) {conversation="";messages=emptyList();inbox=emptyList();files=emptyList();text=""}
+                    admin=permittedAdmin
+                    if(!admin)conversation=own.getJSONObject("conversation").getString("id")
                     if(admin)inbox=(requireNotNull(client).call("inbox",JSONObject().put("before",0).put("beforeId","")) as JSONArray).objects()
                     refresh()
-                    pending=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}
+                    pending=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}.filter {admin || it.second.getString("conversation")==conversation}
                     if(pending.isNotEmpty() && android.os.SystemClock.elapsedRealtime()>=nextAttempt) {
                         nextAttempt=android.os.SystemClock.elapsedRealtime()+30_000
                         sendPending(pending.first().first)

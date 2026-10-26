@@ -209,6 +209,10 @@ jobs:
           cmdline-tools-version: '15859902'
           packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
       - run: bash tools/prepare_android_tools.sh
+      - name: Generate media fixture for instrumentation APK
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          python3 tools/generate_chat_media_fixture.py
       - name: Start ADB before emulator
         run: adb version && adb start-server
       - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
