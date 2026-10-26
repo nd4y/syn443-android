@@ -11,5 +11,6 @@ class PolicyChecks(synthetic: Boolean = false) {
     fun cancel() = job.cancel()
     fun run(checks: List<Check>) = job.run(checks)
     val failure get() = job.failure
+    val failureStage get() = job.failureStage
     companion object { private val pool = ProbePool() }
 }

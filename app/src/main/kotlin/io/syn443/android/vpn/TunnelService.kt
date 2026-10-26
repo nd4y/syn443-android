@@ -474,7 +474,14 @@ class TunnelService : VpnService() {
                 io.syn443.health.Failure.DNS -> "dns_resolution_failed"
                 io.syn443.health.Failure.TLS -> "tls_failed"
                 io.syn443.health.Failure.EOF -> "transport_eof"
-                io.syn443.health.Failure.TIMEOUT -> "network_timeout"
+                io.syn443.health.Failure.TIMEOUT -> when (job.failureStage) {
+                    io.syn443.health.Stage.RESOLVE -> "dns_timeout"
+                    io.syn443.health.Stage.CONNECT -> "tcp_timeout"
+                    io.syn443.health.Stage.TLS -> "tls_timeout"
+                    io.syn443.health.Stage.REQUEST -> "request_timeout"
+                    io.syn443.health.Stage.RESPONSE -> "response_timeout"
+                    else -> "network_timeout"
+                }
                 null -> "required_https_failed"
                 else -> "transport_failed"
             }
