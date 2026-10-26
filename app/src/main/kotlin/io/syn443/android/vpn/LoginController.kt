@@ -68,7 +68,18 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     private fun submit(block:()->Unit) {
         val task=synchronized(commands) {pendingCommands.incrementAndGet();Command(commandEpoch,block)}
+        enqueue(task)
+    }
+    private fun enqueue(task:Command) {
         try {testBeforeQueue?.invoke();worker.execute(task)} catch(e:Exception) {task.complete();throw e}
+    }
+    private fun submitIfIdle(onAdmission:()->Unit={},block:()->Unit):Boolean {
+        val task=synchronized(commands) {
+            if(pendingCommands.get()!=0)return false
+            onAdmission()
+            pendingCommands.incrementAndGet();Command(commandEpoch,block)
+        }
+        enqueue(task);return true
     }
     private fun discardQueued() {
         val dropped=arrayListOf<Runnable>();worker.queue.drainTo(dropped)
@@ -240,12 +251,45 @@ class LoginController private constructor(private val context:android.app.Applic
         val receipt=Assignments.receipt(next,s,p,boot(),elapsed())
         val target=if(s.phase==LoginPhase.POLICY_CACHED && s.policyHash==receipt)s
             else LoginRecovery.policyCached(s,s.generation,receipt,s.protectedHash)
+        persistAssignment(s,p,next,target)
+    }
+    private fun persistAssignment(s:LoginIntent,p:LoginPayload,next:AssignmentState,target:LoginIntent=s) {
         val runtime=assignedRuntime.prepare(target,p,next)
         journal.prepareAssignment(s,next).use {prepared->synchronized(commands) {
             current(s);journal.commitAssignment(s,prepared)
             val accepted=if(target==s)s else commit(s,target)
             cached=accepted to p;assignedRuntime.publish(runtime)
         }}
+    }
+    internal fun assignmentTicket():AssignedPolicyRuntime.Ticket = assignedRuntime.ticket(journal.snapshot())
+    /** Commands persist on the identity worker. The native caller observes the resulting view;
+     * acceptance is not a completed transition, and a lost/stale command grants no new permit. */
+    private fun transitionAssignment(ticket:AssignedPolicyRuntime.Ticket,invalidate:Boolean=false,
+        change:(AssignmentState,LoginIntent,LoginPayload)->AssignmentState):Boolean = submitIfIdle(onAdmission={
+        if(invalidate && runCatching {assignmentTicket()==ticket}.getOrDefault(false))assignedRuntime.clear()
+    }) {
+        val s=journal.snapshot();current(s)
+        require(s.phase==LoginPhase.POLICY_CACHED && s.generation==ticket.loginGeneration && s.policyHash==ticket.receipt)
+        val p=payload(s);val before=checkNotNull(journal.readAssignment(s))
+        require(before.journal.activationGeneration==ticket.activation)
+        persistAssignment(s,p,change(before,s,p))
+    }
+    internal fun beginAssignment(ticket:AssignedPolicyRuntime.Ticket,baseline:List<Boolean>):Boolean {
+        val values=baseline.toList();require(values.size in 1..8)
+        return transitionAssignment(ticket) {before,s,p->
+            require(assignedRuntime.prepare(s,p,before).candidate!=null)
+            Assignments.begin(before,s,p,values,boot(),elapsed())
+        }
+    }
+    internal fun finishAssignment(ticket:AssignedPolicyRuntime.Ticket,actual:List<Boolean>,started:Boolean):Boolean {
+        val values=actual.toList();require(values.size in 1..8)
+        return transitionAssignment(ticket) {before,s,p->Assignments.finish(before,s,p,values,started,boot(),elapsed())}
+    }
+    internal fun abortAssignment(ticket:AssignedPolicyRuntime.Ticket,reason:String):Boolean {
+        require(reason in setOf("activation_deadline","interrupted_activation","native_activation_failed","candidate_expired_or_revoked"))
+        // Invalidate the old view before waiting for encrypted persistence. A stale ticket cannot
+        // erase the current account's permit; the worker independently checks the journal again.
+        return transitionAssignment(ticket,true) {before,s,p->Assignments.abort(before,s,p,reason)}
     }
     private fun resumeSession(initial:LoginIntent,original:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
         var s=initial;var p=original;var session=checkNotNull(p.session)
@@ -272,10 +316,15 @@ class LoginController private constructor(private val context:android.app.Applic
     private fun resumeWorker(s:LoginIntent) {
         val p=payload(s)
         if(s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING)) {
-            val assignment=journal.readAssignment(s)
+            var assignment=journal.readAssignment(s)
             if(assignment!=null) {
-                val prepared=assignedRuntime.prepare(s,p,assignment)
-                synchronized(commands) {current(s);assignedRuntime.publish(prepared)}
+                if(assignment.journal.phase=="applying" && !assignedRuntime.contains(s,assignment)) {
+                    assignment=Assignments.abort(assignment,s,p,"interrupted_activation")
+                    persistAssignment(s,p,assignment)
+                } else {
+                    val prepared=assignedRuntime.prepare(s,p,assignment)
+                    synchronized(commands) {current(s);assignedRuntime.publish(prepared)}
+                }
             }
         }
         when(LoginRecovery.resume(s,true,true,boot(),elapsed(),p.pending,p.user?.time?.boot?:p.session?.time?.boot?: -1)) {

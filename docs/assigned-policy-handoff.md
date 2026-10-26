@@ -1,5 +1,7 @@
 # Assigned policy handoff
 
+The controller exposes bounded asynchronous begin/finish/abort transitions for the native integration. Each request carries the login generation, signed-policy receipt and activation generation; admission alone never authorizes a candidate. Encryption and engine validation run on its worker before the current-intent CAS and immutable-view publication. An accepted abort invalidates the view before enqueue. A replacement policy or logout rejects late results. On controller recreation, an interrupted applying journal is durably rolled back before any view or network refresh can publish it. These commands are internal and do not yet enable the enrolled TUN.
+
 This stage implements receipt of an assigned policy and protected storage, plus session refresh while VPN is Off. It does not enable a managed VPN after login yet. Native activation, periodic refresh on a separately bound physical Network, native-owner retirement on logout, and managed overlay namespaces remain acceptance gates. Existing M1 operator-provisioned activation remains separate.
 
 `Assignments` binds every policy journal to the exact login generation, bootstrap authority, device ID and proof-key thumbprint. It verifies the pinned signature and device/key claims again, uses the conservative HTTPS time window, and accepts only capabilities currently advertised by enrollment. A new identity cannot inherit a previous account's activation history or configuration. A management release is not admitted through this enrollment path.

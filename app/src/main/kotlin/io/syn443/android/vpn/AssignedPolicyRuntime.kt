@@ -7,6 +7,9 @@ import org.json.JSONObject
 
 /** Immutable worker-built view. Binder/native reads never decrypt or verify signatures. */
 internal class AssignedPolicyRuntime(private val boot:()->Int,private val elapsed:()->Long) {
+    internal data class Ticket(val loginGeneration:Long,val receipt:String,val activation:Long) {
+        override fun toString()="AssignmentTicket([redacted])"
+    }
     internal class Prepared internal constructor(val login:LoginIntent,val state:AssignmentState,val candidate:Verified?,
         val candidateDeadline:Long,val permit:AssignmentPermit?) {
         override fun toString()="AssignedPolicyView([redacted])"
@@ -36,6 +39,11 @@ internal class AssignedPolicyRuntime(private val boot:()->Int,private val elapse
             login.deviceId==view.login.deviceId && login.thumbprint==view.login.thumbprint && login.policyHash==view.login.policyHash)
         return view
     }
+    fun ticket(login:LoginIntent):Ticket {
+        val view=current(login)
+        return Ticket(login.generation,login.policyHash,view.state.journal.activationGeneration)
+    }
+    fun contains(login:LoginIntent,state:AssignmentState):Boolean = runCatching {current(login).state==state}.getOrDefault(false)
     fun config(login:LoginIntent):String {
         val view=current(login)
         return checkNotNull(view.permit).authorized(login,view.state,boot(),elapsed()).engineConfig
