@@ -42,6 +42,7 @@ private fun Prototype(request: Request, consentGeneration: Long = -1) {
     ) {
         Text("SYN443", style = MaterialTheme.typography.headlineLarge)
         Text("Secure Your Network")
+        io.syn443.android.vpn.LoginControls()
         io.syn443.android.vpn.VpnControls(consentGeneration)
         Text("Модель выбора маршрута (тестовые данные).", Modifier.testTag("prototype"))
         Text("Эпоха сети: " + state.context.networkEpoch, Modifier.testTag("epoch"))

@@ -19,6 +19,7 @@ class ControlProvider : ContentProvider() {
         val store = StateStore.get(checkNotNull(context))
         OsIntentGate.observe(checkNotNull(context), store)
         if (store.checkpoint().desiredOn) store.event(if (store.read().optBoolean("resumeRequired")) "NeedsAction" else "Recovering", if (store.read().optBoolean("resumeRequired")) "explicit_resume_required" else "controller_recreated", store.read().optLong("networkEpoch"))
+        LoginController.get(checkNotNull(context)).recover()
         return true
     }
     private fun requestReconcile(context: android.content.Context, store: StateStore, action: String = TunnelService.RECONCILE) {
@@ -37,6 +38,28 @@ class ControlProvider : ContentProvider() {
         val store = StateStore.get(context)
         return try {
             when (method) {
+                "auth-status" -> return Bundle().apply {putBoolean("ok",true);putString("json",LoginController.get(context).status().toString())}
+                "auth-bootstrap-file" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller==2000)
+                    val file=java.io.File(context.noBackupFilesDir,"operator-identity.json")
+                    val raw=try {require(file.length() in 1..16_384);file.readText(Charsets.UTF_8)} finally {file.delete()}
+                    LoginController.get(context).configure(raw)
+                }
+                "auth-start" -> LoginController.get(context).start(requireNotNull(arg?.toLongOrNull()))
+                "auth-retry" -> LoginController.get(context).retry(requireNotNull(arg?.toLongOrNull()))
+                "auth-browser" -> {
+                    require(caller==Process.myUid())
+                    return Bundle().apply {putBoolean("ok",true);putString("url",LoginController.get(context).browserUrl(requireNotNull(arg?.toLongOrNull())))}
+                }
+                "auth-callback" -> {
+                    require(caller==Process.myUid());LoginController.get(context).callback(requireNotNull(arg))
+                }
+                "auth-cancel" -> {
+                    try {store.serialized {
+                        store.update {store.put(it,Recovery.command(store.checkpoint(it),false));OsIntentGate.command(context,it,false);it.put("phase","Off")}
+                        LoginController.get(context).cancel()
+                    }} finally {context.startService(Intent(context,TunnelService::class.java).setAction(TunnelService.RECONCILE))}
+                }
                 "resources" -> return Bundle().apply { putBoolean("ok", true); putString("json", resources.snapshot().toString()) }
                 "status", "logs" -> Unit
                 "foreground-open" -> {
@@ -77,8 +100,11 @@ class ControlProvider : ContentProvider() {
                 }
                 "connect", "disconnect" -> {
                     val on = method == "connect"
+                    store.serialized {
+                        require(!on || LoginController.get(context).allowsConnect())
+                        store.update { store.put(it, Recovery.command(store.checkpoint(it), on)); OsIntentGate.command(context, it, on); it.put("phase", if (on) "Connecting" else "Off") }
+                    }
                     explicitConnectInProcess = on
-                    store.update { store.put(it, Recovery.command(store.checkpoint(it), on)); OsIntentGate.command(context, it, on); it.put("phase", if (on) "Connecting" else "Off") }
                     val intent = Intent(context, TunnelService::class.java).setAction(TunnelService.RECONCILE)
                     if (on) requestReconcile(context, store) else context.startService(intent)
                 }
