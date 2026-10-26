@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=65
+    minimum=67
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -78,7 +78,9 @@ if mode=="emulator":
     required |= {"browserReservationAndCancellationPreserveVpnAndDeleteTheKey",
         "controllerRestartResumesSameBrowserGenerationWithoutANewKey",
         "exactErrorCallbackIsSingleUseAndNeverConnectsVpn"}
-    required |= {"actualControllerRegistersOnceAcrossRestartAndRevokesBeforeDeletingItsKey",
+    required |= {"acceptedCommandIsBusyBeforeExecutorAdmissionAndCancellationDrainsItExactlyOnce",
+        "fullQueueAndDiscardedCommandsCannotRemainBusyOrRunAfterCancellation",
+        "actualControllerRegistersOnceAcrossRestartAndRevokesBeforeDeletingItsKey",
         "lostEnrollmentReplyRetriesExactPersistedBodyAndKeyAfterControllerRestart",
         "cancelledCommittedEnrollmentCannotReturnAndFreshOwnerLoginCleansItsOrphan",
         "unreadableJournalStillCancelsNetworkAndRetiresTheOwnedPrivateKey"}

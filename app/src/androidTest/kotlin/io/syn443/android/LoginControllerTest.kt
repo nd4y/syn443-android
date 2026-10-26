@@ -168,9 +168,9 @@ class LoginControllerTest {
         val end=SystemClock.elapsedRealtime()+20_000
         while(!predicate()) {check(SystemClock.elapsedRealtime()<end) {"isolated login timed out"};Thread.sleep(50)}
     }
-    private inner class Fixture(val server:Server=Server()) {
+    private inner class Fixture(val server:Server=Server(),val beforeQueue:(()->Unit)?=null) {
         val namespace="test-"+UUID.randomUUID().toString()
-        var controller=LoginController.isolatedForTest(context,namespace,server)
+        var controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue)
         val journal=LoginJournal(context,namespace)
         fun idle()=until {!controller.status().getBoolean("busy")}
         fun begin():String {
@@ -179,22 +179,56 @@ class LoginControllerTest {
             val state=checkNotNull(server.authorization.toUri().getQueryParameter("state"))
             return Identity.callback+"?"+Identity.form(mapOf("state" to state,"iss" to server.bootstrap.issuer,"code" to "synthetic-code"))
         }
-        fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server);controller.recover();idle()}
+        fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue);controller.recover();idle()}
         fun cleanup() {
             server.release.countDown();controller.cancel();idle();check(journal.snapshot().phase==LoginPhase.SIGNED_OUT)
             controller.shutdownTest();check(File(context.noBackupFilesDir,"login/$namespace").deleteRecursively())
             check(File(context.noBackupFilesDir,"$namespace-bootstrap.json").delete())
         }
     }
-    private fun fixture(block:(Fixture)->Unit) {
+    private fun fixture(beforeQueue:(()->Unit)?=null,block:(Fixture)->Unit) {
         check(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
         context.contentResolver.call("content://io.syn443.control".toUri(),"disconnect",null,null)
         until {
             val raw=context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null)?.getString("json")
             raw!=null && org.json.JSONObject(raw).let {!it.optBoolean("desiredOn") && !it.optBoolean("engineActive")}
         }
-        val f=Fixture()
+        val f=Fixture(beforeQueue=beforeQueue)
         try {f.controller.configure(Canonical.json.encodeToString(f.server.bootstrap));f.idle();block(f)} finally {f.cleanup()}
+    }
+    @Test fun acceptedCommandIsBusyBeforeExecutorAdmissionAndCancellationDrainsItExactlyOnce() {
+        val pause=java.util.concurrent.atomic.AtomicBoolean()
+        val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        fixture(beforeQueue={if(pause.get()) {entered.countDown();check(release.await(5,TimeUnit.SECONDS))}}) {f->
+            val caller=java.util.concurrent.Executors.newSingleThreadExecutor()
+            try {
+                pause.set(true);val accepted=caller.submit {f.controller.start(0)}
+                assertTrue(entered.await(3,TimeUnit.SECONDS))
+                assertTrue(f.controller.status().getBoolean("busy"))
+                assertThrows(IllegalArgumentException::class.java) {f.controller.start(0)}
+                f.controller.cancel();assertTrue(f.controller.status().getBoolean("busy"))
+                pause.set(false);release.countDown();accepted.get(3,TimeUnit.SECONDS);f.idle()
+                assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+                assertEquals(0L,f.journal.snapshot().generation)
+                assertFalse(f.controller.status().getBoolean("busy"));assertFalse(f.controller.status().getBoolean("browserReady"))
+                // A cancelled pre-queue command does not poison the next admitted generation.
+                f.begin();assertEquals(LoginPhase.BROWSER,f.journal.snapshot().phase)
+            } finally {pause.set(false);release.countDown();caller.shutdownNow()}
+        }
+    }
+    @Test fun fullQueueAndDiscardedCommandsCannotRemainBusyOrRunAfterCancellation() = fixture {f->
+        f.server.holdEnrollment=true;f.controller.callback(f.begin())
+        assertTrue(f.server.enrollmentEntered.await(10,TimeUnit.SECONDS))
+        val generation=f.journal.snapshot().generation
+        f.controller.retry(generation)
+        assertThrows(java.util.concurrent.RejectedExecutionException::class.java) {f.controller.retry(generation)}
+        assertTrue(f.controller.status().getBoolean("busy"))
+        f.controller.cancel();f.server.holdEnrollment=false;f.server.release.countDown();f.idle()
+        assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+        assertEquals(1,f.server.enrollBodies.size);assertFalse(f.controller.status().getBoolean("busy"))
+        f.controller.callback(f.begin());f.idle()
+        assertEquals(LoginPhase.PROVISIONING,f.journal.snapshot().phase)
+        assertTrue(f.journal.snapshot().tombstones.isEmpty());assertEquals(1,f.server.activeKeys.size)
     }
     @Test fun actualControllerRegistersOnceAcrossRestartAndRevokesBeforeDeletingItsKey() = fixture {f->
         f.controller.callback(f.begin());f.idle()
