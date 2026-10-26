@@ -214,7 +214,40 @@ class LoginController private constructor(private val context:android.app.Applic
         val next=LoginRecovery.beginEnrollment(s,s.generation,public,boot(),elapsed())
         if(next!=s)s=commit(s,next)
         val reply=protocol.enroll(checkNotNull(s.operation),user,scope)
-        protect(s,LoginPayload(p.bootstrap,session=reply)) {hash->LoginRecovery.enrolled(s,s.generation,reply,hash)}
+        val sessionPayload=LoginPayload(p.bootstrap,session=reply)
+        val registered=protect(s,sessionPayload) {hash->LoginRecovery.enrolled(s,s.generation,reply,hash)}
+        fetchAssignment(registered,sessionPayload,protocol,scope)
+    }
+    private fun fetchAssignment(s:LoginIntent,p:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
+        current(s)
+        val response=protocol.policy(checkNotNull(p.session),scope)
+        val next=Assignments.receive(journal.readAssignment(s)?:AssignmentState(),s,p,response,boot(),elapsed())
+        val receipt=Assignments.receipt(next,s,p,boot(),elapsed())
+        journal.prepareAssignment(s,next).use {prepared->synchronized(commands) {
+            current(s);journal.commitAssignment(s,prepared)
+            val accepted=if(s.phase==LoginPhase.POLICY_CACHED && s.policyHash==receipt)s
+                else commit(s,LoginRecovery.policyCached(s,s.generation,receipt,s.protectedHash))
+            cached=accepted to p
+        }}
+    }
+    private fun resumeSession(initial:LoginIntent,original:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
+        var s=initial;var p=original;var session=checkNotNull(p.session)
+        val reanchor=session.time.boot!=boot()
+        val refresh=s.phase==LoginPhase.REFRESHING || reanchor || Math.addExact(session.time.window(boot(),elapsed()).upperMs,30_000)>=session.session.accessUntilMs
+        if(refresh) {
+            val next=LoginRecovery.beginRefresh(s,s.generation,boot(),elapsed())
+            if(next!=s)s=commit(s,next)
+            // A newly pinned issuer HTTPS Date is only a proof/expiry anchor. The device API
+            // must still verify the old refresh credential and return a rotated session.
+            if(reanchor)session=session.copy(time=protocol.discover(scope).time)
+            val operation=checkNotNull(s.operation)
+            val reply=protocol.refresh(operation,session,scope)
+            val refreshed=LoginPayload(p.bootstrap,session=reply)
+            val previous=s
+            s=protect(previous,refreshed) {hash->LoginRecovery.refreshed(previous,previous.generation,operation.body,reply,hash)}
+            p=refreshed
+        }
+        fetchAssignment(s,p,protocol,scope)
     }
     private fun reauthenticate(s:LoginIntent) {synchronized(commands) {
         commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null
@@ -224,7 +257,7 @@ class LoginController private constructor(private val context:android.app.Applic
         when(LoginRecovery.resume(s,true,true,boot(),elapsed(),p.pending,p.user?.time?.boot?:p.session?.time?.boot?: -1)) {
             LoginResume.BROWSER->synchronized(commands) {current(s);browser=s.generation to Identity.authorization(p.bootstrap,checkNotNull(p.pending))}
             LoginResume.AUTHENTICATED,LoginResume.RETRY_CLEANUP,LoginResume.RETRY_ENROLLMENT->withProtocol(s,p.bootstrap) {protocol,scope->provision(s,p,protocol,scope)}
-            LoginResume.SESSION,LoginResume.REANCHOR_SESSION->Unit // Registered, pending policy handoff; never enroll again.
+            LoginResume.SESSION,LoginResume.REANCHOR_SESSION,LoginResume.RETRY_REFRESH->withProtocol(s,p.bootstrap) {protocol,scope->resumeSession(s,p,protocol,scope)}
             else->reauthenticate(s)
         }
     }

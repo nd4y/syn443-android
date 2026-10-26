@@ -9,7 +9,10 @@ import io.syn443.identity.Identity
 import io.syn443.identity.LoginIntent
 import io.syn443.identity.LoginPhase
 import io.syn443.identity.LoginRecovery
+import io.syn443.identity.AssignmentState
+import io.syn443.identity.AssignmentIdentity
 import io.syn443.policy.Policy
+import kotlinx.serialization.encodeToString
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -29,6 +32,7 @@ class LoginStorageException(val reason:LoginStorageFailure):Exception(reason.nam
 class LoginJournal(context:Context,private val namespace:String="device-login-v1") {
     companion object {
         private const val maximum=65_536
+        private const val assignmentMaximum=2_097_152
         private const val keyAlias="syn443-auth-store-v1"
         private val intentLock=Any()
         private val cryptoLock=Any()
@@ -53,10 +57,12 @@ class LoginJournal(context:Context,private val namespace:String="device-login-v1
     private val directory:File
     private val intent:AtomicFile
     private val protected:AtomicFile
+    private val assignment:AtomicFile
     init {
         require(namespace.matches(Regex("[a-z0-9-]{1,48}")))
         directory=File(context.noBackupFilesDir,"login/$namespace")
         intent=AtomicFile(File(directory,"intent.json"));protected=AtomicFile(File(directory,"protected.bin"))
+        assignment=AtomicFile(File(directory,"assignment.bin"))
     }
     class Prepared internal constructor(internal val generation:Long,internal val authority:String,
         internal val namespace:String,internal val data:ByteArray) : AutoCloseable {
@@ -79,11 +85,11 @@ class LoginJournal(context:Context,private val namespace:String="device-login-v1
     }
     private fun snapshotLocked():LoginIntent {
         if(!exists(intent)) {
-            if(exists(protected))throw LoginStorageException(LoginStorageFailure.CORRUPT)
+            if(exists(protected) || exists(assignment))throw LoginStorageException(LoginStorageFailure.CORRUPT)
             return LoginIntent()
         }
         return try {LoginRecovery.decode(Policy.utf8(read(intent,maximum))).also {
-            if(it.phase==LoginPhase.SIGNED_OUT && exists(protected))throw LoginStorageException(LoginStorageFailure.CORRUPT)
+            if(it.phase==LoginPhase.SIGNED_OUT && (exists(protected) || exists(assignment)))throw LoginStorageException(LoginStorageFailure.CORRUPT)
         }}
             catch(_:Exception) {throw LoginStorageException(LoginStorageFailure.CORRUPT)}
     }
@@ -154,7 +160,70 @@ class LoginJournal(context:Context,private val namespace:String="device-login-v1
             Policy.utf8(plain).also {Identity.objectJSON(it)}
         } finally {plain.fill(0)}
     }
-    private fun eraseLocked() {protected.delete();check(!exists(protected))}
+    class PreparedAssignment internal constructor(internal val identity:AssignmentIdentity,
+        internal val namespace:String,internal val data:ByteArray):AutoCloseable {
+        internal var closed=false
+        internal val hash=Identity.hash(data)
+        override fun close() {synchronized(this) {closed=true;data.fill(0)}}
+        override fun toString()="PreparedAssignment([redacted])"
+    }
+    private fun assignmentIdentity(expected:LoginIntent):AssignmentIdentity {
+        LoginRecovery.validate(expected)
+        require(expected.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))
+        return AssignmentIdentity(expected.authority,expected.generation,expected.deviceId,expected.thumbprint)
+    }
+    private fun assignmentAad(expected:LoginIntent)=("SYN443-ASSIGNMENT-1\n$namespace\n"+
+        "${expected.generation}\n${expected.authority}\n${expected.deviceId}\n${expected.thumbprint}").toByteArray(Charsets.US_ASCII)
+    /** Separate bounded ciphertext: activation snapshots must not inflate the credential record. */
+    fun prepareAssignment(expected:LoginIntent,value:AssignmentState):PreparedAssignment = guarded {
+        worker();val identity=assignmentIdentity(expected);require(value.identity==identity && value.time!=null)
+        synchronized(intentLock) {requireCurrent(expected)}
+        val plain=Policy.json.encodeToString(value).toByteArray(Charsets.UTF_8)
+        try {
+            require(plain.size in 1..assignmentMaximum)
+            val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(Cipher.ENCRYPT_MODE,key(true));updateAAD(assignmentAad(expected))
+            }
+            PreparedAssignment(identity,namespace,byteArrayOf(1)+cipher.iv+cipher.doFinal(plain))
+        } finally {plain.fill(0)}
+    }
+    /** Caller holds its command fence; the login receipt is committed only after this readback. */
+    fun commitAssignment(expected:LoginIntent,prepared:PreparedAssignment) = guarded {synchronized(intentLock) {
+        requireCurrent(expected)
+        synchronized(prepared) {
+            require(!prepared.closed && prepared.namespace==namespace && prepared.identity==assignmentIdentity(expected))
+            write(assignment,prepared.data)
+            if(Identity.hash(read(assignment,assignmentMaximum+29))!=prepared.hash)throw LoginStorageException(LoginStorageFailure.CORRUPT)
+        }
+    }}
+    fun readAssignment(expected:LoginIntent):AssignmentState? = guarded {
+        worker();val identity=assignmentIdentity(expected)
+        val bytes=synchronized(intentLock) {
+            requireCurrent(expected)
+            if(!exists(assignment)) {
+                if(expected.policyHash.isNotEmpty())throw LoginStorageException(LoginStorageFailure.CORRUPT)
+                return@guarded null
+            }
+            read(assignment,assignmentMaximum+29).also {
+                if(it.size !in 30..assignmentMaximum+29 || it[0]!=1.toByte())throw LoginStorageException(LoginStorageFailure.CORRUPT)
+            }
+        }
+        val plain=try {Cipher.getInstance("AES/GCM/NoPadding").run {
+            init(Cipher.DECRYPT_MODE,key(false),GCMParameterSpec(128,bytes.copyOfRange(1,13)))
+            updateAAD(assignmentAad(expected));doFinal(bytes.copyOfRange(13,bytes.size))
+        }} catch(_:Exception) {throw LoginStorageException(LoginStorageFailure.CORRUPT)} finally {bytes.fill(0)}
+        try {
+            val text=Policy.utf8(plain)
+            val value=try {Policy.json.decodeFromString<AssignmentState>(text).also {
+                require(it.identity==identity && it.time!=null && Policy.json.encodeToString(it)==text)
+            }} catch(_:Exception) {throw LoginStorageException(LoginStorageFailure.CORRUPT)}
+            synchronized(intentLock) {requireCurrent(expected)};value
+        } finally {plain.fill(0)}
+    }
+    private fun eraseLocked() {
+        protected.delete();assignment.delete()
+        check(!exists(protected) && !exists(assignment))
+    }
     /** Retry erasure after a persisted Cancel; retirement cannot be acknowledged until it succeeds. */
     fun eraseRetired(expected:LoginIntent):Boolean = guarded {synchronized(intentLock) {
         requireCurrent(expected);require(expected.phase in setOf(LoginPhase.RETIRING,LoginPhase.SIGNED_OUT))

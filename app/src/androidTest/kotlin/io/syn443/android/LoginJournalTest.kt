@@ -9,6 +9,7 @@ import io.syn443.android.vpn.LoginJournal
 import io.syn443.android.vpn.LoginStorageException
 import io.syn443.android.vpn.LoginStorageFailure
 import io.syn443.identity.*
+import io.syn443.policy.Journal
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -47,6 +48,73 @@ class LoginJournalTest {
     private fun reason(expected:LoginStorageFailure,block:()->Unit) {
         val e=assertThrows(LoginStorageException::class.java,block)
         assertEquals(expected,e.reason);assertNull(e.cause);assertEquals(expected.name,e.message)
+    }
+    private fun registered(f:Fixture):LoginIntent {
+        val previous=browser(f)
+        return f.journal.commit(previous,previous.copy(revision=previous.revision+1,phase=LoginPhase.PROVISIONING,
+            ownerTag=Identity.random(),maybeRegistered=true,deviceId=Identity.random(),sessionGeneration=0))
+    }
+    private fun assignment(s:LoginIntent)=AssignmentState(AssignmentIdentity(s.authority,s.generation,s.deviceId,s.thumbprint),
+        Journal(desired="synthetic-private-assignment-"+"x".repeat(70_000)),TrustedTime(1,1000,1_800_000_000_000,1_800_000_001_000))
+    @Test fun assignmentJournalIsSeparateEncryptedAndCancellationFencesLateStorage() = withFixture {f->
+        val s=registered(f);val value=assignment(s)
+        assertNull(f.journal.readAssignment(s))
+        val credentials=File(f.directory,"protected.bin").readBytes()
+        f.journal.prepareAssignment(s,value).use {p->
+            assertEquals("PreparedAssignment([redacted])",p.toString());f.journal.commitAssignment(s,p)
+        }
+        assertArrayEquals(credentials,File(f.directory,"protected.bin").readBytes())
+        assertEquals(value,LoginJournal(context,f.name).readAssignment(s))
+        assertFalse(File(f.directory,"assignment.bin").readBytes().toString(Charsets.UTF_8).contains("synthetic-private-assignment"))
+        f.journal.prepareAssignment(s,value).use {late->
+            val retired=f.journal.commit(s,LoginRecovery.cancel(s,s.generation))
+            assertFalse(File(f.directory,"assignment.bin").exists());assertFalse(File(f.directory,"protected.bin").exists())
+            reason(LoginStorageFailure.STALE) {f.journal.commitAssignment(s,late)}
+            assertTrue(f.journal.eraseRetired(retired))
+            val signedOut=f.journal.commit(retired,LoginRecovery.retired(retired,retired.generation,s.keyAlias,true,true))
+            assertEquals(LoginPhase.SIGNED_OUT,signedOut.phase)
+        }
+    }
+    @Test fun assignmentCiphertextCannotCrossNamespaceGenerationDeviceKeyOrTrustScope() = withFixture {f->
+        val s=registered(f);val value=assignment(s)
+        f.journal.prepareAssignment(s,value).use {f.journal.commitAssignment(s,it)}
+        val ciphertext=File(f.directory,"assignment.bin").readBytes()
+        withFixture {other->
+            registered(other);File(other.directory,"intent.json").writeText(LoginRecovery.encode(s))
+            File(other.directory,"assignment.bin").writeBytes(ciphertext)
+            reason(LoginStorageFailure.CORRUPT) {other.journal.readAssignment(s)}
+            f.journal.prepareAssignment(s,value).use {p->reason(LoginStorageFailure.UNAVAILABLE) {other.journal.commitAssignment(s,p)}}
+        }
+        for(changed in listOf(s.copy(generation=2),s.copy(authority=Identity.random()),s.copy(deviceId=Identity.random()),s.copy(thumbprint=Identity.random()))) {
+            File(f.directory,"intent.json").writeText(LoginRecovery.encode(changed))
+            reason(LoginStorageFailure.CORRUPT) {f.journal.readAssignment(changed)}
+        }
+        File(f.directory,"intent.json").writeText(LoginRecovery.encode(s))
+        ciphertext[ciphertext.lastIndex]=(ciphertext.last().toInt() xor 1).toByte()
+        File(f.directory,"assignment.bin").writeBytes(ciphertext)
+        reason(LoginStorageFailure.CORRUPT) {f.journal.readAssignment(s)}
+    }
+    @Test fun assignmentBoundsOrphansMissingReceiptsAndWrongThreadFailClosed() = withFixture {f->
+        val s=registered(f);val value=assignment(s)
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            reason(LoginStorageFailure.WRONG_THREAD) {f.journal.prepareAssignment(s,value)}
+            reason(LoginStorageFailure.WRONG_THREAD) {f.journal.readAssignment(s)}
+        }
+        reason(LoginStorageFailure.UNAVAILABLE) {f.journal.prepareAssignment(s,value.copy(journal=Journal(desired="x".repeat(2_097_152))))}
+        reason(LoginStorageFailure.UNAVAILABLE) {f.journal.prepareAssignment(s,AssignmentState())}
+        f.journal.prepareAssignment(s,value).use {p->
+            p.close();reason(LoginStorageFailure.UNAVAILABLE) {f.journal.commitAssignment(s,p)}
+        }
+        val cached=f.journal.commit(s,LoginRecovery.policyCached(s,s.generation,Identity.random(),s.protectedHash))
+        reason(LoginStorageFailure.CORRUPT) {f.journal.readAssignment(cached)}
+        for(bytes in listOf(byteArrayOf(1),ByteArray(2_097_182))) {
+            File(f.directory,"assignment.bin").writeBytes(bytes)
+            reason(LoginStorageFailure.CORRUPT) {f.journal.readAssignment(cached)}
+        }
+        File(f.directory,"protected.bin").delete();File(f.directory,"intent.json").delete()
+        reason(LoginStorageFailure.CORRUPT) {f.journal.snapshot()}
+        File(f.directory,"intent.json").writeText(LoginRecovery.encode(LoginIntent()))
+        reason(LoginStorageFailure.CORRUPT) {f.journal.snapshot()}
     }
     @Test fun protectedStatePersistsWithoutPlaintextAndCallbackIsConsumedOnce() = withFixture {f->
         val s=browser(f);val reopened=LoginJournal(context,f.name)

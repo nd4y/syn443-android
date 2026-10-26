@@ -12,6 +12,9 @@ import io.syn443.android.vpn.LoginStorageException
 import io.syn443.identity.*
 import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
+import io.syn443.policy.Payload
+import io.syn443.policy.Gate
+import io.syn443.policy.Check
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
@@ -48,9 +51,17 @@ class LoginControllerTest {
         @Volatile var authorization=""
         @Volatile var dropEnrollment=false
         @Volatile var holdEnrollment=false
+        @Volatile var policyReady=false
+        @Volatile var foreignPolicyKey=false
+        @Volatile var shortAccess=false
+        @Volatile var dropRefresh=false
         val enrollmentEntered=CountDownLatch(1);val release=CountDownLatch(1)
         val receipts=linkedMapOf<String,String>();val enrollBodies=mutableListOf<String>();val paths=mutableListOf<String>()
         val activeKeys=mutableSetOf<String>()
+        val sessions=mutableMapOf<String,DeviceSession>()
+        val refreshBodies=mutableListOf<String>()
+        private val refreshReceipts=mutableMapOf<String,Pair<String,String>>()
+        private val policies=mutableMapOf<String,String>()
         private fun now()=System.currentTimeMillis()/1000*1000
         private fun reply(status:Int=200,text:String="{}")=Reply(status,mapOf(
             "content-type" to listOf("application/json; charset=utf-8"),
@@ -77,7 +88,8 @@ class LoginControllerTest {
             check(claims.getValue("htu").jsonPrimitive.content==url && claims.getValue("htm").jsonPrimitive.content==method)
             headers["Authorization"]?.let {
                 check(it.startsWith("DPoP ") && claims.getValue("ath").jsonPrimitive.content==Identity.hash(it.removePrefix("DPoP ").toByteArray()))
-                check(claims.getValue("req_hash").jsonPrimitive.content==Identity.hash(checkNotNull(body)))
+                if(body!=null)check(claims.getValue("req_hash").jsonPrimitive.content==Identity.hash(body))
+                else check("req_hash" !in claims)
             }
             return Identity.thumbprint(key)
         }
@@ -106,12 +118,42 @@ class LoginControllerTest {
                 check(Identity.hash(Canonical.encode(Identity.objectJSON(text).getValue("key")).toByteArray())==thumb)
                 val response=receipts.getOrPut(text) {
                     activeKeys.add(thumb)
-                    Canonical.json.encodeToString(DeviceSession(Identity.random(),Identity.random(),Identity.random(),now()+590_000,now()+86_000_000,0,Identity.random()))
+                    val session=DeviceSession(Identity.random(),Identity.random(),Identity.random(),now()+(if(shortAccess)10_000 else 590_000),now()+86_000_000,0,Identity.random())
+                    sessions[thumb]=session;Canonical.json.encodeToString(session)
                 }
                 enrollmentEntered.countDown()
                 if(holdEnrollment)check(release.await(10,TimeUnit.SECONDS))
                 if(dropEnrollment) {dropEnrollment=false;throw DeliveryException(DeliveryFailure.TRANSPORT)}
                 return reply(text=response)
+            }
+            if(url.endsWith("/device/session/refresh")) {
+                val text=checkNotNull(body).toString(Charsets.UTF_8);refreshBodies.add(text)
+                val oldToken=headers.getValue("Authorization").removePrefix("DPoP ")
+                val receipt=refreshReceipts.getOrPut(text) {
+                    val old=sessions.getValue(thumb);check(oldToken==old.refreshToken)
+                    val next=old.copy(accessToken=Identity.random(),refreshToken=Identity.random(),accessUntilMs=now()+590_000,
+                        generation=old.generation+1,nonce=Identity.random())
+                    sessions[thumb]=next;oldToken to Canonical.json.encodeToString(next)
+                }
+                check(receipt.first==oldToken)
+                if(dropRefresh) {dropRefresh=false;throw DeliveryException(DeliveryFailure.TRANSPORT)}
+                return reply(text=receipt.second)
+            }
+            if(url.endsWith("/device/policy")) {
+                if(!policyReady)return reply(202,"""{"code":"provisioning_pending"}""")
+                val session=sessions.getValue(thumb);check(headers.getValue("Authorization")=="DPoP "+session.accessToken)
+                val envelope=policies.getOrPut(thumb+foreignPolicyKey) {
+                    val engine="""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}"""
+                    val payload=Payload(2,1,0,0,session.deviceId,"syn443-device",now(),now(),now()+30_000,now()+3_600_000,
+                        IdentityOperation.requiredCapabilities,"m1-local-v1",Identity.encode(engine.toByteArray()),Policy.hash(engine),
+                        Gate(30,false,listOf(Check("internet","https_204","https://health.example.org/generate_204"))),
+                        keyThumbprint=if(foreignPolicyKey)Identity.random() else thumb)
+                    val input=Identity.encode("""{"alg":"ES256","kid":"root","typ":"syn443-policy+jws"}""".toByteArray())+"."+
+                        Identity.encode(Canonical.encode(Canonical.parse(Policy.json.encodeToString(payload))).toByteArray())
+                    input+"."+Identity.encode(Identity.derToRaw(Signature.getInstance("SHA256withECDSA").run {initSign(root.private);update(input.toByteArray());sign()}))
+                }
+                val response=reply(text=envelope)
+                return response.copy(headers=response.headers+mapOf("content-type" to listOf("application/jose")))
             }
             if(url.endsWith("/identity/devices/revoke")) {
                 Identity.objectJSON(checkNotNull(body).toString(Charsets.UTF_8)).getValue("thumbprints").jsonArray.forEach {activeKeys.remove(it.jsonPrimitive.content)}
@@ -162,6 +204,36 @@ class LoginControllerTest {
         f.controller.cancel();f.idle()
         assertTrue(f.server.activeKeys.isEmpty());assertTrue(f.journal.snapshot().tombstones.isEmpty())
         assertThrows(IllegalStateException::class.java) {DeviceKey.open(s.keyAlias)}
+    }
+    @Test fun verifiedAssignmentPersistsAcrossControllerDeathAndIsErasedOnLogout() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val current=f.journal.snapshot();assertEquals(LoginPhase.POLICY_CACHED,current.phase)
+        val value=checkNotNull(f.journal.readAssignment(current))
+        val protected=LoginPayload.decode(f.journal.readProtected(current),current)
+        assertEquals(current.policyHash,Assignments.receipt(value,current,protected,protected.session!!.time.boot,SystemClock.elapsedRealtime()))
+        assertFalse(f.controller.allowsConnect()) // Native handoff is a separate acceptance gate.
+        f.restart();assertEquals(current.generation,f.journal.snapshot().generation);assertEquals(1,f.server.enrollBodies.size)
+        assertEquals(value.journal,f.journal.readAssignment(f.journal.snapshot())!!.journal)
+        f.controller.cancel();f.idle()
+        assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/assignment.bin").exists())
+        assertTrue(f.server.activeKeys.isEmpty());assertTrue(f.journal.snapshot().tombstones.isEmpty())
+    }
+    @Test fun wrongKeyAssignmentNeverGetsAReceiptOrUsableConfiguration() = fixture {f->
+        f.server.policyReady=true;f.server.foreignPolicyKey=true
+        f.controller.callback(f.begin());f.idle()
+        val s=f.journal.snapshot();assertEquals(LoginPhase.PROVISIONING,s.phase);assertTrue(s.policyHash.isEmpty())
+        assertNull(f.journal.readAssignment(s));assertFalse(f.controller.allowsConnect())
+        assertEquals("INVALID_REPLY",f.controller.status().getString("reason"))
+    }
+    @Test fun rotatedSessionReplyLossRetriesItsPersistedOperationWithoutLosingThePolicy() = fixture {f->
+        f.server.policyReady=true;f.server.shortAccess=true
+        f.controller.callback(f.begin());f.idle();val first=f.journal.snapshot();assertEquals(LoginPhase.POLICY_CACHED,first.phase)
+        f.server.dropRefresh=true;f.restart();val uncertain=f.journal.snapshot();assertEquals(LoginPhase.REFRESHING,uncertain.phase)
+        f.restart();val resumed=f.journal.snapshot()
+        assertEquals(LoginPhase.POLICY_CACHED,resumed.phase);assertEquals(1L,resumed.sessionGeneration)
+        assertEquals(first.policyHash,resumed.policyHash);assertEquals(first.keyAlias,resumed.keyAlias)
+        assertEquals(2,f.server.refreshBodies.size);assertEquals(f.server.refreshBodies[0],f.server.refreshBodies[1])
+        assertEquals(1,f.server.enrollBodies.size);assertEquals(1L,f.server.sessions.getValue(resumed.thumbprint).generation)
     }
     @Test fun lostEnrollmentReplyRetriesExactPersistedBodyAndKeyAfterControllerRestart() = fixture {f->
         f.server.dropEnrollment=true;f.controller.callback(f.begin());f.idle()
