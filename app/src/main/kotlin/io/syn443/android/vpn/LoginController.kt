@@ -63,6 +63,7 @@ class LoginController private constructor(private val context:android.app.Applic
     private val pendingCommands=java.util.concurrent.atomic.AtomicInteger()
     private inner class Command(private val admitted:Long,private val block:()->Unit):Runnable {
         private val completed=java.util.concurrent.atomic.AtomicBoolean()
+        fun obsolete()=admitted!=commandEpoch
         fun complete() {if(completed.compareAndSet(false,true))check(pendingCommands.decrementAndGet()>=0)}
         override fun run() {try {
             val reason=try {
@@ -85,7 +86,14 @@ class LoginController private constructor(private val context:android.app.Applic
         enqueue(task)
     }
     private fun enqueue(task:Command) {
-        try {testBeforeQueue?.invoke();worker.execute(task)} catch(e:Exception) {task.complete();throw e}
+        try {
+            testBeforeQueue?.invoke()
+            synchronized(commands) {
+                // Logout may have admitted retirement while this older ticket was not queued.
+                // A cancelled ticket must not compete with that work for the bounded queue.
+                if(task.obsolete())task.complete() else worker.execute(task)
+            }
+        } catch(e:Exception) {task.complete();throw e}
     }
     private fun submitIfIdle(onAdmission:()->Unit={},admit:()->Boolean={true},block:()->Unit):Boolean {
         val task=synchronized(commands) {
