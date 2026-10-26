@@ -12,6 +12,8 @@ import java.security.KeyStore
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.*
+import io.syn443.policy.Canonical
+import kotlinx.serialization.json.*
 
 class BoundedHttpTest {
     companion object {
@@ -139,5 +141,50 @@ class BoundedHttpTest {
                 assertEquals(DeliveryFailure.CANCELLED,error.reason);assertTrue(Thread.currentThread().isInterrupted)
             } finally {Thread.interrupted()}
         }
+    }
+    @Test fun issuerDiscoveryUsesFreshSocketScopesThroughRealTlsRequests() {
+        val ec=java.security.KeyPairGenerator.getInstance("EC").apply {initialize(java.security.spec.ECGenParameterSpec("secp256r1"))}.generateKeyPair()
+        val rsa=java.security.KeyPairGenerator.getInstance("RSA").apply {initialize(2048)}.generateKeyPair().public as java.security.interfaces.RSAPublicKey
+        val key=object:ProofKey {
+            override val publicKey=ec.public as java.security.interfaces.ECPublicKey
+            override fun sign(input:ByteArray)=error("Discovery must not request a device signature")
+        }
+        val server=serverContext.serverSocketFactory.createServerSocket(0,2,InetAddress.getByName("127.0.0.1")) as SSLServerSocket
+        val issuer="https://localhost:${server.localPort}/realms/test"
+        val bootstrap=Bootstrap("tls-fixture",issuer,"syn443-android","https://api.example.invalid",
+            mapOf("test-root" to java.util.Base64.getEncoder().encodeToString(ec.public.encoded)))
+        val discovery=Canonical.encode(buildJsonObject {
+            put("issuer",issuer);put("authorization_endpoint",issuer+"/protocol/openid-connect/auth")
+            put("token_endpoint",issuer+"/protocol/openid-connect/token");put("jwks_uri",issuer+"/protocol/openid-connect/certs")
+            put("id_token_signing_alg_values_supported",JsonArray(listOf(JsonPrimitive("RS256"))))
+            put("dpop_signing_alg_values_supported",JsonArray(listOf(JsonPrimitive("ES256"))))
+            put("code_challenge_methods_supported",JsonArray(listOf(JsonPrimitive("S256"))))
+        })
+        val keys=Canonical.encode(buildJsonObject {putJsonArray("keys") {add(buildJsonObject {
+            put("kid","fixture");put("kty","RSA");put("alg","RS256");put("use","sig");put("e","AQAB")
+            put("n",Identity.encode(rsa.modulus.toByteArray().let {if(it.first()==0.toByte())it.drop(1).toByteArray() else it}))
+        })}})
+        val worker=Executors.newSingleThreadExecutor()
+        val serving=worker.submit {
+            for((path,body) in listOf("/realms/test/.well-known/openid-configuration" to discovery,"/realms/test/protocol/openid-connect/certs" to keys)) {
+                server.accept().use {socket->
+                    socket.soTimeout=2000;val reader=socket.inputStream.bufferedReader(Charsets.US_ASCII)
+                    assertEquals("GET $path HTTP/1.1",reader.readLine());var lines=0
+                    while(!reader.readLine().isNullOrEmpty())check(++lines<=20)
+                    val date=java.time.format.DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'",java.util.Locale.US)
+                        .withZone(java.time.ZoneOffset.UTC).format(java.time.Instant.now())
+                    val data=body.toByteArray(Charsets.UTF_8)
+                    socket.outputStream.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nDate: $date\r\nContent-Length: ${data.size}\r\n\r\n".toByteArray(Charsets.US_ASCII))
+                    socket.outputStream.write(data);socket.outputStream.flush()
+                }
+            }
+        }
+        try {BoundedHttp().use {transport->
+            val client=AuthProtocol(bootstrap,key,IdentityExchange {m,u,h,body,scope,max->transport.exchange(m,u,h,body,scope,factory=trusted,maxBody=max)},
+                {2},{System.nanoTime()/1_000_000})
+            val scope=IdentityScope();assertEquals(setOf("fixture"),client.discover(scope).keys.keys)
+            scope.cancel();assertEquals(AuthFailure.CANCELLED,assertThrows(AuthException::class.java){client.discover(scope)}.reason)
+            serving.get(5,TimeUnit.SECONDS)
+        }} finally {server.close();worker.shutdownNow()}
     }
 }

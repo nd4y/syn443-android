@@ -141,7 +141,10 @@
       "status": "partial",
       "evidence": [
         "docs/enrollment-pilot.md",
-        "docs/identity-lifecycle.md"
+        "docs/identity-lifecycle.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/AuthProtocol.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/TrustedTime.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt"
       ]
     },
     {
@@ -150,7 +153,10 @@
       "status": "partial",
       "evidence": [
         "docs/enrollment-pilot.md",
-        "docs/identity-lifecycle.md"
+        "docs/identity-lifecycle.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/AuthProtocol.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/TrustedTime.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt"
       ]
     },
     {
@@ -188,7 +194,10 @@
       "status": "partial",
       "evidence": [
         "docs/enrollment-pilot.md",
-        "docs/identity-lifecycle.md"
+        "docs/identity-lifecycle.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/AuthProtocol.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/TrustedTime.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt"
       ]
     },
     {
@@ -1653,7 +1662,10 @@
       "status": "partial",
       "evidence": [
         "docs/enrollment-pilot.md",
-        "docs/identity-lifecycle.md"
+        "docs/identity-lifecycle.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/AuthProtocol.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/TrustedTime.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt"
       ]
     },
     {

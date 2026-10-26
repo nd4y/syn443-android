@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=18
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=21
+    minimum=37
 else: raise SystemExit("unknown evidence type")
 assert paths,"No JUnit XML evidence produced"
 cases=[]

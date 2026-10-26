@@ -3,6 +3,7 @@ package io.syn443.android.vpn
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import io.syn443.identity.Identity
+import io.syn443.identity.ProofKey
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
@@ -11,7 +12,7 @@ import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
 
 /** No private bytes leave Keystore. Call on the bounded identity worker, never the UI thread. */
-class DeviceKey private constructor(val alias: String) {
+class DeviceKey private constructor(val alias: String):ProofKey {
     companion object {
         private val pattern=Regex("syn443-dpop-[A-Za-z0-9_-]{43}")
         private val lock=Any()
@@ -35,7 +36,8 @@ class DeviceKey private constructor(val alias: String) {
         val key=store().getCertificate(alias).publicKey as ECPublicKey
         check(key.params.order==Identity.ecParameters.order && key.params.cofactor==1);key
     }
-    fun sign(input:ByteArray):ByteArray = synchronized(lock) {
+    override val publicKey:ECPublicKey get()=publicKey()
+    override fun sign(input:ByteArray):ByteArray = synchronized(lock) {
         require(input.size in 1..32_768)
         val key=store().getKey(alias,null) as PrivateKey
         check(key.encoded==null)

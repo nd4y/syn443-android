@@ -23,6 +23,7 @@ import java.util.Base64
 
 @Serializable data class Bootstrap(val serviceId: String, val issuer: String, val clientId: String,
     val apiOrigin: String, val roots: Map<String, String>, val tlsCaDer: String = "") {
+    override fun toString()="Bootstrap([redacted])"
     fun validate() {
         require(serviceId.matches(Regex("[a-zA-Z0-9_-]{1,64}")))
         require(clientId.matches(Regex("[a-zA-Z0-9_-]{1,128}")))
@@ -41,11 +42,16 @@ import java.util.Base64
 }
 @Serializable data class Pending(val generation: Long, val state: String, val nonce: String,
     val verifier: String, val thumbprint: String, val bootCount: Int, val startedElapsedMs: Long) {
+    override fun toString()="Pending([redacted])"
     fun current(generation: Long, bootCount: Int, elapsedMs: Long) = this.generation == generation &&
         this.bootCount == bootCount && elapsedMs >= startedElapsedMs && elapsedMs - startedElapsedMs < 300_000
 }
-data class Callback(val code: String?, val error: String?)
-data class UserIdentity(val subject: String)
+data class Callback(val code: String?, val error: String?) {
+    override fun toString()="Callback([redacted])"
+}
+data class UserIdentity(val subject: String) {
+    override fun toString()="UserIdentity([redacted])"
+}
 
 /** Pure protocol core. Private-key operations are supplied by the Android Keystore adapter. */
 object Identity {
