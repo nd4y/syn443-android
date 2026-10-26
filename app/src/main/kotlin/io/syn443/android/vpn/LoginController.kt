@@ -10,7 +10,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.decodeFromJsonElement
 import org.json.JSONObject
 import java.io.File
-import java.net.InetSocketAddress
 import java.net.URI
 import java.security.KeyStore
 import java.security.cert.CertificateFactory
@@ -203,13 +202,17 @@ class LoginController private constructor(private val context:android.app.Applic
             require(workerEpoch==commandEpoch && current.generation==generation && (current.phase==LoginPhase.RETIRING)==retiring && cancelledGeneration!=generation)
             noVpn()
         }
-        // This enrollment-only pilot admits no active VPN. Managed refresh needs a separately
-        // fenced physical Network before assigned policies can be activated.
+        // Native managed activation remains separately gated. Every real request already uses
+        // physical-network DNS and fresh per-address sockets, without process-route fallback.
         admitted();val uri=Identity.https(url)
         if(testExchange!=null)return@IdentityExchange testExchange.request(method,url,headers,body,child,maxBody)
-        http.exchange(method,url,headers,body,child,maxBody=maxBody,factory=tls(b,uri),connect={socket,target,remaining->
-            admitted();socket.connect(InetSocketAddress(target.host,if(target.port>0)target.port else 443),remaining)
-        })
+        val physical=PhysicalIdentityRoute.capture(context)
+        val route=object:HttpRoute {
+            override fun resolve(host:String)=physical.resolve(host)
+            override fun bind(socket:java.net.Socket)=physical.bind(socket)
+            override fun check() {admitted();physical.check()}
+        }
+        http.exchange(method,url,headers,body,child,maxBody=maxBody,factory=tls(b,uri),route=route)
     }
     private fun provision(initial:LoginIntent,p:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
         var s=initial;val user=checkNotNull(p.user)

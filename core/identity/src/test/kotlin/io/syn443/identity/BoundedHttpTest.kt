@@ -60,7 +60,7 @@ class BoundedHttpTest {
         assertThrows(DeliveryException::class.java) {reply("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n12345\r\n0\r\n\r\n",4)}
         assertThrows(DeliveryException::class.java) {reply("HTTP/1.1 401 Unauthorized\r\nDPoP-Nonce: first\r\nDPoP-Nonce: second\r\n\r\n").single("dpop-nonce")}
     }
-    private fun tlsRequest(host:String="localhost",factory:SSLSocketFactory=trusted,status:Int=200,body:ByteArray?=null):Reply {
+    private fun tlsRequest(host:String="localhost",factory:SSLSocketFactory=trusted,status:Int=200,body:ByteArray?=null,route:HttpRoute?=null):Reply {
         val server=serverContext.serverSocketFactory.createServerSocket(0,2,InetAddress.getByName("127.0.0.1")) as SSLServerSocket
         val worker=Executors.newSingleThreadExecutor {r->Thread(r).apply {isDaemon=true}}
         val serving=worker.submit {runCatching {server.accept().use {socket->socket.soTimeout=2000
@@ -70,7 +70,7 @@ class BoundedHttpTest {
             if(body!=null) {assertEquals(body.size,length);assertArrayEquals(body,input.readNBytes(length))}
             socket.outputStream.write("HTTP/1.1 $status Test\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".toByteArray())
         }}}
-        return try {BoundedHttp().use {it.exchange(if(body==null)"GET" else "POST","https://$host:${server.localPort}/test",body=body,factory=factory)}}
+        return try {BoundedHttp().use {it.exchange(if(body==null)"GET" else "POST","https://$host:${server.localPort}/test",body=body,factory=factory,route=route)}}
         finally {server.close();serving.get(4,TimeUnit.SECONDS);worker.shutdownNow()}
     }
     @Test fun actualTlsUsesTrustAndHostnameVerificationAndDoesNotFollowRedirects() {
@@ -79,6 +79,60 @@ class BoundedHttpTest {
         assertEquals(302,tlsRequest(status=302).status)
         assertEquals(DeliveryFailure.TLS,assertThrows(DeliveryException::class.java){tlsRequest(factory=SSLSocketFactory.getDefault() as SSLSocketFactory)}.reason)
         assertEquals(DeliveryFailure.TLS,assertThrows(DeliveryException::class.java){tlsRequest(host="127.0.0.1")}.reason)
+    }
+    @Test fun capturedRouteRetriesTcpAddressesWithFreshBoundSocketsAndRejectsLateReplies() {
+        val sockets=arrayListOf<Socket>();var loseAfterBind=false;var checks=0
+        val route=object:HttpRoute {
+            override fun resolve(host:String)=listOf(InetAddress.getByName("127.0.0.2"),InetAddress.getByName("127.0.0.1"))
+            override fun bind(socket:Socket) {assertFalse(socket.isConnected);sockets.add(socket)}
+            override fun check() {checks++;if(loseAfterBind && sockets.size==2)throw DeliveryException(DeliveryFailure.TRANSPORT)}
+        }
+        assertEquals("ok",String(tlsRequest(route=route).body));assertEquals(2,sockets.size)
+        assertTrue(sockets.all {it.isClosed});assertNotSame(sockets[0],sockets[1]);assertTrue(checks>=8)
+        sockets.clear();loseAfterBind=true
+        assertEquals(DeliveryFailure.TRANSPORT,assertThrows(DeliveryException::class.java){tlsRequest(route=route)}.reason)
+        assertTrue(sockets.all {it.isClosed})
+        // A route can disappear after the final byte. The authenticated reply still must not escape.
+        var resolved=false;var binds=0;var checked=0
+        val vanished=object:HttpRoute {
+            override fun resolve(host:String)=listOf(InetAddress.getByName("127.0.0.1")).also {resolved=true}
+            override fun bind(socket:Socket) {binds++}
+            override fun check() {if(resolved && ++checked>=6)throw DeliveryException(DeliveryFailure.TRANSPORT)}
+        }
+        assertEquals(DeliveryFailure.TRANSPORT,assertThrows(DeliveryException::class.java){tlsRequest(route=vanished)}.reason)
+        assertEquals(1,binds)
+    }
+    @Test fun capturedRouteHasNoDefaultDnsFallbackAndBoundedAttempts() {
+        BoundedHttp().use {http->
+            var resolved=0;val sockets=arrayListOf<Socket>()
+            val route=object:HttpRoute {
+                override fun resolve(host:String):List<InetAddress> {resolved++;return emptyList()}
+                override fun bind(socket:Socket) {error("empty DNS cannot bind")}
+                override fun check() {}
+            }
+            assertEquals(DeliveryFailure.DNS,assertThrows(DeliveryException::class.java) {
+                http.exchange("GET","https://localhost/",route=route,connect={_,_,_->error("default route must not run")})
+            }.reason);assertEquals(1,resolved)
+            val refused=object:HttpRoute {
+                override fun resolve(host:String)=(2..10).map {InetAddress.getByName("127.0.0.$it")}
+                override fun bind(socket:Socket) {sockets.add(socket);throw java.io.IOException("synthetic bind refusal")}
+                override fun check() {}
+            }
+            assertEquals(DeliveryFailure.TRANSPORT,assertThrows(DeliveryException::class.java) {
+                http.exchange("GET","https://localhost/",route=refused)
+            }.reason)
+            assertEquals(4,sockets.size);assertTrue(sockets.all {it.isClosed})
+            val scope=BoundedHttp.Scope()
+            val cancelled=object:HttpRoute {
+                override fun resolve(host:String)=listOf(InetAddress.getByName("127.0.0.1"))
+                override fun bind(socket:Socket) {sockets.add(socket);scope.cancel()}
+                override fun check() {}
+            }
+            assertEquals(DeliveryFailure.CANCELLED,assertThrows(DeliveryException::class.java) {
+                http.exchange("GET","https://localhost/",scope=scope,route=cancelled)
+            }.reason)
+            assertTrue(sockets.all {it.isClosed})
+        }
     }
     @Test fun absoluteDeadlineAndExplicitCancelCloseAStalledTlsSocket() {
         for(cancel in listOf(false,true)) {
