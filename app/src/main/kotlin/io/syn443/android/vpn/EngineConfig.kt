@@ -42,6 +42,12 @@ object EngineConfig {
         val final = value.optJSONObject("route")?.optString("final").orEmpty()
         require(final.isEmpty() || final in tags)
     }
+    /** Overlay state must acquire an account namespace before managed enrollment advertises it. */
+    fun validateAssigned(raw:String) {
+        validate(raw)
+        val outbounds=JSONObject(raw).getJSONArray("outbounds")
+        require((0 until outbounds.length()).none {outbounds.getJSONObject(it).getString("type")=="netbird"})
+    }
     fun render(raw: String?, stateRoot: java.io.File): String {
         val value = if (raw == null) JSONObject("""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}""") else JSONObject(raw).also { validate(raw) }
         value.put("log", JSONObject().put("disabled", true))

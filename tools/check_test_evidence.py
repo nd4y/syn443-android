@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=72
+    minimum=78
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=18
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=66
+    minimum=72
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -94,6 +94,11 @@ if mode=="emulator":
         "identityRouteLossOrChangedLinkRejectsWorkWithoutSwitchingNetworks",
         "physicalIdentityRejectsMissingDuplicateAndOversizedInventory",
         "androidPhysicalBindingDoesNotChangeProcessDefaultNetwork"}
+    required |= {"managedOverlayWithoutItsCredentialNamespaceCannotBecomeARuntimeCandidate", "assignedRuntimeViewIsWorkerPreparedAndCannotOutliveLogout"}
+    required |= {"assignedActivationPersistsBeforeUseAndCommitsAcrossControllerRestart",
+        "assignedFailedReplacementRollsBackAndRejectsStaleActivationResults",
+        "assignedInterruptedActivationIsPoisonedBeforeRecoveryCanPublishIt",
+        "assignedAbortAndLogoutFenceAcceptedButNotYetQueuedTransitions"}
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"
 print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
 

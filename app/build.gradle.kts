@@ -33,8 +33,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 16
-        versionName = "0.4.6-m2-physical-identity"
+        versionCode = 17
+        versionName = "0.4.7-m2-runtime-policy-view"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }

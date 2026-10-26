@@ -39,6 +39,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Actual Android controller/journal/Keystore with synthetic, cryptographically checked replies. */
 @RunWith(AndroidJUnit4::class)
@@ -53,6 +54,9 @@ class LoginControllerTest {
         @Volatile var holdEnrollment=false
         @Volatile var policyReady=false
         @Volatile var foreignPolicyKey=false
+        @Volatile var overlayPolicy=false
+        @Volatile var policyRevision=1L
+        @Volatile var engineTag="direct"
         @Volatile var shortAccess=false
         @Volatile var dropRefresh=false
         val enrollmentEntered=CountDownLatch(1);val release=CountDownLatch(1)
@@ -142,9 +146,10 @@ class LoginControllerTest {
             if(url.endsWith("/device/policy")) {
                 if(!policyReady)return reply(202,"""{"code":"provisioning_pending"}""")
                 val session=sessions.getValue(thumb);check(headers.getValue("Authorization")=="DPoP "+session.accessToken)
-                val envelope=policies.getOrPut(thumb+foreignPolicyKey) {
-                    val engine="""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}"""
-                    val payload=Payload(2,1,0,0,session.deviceId,"syn443-device",now(),now(),now()+30_000,now()+3_600_000,
+                val envelope=policies.getOrPut(thumb+foreignPolicyKey+policyRevision) {
+                    val engine=if(overlayPolicy)"""{"outbounds":[{"type":"netbird","tag":"overlay","management_url":"https://overlay.example.invalid"}],"route":{"final":"overlay"}}"""
+                        else """{"outbounds":[{"type":"direct","tag":"$engineTag"}],"route":{"final":"$engineTag"}}"""
+                    val payload=Payload(2,policyRevision,0,0,session.deviceId,"syn443-device",now(),now(),now()+30_000,now()+3_600_000,
                         IdentityOperation.requiredCapabilities,"m1-local-v1",Identity.encode(engine.toByteArray()),Policy.hash(engine),
                         Gate(30,false,listOf(Check("internet","https_204","https://health.example.org/generate_204"))),
                         keyThumbprint=if(foreignPolicyKey)Identity.random() else thumb)
@@ -246,11 +251,116 @@ class LoginControllerTest {
         val protected=LoginPayload.decode(f.journal.readProtected(current),current)
         assertEquals(current.policyHash,Assignments.receipt(value,current,protected,protected.session!!.time.boot,SystemClock.elapsedRealtime()))
         assertFalse(f.controller.allowsConnect()) // Native handoff is a separate acceptance gate.
+        val view=f.controller.status().getJSONObject("assignedPolicy")
+        assertEquals("prepared",view.getString("phase"));assertTrue(view.getBoolean("candidateValidated"));assertFalse(view.getBoolean("runtimeAuthorized"))
+        assertThrows(IllegalStateException::class.java) {f.controller.assignedRuntime.config(current)}
         f.restart();assertEquals(current.generation,f.journal.snapshot().generation);assertEquals(1,f.server.enrollBodies.size)
         assertEquals(value.journal,f.journal.readAssignment(f.journal.snapshot())!!.journal)
-        f.controller.cancel();f.idle()
+        assertTrue(f.controller.status().getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+        f.controller.cancel();assertEquals("unavailable",f.controller.status().getJSONObject("assignedPolicy").getString("phase"));f.idle()
         assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/assignment.bin").exists())
         assertTrue(f.server.activeKeys.isEmpty());assertTrue(f.journal.snapshot().tombstones.isEmpty())
+    }
+    @Test fun managedOverlayWithoutItsCredentialNamespaceCannotBecomeARuntimeCandidate() = fixture {f->
+        f.server.policyReady=true;f.server.overlayPolicy=true;f.controller.callback(f.begin());f.idle()
+        val s=f.journal.snapshot();assertEquals(LoginPhase.POLICY_CACHED,s.phase)
+        val view=f.controller.status().getJSONObject("assignedPolicy")
+        assertFalse(view.getBoolean("candidateValidated"));assertFalse(view.getBoolean("runtimeAuthorized"))
+        assertThrows(IllegalStateException::class.java) {f.controller.assignedRuntime.config(s)}
+    }
+    @Test fun assignedRuntimeViewIsWorkerPreparedAndCannotOutliveLogout() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val s=f.journal.snapshot();val p=LoginPayload.decode(f.journal.readProtected(s),s)
+        val state=checkNotNull(f.journal.readAssignment(s));val boot=p.session!!.time.boot
+        val applying=Assignments.begin(state,s,p,listOf(false),boot,SystemClock.elapsedRealtime())
+        val runtime=f.controller.assignedRuntime
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            assertThrows(IllegalStateException::class.java) {runtime.prepare(s,p,applying)}
+        }
+        val prepared=runtime.prepare(s,p,applying);runtime.publish(prepared)
+        val raw=runtime.config(s);val deadline=runtime.leaseDeadline(s,Policy.hash(raw))
+        assertTrue(deadline>SystemClock.elapsedRealtime())
+        assertTrue(runtime.status(s).getBoolean("runtimeAuthorized"))
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            assertEquals(raw,runtime.config(s)) // Already verified; reads do no Keystore/disk work.
+        }
+        assertThrows(IllegalArgumentException::class.java) {runtime.leaseDeadline(s,Policy.hash("different"))}
+        assertThrows(IllegalArgumentException::class.java) {runtime.config(s.copy(generation=s.generation+1))}
+        f.controller.cancel();f.idle()
+        assertThrows(IllegalStateException::class.java) {runtime.config(s)}
+        assertFalse(runtime.status(f.journal.snapshot()).getBoolean("runtimeAuthorized"))
+    }
+    @Test fun assignedActivationPersistsBeforeUseAndCommitsAcrossControllerRestart() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val ticket=f.controller.assignmentTicket();val s=f.journal.snapshot()
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            assertTrue(f.controller.beginAssignment(ticket,listOf(false)))
+        }
+        f.idle();assertEquals("applying",f.journal.readAssignment(s)!!.journal.phase)
+        val config=f.controller.assignedRuntime.config(s)
+        assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()
+        val committed=f.journal.readAssignment(s)!!;assertEquals("committed",committed.journal.phase)
+        assertEquals(committed.journal.active,committed.journal.lastGood)
+        f.restart();assertEquals(config,f.controller.assignedRuntime.config(f.journal.snapshot()))
+        assertEquals("committed",f.journal.readAssignment(f.journal.snapshot())!!.journal.phase)
+        assertFalse(f.controller.allowsConnect()) // Native integration remains separately gated.
+    }
+    @Test fun assignedFailedReplacementRollsBackAndRejectsStaleActivationResults() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val first=f.controller.assignmentTicket()
+        assertTrue(f.controller.beginAssignment(first,listOf(false)));f.idle()
+        assertTrue(f.controller.finishAssignment(first,listOf(true),true));f.idle()
+        val config=f.controller.assignedRuntime.config(f.journal.snapshot())
+        f.server.policyRevision=2;f.server.engineTag="replacement"
+        f.controller.retry(f.journal.snapshot().generation);f.idle();val second=f.controller.assignmentTicket()
+        assertNotEquals(first,second)
+        assertTrue(f.controller.beginAssignment(first,listOf(true)));f.idle()
+        assertEquals("prepared",f.journal.readAssignment(f.journal.snapshot())!!.journal.phase)
+        assertEquals(config,f.controller.assignedRuntime.config(f.journal.snapshot()))
+        assertTrue(f.controller.beginAssignment(second,listOf(true)));f.idle()
+        assertNotEquals(config,f.controller.assignedRuntime.config(f.journal.snapshot()))
+        assertTrue(f.controller.finishAssignment(second,listOf(false),true));f.idle()
+        val failed=f.journal.readAssignment(f.journal.snapshot())!!
+        assertEquals("rolled_back",failed.journal.phase);assertEquals(listOf(2L),failed.journal.failedRevisions)
+        assertEquals(config,f.controller.assignedRuntime.config(f.journal.snapshot()))
+        f.server.policyRevision=3;f.controller.retry(f.journal.snapshot().generation);f.idle()
+        assertEquals(failed.journal,f.journal.readAssignment(f.journal.snapshot())!!.journal)
+        assertEquals(config,f.controller.assignedRuntime.config(f.journal.snapshot()))
+    }
+    @Test fun assignedInterruptedActivationIsPoisonedBeforeRecoveryCanPublishIt() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val ticket=f.controller.assignmentTicket()
+        assertTrue(f.controller.beginAssignment(ticket,listOf(false)));f.idle()
+        assertTrue(f.controller.status().getJSONObject("assignedPolicy").getBoolean("runtimeAuthorized"))
+        f.restart();val state=f.journal.readAssignment(f.journal.snapshot())!!
+        assertEquals("rolled_back",state.journal.phase);assertEquals("interrupted_activation",state.journal.reason)
+        assertEquals(listOf(1L),state.journal.failedRevisions)
+        assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("runtimeAuthorized"))
+        assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()
+        assertEquals(state.journal,f.journal.readAssignment(f.journal.snapshot())!!.journal)
+        assertThrows(IllegalStateException::class.java) {f.controller.assignedRuntime.config(f.journal.snapshot())}
+    }
+    @Test fun assignedAbortAndLogoutFenceAcceptedButNotYetQueuedTransitions() {
+        val admission=CountDownLatch(1);val release=CountDownLatch(1);val pause=AtomicBoolean(false)
+        fixture(beforeQueue={if(pause.compareAndSet(true,false)) {admission.countDown();check(release.await(10,TimeUnit.SECONDS))}}) {f->
+            f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+            val ticket=f.controller.assignmentTicket()
+            assertTrue(f.controller.beginAssignment(ticket,listOf(false)));f.idle()
+            pause.set(true)
+            val accepted=AtomicBoolean(false)
+            val thread=Thread {accepted.set(f.controller.abortAssignment(ticket,"native_activation_failed"))}.also {it.start()}
+            try {
+                assertTrue(admission.await(10,TimeUnit.SECONDS))
+                assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("runtimeAuthorized"))
+                assertFalse(f.controller.finishAssignment(ticket,listOf(true),true))
+                f.controller.cancel()
+            } finally {release.countDown();thread.join(10_000)}
+            assertFalse(thread.isAlive);assertTrue(accepted.get());f.idle()
+            assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+            assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/assignment.bin").exists())
+            assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()
+            assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/assignment.bin").exists())
+        }
     }
     @Test fun wrongKeyAssignmentNeverGetsAReceiptOrUsableConfiguration() = fixture {f->
         f.server.policyReady=true;f.server.foreignPolicyKey=true
