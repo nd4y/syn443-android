@@ -155,7 +155,10 @@
         "core/identity/src/test/kotlin/io/syn443/identity/LoginPayloadTest.kt",
         "docs/assigned-policy-handoff.md",
         "core/identity/src/main/kotlin/io/syn443/identity/Assignments.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/AssignmentsTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/AssignmentsTest.kt",
+        "docs/physical-identity-transport.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt"
       ]
     },
     {
@@ -178,7 +181,10 @@
         "core/identity/src/test/kotlin/io/syn443/identity/LoginPayloadTest.kt",
         "docs/assigned-policy-handoff.md",
         "core/identity/src/main/kotlin/io/syn443/identity/Assignments.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/AssignmentsTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/AssignmentsTest.kt",
+        "docs/physical-identity-transport.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt"
       ]
     },
     {
@@ -230,7 +236,10 @@
         "core/identity/src/test/kotlin/io/syn443/identity/LoginPayloadTest.kt",
         "docs/assigned-policy-handoff.md",
         "core/identity/src/main/kotlin/io/syn443/identity/Assignments.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/AssignmentsTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/AssignmentsTest.kt",
+        "docs/physical-identity-transport.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt"
       ]
     },
     {
@@ -1709,7 +1718,10 @@
         "core/identity/src/test/kotlin/io/syn443/identity/LoginPayloadTest.kt",
         "docs/assigned-policy-handoff.md",
         "core/identity/src/main/kotlin/io/syn443/identity/Assignments.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/AssignmentsTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/AssignmentsTest.kt",
+        "docs/physical-identity-transport.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/PhysicalIdentityRoute.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/PhysicalIdentityRouteTest.kt"
       ]
     },
     {

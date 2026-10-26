@@ -36,6 +36,19 @@ class VpnLifecycleTest {
             android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE)
         assertNull("Stop must cancel both marker and ownership sentinel", marker)
     }
+    @Test fun physicalIdentitySocketBypassesTheRunningVpnProxy() {
+        connect()
+        // The ordinary process socket reaches the hermetic VPN proxy first.
+        runCatching {Socket().use {it.connect(java.net.InetSocketAddress("198.51.100.11",80),1500);it.outputStream.write(1)}}
+        await {controlProbes.get()==1}
+        val route=io.syn443.android.vpn.PhysicalIdentityRoute.capture(context)
+        assertTrue(route.resolve("localhost").isNotEmpty())
+        // This contains no HTTP request or credentials. The documentation address need not
+        // answer; it must never produce a second CONNECT through our own VPN proxy.
+        Socket().use {socket->route.bind(socket);runCatching {socket.connect(java.net.InetSocketAddress("198.51.100.11",80),1500)}}
+        route.check();Thread.sleep(250)
+        assertEquals(1,controlProbes.get());assertTrue(status().getBoolean("desiredOn"))
+    }
     @Test fun externalConnectExtraCannotTurnVpnOn() {
         scenario.close()
         scenario = ActivityScenario.launch(android.content.Intent(context, MainActivity::class.java)
@@ -59,6 +72,7 @@ class VpnLifecycleTest {
     private lateinit var server: ServerSocket
     private val workers = Executors.newFixedThreadPool(4)
     private val tunnels = AtomicInteger()
+    private val controlProbes = AtomicInteger()
     @Volatile private var serving = true
     private fun shell(command: String) = instrumentation.uiAutomation.executeShellCommand(command).use { fd ->
         FileInputStream(fd.fileDescriptor).use { it.readBytes() }
@@ -102,6 +116,7 @@ class VpnLifecycleTest {
             val reader = socket.getInputStream().bufferedReader()
             val first = reader.readLine() ?: return
             while (!reader.readLine().isNullOrEmpty()) { /* bounded by socket timeout */ }
+            if (first.startsWith("CONNECT 198.51.100.11:80 ")) {controlProbes.incrementAndGet();return}
             if (!first.startsWith("CONNECT 203.0.113.10:80 ")) return
             tunnels.incrementAndGet()
             socket.getOutputStream().write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray())

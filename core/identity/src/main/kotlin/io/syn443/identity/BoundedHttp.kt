@@ -3,6 +3,7 @@ package io.syn443.identity
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
 import java.io.InputStream
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URI
@@ -23,6 +24,13 @@ data class Reply(val status: Int, val headers: Map<String,List<String>>, val bod
     }
 }
 
+/** Captured physical route. DNS, socket binding and freshness checks share one network. */
+interface HttpRoute {
+    fun resolve(host:String):List<InetAddress>
+    fun bind(socket:Socket)
+    fun check()
+}
+
 /** One controller-owned instance survives logout/retry; blocked platform DNS cannot grow the pool. */
 class BoundedHttp:AutoCloseable {
     private val workers=ThreadPoolExecutor(2,2,30,TimeUnit.SECONDS,ArrayBlockingQueue(1),
@@ -33,7 +41,7 @@ class BoundedHttp:AutoCloseable {
         private val socket=AtomicReference<Socket?>()
         private val stopped=AtomicBoolean()
         private val future=AtomicReference<Future<*>?>()
-        internal fun attach(raw:Socket) {check(socket.compareAndSet(null,raw));if(stopped.get())socket.getAndSet(null)?.let {runCatching {it.close()}}}
+        internal fun attach(raw:Socket) {socket.getAndSet(raw)?.let {runCatching {it.close()}};if(stopped.get())finish();active()}
         internal fun bind(value:Future<*>) {check(future.compareAndSet(null,value));if(stopped.get())value.cancel(true)}
         internal fun active() {if(stopped.get())throw DeliveryException(DeliveryFailure.CANCELLED)}
         internal fun finish() {socket.getAndSet(null)?.let {runCatching {it.close()}}}
@@ -42,7 +50,7 @@ class BoundedHttp:AutoCloseable {
     /** Blocking only on the dedicated identity coordinator; never call from Binder or the UI. */
     fun exchange(method:String,url:String,headers:Map<String,String> = emptyMap(),body:ByteArray? = null,
         scope:Scope=Scope(),timeoutMs:Long=20_000,maxBody:Int=65_536,
-        factory:SSLSocketFactory=SSLSocketFactory.getDefault() as SSLSocketFactory,
+        factory:SSLSocketFactory=SSLSocketFactory.getDefault() as SSLSocketFactory,route:HttpRoute?=null,
         connect:(Socket,URI,Int)->Unit={socket,uri,remaining->socket.connect(InetSocketAddress(uri.host,if(uri.port>0)uri.port else 443),remaining)}):Reply {
         require(timeoutMs in 1..20_000 && maxBody in 1..524_288 && method in setOf("GET","POST"))
         val uri=Identity.https(url);require((method=="GET" && body==null) || (method=="POST" && body!=null && body.size<=8192))
@@ -56,13 +64,32 @@ class BoundedHttp:AutoCloseable {
             if(Thread.currentThread().isInterrupted)throw DeliveryException(DeliveryFailure.CANCELLED)
             scope.active()
             future=workers.submit<Reply> {
-                scope.active();val raw=Socket();scope.attach(raw)
+                scope.active()
                 fun remaining():Int {scope.active();val ms=TimeUnit.NANOSECONDS.toMillis(deadline-System.nanoTime());if(ms<=0)throw DeliveryException(DeliveryFailure.DEADLINE);return ms.coerceAtMost(20_000).toInt()}
                 try {
-                    connect(raw,uri,remaining());scope.active()
+                    val raw=if(route==null)Socket().also {scope.attach(it);connect(it,uri,remaining())} else {
+                        route.check()
+                        val addresses=route.resolve(uri.host).distinct().take(4)
+                        remaining();route.check()
+                        if(addresses.isEmpty())throw java.net.UnknownHostException()
+                        var connected:Socket?=null
+                        for((index,address) in addresses.withIndex()) {
+                            val candidate=Socket();scope.attach(candidate)
+                            try {
+                                route.check();route.bind(candidate)
+                                candidate.connect(InetSocketAddress(address,if(uri.port>0)uri.port else 443),minOf(remaining(),2500))
+                                route.check();connected=candidate;break
+                            } catch(e:java.io.IOException) {
+                                scope.finish();remaining();route.check()
+                                if(index==addresses.lastIndex)throw e
+                            }
+                        }
+                        checkNotNull(connected)
+                    }
+                    remaining();route?.check()
                     val tls=factory.createSocket(raw,uri.host,if(uri.port>0)uri.port else 443,true) as SSLSocket
                     tls.soTimeout=remaining();tls.sslParameters=tls.sslParameters.apply {endpointIdentificationAlgorithm="HTTPS";applicationProtocols=arrayOf("http/1.1")}
-                    tls.startHandshake();scope.active()
+                    tls.startHandshake();remaining();route?.check()
                     val path=uri.rawPath.ifEmpty {"/"};val host=uri.rawAuthority
                     val request=buildString {
                         append("$method $path HTTP/1.1\r\nHost: $host\r\nConnection: close\r\nAccept-Encoding: identity\r\n")
@@ -71,7 +98,7 @@ class BoundedHttp:AutoCloseable {
                         append("\r\n")
                     }
                     tls.soTimeout=remaining();tls.outputStream.write(request.toByteArray(Charsets.US_ASCII));safeBody?.let {tls.outputStream.write(it)};tls.outputStream.flush()
-                    response(tls.inputStream.buffered(),maxBody) {tls.soTimeout=remaining()}
+                    response(tls.inputStream.buffered(),maxBody) {tls.soTimeout=remaining()}.also {remaining();route?.check()}
                 } finally {scope.finish()} // Close the raw FD, without waiting for TLS close-notify.
             }
             scope.bind(future)
