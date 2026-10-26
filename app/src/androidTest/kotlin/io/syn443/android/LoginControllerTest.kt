@@ -376,6 +376,24 @@ class LoginControllerTest {
         assertEquals(LoginPhase.NEEDS_REAUTH,f.journal.snapshot().phase);assertFalse(f.controller.allowsConnect())
         assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("runtimeAuthorized"))
     }
+    @Test fun withdrawnOrUnreadableAssignmentRejectsRuntimeCommandsWithoutCrashing() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val policies=io.syn443.android.vpn.RuntimePolicies(context) {f.controller}
+        assertEquals("prepared",policies.read().journal.phase)
+        f.controller.assignedRuntime.clear()
+        assertTrue(policies.managed());assertEquals("blocked",policies.read().journal.phase)
+        assertFalse(policies.begin(listOf(false)));assertFalse(policies.finish(listOf(true),true))
+        assertFalse(policies.rollback("native_activation_failed"))
+        var localRead=false
+        assertTrue(runCatching {policies.config {localRead=true;"{}"}}.isFailure);assertFalse(localRead)
+        val file=File(context.noBackupFilesDir,"login/${f.namespace}/intent.json");val original=file.readBytes()
+        try {
+            file.writeText("corrupt public intent")
+            assertTrue(policies.managed());assertEquals("blocked",policies.read().journal.phase)
+            assertFalse(policies.begin(listOf(false)));assertFalse(policies.finish(listOf(true),true))
+            assertFalse(policies.rollback("native_activation_failed"));assertFalse(policies.refreshAssigned(true))
+        } finally {file.writeBytes(original)}
+    }
     @Test fun logoutCannotAcknowledgeRetirementWhileTheNativeOwnerLockIsHeld() = fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
         val alias=f.journal.snapshot().keyAlias

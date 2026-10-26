@@ -51,10 +51,16 @@ def main():
                 setup();before=proxy.progress;generation=call('auth-status')['generation']
                 if name=='enrolledSignedAssignmentStartsRealTun':
                     assert call('status')['policy']['activeRevision']==1 and fixture.policy_requests>=1
+                    call('disconnect');await_condition(stopped)
                     try:call('import',base64.b64encode(json.dumps(config).encode()).decode());raise RuntimeError('managed import unexpectedly accepted')
                     except AssertionError:pass
+                    before=proxy.progress;call('connect')
+                    await_condition(lambda:call('status').get('phase')=='Online' and proxy.progress>before)
                 elif name=='enrolledControllerDeathRecoversAuthorizedCache':
+                    old_controller=pid('');old_engine=pid(':engine');assert old_controller and old_engine
                     fixture.policy_status=503;call('fault-controller')
+                    await_condition(lambda:bool(pid('')) and pid('')!=old_controller and bool(pid(':engine')) and pid(':engine')!=old_engine)
+                    before=proxy.progress
                     await_condition(lambda:call('auth-status').get('generation')==generation and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert fixture.registrations==1
                 elif name=='enrolledCandidateRegressionRollsBack':
