@@ -26,7 +26,10 @@ if [ "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" -ge 33 ]; then
 fi
 result=0
 ./gradlew :app:connectedDebugAndroidTest --info --stacktrace || result=1
+# The Gradle runner uninstalls both APKs when its suite ends. External enrollment
+# also needs its own-UID driver, which exists exclusively in the test APK.
 adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 python3 tools/run_vpn_process_faults.py || result=1
 python3 tools/run_policy_activation.py || result=1
 python3 tools/run_enrolled_vpn.py || result=1

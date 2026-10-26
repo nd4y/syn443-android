@@ -11,6 +11,7 @@ from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid,
 
 def main():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish'),'Emulator only'
+    assert PACKAGE+'.test/io.syn443.android.EnrollmentDriver' in adb('shell','pm','list','instrumentation').decode(),'Test APK enrollment driver is not installed'
     suite=ET.Element('testsuite',name='SYN443 enrolled native VPN')
     out=ROOT/'app/build/outputs/androidTest-results/external/TEST-enrolled-vpn.xml'
     proxy=Server(('127.0.0.1',0),Proxy);threading.Thread(target=proxy.serve_forever,daemon=True).start()
@@ -34,9 +35,14 @@ def main():
         data=json.dumps(fixture.bootstrap(),separators=(',',':')).encode()
         subprocess.run(['adb','-e','shell','-T','run-as',PACKAGE,'dd','of=no_backup/operator-identity.json'],input=data,capture_output=True,check=True,timeout=15)
         call('auth-bootstrap-file');await_condition(lambda:call('auth-status').get('configured') and not call('auth-status').get('busy'),20)
-        result=adb('shell','am','instrument','-w','-e','fixturePort',str(fixture_port),'-e','fixtureCa',fixture.ca,
-            PACKAGE+'.test/io.syn443.android.EnrollmentDriver',timeout=75).decode()
-        assert 'synthetic_enrollment_verified' in result and 'INSTRUMENTATION_CODE: -1' in result,'Synthetic enrollment did not complete'
+        driver=subprocess.run(['adb','-e','shell','am','instrument','-w','-e','fixturePort',str(fixture_port),'-e','fixtureCa',fixture.ca,
+            PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=75)
+        result=driver.stdout.decode()
+        if driver.returncode or 'synthetic_enrollment_verified' not in result or 'INSTRUMENTATION_CODE: -1' not in result:
+            import re
+            stage=re.search(r'INSTRUMENTATION_RESULT: stage=([a-z_]{1,40})',result)
+            state=call('auth-status');safe={k:v for k,v in state.items() if k in ('phase','reason') and isinstance(v,str) and re.fullmatch('[A-Z_]{0,64}',v)}
+            raise AssertionError('Synthetic enrollment failed at '+(stage[1] if stage else 'driver_launch')+' '+json.dumps(safe))
         assert fixture.registrations==1 and not call('status')['desiredOn']
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')
         before=proxy.progress;call('connect')

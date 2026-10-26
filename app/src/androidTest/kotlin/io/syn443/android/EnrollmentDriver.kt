@@ -17,6 +17,7 @@ class EnrollmentDriver:Instrumentation() {
     private lateinit var arguments:Bundle
     override fun onCreate(args:Bundle?) {super.onCreate(args);arguments=checkNotNull(args);start()}
     override fun onStart() {
+        var stage="preflight"
         val ok=runCatching {
             require(BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
             val port=arguments.getString("fixturePort")!!.toInt();require(port in 1024..65535)
@@ -32,22 +33,32 @@ class EnrollmentDriver:Instrumentation() {
                 val end=SystemClock.elapsedRealtime()+30_000
                 while(true) {val value=status();if(predicate(value))return value;check(SystemClock.elapsedRealtime()<end);Thread.sleep(50)}
             }
+            stage="signed_out"
             val before=await {it.getString("phase")=="SIGNED_OUT" && !it.getBoolean("busy")}
+            stage="authorization_start"
             call("auth-start",before.getLong("generation").toString())
             val pending=await {it.getString("phase")=="BROWSER" && it.getBoolean("browserReady") && !it.getBoolean("busy")}
+            stage="authorization_url"
             val url=checkNotNull(call("auth-browser",pending.getLong("generation").toString()).getString("url"))
             require(java.net.URI(url).rawAuthority==java.net.URI(origin).rawAuthority && url.startsWith(origin+"/realms/test/"))
+            stage="browser_tls"
             val connection=URL(url).openConnection() as HttpsURLConnection
             val callback=try {
                 connection.sslSocketFactory=factory;connection.instanceFollowRedirects=false
                 connection.connectTimeout=5000;connection.readTimeout=5000
                 check(connection.responseCode==302);checkNotNull(connection.getHeaderField("Location"))
             } finally {connection.disconnect()}
+            stage="callback"
             require(callback.startsWith("syn443://oauth/callback?"));call("auth-callback",callback)
+            stage="assignment"
             val registered=await {it.getString("phase")=="POLICY_CACHED" && !it.getBoolean("busy")}
+            stage="candidate_validated"
             check(registered.getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
             check(!JSONObject(checkNotNull(call("status").getString("json"))).getBoolean("desiredOn"))
         }.isSuccess
-        finish(if(ok)-1 else 0,Bundle().apply {putString("result",if(ok)"synthetic_enrollment_verified" else "synthetic_enrollment_failed")})
+        finish(if(ok)-1 else 0,Bundle().apply {
+            putString("result",if(ok)"synthetic_enrollment_verified" else "synthetic_enrollment_failed")
+            putString("stage",stage)
+        })
     }
 }
