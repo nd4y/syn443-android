@@ -33,9 +33,9 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 17
-        versionName = "0.4.7-m2-runtime-policy-view"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 18
+        versionName = "0.4.8-m2-enrolled-vpn"
+        testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }
     compileOptions {

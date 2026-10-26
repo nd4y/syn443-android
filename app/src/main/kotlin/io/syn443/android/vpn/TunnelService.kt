@@ -39,7 +39,8 @@ class TunnelService : VpnService() {
     private val handler = Handler(Looper.getMainLooper())
     private val checks = Executors.newSingleThreadExecutor()
     private val policyWorker = Executors.newSingleThreadExecutor()
-    private lateinit var policies: ManagedPolicyStore
+    private lateinit var policies: RuntimePolicies
+    private var stopPolicyObservation:(()->Unit)?=null
     private var policyJob: PolicyChecks? = null
     private var policyFetchRunning = false
     private var forcePolicyFetch = false
@@ -100,7 +101,10 @@ class TunnelService : VpnService() {
         notifyForeground("Подключаемся")
         foreground = true
         store = StateStore.get(this)
-        policies = ManagedPolicyStore.get(this)
+        policies = RuntimePolicies(this)
+        stopPolicyObservation=LoginController.get(this).observePolicy {
+            handler.post {if(!destroyed) {handler.removeCallbacks(tick);handler.post(tick)}}
+        }
         runCatching { policies.recover() }
         connectivity = getSystemService(ConnectivityManager::class.java)
         epoch = store.read().optLong("networkEpoch")
@@ -429,10 +433,10 @@ class TunnelService : VpnService() {
         pendingConfig = ""
         handler.removeCallbacks(drain)
         handler.removeCallbacks(tick)
+        store.update { it.put("engineActive", false) }
         val stopped = store.checkpoint()
         if (!stopped.desiredOn) {
             tun?.close(); tun = null
-            store.update { it.put("engineActive", false) }
             store.event("Off", "user_stop", epoch, stopped.generation)
             stopForeground(STOP_FOREGROUND_REMOVE); foreground = false
             stopSelf(latestStartId)
@@ -522,8 +526,10 @@ class TunnelService : VpnService() {
             if (host != null) retire(false)
             phase("BlockedByPolicy", "policy_store_unavailable"); return
         }
-        val delivery = d.binding ?: return
-        if (network != null && !policyFetchRunning && policies.admitFetch(forcePolicyFetch)) {
+        if(!d.managed)return
+        if(d.enrolled && network!=null && policies.refreshAssigned(forcePolicyFetch))forcePolicyFetch=false
+        if (!d.enrolled && network != null && !policyFetchRunning && policies.admitFetch(forcePolicyFetch)) {
+            val delivery = checkNotNull(d.binding)
             policyFetchRunning = true; forcePolicyFetch = false
             val generation = store.checkpoint().generation; val physical = network; val currentEpoch = epoch
             val activation = d.journal.activationGeneration
@@ -560,7 +566,7 @@ class TunnelService : VpnService() {
             policies.rollback("activation_deadline"); retire(false); phase("Recovering", "policy_rollback"); return
         }
         if (d.journal.phase !in setOf("prepared", "applying")) {
-            if (runCatching { policies.config(null) }.isFailure) {
+            if (runCatching { policies.config {null} }.isFailure) {
                 if (host != null) { terminateOwned(); retire(false) }
                 if (prepare(this) == null) runCatching { blackhole() }
                 phase("BlockedByPolicy", "policy_lease_time_or_scope_invalid")
@@ -583,7 +589,7 @@ class TunnelService : VpnService() {
             val activeAuthorized = runCatching { policies.allowed(d.journal.active, d) }.getOrNull() != null
             when (Policy.preparation(store.checkpoint().desiredOn, d.journal.active != null, activeAuthorized,
                 host != null || binding || retiring, ready && !retiring, runningConfigHash != candidate.payload.contentHash,
-                Recovery.replacementReady(store.checkpoint(), System.currentTimeMillis()))) {
+                Recovery.replacementReady(store.checkpoint(), System.currentTimeMillis()), unsignedBaselineAllowed = !d.enrolled)) {
                 Preparation.REVOKE_OWNER -> { terminateOwned(); retire(true); return }
                 Preparation.BEGIN_WITHOUT_BASELINE -> { policies.begin(List(candidate.payload.activation.checks.size) { false }); return }
                 Preparation.WAIT -> {
@@ -618,16 +624,18 @@ class TunnelService : VpnService() {
                     store.effectCurrent(generation) {
                         if (policies.read().journal.activationGeneration == activation && policies.read().journal.candidate == candidate.envelope &&
                             (runningConfigHash == candidate.payload.contentHash || Recovery.replacementReady(store.checkpoint(), System.currentTimeMillis()))) {
-                            policies.begin(results); began = true
+                            began = policies.begin(results)
                         }
                     }
-                    if (began && runningConfigHash != candidate.payload.contentHash) retire(true)
+                    // Enrolled begin is asynchronous: keep the baseline owner until the durable
+                    // applying view wakes policyTick, which then retires it before replacement.
+                    if (began && !d.enrolled && runningConfigHash != candidate.payload.contentHash) retire(true)
                 } else if (policies.read().journal.phase == "applying") {
                     val passed = candidate.payload.activation.checks.indices.all { !candidate.payload.activation.checks[it].required || results[it] }
                     val regressed = candidate.payload.activation.checks.indices.any { candidate.payload.activation.checks[it].required && !results[it] && policies.read().journal.baseline[it] }
                     if (passed || (!regressed && candidate.payload.activation.allowDegraded) || android.os.SystemClock.elapsedRealtime() >= policies.read().applyDeadlineElapsed) {
                         var finished = false
-                        store.effectCurrent(generation) { if (policies.read().journal.activationGeneration == activation && policies.read().journal.candidate == candidate.envelope) { policies.finish(results, true); finished = true } }
+                        store.effectCurrent(generation) { if (policies.read().journal.activationGeneration == activation && policies.read().journal.candidate == candidate.envelope) { finished = policies.finish(results, true) } }
                         if (!finished) return@post
                         if (policies.read().journal.phase == "rolled_back") { retire(false); phase("Recovering", "policy_rollback") }
                         else { store.config(); probe() }
@@ -643,6 +651,7 @@ class TunnelService : VpnService() {
     }
     override fun onDestroy() {
         destroyed = true; token = null; ready = false
+        stopPolicyObservation?.invoke();stopPolicyObservation=null
         handler.removeCallbacksAndMessages(null)
         if (registered) connectivity.unregisterNetworkCallback(networkCallback)
         terminateOwned()

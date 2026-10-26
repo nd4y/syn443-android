@@ -95,8 +95,14 @@ object Canonical {
 object Policy {
     /** Local scheduling is not evidence of a defective signed candidate. */
     fun preparation(desiredOn: Boolean, activeExists: Boolean, activeAuthorized: Boolean,
-        ownerPresent: Boolean, ownerReady: Boolean, replacementRequired: Boolean, restartReady: Boolean): Preparation {
+        ownerPresent: Boolean, ownerReady: Boolean, replacementRequired: Boolean, restartReady: Boolean,
+        unsignedBaselineAllowed: Boolean = true): Preparation {
         if (!desiredOn) return Preparation.WAIT
+        if (!activeExists && !unsignedBaselineAllowed) return when {
+            ownerPresent -> Preparation.REVOKE_OWNER
+            restartReady -> Preparation.BEGIN_WITHOUT_BASELINE
+            else -> Preparation.WAIT
+        }
         if (activeExists && !activeAuthorized) return when {
             ownerPresent -> Preparation.REVOKE_OWNER
             restartReady -> Preparation.BEGIN_WITHOUT_BASELINE

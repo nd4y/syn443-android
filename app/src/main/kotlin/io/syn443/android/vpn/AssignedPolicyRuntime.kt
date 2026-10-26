@@ -44,6 +44,15 @@ internal class AssignedPolicyRuntime(private val boot:()->Int,private val elapse
         return Ticket(login.generation,login.policyHash,view.state.journal.activationGeneration)
     }
     fun contains(login:LoginIntent,state:AssignmentState):Boolean = runCatching {current(login).state==state}.getOrDefault(false)
+    fun read(login:LoginIntent):Prepared = current(login)
+    fun allowed(login:LoginIntent,raw:String?):Verified? = runCatching {
+        val view=current(login);require(raw!=null)
+        val now=elapsed();val currentBoot=boot()
+        if(raw==view.candidate?.envelope) {
+            require(view.state.time?.boot==currentBoot && now>=checkNotNull(view.state.time).elapsedMs && now<view.candidateDeadline)
+            checkNotNull(view.candidate)
+        } else checkNotNull(view.permit).authorized(login,view.state,currentBoot,now).also {require(it.envelope==raw)}
+    }.getOrNull()
     fun config(login:LoginIntent):String {
         val view=current(login)
         return checkNotNull(view.permit).authorized(login,view.state,boot(),elapsed()).engineConfig

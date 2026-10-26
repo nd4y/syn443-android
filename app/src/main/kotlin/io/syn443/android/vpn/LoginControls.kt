@@ -59,7 +59,8 @@ import org.json.JSONObject
             "BROWSER"->"Вход продолжается в браузере"
             "EXCHANGING","AUTHENTICATED","CLEANUP","ENROLLING"->"Проверка доступа и регистрация устройства"
             "PROVISIONING"->"Устройство зарегистрировано. Ожидается конфигурация от сервера."
-            "POLICY_CACHED"->"Конфигурация получена и проверена. Подключение ещё не доступно в этой версии."
+            "POLICY_CACHED"->if(status.optJSONObject("assignedPolicy")?.let {it.optBoolean("candidateValidated") || it.optBoolean("runtimeAuthorized")}==true)
+                "Конфигурация получена и проверена. Можно включить VPN." else "Ожидаем действующую конфигурацию."
             "REFRESHING"->"Обновление защищённой сессии"
             "NEEDS_REAUTH"->"Нужен повторный вход. Завершите текущую сессию и войдите снова."
             "RETIRING"->"Завершение сессии и удаление локальных ключей"

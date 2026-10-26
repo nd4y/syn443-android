@@ -21,7 +21,7 @@ class StateStore private constructor(context: Context) {
         @Synchronized fun get(context: Context): StateStore = instance ?: StateStore(context.applicationContext).also { instance = it }
     }
     private val directory = context.noBackupFilesDir
-    private val policyStore = ManagedPolicyStore.get(context)
+    private val policyStore = RuntimePolicies(context)
     private val state = AtomicFile(File(directory, "vpn-intent.json"))
     private val config = AtomicFile(File(directory, "vpn-config.enc"))
     @Synchronized fun read(): JSONObject = if (!state.baseFile.exists()) JSONObject().put("desiredOn", false).put("generation", 0) else
@@ -108,7 +108,7 @@ class StateStore private constructor(context: Context) {
         if (!policyStore.managed() && read().optString("configRevision") != digest) update { it.put("configRevision", digest) }
         return raw
     }
-    @Synchronized fun config(): String? = policyStore.config(originalConfig()).also { raw ->
+    @Synchronized fun config(): String? = policyStore.config(::originalConfig).also { raw ->
         if (raw != null && read().optString("configRevision") != revision(raw)) update { it.put("configRevision", revision(raw)) }
     }
     private fun revision(raw: String) = java.security.MessageDigest.getInstance("SHA-256")
