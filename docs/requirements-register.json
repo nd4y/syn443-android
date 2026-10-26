@@ -148,7 +148,11 @@
         "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
         "core/identity/src/test/kotlin/io/syn443/identity/LoginRecoveryTest.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/LoginJournal.kt",
-        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt"
+        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginPilotTest.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/LoginPayloadTest.kt"
       ]
     },
     {
@@ -164,7 +168,11 @@
         "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
         "core/identity/src/test/kotlin/io/syn443/identity/LoginRecoveryTest.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/LoginJournal.kt",
-        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt"
+        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginPilotTest.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/LoginPayloadTest.kt"
       ]
     },
     {
@@ -209,7 +217,11 @@
         "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
         "core/identity/src/test/kotlin/io/syn443/identity/LoginRecoveryTest.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/LoginJournal.kt",
-        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt"
+        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginPilotTest.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/LoginPayloadTest.kt"
       ]
     },
     {
@@ -1681,7 +1693,11 @@
         "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
         "core/identity/src/test/kotlin/io/syn443/identity/LoginRecoveryTest.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/LoginJournal.kt",
-        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt"
+        "app/src/androidTest/kotlin/io/syn443/android/LoginJournalTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginPilotTest.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/LoginPayloadTest.kt"
       ]
     },
     {

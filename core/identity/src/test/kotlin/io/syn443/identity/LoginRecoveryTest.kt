@@ -37,6 +37,17 @@ class LoginRecoveryTest {
         fun resume(s:LoginIntent,boot:Int=2,elapsed:Long=2000,payload:Boolean=true,key:Boolean=true,p:Pending?=pending,anchor:Int=2)=
             LoginRecovery.resume(s,payload,key,boot,elapsed,p,anchor)
     }
+    @Test fun acknowledgedRetirementRemovesOnlyItsOwnPublicTombstone() {
+        val foreign=tomb("another-owner");val f=Flow(LoginIntent(tombstones=listOf(foreign)))
+        val retiring=LoginRecovery.cancel(f.enrolling(),f.generation)
+        val own=RegistrationTombstone(f.authenticated.ownerTag,f.thumb)
+        val acknowledged=LoginRecovery.serverRevoked(retiring,retiring.generation,own)
+        assertEquals(listOf(foreign),acknowledged.tombstones)
+        assertEquals(retiring.retiringAliases,acknowledged.retiringAliases)
+        invalid {LoginRecovery.serverRevoked(retiring,f.generation,own)}
+        invalid {LoginRecovery.serverRevoked(acknowledged,acknowledged.generation,own)}
+        invalid {LoginRecovery.serverRevoked(LoginIntent(tombstones=listOf(own)),0,own)}
+    }
     @Test fun recoveryIntentContainsNoCredentialsAndRoundTripsExactly() {
         val f=Flow();val states=listOf(LoginIntent(),f.reserved,f.browser,f.exchanging,f.authenticated,f.enrolling(),f.registered(),f.cached())
         for(s in states) {

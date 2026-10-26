@@ -174,6 +174,11 @@ object LoginRecovery {
         val remaining=s.retiringAliases-alias
         return revised(s.copy(phase=if(remaining.isEmpty())LoginPhase.SIGNED_OUT else LoginPhase.RETIRING,retiringAliases=remaining))
     }
+    /** Only after a proof-bound successful server revoke, never after a timeout/transport error. */
+    fun serverRevoked(s:LoginIntent,generation:Long,tombstone:RegistrationTombstone):LoginIntent {
+        current(s,generation);require(s.phase==LoginPhase.RETIRING && tombstone in s.tombstones)
+        return revised(s.copy(tombstones=s.tombstones-tombstone))
+    }
     fun resume(s:LoginIntent,protectedStateMatches:Boolean,keyMatches:Boolean,boot:Int,elapsed:Long,pending:Pending?=null,anchorBoot:Int = -1):LoginResume {
         validate(s);require(boot>=0 && elapsed>=0)
         if(s.phase==LoginPhase.SIGNED_OUT)return LoginResume.IDLE
