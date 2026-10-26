@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=88
+    minimum=94
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=21
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=77
+    minimum=79
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -39,6 +39,7 @@ for path in paths:
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="emulator":
+    chat_required={"chatSqlOutboxPersistsCiphertextAndFencesAccountGeneration","chatSqlChunksPreserveTwentyFiveMiBAndRejectOversize","chatOutboxQuotaAndLogoutEraseTheOwnedKey","chatPhotoCompressionAppliesOrientationAndStripsGps","chatTextAndDocumentBoundariesDoNotAcceptInvalidMedia","supportChatHasVisibleTitleAndConnectionStatus"}
     identity_required={"keystoreIdentityPersistsSignsAndCannotExportPrivateMaterial", "identityKeysAreIndependentAndCannotDeleteUnrelatedAliases"}
     identity_required |= {"cancellationOrdersDeletionAfterInFlightCreationAndFencesQueuedCreation",
         "protectedStatePersistsWithoutPlaintextAndCallbackIsConsumedOnce",
@@ -74,7 +75,7 @@ if mode=="emulator":
     required.add("missingVpnConsentPreservesIntentWithoutStartingForegroundService")
     required |= {"resourceRequestsAreBoundedRedactedAndDoNotChangeIntent", "resourceSnapshotIsExplicitAndVisible"}
     required |= {"slowAndroidSocketReadHasAnAbsoluteDeadline", "cancelledAndroidBatchCannotBecomeAFalseBaseline"}
-    required |= identity_required
+    required |= identity_required | chat_required
     required |= {"browserReservationAndCancellationPreserveVpnAndDeleteTheKey",
         "controllerRestartResumesSameBrowserGenerationWithoutANewKey",
         "exactErrorCallbackIsSingleUseAndNeverConnectsVpn"}

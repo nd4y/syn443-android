@@ -33,8 +33,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 21
-        versionName = "0.4.11-health-attribution"
+        versionCode = 22
+        versionName = "0.5.0-support-chat"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }
@@ -60,6 +60,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
+    implementation("androidx.media3:media3-transformer:1.11.1")
+    implementation("androidx.media3:media3-effect:1.11.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

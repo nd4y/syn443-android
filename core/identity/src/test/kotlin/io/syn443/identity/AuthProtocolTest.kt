@@ -18,6 +18,33 @@ import java.util.Base64
 import java.util.Locale
 
 class AuthProtocolTest {
+    @Test fun chatBindsExactBodyAccountAndScopeWithBoundedLargeReply() {
+        val f=Fixture();val body="{\"data\":\""+"a".repeat(349528)+"\"}"
+        f.handler={m,u,h,bytes,_,max->
+            assertEquals("POST",m);assertEquals(b.apiOrigin+"/v1/chat/uploads/part",u);assertEquals(524288,max)
+            assertEquals(body,bytes!!.toString(Charsets.UTF_8))
+            val claims=Identity.objectJSON(Policy.utf8(Policy.decode64(h.getValue("DPoP").split('.')[1])))
+            assertEquals(Identity.hash(bytes),claims.getValue("req_hash").jsonPrimitive.content)
+            assertEquals(Identity.hash(f.current().session.accessToken.toByteArray()),claims.getValue("ath").jsonPrimitive.content)
+            json(text="{\"data\":\""+"b".repeat(349528)+"\"}")
+        }
+        assertTrue(f.client.chat("uploads/part",body,f.current(),IdentityScope()).length>349528)
+        error(AuthFailure.INVALID_REPLY) {f.client.chat("uploads/part",body,f.current().copy(keyThumbprint="wrong"),IdentityScope())}
+        val scope=IdentityScope();scope.cancel();error(AuthFailure.CANCELLED) {f.client.chat("self","{}",f.current(),scope)}
+    }
+    @Test fun chatRejectsUnknownPathOversizeExpiredSessionAndUnsafeJson() {
+        val f=Fixture()
+        for((action,body) in listOf("../identity" to "{}","self" to "a".repeat(32769),"uploads/part" to "a".repeat(360449),"self" to "[]","self" to "{\"x\":1,\"x\":2}")) {
+            error(AuthFailure.INVALID_REPLY) {f.client.chat(action,body,f.current(),IdentityScope())}
+        }
+        error(AuthFailure.INVALID_REPLY) {f.client.chat("self","{}",f.current(session().copy(accessUntilMs=now)),IdentityScope())}
+        for(reply in listOf(json(text="{\"x\":1,\"x\":2}"),json(text="{} "+"x"),json().copy(headers=mapOf("content-type" to listOf("text/html"),"date" to listOf(date()))))) {
+            f.handler={_,_,_,_,_,_->reply};error(AuthFailure.INVALID_REPLY) {f.client.chat("self","{}",f.current(),IdentityScope())}
+        }
+        for((status,reason) in listOf(403 to AuthFailure.ACCESS_DENIED,429 to AuthFailure.THROTTLED,503 to AuthFailure.UNAVAILABLE)) {
+            f.handler={_,_,_,_,_,_->json(status)};error(reason) {f.client.chat("self","{}",f.current(),IdentityScope())}
+        }
+    }
     companion object {
         private const val now=1_800_000_000_000L
         private val ec=KeyPairGenerator.getInstance("EC").apply {initialize(ECGenParameterSpec("secp256r1"))}.generateKeyPair()

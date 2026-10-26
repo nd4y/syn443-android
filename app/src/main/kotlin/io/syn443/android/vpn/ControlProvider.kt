@@ -38,6 +38,15 @@ class ControlProvider : ContentProvider() {
         val store = StateStore.get(context)
         return try {
             when (method) {
+                "chat-start" -> {
+                    require(caller==Process.myUid());val input=requireNotNull(extras)
+                    return Bundle().apply {putBoolean("ok",LoginController.get(context).chatStart(requireNotNull(arg),input.getLong("generation",-1),requireNotNull(input.getString("action")),requireNotNull(input.getString("body"))))}
+                }
+                "chat-result" -> {
+                    require(caller==Process.myUid())
+                    return Bundle().apply {putString("json",LoginController.get(context).chatResult(requireNotNull(arg),requireNotNull(extras).getLong("generation",-1)).toString())}
+                }
+                "chat-cancel" -> {require(caller==Process.myUid());LoginController.get(context).chatCancel(requireNotNull(arg))}
                 "auth-status" -> return Bundle().apply {putBoolean("ok",true);putString("json",LoginController.get(context).status().toString())}
                 "auth-bootstrap-file" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller==2000)
