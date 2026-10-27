@@ -92,7 +92,8 @@ jobs:
           cmdline-tools-version: '15859902'
           packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
       - name: Install synthetic media fixture generator
-        run: test -f /etc/apt/sources.list.d/ubuntu.sources
+        run: |
+          test -f /etc/apt/sources.list.d/ubuntu.sources
           apt_options=(-o Dir::Etc::sourceparts=- -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::ForceIPv4=true)
           timeout 180s sudo apt-get "${apt_options[@]}" update
           timeout 300s sudo apt-get "${apt_options[@]}" install -y --no-install-recommends ffmpeg
