@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=108
+    minimum=110
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -77,6 +77,8 @@ if mode=="emulator":
     required.add("signedManagementReleasePreservesLocalState")
     required.add("externalConnectExtraCannotTurnVpnOn")
     required.add("healthyChangedCandidateCommits")
+    required |= {"revocationDrainsNativeBeforeFinalOffAndSurvivesControllerDeath",
+                 "revocationDrainPreservesNewerConnectAndRetiresFrozenOldOwner"}
     required.add("intentSentinelIsNonWakeupAndCancelledByStop")
     required.add("localRestartBudgetDoesNotPoisonHealthyRenewal")
     required.add("missingVpnConsentPreservesIntentWithoutStartingForegroundService")

@@ -121,6 +121,10 @@ class TunnelService : VpnService() {
         // previous Stop removed its notification. Re-promote before inspecting intent.
         if (!foreground) { notifyForeground("Подключаемся"); foreground = true }
         if (intent?.action == STOP) store.update { store.put(it, Recovery.command(store.checkpoint(it), false)); OsIntentGate.command(this, it, false) }
+        if (intent?.action == "fault-revoke" && io.syn443.android.BuildConfig.DEBUG &&
+            android.os.Build.HARDWARE in setOf("ranchu", "goldfish")) {
+            checks.execute { onRevoke() }; return START_NOT_STICKY
+        }
         if (!store.checkpoint().desiredOn) { retire(false); return START_NOT_STICKY }
         if (!OsIntentGate.allowed(this, store)) { store.update { it.put("resumeRequired", true) }; phase("NeedsAction", "explicit_resume_required"); retire(false); return START_NOT_STICKY }
         if (intent?.action == "fault-crash" && io.syn443.android.BuildConfig.DEBUG) terminateOwned()
@@ -652,9 +656,25 @@ class TunnelService : VpnService() {
         }
     }
     override fun onRevoke() {
-        store.update { store.put(it, Recovery.command(store.checkpoint(it), false)) }
-        store.event("Off", "vpn_permission_revoked", epoch)
-        retire(false); stopSelf(); super.onRevoke()
+        // Framework callbacks may arrive on a Binder thread. Persist the revoked
+        // intent first; confine ownership changes and the bounded drain to main.
+        val generation = store.serialized {
+            val stopped = store.update {
+                store.put(it, Recovery.command(store.checkpoint(it), false))
+                OsIntentGate.command(this, it, false)
+            }
+            val current = store.checkpoint(stopped).generation
+            store.event("Off", "vpn_permission_revoked", stopped.optLong("networkEpoch"), current)
+            current
+        }
+        handler.post {
+            // Retire an older owner even if a newer Connect now needs permission.
+            // A replacement already owned by that newer intent must be preserved.
+            if (destroyed || boundGeneration > generation) return@post
+            // The default onRevoke calls stopSelf and cancels this drain in
+            // onDestroy. completeRetirement stops only after the owner exits.
+            retire(false)
+        }
     }
     override fun onDestroy() {
         destroyed = true; token = null; ready = false

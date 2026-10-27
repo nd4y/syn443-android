@@ -36,6 +36,7 @@ fi
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 python3 tools/run_vpn_process_faults.py || result=1
+python3 tools/run_vpn_revocation.py || result=1
 python3 tools/run_policy_activation.py || result=1
 python3 tools/run_enrolled_vpn.py || result=1
 python3 tools/check_test_evidence.py emulator || result=1

@@ -129,6 +129,11 @@ class ControlProvider : ContentProvider() {
                     require(!store.read().optBoolean("resumeRequired")) { "explicit_connect_required" }
                     requestReconcile(context, store)
                 }
+                "fault-revoke" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller == 2000 &&
+                        android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+                    context.startService(Intent(context, TunnelService::class.java).setAction(method))
+                }
                 "fault-crash", "fault-hang", "fault-owner" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
