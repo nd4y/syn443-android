@@ -59,7 +59,7 @@ class LoginController private constructor(private val context:android.app.Applic
         require(id.matches(Regex("[0-9a-f]{32}")) && action.length<=32 && body.toByteArray(Charsets.UTF_8).size<=360_448)
         return submitIfIdle(onAdmission={chatTicket=ChatTicket(id,generation,elapsed()+60_000)},admit={
             val s=journal.snapshot()
-            s.generation==generation && s.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED) &&
+            s.generation==generation && s.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING) &&
                 (chatTicket==null || chatTicket!!.expires<elapsed() || chatTicket!!.state!="pending")
         }) {
             var result="";var failure=""

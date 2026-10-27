@@ -302,6 +302,20 @@ class LoginControllerTest {
         f.controller.cancel();f.idle()
         assertEquals("gone",f.controller.chatResult(id,before.generation).getString("state"))
     }
+    @Test fun chatResumesPersistedRefreshAfterTransportLossWithoutManualLogin()=fixture {f->
+        f.server.policyReady=true;f.server.shortAccess=true
+        f.controller.callback(f.begin());f.idle();val initial=f.journal.snapshot()
+        f.server.dropRefresh=true;f.restart();val uncertain=f.journal.snapshot()
+        assertEquals(LoginPhase.REFRESHING,uncertain.phase)
+        val id="e".repeat(32)
+        assertFalse(f.controller.chatStart(id,uncertain.generation+1,"self","{}"))
+        assertTrue(f.controller.chatStart(id,uncertain.generation,"self","{}"));f.idle()
+        assertEquals("done",f.controller.chatResult(id,uncertain.generation).getString("state"))
+        val resumed=f.journal.snapshot();assertEquals(LoginPhase.POLICY_CACHED,resumed.phase)
+        assertEquals(initial.policyHash,resumed.policyHash);assertEquals(initial.keyAlias,resumed.keyAlias)
+        assertEquals(2,f.server.refreshBodies.size);assertEquals(f.server.refreshBodies[0],f.server.refreshBodies[1])
+        assertEquals(1,f.server.enrollBodies.size);assertEquals(1L,resumed.sessionGeneration)
+    }
     @Test fun cancelledQueuedChatNeverTransmitsAndDoesNotPoisonNextRequest() {
         val pause=AtomicBoolean();val entered=CountDownLatch(1);val release=CountDownLatch(1)
         fixture(beforeQueue={if(pause.compareAndSet(true,false)) {entered.countDown();check(release.await(5,TimeUnit.SECONDS))}}) {f->
