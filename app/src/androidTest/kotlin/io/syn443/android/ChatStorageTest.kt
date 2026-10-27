@@ -1,3 +1,4 @@
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 package io.syn443.android
 
 import android.content.Context
@@ -111,6 +112,15 @@ class ChatStorageTest {
         val dir=File(context.cacheDir,"chat-test").apply {mkdirs()}
         return File(dir,"source-${ChatLimits.id()}.mp4").also {file->
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().context.assets.open("chat-fixture.mp4").use {input->file.outputStream().use {input.copyTo(it)}}
+        }
+    }
+    @Test fun chatDecoderSelectionPreservesPhysicalCodecsAndExcludesBrokenVirtualDecoder() {
+        val defaults=androidx.media3.exoplayer.mediacodec.MediaCodecSelector.DEFAULT
+        for(mime in listOf("video/avc","audio/mp4a-latm")) {
+            val original=defaults.getDecoderInfos(mime,false,false).map {it.name}
+            val selected=ChatMedia.decoderSelector.getDecoderInfos(mime,false,false).map {it.name}
+            assertEquals(if(android.os.Build.VERSION.SDK_INT>=37)original.filterNot {it=="c2.goldfish.h264.decoder"} else original,selected)
+            assertTrue(selected.isNotEmpty())
         }
     }
     @Test fun chatVideoCompressionProducesBoundedMp4AndStripsLocation()=runBlocking {

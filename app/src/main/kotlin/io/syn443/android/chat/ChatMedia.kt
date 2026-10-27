@@ -9,8 +9,10 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.Clock
 import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.Presentation
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.transformer.*
 import kotlinx.coroutines.*
 import java.io.File
@@ -21,6 +23,15 @@ data class PreparedMedia(val file:File,val name:String,val mime:String,val kind:
     override fun close() {file.delete()}
 }
 object ChatMedia {
+    internal val decoderSelector=MediaCodecSelector {mime,secure,tunneling->
+        val defaults=MediaCodecSelector.DEFAULT.getDecoderInfos(mime,secure,tunneling)
+        // API37's emulator H264 decoder fails while draining real 1080p input.
+        // Keep the device's normal hardware order; exclude only that exact
+        // virtual codec, letting Media3 use the remaining platform decoder.
+        if(android.os.Build.VERSION.SDK_INT>=37)
+            defaults.filterNot {it.name=="c2.goldfish.h264.decoder"}
+        else defaults
+    }
     private fun safeName(value:String)=value.filter { !it.isISOControl() && it!='/' && it!='\\' && Character.getType(it)!=Character.FORMAT.toInt() }
         .take(60).trim().takeUnless {it.isEmpty() || it=="." || it==".."}?:"attachment"
     suspend fun prepare(context:Context,uri:Uri,compress:Boolean,progress:(String)->Unit):PreparedMedia {
@@ -81,6 +92,9 @@ object ChatMedia {
                             .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(bitrate).build())
                             .setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(96_000).build()).build()
                         transformer=Transformer.Builder(context).setEncoderFactory(encoder)
+                            .setAssetLoaderFactory(DefaultAssetLoaderFactory(context,
+                                DefaultDecoderFactory.Builder(context).setMediaCodecSelector(decoderSelector)
+                                    .setEnableDecoderFallback(true).build(),Clock.DEFAULT,null))
                             .setVideoMimeType(MimeTypes.VIDEO_H264).setAudioMimeType(MimeTypes.AUDIO_AAC)
                             .addListener(object:Transformer.Listener {
                                 override fun onCompleted(composition:Composition,result:ExportResult) {if(cont.isActive)cont.resume(Unit)}

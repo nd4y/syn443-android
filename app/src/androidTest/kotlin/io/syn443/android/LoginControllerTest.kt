@@ -201,7 +201,9 @@ class LoginControllerTest {
         fun cleanup() {
             server.release.countDown();server.releaseRevoke.countDown();controller.cancel();idle();check(journal.snapshot().phase==LoginPhase.SIGNED_OUT)
             controller.shutdownTest();check(File(context.noBackupFilesDir,"login/$namespace").deleteRecursively())
-            check(File(context.noBackupFilesDir,"$namespace-bootstrap.json").delete())
+            val bootstrap=File(context.noBackupFilesDir,"$namespace-bootstrap.json")
+            android.util.AtomicFile(bootstrap).delete()
+            check(listOf(bootstrap,File(bootstrap.path+".bak"),File(bootstrap.path+".new")).none {it.exists()})
         }
     }
     private fun fixture(beforeQueue:(()->Unit)?=null,block:(Fixture)->Unit) {
@@ -212,7 +214,13 @@ class LoginControllerTest {
             raw!=null && org.json.JSONObject(raw).let {!it.optBoolean("desiredOn") && !it.optBoolean("engineActive")}
         }
         val f=Fixture(beforeQueue=beforeQueue)
-        try {f.controller.configure(Canonical.json.encodeToString(f.server.bootstrap));f.idle();block(f)} finally {f.cleanup()}
+        var failure:Throwable?=null
+        try {
+            f.controller.configure(Canonical.json.encodeToString(f.server.bootstrap));f.idle()
+            check(f.controller.status().getBoolean("configured")) {"isolated bootstrap was not committed"}
+            block(f)
+        } catch(e:Throwable) {failure=e;throw e}
+        finally {try {f.cleanup()} catch(e:Throwable) {if(failure==null)throw e else failure.addSuppressed(e)}}
     }
     @Test fun pendingPollFencesStaleGenerationAndCannotReviveLogout() {
         val pause=AtomicBoolean();val entered=CountDownLatch(1);val release=CountDownLatch(1)
