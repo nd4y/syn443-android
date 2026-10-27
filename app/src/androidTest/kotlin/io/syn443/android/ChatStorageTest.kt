@@ -94,6 +94,19 @@ class ChatStorageTest {
             }
         } finally {file.delete()}
     }
+    @Test fun chatCancelledImportRollsBackPartialSqlAndCanBeRetried()=fixture {name->
+        val file=File(context.cacheDir,"chat-test-${ChatLimits.id()}").apply {writeBytes(ByteArray(ChatLimits.chunk*3){37})}
+        try {ChatOutbox(context,1,name).use {store->
+            var checks=0
+            assertThrows(CancellationException::class.java) {store.importFile(file,"cancelled.bin","application/octet-stream","file") {if(++checks==3)throw CancellationException()}}
+            val snapshot=File(context.noBackupFilesDir,"$name.db")
+            android.database.sqlite.SQLiteDatabase.openDatabase(snapshot.path,null,android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use {db->
+                for(table in listOf("files","chunks"))db.rawQuery("SELECT count(*) FROM $table",null).use {c->c.moveToFirst();assertEquals(0,c.getInt(0))}
+            }
+            val info=store.importFile(file,"retry.bin","application/octet-stream","file")
+            assertEquals(file.length(),info.getLong("size"));assertEquals(37,store.chunk(info.getString("localId"),2)[0].toInt())
+        }} finally {file.delete()}
+    }
     private fun videoFixture():File {
         val dir=File(context.cacheDir,"chat-test").apply {mkdirs()}
         return File(dir,"source-${ChatLimits.id()}.mp4").also {file->

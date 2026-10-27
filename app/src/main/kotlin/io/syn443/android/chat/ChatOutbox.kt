@@ -83,7 +83,8 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
         buildList {while(c.moveToNext()) {val id=c.getString(0);add(id to JSONObject(crypt("draft/$id",c.getBlob(1),true).toString(Charsets.UTF_8)))}}
     }
     fun removeDraft(id:String) {db.delete("drafts","id=? AND generation=?",arrayOf(id,generation.toString()))}
-    fun importFile(file:File,name:String,mime:String,kind:String):JSONObject {
+    fun importFile(file:File,name:String,mime:String,kind:String,checkActive:()->Unit={}):JSONObject {
+        checkActive()
         require(file.length() in 1..ChatLimits.file.toLong())
         val used=db.rawQuery("SELECT COALESCE(sum(size),0) FROM files",null).use {it.moveToFirst();it.getLong(0)}
         require(used+file.length()<=100L*1024*1024)
@@ -91,6 +92,7 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
         file.inputStream().use {input->val buffer=ByteArray(ChatLimits.chunk);while(true) {val n=input.read(buffer);if(n<0)break;hash.update(buffer,0,n)}}
         val info=JSONObject().put("localId",id).put("clientId",id).put("name",name).put("mime",mime).put("kind",kind).put("size",file.length())
             .put("sha256",hash.digest().joinToString("") {"%02x".format(it)})
+        checkActive()
         db.transaction {
             check(db.insertOrThrow("files",null,ContentValues().apply {put("id",id);put("generation",generation);put("size",file.length());put("body",crypt("file/$id",info.toString().toByteArray()))})!=-1L)
             file.inputStream().buffered().use {input->var part=0;while(true) {
@@ -98,6 +100,7 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
                 while(n<data.size) {val count=input.read(data,n,data.size-n);if(count<0)break;n+=count}
                 if(n==0)break
                 db.insertOrThrow("chunks",null,ContentValues().apply {put("file",id);put("part",part);put("data",crypt("$id/$part",data.copyOf(n)))})
+                checkActive()
                 part++
             }}
         }

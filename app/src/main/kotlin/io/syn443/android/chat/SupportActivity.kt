@@ -75,13 +75,20 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
         }
         lifecycle.addObserver(observer);onDispose {lifecycle.removeObserver(observer);operation?.cancel()}
     }
-    DisposableEffect(store) {val current=store;onDispose {current?.close()}}
+    LaunchedEffect(store) {
+        val current=store
+        try {awaitCancellation()}
+        finally {withContext(NonCancellable+Dispatchers.IO) {current?.close()}}
+    }
     fun run(block:suspend ()->Unit) {
         if(operation?.isActive==true)return
         operation=scope.launch {
             try {mutex.withLock {block()}}
             catch(e:CancellationException) {throw e}
-            catch(e:Exception) {status=chatError(e);nextAttempt=android.os.SystemClock.elapsedRealtime()+60_000}
+            catch(e:Exception) {
+                if(io.syn443.android.BuildConfig.DEBUG)android.util.Log.w("SYN443Chat","operation_failed/"+e.javaClass.simpleName)
+                status=chatError(e);nextAttempt=android.os.SystemClock.elapsedRealtime()+60_000
+            }
             finally {operation=null}
         }
     }
@@ -113,7 +120,10 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
     fun prepare(uri:android.net.Uri,compress:Boolean) {run {
         require(files.size<4)
         val prepared=ChatMedia.prepare(context,uri,compress) {status=it}
-        try {files=files+withContext(Dispatchers.IO) {requireNotNull(store).importFile(prepared.file,prepared.name,prepared.mime,prepared.kind)}}
+        try {files=files+withContext(Dispatchers.IO) {
+            val owner=currentCoroutineContext()
+            requireNotNull(store).importFile(prepared.file,prepared.name,prepared.mime,prepared.kind) {owner.ensureActive()}
+        }}
         finally {prepared.close()}
         status="Файл подготовлен"
     }}
@@ -128,9 +138,12 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
                     generation= -1;client=null;store=null;messages=emptyList();inbox=emptyList();pending=emptyList();files=emptyList();text="";conversation="";admin=false
                     status="Для чата войдите в SYN443 на главном экране."
                 } else {
-                    if(generation!=next || client==null) {
-                        generation=next;client=ChatClient(context,next);messages=emptyList();conversation="";files=emptyList();text="";inbox=emptyList();pending=emptyList();admin=false
-                        store=withContext(Dispatchers.IO) {ChatOutbox(context,next)}
+                    if(generation!=next || client==null || store==null) {
+                        messages=emptyList();conversation="";files=emptyList();text="";inbox=emptyList();pending=emptyList();admin=false
+                        val opened=withContext(NonCancellable+Dispatchers.IO) {ChatOutbox(context,next)}
+                        try {currentCoroutineContext().ensureActive()}
+                        catch(e:CancellationException) {withContext(NonCancellable+Dispatchers.IO) {opened.close()};throw e}
+                        store=opened;generation=next;client=ChatClient(context,next)
                     }
                     val own=requireNotNull(client).objectCall("self")
                     val permittedAdmin=own.getBoolean("admin")
