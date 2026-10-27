@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <application android:usesCleartextTraffic="true">
-        <provider android:name="androidx.core.content.FileProvider" android:authorities="io.syn443.chat.fixture" android:exported="false" android:grantUriPermissions="false">
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="io.syn443.chat.fixture" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/chat_fixture_paths" />
         </provider>
         <provider android:name=".vpn.ControlProvider" android:exported="true"
