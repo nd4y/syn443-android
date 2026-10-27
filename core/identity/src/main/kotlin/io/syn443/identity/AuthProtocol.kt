@@ -169,6 +169,8 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
             if(reply.status==401 && attempt==0 && json(reply)["code"]?.text()=="use_dpop_nonce") {
                 currentNonce=challenge(reply);continue
             }
+            if(reply.status==409 && json(reply)["code"]?.text()=="reauthentication_required")
+                throw AuthException(AuthFailure.REAUTHENTICATE)
             status(reply,if(path.endsWith("/revoke"))204 else 200)
             return Delivered(reply,observed(reply,start,floor))
         }

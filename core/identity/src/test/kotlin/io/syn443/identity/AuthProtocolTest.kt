@@ -18,6 +18,15 @@ import java.util.Base64
 import java.util.Locale
 
 class AuthProtocolTest {
+    @Test fun publicationReauthenticationIsDistinctFromAnIdempotencyConflict() {
+        val f=Fixture()
+        for((code,expected) in listOf("reauthentication_required" to AuthFailure.REAUTHENTICATE,"idempotency_conflict" to AuthFailure.CONFLICT)) {
+            f.handler={_,_,_,_,_,_->json(409,text="""{"code":"$code"}""")}
+            error(expected) {f.client.policy(f.current(),IdentityScope())}
+        }
+        f.handler={_,_,_,_,_,_->json(409,text="not-json")}
+        error(AuthFailure.INVALID_REPLY) {f.client.policy(f.current(),IdentityScope())}
+    }
     @Test fun chatBindsExactBodyAccountAndScopeWithBoundedLargeReply() {
         val f=Fixture();val body="{\"data\":\""+"a".repeat(349528)+"\"}"
         f.handler={m,u,h,bytes,_,max->

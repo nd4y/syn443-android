@@ -59,6 +59,7 @@ class LoginControllerTest {
         @Volatile var policyRevision=1L
         @Volatile var engineTag="direct"
         @Volatile var policyStatus=200
+        @Volatile var policyProblem="test_failure"
         @Volatile var shortAccess=false
         @Volatile var dropRefresh=false
         @Volatile var chatStatus=200
@@ -152,7 +153,7 @@ class LoginControllerTest {
                 return reply(text=receipt.second)
             }
             if(url.endsWith("/device/policy")) {
-                if(policyStatus!=200)return reply(policyStatus,"""{"code":"test_failure"}""")
+                if(policyStatus!=200)return reply(policyStatus,org.json.JSONObject().put("code",policyProblem).toString())
                 if(!policyReady)return reply(202,"""{"code":"provisioning_pending"}""")
                 val session=sessions.getValue(thumb);check(headers.getValue("Authorization")=="DPoP "+session.accessToken)
                 val envelope=policies.getOrPut(thumb+foreignPolicyKey+policyRevision) {
@@ -285,6 +286,13 @@ class LoginControllerTest {
         f.controller.cancel();f.idle()
         assertTrue(f.server.activeKeys.isEmpty());assertTrue(f.journal.snapshot().tombstones.isEmpty())
         assertThrows(IllegalStateException::class.java) {DeviceKey.open(s.keyAlias)}
+    }
+    @Test fun expiredPublicationReceiptRequiresReauthenticationInsteadOfPermanentProvisioning()=fixture {f->
+        f.server.policyStatus=409;f.server.policyProblem="reauthentication_required"
+        f.controller.callback(f.begin());f.idle()
+        val current=f.journal.snapshot();assertEquals(LoginPhase.NEEDS_REAUTH,current.phase)
+        assertFalse(f.controller.pollProvisioning(current.generation))
+        assertFalse(f.controller.allowsConnect());assertFalse(f.controller.status().getBoolean("busy"))
     }
     @Test fun chatReplyIsPrivateAndDenialDoesNotWithdrawAssignedPolicy()=fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()

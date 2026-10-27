@@ -121,7 +121,7 @@ class LoginController private constructor(private val context:android.app.Applic
             } catch(e:AuthException) {
                 if(e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))runCatching {
                     val s=journal.snapshot()
-                    if(s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))reauthenticate(s)
+                    if(s.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))reauthenticate(s)
                 }
                 e.reason.name
             }
