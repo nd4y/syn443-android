@@ -489,7 +489,7 @@ class TunnelService : VpnService() {
                 if (healthJob !== job) return@post
                 healthJob = null
                 if (destroyed || retiring || !ready || currentToken != token || currentEpoch != epoch || activation != policies.read().journal.activationGeneration || !Recovery.current(store.checkpoint(), generation)) return@post
-                if (!result.complete) { phase("Recovering", "health_check_incomplete", generation); return@post }
+                if (!result.complete) { phase("Recovering", "health_check_" + checkNotNull(result.incompleteOutcome).name.lowercase(java.util.Locale.ROOT), generation); return@post }
                 if (ok) {
                     val now = SystemClock.uptimeMillis()
                     if (stableSince == 0L) stableSince = now
@@ -622,7 +622,7 @@ class TunnelService : VpnService() {
                 if (policyJob === job) policyJob = null
                 if (destroyed || retiring || !ready || !Recovery.current(store.checkpoint(), generation) || currentEpoch != epoch || session != token || activation != policies.read().journal.activationGeneration) return@post
                 if (!batch.complete) {
-                    store.event(store.read().optString("phase"), "policy_checks_incomplete", epoch)
+                    store.event(store.read().optString("phase"), "policy_checks_" + checkNotNull(batch.incompleteOutcome).name.lowercase(java.util.Locale.ROOT), epoch)
                     return@post
                 }
                 val results = batch.values()

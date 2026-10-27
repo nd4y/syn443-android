@@ -2,6 +2,8 @@ package io.syn443.android
 
 import io.syn443.health.*
 import io.syn443.policy.Check
+import io.syn443.android.vpn.AndroidProbeResolver
+import android.os.CancellationSignal
 import org.junit.Assert.*
 import org.junit.Test
 import java.net.InetAddress
@@ -34,6 +36,68 @@ class HealthChecksTest {
             assertFalse(result.complete)
             assertEquals(listOf(Outcome.CANCELLED), result.outcomes)
             assertThrows(IllegalStateException::class.java) { result.values() }
+        }
+    }
+
+    @Test fun androidDnsLiteralNeverStartsPlatformQuery() {
+        val resolver = AndroidProbeResolver(query = { _, _, _ -> error("literal must not query DNS") })
+        assertEquals("192.0.2.1", resolver.resolve("192.0.2.1").hostAddress)
+        assertEquals(16, resolver.resolve("2001:db8::1").address.size)
+    }
+    @Test fun androidDnsCallbacksKeepFailuresDistinctAndCancelQuery() {
+        val expected = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
+        var signal: CancellationSignal? = null
+        val success = AndroidProbeResolver(query = { _, cancel, callback ->
+            signal = cancel; callback.onAnswer(listOf(expected), 0)
+        })
+        assertEquals(expected, success.resolve("host.example.org")); assertTrue(checkNotNull(signal).isCanceled)
+        for (mode in 0..2) {
+            val failure = AndroidProbeResolver(query = { _, cancel, callback ->
+                signal = cancel
+                when (mode) {
+                    0 -> callback.onAnswer(listOf(expected), 3)
+                    1 -> callback.onAnswer(emptyList(), 0)
+                    else -> callback.onError()
+                }
+            })
+            assertThrows(java.net.UnknownHostException::class.java) { failure.resolve("host.example.org") }
+            assertTrue(checkNotNull(signal).isCanceled)
+        }
+    }
+    @Test fun androidDnsDeadlineCancelsQueryAndRejectsLateSuccess() {
+        lateinit var callback: AndroidProbeResolver.Answer
+        lateinit var signal: CancellationSignal
+        val resolver = AndroidProbeResolver(query = { _, cancel, cb -> signal = cancel; callback = cb }, timeoutMillis = 50)
+        assertThrows(java.net.SocketTimeoutException::class.java) { resolver.resolve("host.example.org") }
+        assertTrue(signal.isCanceled)
+        callback.onAnswer(listOf(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))), 0)
+        for (limit in listOf(0L, 2_501L)) assertThrows(IllegalArgumentException::class.java) {
+            AndroidProbeResolver(timeoutMillis = limit)
+        }
+    }
+    @Test fun androidDnsCancellationReleasesWorkersForNextPolicyCheck() {
+        ProbePool().use { pool ->
+            val caller = Executors.newSingleThreadExecutor()
+            try {
+                repeat(3) {
+                    val entered = CountDownLatch(1); val cancelled = CountDownLatch(1)
+                    val resolver = AndroidProbeResolver(query = { _, signal, _ ->
+                        signal.setOnCancelListener { cancelled.countDown() }; entered.countDown()
+                    })
+                    val job = CheckJob(pool, Probe { _, scope ->
+                        scope.enter(Stage.RESOLVE); resolver.resolve("host.example.org"); true
+                    })
+                    val result = caller.submit<Batch> { job.run(listOf(Check("internet", "https_204", "https://example.org/"))) }
+                    assertTrue(entered.await(2, TimeUnit.SECONDS)); job.cancel()
+                    assertEquals(Outcome.CANCELLED, result.get(2, TimeUnit.SECONDS).outcomes.single())
+                    assertTrue(cancelled.await(2, TimeUnit.SECONDS))
+                }
+                val resolver = AndroidProbeResolver(query = { _, _, callback ->
+                    callback.onAnswer(listOf(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))), 0)
+                })
+                val next = CheckJob(pool, Probe { _, _ -> resolver.resolve("host.example.org"); true })
+                assertEquals(Outcome.PASS, next.run(listOf(Check("internet", "https_204", "https://example.org/"))).outcomes.single())
+            } finally { caller.shutdownNow() }
         }
     }
 }

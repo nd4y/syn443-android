@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=104
+    minimum=108
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -81,7 +81,9 @@ if mode=="emulator":
     required.add("localRestartBudgetDoesNotPoisonHealthyRenewal")
     required.add("missingVpnConsentPreservesIntentWithoutStartingForegroundService")
     required |= {"resourceRequestsAreBoundedRedactedAndDoNotChangeIntent", "resourceSnapshotIsExplicitAndVisible"}
-    required |= {"slowAndroidSocketReadHasAnAbsoluteDeadline", "cancelledAndroidBatchCannotBecomeAFalseBaseline"}
+    required |= {"slowAndroidSocketReadHasAnAbsoluteDeadline", "cancelledAndroidBatchCannotBecomeAFalseBaseline",
+                 "androidDnsLiteralNeverStartsPlatformQuery", "androidDnsCallbacksKeepFailuresDistinctAndCancelQuery",
+                 "androidDnsDeadlineCancelsQueryAndRejectsLateSuccess", "androidDnsCancellationReleasesWorkersForNextPolicyCheck"}
     required |= identity_required | chat_required
     required |= {"browserReservationAndCancellationPreserveVpnAndDeleteTheKey",
         "controllerRestartResumesSameBrowserGenerationWithoutANewKey",

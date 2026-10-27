@@ -14,10 +14,12 @@ class ChecksTest {
     private fun result(probe: Probe): Batch = ProbePool().use { CheckJob(it, probe).run(listOf(check)) }
     @Test fun completedSuccessAndFailureAreDistinctFromIncomplete() {
         assertEquals(listOf(true), result(Probe { _, _ -> true }).values())
+        assertNull(result(Probe { _, _ -> false }).incompleteOutcome)
         assertEquals(listOf(false), result(Probe { _, _ -> false }).values())
         assertEquals(listOf(false), result(Probe { _, _ -> error("network") }).values())
         for (outcome in listOf(Outcome.CANCELLED, Outcome.DEADLINE, Outcome.UNAVAILABLE)) {
             val batch = Batch(listOf(Outcome.PASS, outcome)); assertFalse(batch.complete)
+            assertEquals(outcome, batch.incompleteOutcome)
             assertThrows(IllegalStateException::class.java) { batch.values() }
         }
     }
