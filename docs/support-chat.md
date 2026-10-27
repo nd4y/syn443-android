@@ -31,7 +31,7 @@ encrypted persistence/account fences, 25 MiB chunk integrity, local quotas/key
 retirement, photo orientation/GPS removal, invalid media and the visible UI.
 These tests are mandatory in the emulator evidence gate.
 
-The required Actions gate now contains 104 outcomes on each Android API and 80
+The required Actions gate now contains 108 outcomes on each Android API and 80
 identity JVM methods. It covers an interrupted session refresh with exact request
 reuse, stale generation/boot rejection and a publisher requiring reauthentication.
 The API37 virtual H264 decoder workaround preserves physical decoder ordering and
