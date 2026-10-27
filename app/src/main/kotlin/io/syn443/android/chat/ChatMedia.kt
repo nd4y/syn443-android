@@ -84,7 +84,13 @@ object ChatMedia {
                             .setVideoMimeType(MimeTypes.VIDEO_H264).setAudioMimeType(MimeTypes.AUDIO_AAC)
                             .addListener(object:Transformer.Listener {
                                 override fun onCompleted(composition:Composition,result:ExportResult) {if(cont.isActive)cont.resume(Unit)}
-                                override fun onError(composition:Composition,result:ExportResult,error:ExportException) {if(cont.isActive)cont.resumeWithException(ChatFailure("MEDIA_UNSUPPORTED"))}
+                                override fun onError(composition:Composition,result:ExportResult,error:ExportException) {
+                                    if(cont.isActive)cont.resumeWithException(ChatFailure("MEDIA_UNSUPPORTED").apply {
+                                        // The UI keeps a fixed message; synthetic instrumentation
+                                        // retains the codec cause instead of losing its failure stage.
+                                        if(io.syn443.android.BuildConfig.DEBUG)initCause(error)
+                                    })
+                                }
                             }).build()
                         val edited=EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(raw)))
                             .setEffects(Effects(emptyList(),listOf(Presentation.createForWidthAndHeight(1280,720,Presentation.LAYOUT_SCALE_TO_FIT),FrameDropEffect.createDefaultFrameDropEffect(30f)))).build()
