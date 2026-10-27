@@ -31,7 +31,22 @@ encrypted persistence/account fences, 25 MiB chunk integrity, local quotas/key
 retirement, photo orientation/GPS removal, invalid media and the visible UI.
 These tests are mandatory in the emulator evidence gate.
 
-This branch is under development. Video export/cancellation, complete real
-Android-to-web exchange, network interruption and the new physical APK still need
-acceptance. The original cold VPN timeout investigation remains separate. LTE,
-natural Doze, unplugged energy and endurance have not been accepted.
+The required Actions gate now contains 104 outcomes on each Android API and 80
+identity JVM methods. It covers an interrupted session refresh with exact request
+reuse, stale generation/boot rejection and a publisher requiring reauthentication.
+The API37 virtual H264 decoder workaround preserves physical decoder ordering and
+retains the same successful video export assertions.
+
+A privately signed Actions APK passed 38 USB Xperia UI/storage/media checks.
+Disposable SQL/Keycloak tests verified user/admin Android and web conversations,
+25 MiB attachment hashes in both directions, role withdrawal and actual on-device
+1080p-to-720p video compression. Reopening chat reuses one Activity; hidden chat
+made no new authenticated requests during the observed interval. A natural access-token expiry during an API outage survived actual app process
+death; the exact refresh operation resumed and the queued message was published
+once without another login.
+
+Cold VPN startup attributed its first timeout to DNS and recovered in 19 seconds;
+crash, frozen-host and Wi-Fi return checks also recovered. This does not establish
+zero transient failures or bounded recovery for every network. This is a draft
+implementation, not production deployment. LTE, natural Doze, unplugged energy,
+long endurance and the complete M1/M2 release gate have not been accepted.
