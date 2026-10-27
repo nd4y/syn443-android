@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=102
+    minimum=103
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -45,6 +45,7 @@ if mode=="emulator":
     chat_required |= {"chatCancelledImportRollsBackPartialSqlAndCanBeRetried"}
     chat_required |= {"chatDecoderSelectionPreservesPhysicalCodecsAndExcludesBrokenVirtualDecoder"}
     chat_required |= {"chatResumesPersistedRefreshAfterTransportLossWithoutManualLogin"}
+    chat_required |= {"chatCannotResumeRefreshFromAnObsoleteBootOrBypassRecoveryAdmission"}
     identity_required={"keystoreIdentityPersistsSignsAndCannotExportPrivateMaterial", "identityKeysAreIndependentAndCannotDeleteUnrelatedAliases"}
     identity_required |= {"cancellationOrdersDeletionAfterInFlightCreationAndFencesQueuedCreation",
         "protectedStatePersistsWithoutPlaintextAndCallbackIsConsumedOnce",

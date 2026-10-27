@@ -316,6 +316,18 @@ class LoginControllerTest {
         assertEquals(2,f.server.refreshBodies.size);assertEquals(f.server.refreshBodies[0],f.server.refreshBodies[1])
         assertEquals(1,f.server.enrollBodies.size);assertEquals(1L,resumed.sessionGeneration)
     }
+    @Test fun chatCannotResumeRefreshFromAnObsoleteBootOrBypassRecoveryAdmission()=fixture {f->
+        f.server.policyReady=true;f.server.shortAccess=true
+        f.controller.callback(f.begin());f.idle();f.server.dropRefresh=true;f.restart()
+        val uncertain=f.journal.snapshot();assertEquals(LoginPhase.REFRESHING,uncertain.phase)
+        val stale=uncertain.copy(operationBoot=uncertain.operationBoot+1,revision=uncertain.revision+1)
+        f.journal.commit(uncertain,stale)
+        val paths=f.server.paths.size;val id="f".repeat(32)
+        assertTrue(f.controller.chatStart(id,stale.generation,"self","{}"));f.idle()
+        assertEquals("REAUTHENTICATE",f.controller.chatResult(id,stale.generation).getString("reason"))
+        assertEquals(LoginPhase.NEEDS_REAUTH,f.journal.snapshot().phase)
+        assertEquals(paths,f.server.paths.size)
+    }
     @Test fun cancelledQueuedChatNeverTransmitsAndDoesNotPoisonNextRequest() {
         val pause=AtomicBoolean();val entered=CountDownLatch(1);val release=CountDownLatch(1)
         fixture(beforeQueue={if(pause.compareAndSet(true,false)) {entered.countDown();check(release.await(5,TimeUnit.SECONDS))}}) {f->

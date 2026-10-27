@@ -66,6 +66,10 @@ class LoginController private constructor(private val context:android.app.Applic
             try {
                 val initial=journal.snapshot();current(initial);require(initial.generation==generation)
                 val original=payload(initial)
+                if(initial.phase==LoginPhase.REFRESHING &&
+                    LoginRecovery.resume(initial,true,true,boot(),elapsed(),anchorBoot=original.session?.time?.boot?: -1)!=LoginResume.RETRY_REFRESH) {
+                    reauthenticate(initial);throw AuthException(AuthFailure.REAUTHENTICATE)
+                }
                 withProtocol(initial,original.bootstrap) {protocol,scope->
                     synchronized(commands) {require(chatTicket?.let {it.id==id && it.state=="pending"}==true)}
                     resumeSession(initial,original,protocol,scope,false)
