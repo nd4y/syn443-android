@@ -25,7 +25,12 @@ if [ "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" -ge 33 ]; then
   adb shell pm grant io.syn443.android android.permission.POST_NOTIFICATIONS
 fi
 result=0
-./gradlew :app:connectedDebugAndroidTest --info --stacktrace || result=1
+# Capture the actual failing assertion before long native fault scenarios. A
+# failed instrumentation run cannot satisfy the mandatory evidence gate anyway.
+if ! ./gradlew :app:connectedDebugAndroidTest --info --stacktrace; then
+  python3 tools/print_emulator_reports.py || true
+  exit 1
+fi
 # The Gradle runner uninstalls both APKs when its suite ends. External enrollment
 # also needs its own-UID driver, which exists exclusively in the test APK.
 adb install -r app/build/outputs/apk/debug/app-debug.apk

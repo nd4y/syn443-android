@@ -172,7 +172,9 @@ jobs:
   emulator:
     needs: jvm-and-apk
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # Cold API37 image/tool preparation consumed 20+ minutes on a measured run.
+    # Runtime activation/probe/restart deadlines remain unchanged.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
