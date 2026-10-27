@@ -93,10 +93,8 @@ jobs:
           packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
       - name: Install synthetic media fixture generator
         run: |
-          test -f /etc/apt/sources.list.d/ubuntu.sources
-          apt_options=(-o Dir::Etc::sourceparts=- -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::ForceIPv4=true)
-          timeout 180s sudo apt-get "${apt_options[@]}" update
-          timeout 300s sudo apt-get "${apt_options[@]}" install -y --no-install-recommends ffmpeg
+          bash -n tools/prepare_media_tools.sh
+          bash tools/prepare_media_tools.sh
       - run: python3 tools/generate_chat_media_fixture.py
       - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :core:host-lifecycle:check :core:host-lifecycle:jacocoTestReport :core:recovery:test :core:policy:test :core:observability:check :core:health:check :core:identity:check :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - run: python3 tools/check_test_evidence.py jvm
@@ -223,10 +221,8 @@ jobs:
       - run: bash tools/prepare_android_tools.sh
       - name: Generate media fixture for instrumentation APK
         run: |
-          test -f /etc/apt/sources.list.d/ubuntu.sources
-          apt_options=(-o Dir::Etc::sourceparts=- -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::ForceIPv4=true)
-          timeout 180s sudo apt-get "${apt_options[@]}" update
-          timeout 300s sudo apt-get "${apt_options[@]}" install -y --no-install-recommends ffmpeg
+          bash -n tools/prepare_media_tools.sh
+          bash tools/prepare_media_tools.sh
           python3 tools/generate_chat_media_fixture.py
       - name: Start ADB before emulator
         run: adb version && adb start-server
