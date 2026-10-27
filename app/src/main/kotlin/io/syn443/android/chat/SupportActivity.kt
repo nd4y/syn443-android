@@ -145,6 +145,9 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
                         catch(e:CancellationException) {withContext(NonCancellable+Dispatchers.IO) {opened.close()};throw e}
                         store=opened;generation=next;client=ChatClient(context,next)
                     }
+                    // The generation-bound local queue stays visible when the
+                    // server is offline. Sending still waits for live authority.
+                    pending=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}
                     val own=requireNotNull(client).objectCall("self")
                     val permittedAdmin=own.getBoolean("admin")
                     if(admin && !permittedAdmin) {conversation="";messages=emptyList();inbox=emptyList();files=emptyList();text=""}
@@ -159,7 +162,10 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
                     } else status=if(admin && conversation.isEmpty())"Выберите диалог" else "На связи"
                 }
             }} catch(e:CancellationException) {throw e}
-            catch(e:Exception) {status=chatError(e);nextAttempt=android.os.SystemClock.elapsedRealtime()+60_000}
+            catch(e:Exception) {
+                if(io.syn443.android.BuildConfig.DEBUG)android.util.Log.w("SYN443Chat","refresh_failed/"+e.javaClass.simpleName)
+                status=chatError(e);nextAttempt=android.os.SystemClock.elapsedRealtime()+60_000
+            }
             delay(10_000)
         }
     }
