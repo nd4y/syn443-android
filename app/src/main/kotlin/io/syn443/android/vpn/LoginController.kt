@@ -52,6 +52,55 @@ class LoginController private constructor(private val context:android.app.Applic
     @Volatile private var cached:Pair<LoginIntent,LoginPayload>?=null
     @Volatile private var lastAssignmentFetch= -300_000L
     private var provisioningRetry=ProvisioningRetry()
+    private data class ChatTicket(val id:String,val generation:Long,val expires:Long,var state:String="pending",var body:String="",var reason:String="")
+    private var chatTicket:ChatTicket?=null
+    /** Private UI mailbox: at most one bounded operation; no content enters public status. */
+    fun chatStart(id:String,generation:Long,action:String,body:String):Boolean {
+        require(id.matches(Regex("[0-9a-f]{32}")) && action.length<=32 && body.toByteArray(Charsets.UTF_8).size<=360_448)
+        return submitIfIdle(onAdmission={chatTicket=ChatTicket(id,generation,elapsed()+60_000)},admit={
+            val s=journal.snapshot()
+            s.generation==generation && s.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING) &&
+                (chatTicket==null || chatTicket!!.expires<elapsed() || chatTicket!!.state!="pending")
+        }) {
+            var result="";var failure=""
+            try {
+                val initial=journal.snapshot();current(initial);require(initial.generation==generation)
+                val original=payload(initial)
+                if(initial.phase==LoginPhase.REFRESHING &&
+                    LoginRecovery.resume(initial,true,true,boot(),elapsed(),anchorBoot=original.session?.time?.boot?: -1)!=LoginResume.RETRY_REFRESH) {
+                    reauthenticate(initial);throw AuthException(AuthFailure.REAUTHENTICATE)
+                }
+                withProtocol(initial,original.bootstrap) {protocol,scope->
+                    synchronized(commands) {require(chatTicket?.let {it.id==id && it.state=="pending"}==true)}
+                    resumeSession(initial,original,protocol,scope,false)
+                    val now=journal.snapshot();current(now);require(now.generation==generation)
+                    val session=checkNotNull(payload(now).session)
+                    result=protocol.chat(action,body,session,scope)
+                    current(journal.snapshot())
+                }
+            } catch(e:AuthException) {failure=e.reason.name
+                if(e.reason==AuthFailure.REAUTHENTICATE)runCatching {reauthenticate(journal.snapshot())}
+            } catch(_:Exception) {failure="UNAVAILABLE"}
+            synchronized(commands) {
+                val ticket=chatTicket
+                if(ticket?.id==id && ticket.generation==generation && ticket.state=="pending" && workerEpoch==commandEpoch && journal.snapshot().generation==generation) {
+                    ticket.body=result;ticket.reason=failure;ticket.state=if(failure.isEmpty())"done" else "failed"
+                }
+            }
+        }
+    }
+    fun chatResult(id:String,generation:Long):JSONObject=synchronized(commands) {
+        val t=chatTicket
+        if(t==null || t.id!=id || t.generation!=generation || journal.snapshot().generation!=generation || t.expires<elapsed())
+            JSONObject().put("state","gone")
+        else JSONObject().put("state",t.state).put("body",t.body).put("reason",t.reason)
+    }
+    fun chatCancel(id:String) {synchronized(commands) {
+        if(chatTicket?.id==id) {
+            if(chatTicket?.state=="pending")activeScope?.cancel()
+            chatTicket=null
+        }
+    }}
     @Volatile private var policyListener:(()->Unit)?=null
     internal fun observePolicy(listener:()->Unit):()->Unit {
         synchronized(commands) {policyListener=listener}
@@ -72,7 +121,7 @@ class LoginController private constructor(private val context:android.app.Applic
             } catch(e:AuthException) {
                 if(e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))runCatching {
                     val s=journal.snapshot()
-                    if(s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))reauthenticate(s)
+                    if(s.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))reauthenticate(s)
                 }
                 e.reason.name
             }
@@ -254,7 +303,8 @@ class LoginController private constructor(private val context:android.app.Applic
             override fun bind(socket:java.net.Socket)=physical.bind(socket)
             override fun check() {admitted();physical.check()}
         }
-        http.exchange(method,url,headers,body,child,maxBody=maxBody,factory=tls(b,uri),route=route)
+        val requestLimit=if(uri.path=="/v1/chat/uploads/part")360_448 else if(uri.path.startsWith("/v1/chat/"))32_768 else 8192
+        http.exchange(method,url,headers,body,child,maxBody=maxBody,factory=tls(b,uri),route=route,maxRequestBody=requestLimit)
     }
     private fun provision(initial:LoginIntent,p:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
         var s=initial;val user=checkNotNull(p.user)
@@ -354,7 +404,7 @@ class LoginController private constructor(private val context:android.app.Applic
             current(s);resumeWorker(s)
         }
     }
-    private fun resumeSession(initial:LoginIntent,original:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
+    private fun resumeSession(initial:LoginIntent,original:LoginPayload,protocol:AuthProtocol,scope:IdentityScope,fetch:Boolean=true) {
         var s=initial;var p=original;var session=checkNotNull(p.session)
         val reanchor=session.time.boot!=boot()
         val refresh=s.phase==LoginPhase.REFRESHING || reanchor || Math.addExact(session.time.window(boot(),elapsed()).upperMs,30_000)>=session.session.accessUntilMs
@@ -371,7 +421,7 @@ class LoginController private constructor(private val context:android.app.Applic
             s=protect(previous,refreshed) {hash->LoginRecovery.refreshed(previous,previous.generation,operation.body,reply,hash)}
             p=refreshed
         }
-        fetchAssignment(s,p,protocol,scope)
+        if(fetch)fetchAssignment(s,p,protocol,scope)
     }
     private fun reauthenticate(s:LoginIntent) {synchronized(commands) {
         assignedRuntime.clear();commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null;policyChanged()
@@ -410,7 +460,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }}
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
-        commandEpoch++;browser=null;val previous=cached;cached=null;assignedRuntime.clear();discardQueued();policyChanged()
+        commandEpoch++;browser=null;chatTicket=null;val previous=cached;cached=null;assignedRuntime.clear();discardQueued();policyChanged()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {
@@ -438,6 +488,7 @@ class LoginController private constructor(private val context:android.app.Applic
             if(runCatching {noVpn();NativeRetirement.released(context)}.getOrDefault(false))break
             check(elapsed()<deadline) {"native_retirement_pending"};Thread.sleep(100)
         }
+        if(namespace=="device-login-v1")io.syn443.android.chat.ChatOutbox.erase(context)
         check(journal.eraseRetired(expected))
         var s=expected
         val session=previous?.second?.session

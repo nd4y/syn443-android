@@ -1,4 +1,19 @@
 from pathlib import Path
+import xml.etree.ElementTree as ET
+
+# Report failure nodes before bounded file previews, even when a large passing
+# XML prefix would otherwise hide the failing codec/controller case.
+for path in sorted(Path('app/build/outputs/androidTest-results').rglob('*.xml'))[:16]:
+    try:
+        doc=ET.parse(path).getroot()
+        for case in doc.iter('testcase'):
+            for tag in ('failure','error'):
+                node=case.find(tag)
+                if node is not None:
+                    print('FAILED CASE '+case.get('classname','')+'.'+case.get('name',''))
+                    print((node.text or node.get('message',''))[:8192])
+    except (ET.ParseError,OSError):
+        print('JUnit diagnostic could not be parsed')
 
 # CI uses only synthetic fixtures; bound diagnostics when artifact storage is full.
 remaining = 131072

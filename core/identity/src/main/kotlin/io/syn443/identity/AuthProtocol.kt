@@ -156,18 +156,21 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
         require(it.length in 1..256 && it.all {c->c.code in 33..126})
     }
     private data class Delivered(val reply:Reply,val time:TrustedTime)
-    private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope):Delivered {
+    private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int=if(body==null)524_288 else 65_536):Delivered {
         require(token.length in 24..16_384 && token.all {it.code in 33..126})
         val url=bootstrap.apiOrigin+path;val method=if(body==null)"GET" else "POST";val bytes=body?.toByteArray(Charsets.UTF_8)
         var currentNonce=nonce
         for(attempt in 0..1) {
-            val start=elapsed();val proof=Identity.proof(key.publicKey,key::sign,method,url,floor.proofSecond(boot(),start),token,currentNonce,bytes)
+            val limit=if(path=="/v1/chat/uploads/part")360_448 else if(path.startsWith("/v1/chat/"))32_768 else 8192
+            val start=elapsed();val proof=Identity.proof(key.publicKey,key::sign,method,url,floor.proofSecond(boot(),start),token,currentNonce,bytes,limit)
             val headers=linkedMapOf("Authorization" to "DPoP $token","DPoP" to proof)
             if(body!=null)headers["Content-Type"]="application/json"
-            val reply=request(scope,method,url,headers,bytes,if(body==null)524_288 else 65_536)
+            val reply=request(scope,method,url,headers,bytes,maxReply)
             if(reply.status==401 && attempt==0 && json(reply)["code"]?.text()=="use_dpop_nonce") {
                 currentNonce=challenge(reply);continue
             }
+            if(reply.status==409 && json(reply)["code"]?.text()=="reauthentication_required")
+                throw AuthException(AuthFailure.REAUTHENTICATE)
             status(reply,if(path.endsWith("/revoke"))204 else 200)
             return Delivered(reply,observed(reply,start,floor))
         }
@@ -205,6 +208,17 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
         val upper=result.time.window(boot(),elapsed()).upperMs
         Policy.verifyBound(envelope,bootstrap.roots,current.session.deviceId,thumbprint,upper)
         PolicyReply(envelope,result.time)
+    }
+    /** One bounded chunk/operation; the controller rechecks the account before every call. */
+    fun chat(action:String,body:String,current:SessionReply,scope:IdentityScope):String=checked {
+        bound(current)
+        require(action in setOf("self","inbox","messages","send","read","uploads/begin","uploads/part","uploads/status","uploads/complete","uploads/cancel","download"))
+        require(body.toByteArray(Charsets.UTF_8).size<=if(action=="uploads/part")360_448 else 32_768)
+        require(Canonical.parse(body) is JsonObject)
+        require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val result=api("/v1/chat/$action",body,current.session.accessToken,current.session.nonce,current.time,scope,524_288)
+        require(result.reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+        Policy.utf8(result.reply.body).also {Canonical.parse(it)}
     }
     private fun bound(current:SessionReply) {require(current.authority==authority && current.keyThumbprint==thumbprint)}
     private fun session(result:Delivered):DeviceSession {

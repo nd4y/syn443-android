@@ -12,6 +12,7 @@ enum class Failure { DNS, TLS, EOF, TIMEOUT, TRANSPORT }
 enum class Stage { QUEUED, RESOLVE, CONNECT, TLS, REQUEST, RESPONSE }
 data class Batch(val outcomes: List<Outcome>) {
     val complete: Boolean get() = outcomes.all { it == Outcome.PASS || it == Outcome.FAIL }
+    val incompleteOutcome: Outcome? get() = outcomes.firstOrNull { it != Outcome.PASS && it != Outcome.FAIL }
     fun values(): List<Boolean> { check(complete); return outcomes.map { it == Outcome.PASS } }
 }
 

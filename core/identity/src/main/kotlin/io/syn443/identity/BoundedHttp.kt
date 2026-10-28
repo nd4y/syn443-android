@@ -50,10 +50,11 @@ class BoundedHttp:AutoCloseable {
     /** Blocking only on the dedicated identity coordinator; never call from Binder or the UI. */
     fun exchange(method:String,url:String,headers:Map<String,String> = emptyMap(),body:ByteArray? = null,
         scope:Scope=Scope(),timeoutMs:Long=20_000,maxBody:Int=65_536,
-        factory:SSLSocketFactory=SSLSocketFactory.getDefault() as SSLSocketFactory,route:HttpRoute?=null,
+        factory:SSLSocketFactory=SSLSocketFactory.getDefault() as SSLSocketFactory,route:HttpRoute?=null,maxRequestBody:Int=8192,
         connect:(Socket,URI,Int)->Unit={socket,uri,remaining->socket.connect(InetSocketAddress(uri.host,if(uri.port>0)uri.port else 443),remaining)}):Reply {
         require(timeoutMs in 1..20_000 && maxBody in 1..524_288 && method in setOf("GET","POST"))
-        val uri=Identity.https(url);require((method=="GET" && body==null) || (method=="POST" && body!=null && body.size<=8192))
+        require(maxRequestBody in 1..360_448)
+        val uri=Identity.https(url);require((method=="GET" && body==null) || (method=="POST" && body!=null && body.size<=maxRequestBody))
         val reserved=setOf("host","content-length","connection","transfer-encoding","accept-encoding")
         require(headers.size<=16 && headers.keys.map {it.lowercase()}.distinct().size==headers.size)
         require(headers.all {(k,v)->k.matches(Regex("[A-Za-z0-9-]{1,64}")) && k.lowercase() !in reserved && v.length<=16_384 && v.all {it.code in 32..126}})

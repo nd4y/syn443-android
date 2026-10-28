@@ -121,6 +121,10 @@ class TunnelService : VpnService() {
         // previous Stop removed its notification. Re-promote before inspecting intent.
         if (!foreground) { notifyForeground("Подключаемся"); foreground = true }
         if (intent?.action == STOP) store.update { store.put(it, Recovery.command(store.checkpoint(it), false)); OsIntentGate.command(this, it, false) }
+        if (intent?.action == "fault-revoke" && io.syn443.android.BuildConfig.DEBUG &&
+            android.os.Build.HARDWARE in setOf("ranchu", "goldfish")) {
+            checks.execute { onRevoke() }; return START_NOT_STICKY
+        }
         if (!store.checkpoint().desiredOn) { retire(false); return START_NOT_STICKY }
         if (!OsIntentGate.allowed(this, store)) { store.update { it.put("resumeRequired", true) }; phase("NeedsAction", "explicit_resume_required"); retire(false); return START_NOT_STICKY }
         if (intent?.action == "fault-crash" && io.syn443.android.BuildConfig.DEBUG) terminateOwned()
@@ -489,7 +493,7 @@ class TunnelService : VpnService() {
                 if (healthJob !== job) return@post
                 healthJob = null
                 if (destroyed || retiring || !ready || currentToken != token || currentEpoch != epoch || activation != policies.read().journal.activationGeneration || !Recovery.current(store.checkpoint(), generation)) return@post
-                if (!result.complete) { phase("Recovering", "health_check_incomplete", generation); return@post }
+                if (!result.complete) { phase("Recovering", "health_check_" + checkNotNull(result.incompleteOutcome).name.lowercase(java.util.Locale.ROOT), generation); return@post }
                 if (ok) {
                     val now = SystemClock.uptimeMillis()
                     if (stableSince == 0L) stableSince = now
@@ -622,7 +626,7 @@ class TunnelService : VpnService() {
                 if (policyJob === job) policyJob = null
                 if (destroyed || retiring || !ready || !Recovery.current(store.checkpoint(), generation) || currentEpoch != epoch || session != token || activation != policies.read().journal.activationGeneration) return@post
                 if (!batch.complete) {
-                    store.event(store.read().optString("phase"), "policy_checks_incomplete", epoch)
+                    store.event(store.read().optString("phase"), "policy_checks_" + checkNotNull(batch.incompleteOutcome).name.lowercase(java.util.Locale.ROOT), epoch)
                     return@post
                 }
                 val results = batch.values()
@@ -652,9 +656,25 @@ class TunnelService : VpnService() {
         }
     }
     override fun onRevoke() {
-        store.update { store.put(it, Recovery.command(store.checkpoint(it), false)) }
-        store.event("Off", "vpn_permission_revoked", epoch)
-        retire(false); stopSelf(); super.onRevoke()
+        // Framework callbacks may arrive on a Binder thread. Persist the revoked
+        // intent first; confine ownership changes and the bounded drain to main.
+        val generation = store.serialized {
+            val stopped = store.update {
+                store.put(it, Recovery.command(store.checkpoint(it), false))
+                OsIntentGate.command(this, it, false)
+            }
+            val current = store.checkpoint(stopped).generation
+            store.event("Off", "vpn_permission_revoked", stopped.optLong("networkEpoch"), current)
+            current
+        }
+        handler.post {
+            // Retire an older owner even if a newer Connect now needs permission.
+            // A replacement already owned by that newer intent must be preserved.
+            if (destroyed || boundGeneration > generation) return@post
+            // The default onRevoke calls stopSelf and cancels this drain in
+            // onDestroy. completeRetirement stops only after the owner exits.
+            retire(false)
+        }
     }
     override fun onDestroy() {
         destroyed = true; token = null; ready = false

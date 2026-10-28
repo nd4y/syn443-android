@@ -1,6 +1,6 @@
 # Testing and release gates
 All automatable implemented behavior must run on pull requests and main in GitHub Actions.
-- Documents: source hashes, 277 unique requirements, 90 unique sequential scenarios, traceability/evidence integrity.
+- Documents: source hashes, 292 unique requirements, 98 unique sequential scenarios, traceability/evidence integrity.
 - Contracts: strict schema validation, shared fixtures, unsupported fields/versions and bounded numeric inputs.
 - Go: unit, property/permutation, fuzz seed/smoke, race detector, vet, coverage and HTTP boundary tests.
 - Android: same fixtures on JVM, lifecycle/state tests, lint, APK build and connected instrumentation on emulator API 29, 35 and 37.
@@ -48,3 +48,17 @@ The [enrolled native VPN](enrolled-vpn.md) adds three controller cases for authe
 [Foreground provisioning retries](provisioning-retry.md) add five identity JVM methods (minimum77;22 required coverage classes) and two Android outcomes (minimum88 per API): a generation/cancellation admission race and first-policy202 followed by automatic receipt through the visible UI. No poll runs on a background timer or enables VPN.
 
 [Health attribution](health-attribution.md) raises the required health JVM minimum to21. It tests frozen timeout stages, queued timeout and queued cancellation without mislabeling local capacity as a network failure. Cold-start physical attribution remains separate.
+
+Support chat adds encrypted SQL, account fencing, 25 MiB chunks, real photo/video compression and cancellation checks. The minimum is 110 outcomes on every emulator API. API37 excludes only the crashing virtual `c2.goldfish.h264.decoder`; a mandatory selection test preserves the remaining codec order, and the same successful 1080p-to-720p H264/AAC compression assertions still run. Physical codec behavior requires separate device evidence. Test-fixture cleanup removes AtomicFile sidecars and preserves the original failure if cleanup also fails. A lost refresh response must resume its exact persisted operation through chat without a manual login or controller restart; a stale generation cannot admit that request. An obsolete boot or expired three-minute retry window still requires reauthentication before any chat request.
+
+A publisher requiring a fresh authentication receipt must end provisioning with NEEDS_REAUTH. The TLS-authenticated API error409/reauthentication_required is distinct from an idempotency conflict; malformed JSON remains invalid. Identity minimum:80 actual JVM methods.
+
+
+### Cancellable Android DNS (v23)
+
+Health and activation checks use the current VPN DNS path through Android DnsResolver. Each query has a 2500ms deadline inside the 3000ms total check deadline; timeout, job cancellation and synchronous completion cancel the platform query. Numeric IPv4/IPv6 addresses bypass DNS. Four Android cases cover literals, positive/negative/empty callbacks, timeout and late callback, and three successive cancellations followed by a successful check in the same bounded worker pool. These cases run on API29/35/37 and a USB phone; the mandatory emulator minimum is 110. Incomplete checks retain distinct fixed outcome codes (cancelled, unavailable, deadline) and cannot become a successful baseline. No endpoint or exception text is recorded.
+
+
+### System VPN revocation (v24)
+
+The callback durably cancels intent and its OS marker, then posts retirement to main. The service remains alive for the bounded drain and records engineActive=false after confirmed owner exit; it does not call the default stopSelf implementation prematurely. A debug, emulator-only callback on a worker thread proves real native/TUN retirement, truthful durable Off across controller death and explicit reconnection. A second case freezes the old owner, revokes it, then submits a newer Connect while retirement is pending: the newer intent survives, and replacement waits for the old owner to exit. Both external cases are mandatory; each emulator minimum is110. They do not represent actual system permission removal: Android Settings Always-on/lockdown removal is also tested on a USB phone.

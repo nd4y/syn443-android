@@ -9,7 +9,8 @@ import javax.net.ssl.SSLSocketFactory
 
 /** No redirects, credentials, response body or unbounded header storage. Default platform TLS trust. */
 class NetworkProbe(private val synthetic: Boolean = false,
-    private val tls: SSLSocketFactory? = null) : Probe {
+    private val tls: SSLSocketFactory? = null,
+    private val resolve: (String) -> java.net.InetAddress = java.net.InetAddress::getByName) : Probe {
     override fun run(check: Check, scope: ProbeScope): Boolean {
         val socket = Socket(); scope.attach(socket)
         try {
@@ -17,7 +18,7 @@ class NetworkProbe(private val synthetic: Boolean = false,
             return when (check.type) {
                 "tcp_banner" -> {
                     scope.enter(Stage.RESOLVE)
-                    val address = InetSocketAddress(check.target, check.port)
+                    val address = InetSocketAddress(resolve(check.target), check.port)
                     scope.enter(Stage.CONNECT)
                     socket.connect(address, 3_000)
                     scope.requireActive()
@@ -39,13 +40,13 @@ class NetworkProbe(private val synthetic: Boolean = false,
                     require(uri.scheme == "https" || fake)
                     val port = if (uri.port > 0) uri.port else if (fake) 80 else 443
                     scope.enter(Stage.RESOLVE)
-                    val address = InetSocketAddress(uri.host, port)
+                    val address = InetSocketAddress(resolve(uri.host), port)
                     scope.enter(Stage.CONNECT)
                     socket.connect(address, 3_000)
                     scope.requireActive()
                     scope.enter(Stage.TLS)
-                    val factory = tls ?: SSLSocketFactory.getDefault() as SSLSocketFactory
-                    val transport = if (fake) socket else (factory.createSocket(socket, uri.host, port, true) as SSLSocket).apply {
+                    val transport = if (fake) socket else ((tls ?: SSLSocketFactory.getDefault() as SSLSocketFactory)
+                        .createSocket(socket, uri.host, port, true) as SSLSocket).apply {
                         soTimeout = 3_000
                         sslParameters = sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
                         startHandshake()
