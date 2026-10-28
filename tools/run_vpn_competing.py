@@ -28,7 +28,7 @@ def main():
         # Only this disposable-emulator driver preauthorizes the test UID.
         adb('shell','appops','set',peer,'ACTIVATE_VPN','allow')
         adb('shell','am','start','-W','-n',component,'--ez','ci-start','true')
-        await_condition(lambda:adb('shell','run-as',peer,'cat','no_backup/competing-vpn-state').strip()==b'active',20)
+        await_condition(lambda:adb('shell','run-as',peer,'sh','-c',"'cat no_backup/competing-vpn-state 2>/dev/null || true'").strip()==b'active',20)
         await_condition(lambda:call('status')['phase']=='Off' and not call('status')['desiredOn'] and not call('status')['engineActive'] and not pid(':engine'),25)
         revoked=call('status');assert revoked['generation']>before['generation']
         assert any(e['code']=='vpn_permission_revoked' for e in revoked['events'])
@@ -37,7 +37,7 @@ def main():
         persisted=call('status');assert not pid(':engine') and not persisted['desiredOn'] and persisted['generation']==revoked['generation']
         assert persisted['heavyWallMs']==revoked['heavyWallMs']
         peer_stop()
-        await_condition(lambda:adb('shell','run-as',peer,'cat','no_backup/competing-vpn-state').strip()==b'off',20)
+        await_condition(lambda:adb('shell','run-as',peer,'sh','-c',"'cat no_backup/competing-vpn-state 2>/dev/null || true'").strip()==b'off',20)
         adb('shell','appops','set',PACKAGE,'ACTIVATE_VPN','allow')
         progress=proxy.progress;call('connect')
         await_condition(lambda:call('status')['phase']=='Online' and pid(':engine') not in ('',old) and proxy.progress>progress,150)

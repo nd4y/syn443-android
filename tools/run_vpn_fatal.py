@@ -59,16 +59,21 @@ def main():
             await_condition(lambda:pid(':engine')!=old,30);prove_exit(old,kind)
             await_condition(lambda:call('status')['phase']=='Online' and pid(':engine') not in ('',old) and proxy.progress>progress,150)
             current=call('status');assert current['generation']==before['generation'] and current['desiredOn']
-            assert 1<len(current['heavyWallMs'])<=3
+            assert len(current['heavyWallMs'])==len(before.get('heavyWallMs',[]))+1
+            assert len(current['heavyWallMs'])<=3
             print(case.get('name')+': passed',flush=True)
         case=new_case('fatalCrashSeriesPreservesRestartBudgetAndStopFencesLateRecovery')
         prepare();generation=call('status')['generation']
-        for i in range(3):
+        initial=len(call('status').get('heavyWallMs',[]));assert initial in (0,1)
+        # Cold launch may be free; the policy limits heavy RESTARTS, not all owners.
+        for expected in range(initial+1,4):
             old=pid(':engine');assert old;progress=proxy.progress;call('fault-java')
             await_condition(lambda:pid(':engine')!=old,30);prove_exit(old,'java')
-            if i<2:
-                await_condition(lambda:call('status')['phase']=='Online' and pid(':engine') not in ('',old) and proxy.progress>progress,150)
-        await_condition(lambda:not pid(':engine') and len(call('status')['heavyWallMs'])==3 and call('status')['nextWallMs']>int(time.time()*1000)+240_000,30)
+            await_condition(lambda:call('status')['phase']=='Online' and pid(':engine') not in ('',old) and proxy.progress>progress,150)
+            assert len(call('status')['heavyWallMs'])==expected
+        old=pid(':engine');assert old;call('fault-java')
+        await_condition(lambda:pid(':engine')!=old,30);prove_exit(old,'java')
+        await_condition(lambda:not pid(':engine') and len(call('status')['heavyWallMs'])==3 and call('status')['nextWallMs']>=min(call('status')['heavyWallMs'])+600_000,30)
         before=call('status');assert before['generation']==generation and before['desiredOn']
         old_controller=pid(':controller');call('fault-controller')
         await_condition(lambda:pid(':controller')!=old_controller,20)
