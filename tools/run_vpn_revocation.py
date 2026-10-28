@@ -38,7 +38,10 @@ def main():
         time.sleep(5)
         assert not pid(':engine') and not call('status')['desiredOn'] and not call('status')['engineActive']
         controller = pid(':controller'); assert controller
-        adb('shell', 'run-as', PACKAGE, 'kill', '-9', controller)
+        # Use the existing debug-only self-termination hook: run-as signal
+        # delivery is not supported on every Android SELinux policy.
+        call('fault-controller')
+        await_condition(lambda: pid(':controller') != controller, 20)
         await_condition(lambda: call('status')['phase'] == 'Off' and not call('status')['engineActive'] and
                         call('status')['generation'] == stopped['generation'], 20)
         assert not pid(':engine')
