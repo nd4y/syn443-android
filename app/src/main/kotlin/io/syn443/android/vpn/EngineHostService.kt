@@ -89,6 +89,16 @@ class EngineHostService : Service() {
             worker.removeCallbacks(applyNetwork)
             worker.post(applyNetwork)
         }
+        override fun debugFatal(session: String, kind: String) {
+            if (!io.syn443.android.BuildConfig.DEBUG || android.os.Binder.getCallingUid() != Process.myUid() ||
+                session != token || kind !in setOf("java", "native")) return
+            worker.post {
+                if (session == token && engine != null) {
+                    if (kind == "native") engine?.debugFatal()
+                    else throw IllegalStateException("SYN443 synthetic Java failure")
+                }
+            }
+        }
         override fun diagnoseNetBird(session: String) {
             if (session != token) return
             worker.post { if (session == token) engine?.diagnoseNetBird() }
@@ -104,6 +114,7 @@ class EngineHostService : Service() {
         override fun stop(token: String) = binder.stop(token)
         override fun pulse(token: String) = binder.pulse(token)
         override fun diagnoseNetBird(token: String) = binder.diagnoseNetBird(token)
+        override fun debugFatal(token: String, kind: String) = binder.debugFatal(token, kind)
         override fun networkChanged(token: String, name: String, index: Int) = binder.networkChanged(token, name, index)
     }
     private fun finishHost() {

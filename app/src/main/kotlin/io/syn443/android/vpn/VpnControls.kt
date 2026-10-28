@@ -37,6 +37,8 @@ fun VpnControls(consentGeneration: Long = -1) {
     var message by remember { mutableStateOf("") }
     var resources by remember { mutableStateOf<JSONObject?>(null) }
     var resourcesBusy by remember { mutableStateOf(false) }
+    var exits by remember { mutableStateOf<JSONObject?>(null) }
+    var exitsBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val lifecycle = (context as LifecycleOwner).lifecycle
     var visible by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
@@ -191,6 +193,42 @@ fun VpnControls(consentGeneration: Long = -1) {
                     val cpu = if (window.isNull("cpuPermille")) "нужно два измерения с интервалом от 30 с" else "${window.getLong("cpuPermille") / 10.0}% за ${window.getLong("elapsedMs") / 1000} с"
                     Text("$role: RSS $rss; CPU $cpu; потоки ${process.opt("threads")}; дескрипторы ${process.opt("fileDescriptors")}")
                 }
+            }
+        }
+        Button(onClick = {
+            exitsBusy = true
+            scope.launch {
+                exits = withContext(Dispatchers.IO) { runCatching {
+                    val result = context.contentResolver.call(controlUri, "engine-exits", null, null)
+                    check(result?.getBoolean("ok") == true)
+                    JSONObject(checkNotNull(result?.getString("json")))
+                }.getOrNull() }
+                exitsBusy = false
+                if (exits == null) message = "Не удалось получить причины завершения"
+            }
+        }, enabled = !exitsBusy, modifier = Modifier.testTag("exit-refresh")) { Text("Причины завершения VPN") }
+        exits?.let { report ->
+            val entries = report.getJSONArray("exits")
+            val heading = when (report.optString("state")) {
+                "unsupported" -> "Эта версия Android не предоставляет историю завершений"
+                "unavailable" -> "История завершений временно недоступна"
+                else -> if (entries.length() == 0) "Завершения движка не зарегистрированы" else "Последние завершения движка"
+            }
+            Text(heading, Modifier.testTag("exit-status"))
+            for (i in 0 until entries.length()) {
+                val item = entries.getJSONObject(i)
+                val reason = when (item.optString("kind")) {
+                    "native_crash" -> "Авария VPN-движка"
+                    "java_crash" -> "Ошибка процесса VPN"
+                    "signal" -> "Завершение сигналом ОС"
+                    "self_exit" -> "Процесс завершился самостоятельно"
+                    "low_memory" -> "Недостаточно памяти"
+                    "anr" -> "Процесс не отвечал"
+                    "os_request" -> "Завершён системой или пользователем"
+                    else -> "Другая причина"
+                }
+                val date = java.text.DateFormat.getDateTimeInstance().format(java.util.Date(item.getLong("at")))
+                Text("$date: $reason")
             }
         }
         Button(onClick = { importer.launch(arrayOf("application/json", "text/plain")) }, enabled = !status.optBoolean("desiredOn") && policy?.optBoolean("managed") != true) { Text("Импорт конфигурации движка") }
