@@ -64,6 +64,16 @@ class LoginPilotTest {
             assertFalse(vpn().getBoolean("desiredOn"))
             block(next,url,intent.keyAlias)
         } finally {
+            // Callback UI belongs to this fixture. Retire it before killing its
+            // provider: Android may also kill clients with stable provider refs.
+            val instrumentation=InstrumentationRegistry.getInstrumentation()
+            instrumentation.runOnMainSync {
+                val monitor=androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                androidx.test.runner.lifecycle.Stage.values()
+                    .filter {it!=androidx.test.runner.lifecycle.Stage.DESTROYED}
+                    .flatMap {monitor.getActivitiesInStage(it).toList()}.distinct().forEach {it.finish()}
+            }
+            instrumentation.waitForIdleSync()
             assertTrue(call("auth-cancel").getBoolean("ok"))
             until {auth().optString("phase")=="SIGNED_OUT" && !auth().optBoolean("busy")}
             assertFalse(vpn().getBoolean("desiredOn"));assertTrue(config==vpn().optString("configRevision"))

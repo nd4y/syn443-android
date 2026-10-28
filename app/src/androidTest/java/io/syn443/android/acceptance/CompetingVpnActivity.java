@@ -41,7 +41,7 @@ public final class CompetingVpnActivity extends Activity {
         setContentView(root);
     }
     private void startPeer() { startForegroundService(new Intent(this, CompetingVpnService.class)); }
-    private void stopPeer() { stopService(new Intent(this, CompetingVpnService.class)); }
+    private void stopPeer() { startService(new Intent(this, CompetingVpnService.class).setAction(CompetingVpnService.STOP)); }
     @Override public void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == 41 && result == RESULT_OK) startPeer();

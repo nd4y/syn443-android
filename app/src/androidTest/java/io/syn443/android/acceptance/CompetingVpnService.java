@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 
 /** Independent test-UID TUN owner; SDK/Java only, never in the client APK. */
 public final class CompetingVpnService extends VpnService {
+    public static final String STOP = "io.syn443.acceptance.STOP";
     private ParcelFileDescriptor tun;
     private void mark(String value) {
         try (FileOutputStream output = new FileOutputStream(new File(getNoBackupFilesDir(), "competing-vpn-state"))) {
@@ -20,6 +21,11 @@ public final class CompetingVpnService extends VpnService {
         } catch (IOException error) { throw new IllegalStateException("Fixture state unavailable", error); }
     }
     @Override public int onStartCommand(Intent intent, int flags, int id) {
+        if (intent != null && STOP.equals(intent.getAction())) {
+            // stopService alone cannot destroy a system-bound VpnService.
+            release(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf();
+            return START_NOT_STICKY;
+        }
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager == null) throw new IllegalStateException("Notification service unavailable");
         manager.createNotificationChannel(new NotificationChannel("acceptance", "VPN acceptance test", NotificationManager.IMPORTANCE_LOW));
