@@ -66,4 +66,6 @@ The callback durably cancels intent and its OS marker, then posts retirement to 
 
 ### Fatal engine failures and exit diagnostics (v25)
 
-See [fatal recovery](fatal-recovery.md). Seven additional Android cases cover bounded/redacted exit metadata and visible on-demand UI. Four external cases require actual uncaught Java/Go faults, owner-death evidence, synthetic real-TUN recovery and persistent crash budgets/Stop precedence. All121 outcomes are mandatory on API29/35/37, retaining all prior110. Phone acceptance remains separate.
+See [fatal recovery](fatal-recovery.md). Seven additional Android cases cover bounded/redacted exit metadata and visible on-demand UI. Four external cases require actual uncaught Java/Go faults, owner-death evidence, synthetic real-TUN recovery and persistent crash budgets/Stop precedence. All122 outcomes are mandatory on API29/35/37, retaining all prior110. Phone acceptance remains separate.
+
+The test APK includes an independent UID/TUN fixture restricted to documentation-network addresses. The real competing-owner case transfers Android VPN authorization, requires the original engine to drain with no retry fight across controller death, then explicitly reconnects. Emulator preauthorization is confined to a hardware-gated driver; physical phones use visible controls and the ordinary system VPN dialog. The fixture is absent from the client APK.
