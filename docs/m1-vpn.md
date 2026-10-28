@@ -49,9 +49,9 @@ after native ownership is released. This reset is debug/emulator-only; physical
 devices and release builds reject it. Budgets are never reset inside a scenario.
 The external controller-death case exhausts the persisted three-restart window
 and proves that another controller restart cannot launch a fourth native owner.
-Process-loss injection currently uses SIGKILL and full-process suspension uses
-SIGSTOP. Fatal JNI/Go signals and Android crash-loop suppression remain separate
-unverified OS gates.
+Process-loss injection uses SIGKILL and full-process suspension uses SIGSTOP. The
+[fatal recovery stage](fatal-recovery.md) adds actual Java/Go failures and crash-series
+budget checks; physical OS behavior has separate acceptance evidence.
 
 Default DNS uses Android's raw resolver bound explicitly to the selected physical
 Network. It never retains a Wi-Fi DNS server across a network change. Requests

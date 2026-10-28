@@ -8,6 +8,7 @@ import (
 	netbird "io.syn443/engine-netbird"
 	"net"
 	"net/netip"
+	"runtime/debug"
 	"sync"
 	"syscall"
 
@@ -100,6 +101,13 @@ func (e *Runtime) Close() error { e.cancel(); return e.box.Close() }
 
 // The supervisor additionally checks actual HTTPS data-path progress; this is only runtime liveness.
 func (e *Runtime) Pulse() int64 { return 1 }
+
+// The private Android host admits this only for an active session in DEBUG.
+// A separate goroutine avoids converting a bridge panic into a Java exception.
+func (e *Runtime) DebugFatal() {
+	debug.SetTraceback("crash")
+	go func() { panic("SYN443 synthetic native failure") }()
+}
 
 // No SDK locks on the native host control loop.
 func (e *Runtime) NetBirdStatus() string { return netbird.DeferredStatus() }

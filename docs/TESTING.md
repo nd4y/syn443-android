@@ -62,3 +62,10 @@ Health and activation checks use the current VPN DNS path through Android DnsRes
 ### System VPN revocation (v24)
 
 The callback durably cancels intent and its OS marker, then posts retirement to main. The service remains alive for the bounded drain and records engineActive=false after confirmed owner exit; it does not call the default stopSelf implementation prematurely. A debug, emulator-only callback on a worker thread proves real native/TUN retirement, truthful durable Off across controller death and explicit reconnection. A second case freezes the old owner, revokes it, then submits a newer Connect while retirement is pending: the newer intent survives, and replacement waits for the old owner to exit. Both external cases are mandatory; each emulator minimum is110. They do not represent actual system permission removal: Android Settings Always-on/lockdown removal is also tested on a USB phone.
+
+
+### Fatal engine failures and exit diagnostics (v25)
+
+See [fatal recovery](fatal-recovery.md). Seven additional Android cases cover bounded/redacted exit metadata and visible on-demand UI. Four external cases require actual uncaught Java/Go faults, owner-death evidence, synthetic real-TUN recovery and persistent crash budgets/Stop precedence. All122 outcomes are mandatory on API29/35/37, retaining all prior110. Phone acceptance remains separate.
+
+The test APK includes an independent UID/TUN fixture restricted to documentation-network addresses. The real competing-owner case transfers Android VPN authorization, requires the original engine to drain with no retry fight across controller death, then explicitly reconnects. Emulator preauthorization is confined to a hardware-gated driver; physical phones use visible controls and the ordinary system VPN dialog. The fixture is absent from the client APK.

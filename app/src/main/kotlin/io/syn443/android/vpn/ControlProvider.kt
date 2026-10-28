@@ -73,6 +73,10 @@ class ControlProvider : ContentProvider() {
                         LoginController.get(context).cancel()
                     }} finally {context.startService(Intent(context,TunnelService::class.java).setAction(TunnelService.RECONCILE))}
                 }
+                "engine-exits" -> {
+                    require(arg == null || (io.syn443.android.BuildConfig.DEBUG && caller == 2000 && arg.toIntOrNull()?.let { it > 0 } == true))
+                    return Bundle().apply { putBoolean("ok", true); putString("json", EngineExitDiagnostics.snapshot(context, arg?.toInt()).toString()) }
+                }
                 "resources" -> return Bundle().apply { putBoolean("ok", true); putString("json", resources.snapshot().toString()) }
                 "status", "logs" -> Unit
                 "foreground-open" -> {
@@ -134,8 +138,9 @@ class ControlProvider : ContentProvider() {
                         android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
                 }
-                "fault-crash", "fault-hang", "fault-owner" -> {
+                "fault-crash", "fault-hang", "fault-owner", "fault-java", "fault-native" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
+                    require(method !in setOf("fault-java", "fault-native") || (store.checkpoint().desiredOn && store.read().optBoolean("engineActive")))
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
                 }
                 "netbird-diagnose" -> {
