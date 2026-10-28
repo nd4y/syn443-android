@@ -16,7 +16,11 @@ def main():
     case=ET.SubElement(suite,'testcase',classname='io.syn443.android.CompetingVpnTest',name='competingVpnOwnsTunAndRevokesOriginalWithoutRetryFight')
     proxy=Server(('127.0.0.1',0),Proxy);port=str(proxy.server_address[1])
     threading.Thread(target=proxy.serve_forever,daemon=True).start()
-    def peer_stop():adb('shell','am','start','-W','-n',component,'--ez','ci-stop','true')
+    def peer_state():return adb('shell','run-as',peer,'sh','-c',"'cat no_backup/competing-vpn-state 2>/dev/null || true'").strip()
+    def peer_stop():
+        # This Activity intentionally finishes in onCreate: there is no frame for -W.
+        adb('shell','am','start','-n',component,'--ez','ci-stop','true')
+        await_condition(lambda:peer_state()==b'off',20)
     try:
         call('disconnect');await_condition(lambda:not pid(':engine') and not call('status')['engineActive'],30)
         call('policy-test-reset');call('test-reset');peer_stop()
@@ -27,7 +31,7 @@ def main():
         before=call('status');old=pid(':engine');assert old
         # Only this disposable-emulator driver preauthorizes the test UID.
         adb('shell','appops','set',peer,'ACTIVATE_VPN','allow')
-        adb('shell','am','start','-W','-n',component,'--ez','ci-start','true')
+        adb('shell','am','start','-n',component,'--ez','ci-start','true')
         await_condition(lambda:adb('shell','run-as',peer,'sh','-c',"'cat no_backup/competing-vpn-state 2>/dev/null || true'").strip()==b'active',20)
         await_condition(lambda:call('status')['phase']=='Off' and not call('status')['desiredOn'] and not call('status')['engineActive'] and not pid(':engine'),25)
         revoked=call('status');assert revoked['generation']>before['generation']

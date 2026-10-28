@@ -27,6 +27,9 @@ def main():
         call('import',base64.b64encode(json.dumps(config).encode()).decode());call('test-health','synthetic-http')
         progress=proxy.progress;call('connect')
         await_condition(lambda:call('status')['phase']=='Online' and pid(':engine') and proxy.progress>progress)
+        # Exercise a background VPN, as on the physical phone. Foreground crash
+        # dialogs may hold Android's synchronous fatal-error handler for user input.
+        adb('shell','input','keyevent','KEYCODE_HOME')
     def prove_exit(old,kind):
         if api>=30:
             expected=('java_crash',) if kind=='java' else ('native_crash','signal')
@@ -56,7 +59,7 @@ def main():
             case=new_case('uncaught'+kind.title()+'FaultRecoversRealTunAndRetainsIntent')
             prepare();before=call('status');old=pid(':engine');assert old
             progress=proxy.progress;call('fault-'+kind)
-            await_condition(lambda:pid(':engine')!=old,30);prove_exit(old,kind)
+            await_condition(lambda:pid(':engine')!=old,50);prove_exit(old,kind)
             await_condition(lambda:call('status')['phase']=='Online' and pid(':engine') not in ('',old) and proxy.progress>progress,150)
             current=call('status');assert current['generation']==before['generation'] and current['desiredOn']
             assert len(current['heavyWallMs'])==len(before.get('heavyWallMs',[]))+1
@@ -68,11 +71,11 @@ def main():
         # Cold launch may be free; the policy limits heavy RESTARTS, not all owners.
         for expected in range(initial+1,4):
             old=pid(':engine');assert old;progress=proxy.progress;call('fault-java')
-            await_condition(lambda:pid(':engine')!=old,30);prove_exit(old,'java')
+            await_condition(lambda:pid(':engine')!=old,50);prove_exit(old,'java')
             await_condition(lambda:call('status')['phase']=='Online' and pid(':engine') not in ('',old) and proxy.progress>progress,150)
             assert len(call('status')['heavyWallMs'])==expected
         old=pid(':engine');assert old;call('fault-java')
-        await_condition(lambda:pid(':engine')!=old,30);prove_exit(old,'java')
+        await_condition(lambda:pid(':engine')!=old,50);prove_exit(old,'java')
         await_condition(lambda:not pid(':engine') and len(call('status')['heavyWallMs'])==3 and call('status')['nextWallMs']>=min(call('status')['heavyWallMs'])+600_000,30)
         before=call('status');assert before['generation']==generation and before['desiredOn']
         old_controller=pid(':controller');call('fault-controller')
