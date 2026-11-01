@@ -288,4 +288,31 @@ func probeRouteWithRoots(parent context.Context, dial routeDial, c routeCheck, r
 		return "ok", true
 	}
 	secure := tls.Client(conn, &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12, RootCAs: roots})
-	if err := 
+	if err := secure.HandshakeContext(ctx); err != nil {
+		if parent.Err() != nil {
+			return "cancelled", false
+		}
+		return "tls_failed", true
+	}
+	if c.Method == "tls" {
+		return "ok", true
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.Target, nil)
+	req.Header.Set("Connection", "close")
+	if req.Write(secure) != nil {
+		return "request_failed", true
+	}
+	response, err := http.ReadResponse(bufio.NewReaderSize(io.LimitReader(secure, 8193), 4096), req)
+	if err != nil {
+		if parent.Err() != nil {
+			return "cancelled", false
+		}
+		return "response_failed", true
+	}
+	defer response.Body.Close()
+	length := response.Header.Get("Content-Length")
+	if response.StatusCode != 204 || response.ContentLength > 0 || len(response.TransferEncoding) > 0 || (length != "" && length != "0") {
+		return "http_response_mismatch", true
+	}
+	return "ok", true
+}

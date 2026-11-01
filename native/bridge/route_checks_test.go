@@ -127,3 +127,4 @@ func TestParentCancellationIsIncompleteNotAProxyFailure(t *testing.T) {
 	if code != "cancelled" || complete {
 		t.Fatal("cancellation poisoned path health")
 	}
+}
