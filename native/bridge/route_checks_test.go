@@ -131,17 +131,23 @@ func TestParentCancellationIsIncompleteNotAProxyFailure(t *testing.T) {
 
 func TestRouteDialReturningAfterItsDeadlineCannotBecomeSuccess(t *testing.T) {
 	var peer net.Conn
+	var elapsed int64 = 100
 	dial := func(ctx context.Context, _ string, _ M.Socksaddr) (net.Conn, error) {
 		<-ctx.Done()
+		elapsed += 4000
 		a, b := net.Pipe()
 		peer = b
 		return a, nil
 	}
-	code, complete := probeRoute(context.Background(), dial, routeCheck{"tcp", "192.0.2.1:443"})
+	// The boot-time budget makes late observations incomplete, including when
+	// a suspended or uncooperative dial returns a connection after cancellation.
+	parent, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	code, complete := probeRouteWithClock(parent, dial, routeCheck{"tcp", "192.0.2.1:443"}, nil, func() int64 { return elapsed })
 	if peer != nil {
 		peer.Close()
 	}
-	if code != "check_timeout" || !complete {
+	if code != "check_timeout" || complete {
 		t.Fatal("late dial invented a passing observation")
 	}
 }
