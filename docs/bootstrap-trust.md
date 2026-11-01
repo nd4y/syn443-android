@@ -17,9 +17,10 @@ service floors before use. An already accepted transition can be acknowledged
 again; retired roots cannot authorize fresh enrollment. Root compromise/loss
 requires the independently trusted release/recovery channel.
 
-Core JVM tests cover signature/key substitution, header/type/encoding rejection,
-revision/expiry/replay, dual-key rotation, hostile links and redaction. New protocol
-classes join the existing90% identity line-coverage gate. All compilation/tests
-run in GitHub Actions. Shared Go/Kotlin vectors, the protected Android trust
-journal, QR camera/paste/Intent UI, SQL invitation/approval and physical Xperia
-acceptance remain open; this core component alone does not complete M2.
+Core JVM tests and shared Go/Kotlin vectors cover signature/key substitution,
+header/type/encoding rejection, revision/expiry/replay, dual-key rotation, hostile
+links and redaction. New protocol classes join the existing90% identity line gate.
+The protected Android journal and camera/paste/Intent UI are integrated with
+manual claim/approval/session provisioning; see [manual enrollment](manual-enrollment.md).
+New Actions and physical Xperia acceptance remain open; integration alone does
+not complete M2 or M3. All compilation/tests run in GitHub Actions.

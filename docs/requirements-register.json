@@ -275,7 +275,10 @@
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/bootstrap-trust.md",
         "core/identity/src/main/kotlin/io/syn443/identity/BootstrapTrust.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt",
+        "docs/manual-enrollment.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/InvitationProtocol.kt",
+        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt"
       ]
     },
     {
@@ -325,7 +328,10 @@
         "tools/enrollment_fixture.py",
         "tools/test_enrollment_fixture.py",
         "tools/run_enrolled_vpn.py",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/manual-enrollment.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/InvitationProtocol.kt",
+        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt"
       ]
     },
     {
@@ -2147,8 +2153,12 @@
     {
       "id": "SEC-05",
       "text": "Invite claim/approval/consume - атомарный автомат с CAS; approval связан с inviteId, claimId и точным device key fingerprint. Параллельные претенденты не могут заменить ключ после одобрения. Refresh/retry тем же ключом идемпотентен; переустановка/утрата ключа не восстанавливает доступ по старому ID. Коды имеют ограниченные попытки и безопасные ошибки без перечисления пользователей.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/InvitationProtocol.kt",
+        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt"
+      ]
     },
     {
       "id": "SEC-06",
@@ -2161,7 +2171,10 @@
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/bootstrap-trust.md",
         "core/identity/src/main/kotlin/io/syn443/identity/BootstrapTrust.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt",
+        "docs/manual-enrollment.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/InvitationProtocol.kt",
+        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt"
       ]
     },
     {

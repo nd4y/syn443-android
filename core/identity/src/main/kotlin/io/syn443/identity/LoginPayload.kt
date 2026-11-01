@@ -4,11 +4,11 @@ import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.*
 
 /** Protected worker-only cache. A policy envelope belongs in the separate activation journal. */
 @Serializable data class LoginPayload(val bootstrap:Bootstrap,val pending:Pending?=null,
-    val user:UserCredential?=null,val session:SessionReply?=null) {
+    val user:UserCredential?=null,val session:SessionReply?=null,val invitation:InvitationPending?=null) {
     override fun toString()="LoginPayload([redacted])"
     fun encode():String {
         validate()
@@ -16,7 +16,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
     }
     private fun opaque(s:String)=s.matches(Regex("[A-Za-z0-9_-]{43}")) && runCatching {Policy.decode64(s).size==32}.getOrDefault(false)
     private fun validate() {
-        bootstrap.validate();require(listOf(pending,user,session).count {it!=null}==1)
+        bootstrap.validate();require(listOf(pending,user,session,invitation).count {it!=null}==1)
         val authority=Identity.bootstrapAuthority(bootstrap)
         pending?.let {
             require(it.generation>=0 && it.bootCount>=0 && it.startedElapsedMs>=0 && listOf(it.state,it.nonce,it.verifier,it.thumbprint).all(::opaque))
@@ -36,6 +36,12 @@ import kotlinx.serialization.json.decodeFromJsonElement
     fun requireBound(intent:LoginIntent):LoginPayload {
         validate();LoginRecovery.validate(intent)
         require(intent.authority==Identity.bootstrapAuthority(bootstrap) && intent.serviceId==bootstrap.serviceId)
+        invitation?.let {
+            require(intent.method=="invite" && intent.phase in setOf(LoginPhase.INVITING,LoginPhase.NEEDS_REAUTH))
+            it.validate(intent.thumbprint)
+            require(intent.ownerTag==(it.reply?.state?.ownerTag?:""))
+            require(intent.maybeRegistered==(it.completion!=null))
+        }
         pending?.let {
             require(intent.phase in setOf(LoginPhase.BROWSER,LoginPhase.EXCHANGING,LoginPhase.NEEDS_REAUTH) &&
                 it.generation==intent.generation && it.thumbprint==intent.thumbprint && !intent.maybeRegistered)
@@ -52,7 +58,10 @@ import kotlinx.serialization.json.decodeFromJsonElement
     }
     companion object {
         fun decode(raw:String,intent:LoginIntent):LoginPayload {
-            val parsed=Identity.objectJSON(raw)
+            val original=Identity.objectJSON(raw)
+            // The previous protected format had no invitation variant. Normalize
+            // this one absent null field; every existing credential/binding check remains.
+            val parsed=if("invitation" in original)original else JsonObject(original+ ("invitation" to JsonNull))
             return Canonical.json.decodeFromJsonElement<LoginPayload>(parsed).requireBound(intent).also {
                 require(Canonical.encode(parsed)==it.encode()) // No numeric-string coercion or omitted fields.
             }

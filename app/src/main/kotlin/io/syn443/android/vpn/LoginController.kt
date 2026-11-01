@@ -34,6 +34,11 @@ class LoginController private constructor(private val context:android.app.Applic
         }
     }
     private val journal=LoginJournal(context,namespace)
+    private val bootstrapTrust=BootstrapTrustStore(context,if(namespace=="device-login-v1")"installation-trust-v1" else "$namespace-trust")
+    private data class InvitePreview(val id:String,val raw:String,val until:Long,var result:JSONObject?=null)
+    private var invitePreview:InvitePreview?=null
+    @Volatile private var invitePair=""
+    @Volatile private var inviteState=""
     internal val assignedRuntime=AssignedPolicyRuntime(::boot,::elapsed)
     private val commands=Any()
     @Volatile private var commandEpoch=0L
@@ -121,7 +126,7 @@ class LoginController private constructor(private val context:android.app.Applic
             } catch(e:AuthException) {
                 if(e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))runCatching {
                     val s=journal.snapshot()
-                    if(s.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))reauthenticate(s)
+                    if(s.phase in setOf(LoginPhase.INVITING,LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))reauthenticate(s)
                 }
                 e.reason.name
             }
@@ -185,9 +190,52 @@ class LoginController private constructor(private val context:android.app.Applic
         JSONObject().put("phase",s.phase.name).put("generation",s.generation).put("configured",configured)
             .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
+            .put("inviteState",if(s.phase==LoginPhase.INVITING)inviteState else "").put("pairCode",if(s.phase==LoginPhase.INVITING)invitePair else "")
             .put("cleanupPending",s.tombstones.size).put("assignedPolicy",assignedRuntime.status(s))
     }.getOrElse {JSONObject().put("phase","BLOCKED").put("reason","LOGIN_STORE_UNAVAILABLE")
         .put("busy",pendingCommands.get()>0)}
+    fun previewInvitation(id:String,raw:String):Boolean {
+        require(id.matches(Regex("[0-9a-f]{32}")) && raw.length<=BootstrapTrust.MAX_LINK)
+        return submitIfIdle(onAdmission={invitePreview=InvitePreview(id,raw,elapsed()+120_000)},admit={journal.snapshot().phase==LoginPhase.SIGNED_OUT}) {
+            val verified=bootstrapTrust.preview(raw)
+            val result=JSONObject().put("serviceId",verified.descriptor.serviceId).put("origin",verified.descriptor.apiOrigin)
+                .put("issuer",verified.descriptor.issuer).put("revision",verified.descriptor.revision)
+            synchronized(commands){if(invitePreview?.id==id && workerEpoch==commandEpoch)invitePreview?.result=result}
+        }
+    }
+    fun invitationPreview(id:String):JSONObject=synchronized(commands) {
+        val preview=invitePreview
+        if(preview?.id!=id || preview.until<elapsed())JSONObject().put("state","gone")
+        else preview.result?.let {JSONObject(it.toString()).put("state","verified")}?:JSONObject().put("state",if(pendingCommands.get()>0)"pending" else "rejected")
+    }
+    fun startInvitation(id:String) {
+        val entry=synchronized(commands) {
+            val preview=checkNotNull(invitePreview);require(preview.id==id && preview.until>=elapsed() && preview.result!=null)
+            require(journal.snapshot().phase==LoginPhase.SIGNED_OUT && pendingCommands.get()==0)
+            commandEpoch++;invitePreview=null;preview
+        }
+        submit {
+            val verified=bootstrapTrust.accept(entry.raw);val b=verified.bootstrap();val alias=DeviceKey.newAlias()
+            val reserved=state().serialized {synchronized(commands){
+                check(workerEpoch==commandEpoch);noVpn();require(!ManagedPolicyStore.get(context).managed())
+                val before=journal.snapshot();require(before.phase==LoginPhase.SIGNED_OUT)
+                writeBootstrap(b);commit(before,LoginRecovery.reserve(before,before.generation,b,alias,"invite"))
+            }}
+            workingAlias=alias
+            val key=checkNotNull(DeviceKey.createIfCurrent(alias){workerEpoch==commandEpoch && cancelledGeneration!=reserved.generation && journal.isCurrent(reserved)})
+            val pending=InvitationPending(InvitationOperation.claim(verified.code,key.publicKey))
+            val payload=LoginPayload(b,invitation=pending)
+            val prepared=protect(reserved,payload){hash->LoginRecovery.invitationPrepared(reserved,reserved.generation,Identity.thumbprint(key.publicKey),hash)}
+            resumeInvitation(prepared,payload)
+        }
+    }
+    fun rotateBootstrap(raw:String) {require(raw.length<=16_384);submit {bootstrapTrust.rotate(raw)}}
+    private fun writeBootstrap(b:Bootstrap) {
+        val bytes=Canonical.encode(Canonical.parse(Canonical.json.encodeToString(b))).toByteArray(Charsets.UTF_8)
+        val output=setup.startWrite()
+        try {output.write(bytes);setup.finishWrite(output)}catch(e:Exception){setup.failWrite(output);throw e}
+        require(Identity.bootstrapAuthority(bootstrap())==Identity.bootstrapAuthority(b));configured=true
+    }
     fun configure(raw:String) {
         require(io.syn443.android.BuildConfig.DEBUG && raw.toByteArray(Charsets.UTF_8).size<=16_384)
         submit {
@@ -207,7 +255,7 @@ class LoginController private constructor(private val context:android.app.Applic
         when(s.phase) {
             LoginPhase.SIGNED_OUT->Unit
             LoginPhase.RETIRING->retire(s)
-            LoginPhase.RESERVED->prepareBrowser(s,bootstrap())
+            LoginPhase.RESERVED->if(s.method=="invite"){val retired=commit(s,LoginRecovery.cancel(s,s.generation));retire(retired)}else prepareBrowser(s,bootstrap())
             else->resumeWorker(s)
         }
     }}
@@ -306,6 +354,43 @@ class LoginController private constructor(private val context:android.app.Applic
         val requestLimit=if(uri.path=="/v1/chat/uploads/part")360_448 else if(uri.path.startsWith("/v1/chat/"))32_768 else 8192
         http.exchange(method,url,headers,body,child,maxBody=maxBody,factory=tls(b,uri),route=route,maxRequestBody=requestLimit)
     }
+    private fun resumeInvitation(initial:LoginIntent,original:LoginPayload) {
+        var state=initial;var pending=checkNotNull(original.invitation)
+        lastAssignmentFetch=elapsed()
+        val scope=IdentityScope();var registered:Pair<LoginIntent,LoginPayload>?=null
+        synchronized(commands){current(state);check(activeScope==null);activeScope=scope}
+        try {
+            val protocol=InvitationProtocol(original.bootstrap,DeviceKey.open(state.keyAlias),exchange(state.generation,original.bootstrap,false),::boot,::elapsed)
+            fun save(next:InvitationPending) {
+                val before=state;val value=LoginPayload(original.bootstrap,invitation=next)
+                state=protect(before,value){hash->LoginRecovery.invitationProgress(before,before.generation,next.reply?.state?.ownerTag?:"",next.completion!=null,hash)}
+                pending=next
+            }
+            var time=pending.time
+            if(time==null || runCatching {time!!.window(boot(),elapsed())}.isFailure) {
+                time=protocol.time(scope,time);save(pending.copy(time=time))
+            }
+            val now=checkNotNull(time)
+            if(pending.reply==null) {
+                val claimed=protocol.claim(pending.claim,now,scope);save(pending.copy(reply=claimed,time=claimed.time))
+            } else if(pending.completion==null) {
+                val previous=checkNotNull(pending.reply)
+                val observed=protocol.status(InvitationOperation.mutation("status",previous.state.id),previous,now,scope)
+                save(pending.copy(reply=observed,time=observed.time))
+            }
+            val reply=checkNotNull(pending.reply)
+            synchronized(commands){current(state);invitePair=reply.state.pairCode;inviteState=reply.state.state}
+            if(reply.state.state in setOf("expired","revoked"))throw AuthException(AuthFailure.ACCESS_DENIED)
+            if(reply.state.state !in setOf("ready","completed"))throw AuthException(AuthFailure.PENDING)
+            if(pending.completion==null)save(pending.copy(completion=InvitationOperation.mutation("complete",reply.state.id)))
+            val completed=protocol.complete(checkNotNull(pending.completion),reply,checkNotNull(pending.time),scope)
+            val session=LoginPayload(original.bootstrap,session=completed.session);val before=state
+            val next=protect(before,session){hash->LoginRecovery.invited(before,before.generation,completed,hash)}
+            synchronized(commands){current(next);invitePair="";inviteState=""}
+            registered=next to session
+        } finally {scope.cancel();synchronized(commands){if(activeScope===scope)activeScope=null}}
+        registered?.let {(next,payload)->withProtocol(next,payload.bootstrap){protocol,child->fetchAssignment(next,payload,protocol,child)}}
+    }
     private fun provision(initial:LoginIntent,p:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
         var s=initial;val user=checkNotNull(p.user)
         repeat(2) {
@@ -381,7 +466,7 @@ class LoginController private constructor(private val context:android.app.Applic
         var next:ProvisioningRetry?=null
         return submitIfIdle(admit={
             val s=journal.snapshot()
-            if(s.generation!=expectedGeneration || s.phase!=LoginPhase.PROVISIONING ||
+            if(s.generation!=expectedGeneration || s.phase !in setOf(LoginPhase.PROVISIONING,LoginPhase.INVITING) ||
                 error !in setOf("PENDING","TRANSPORT","THROTTLED","UNAVAILABLE"))false
             else {
                 expected=s
@@ -445,6 +530,7 @@ class LoginController private constructor(private val context:android.app.Applic
             }
         }
         when(LoginRecovery.resume(s,true,true,boot(),elapsed(),p.pending,p.user?.time?.boot?:p.session?.time?.boot?: -1)) {
+            LoginResume.RETRY_INVITATION->resumeInvitation(s,p)
             LoginResume.BROWSER->synchronized(commands) {current(s);browser=s.generation to Identity.authorization(p.bootstrap,checkNotNull(p.pending))}
             LoginResume.AUTHENTICATED,LoginResume.RETRY_CLEANUP,LoginResume.RETRY_ENROLLMENT->withProtocol(s,p.bootstrap) {protocol,scope->provision(s,p,protocol,scope)}
             LoginResume.SESSION,LoginResume.REANCHOR_SESSION,LoginResume.RETRY_REFRESH->withProtocol(s,p.bootstrap) {protocol,scope->resumeSession(s,p,protocol,scope)}
@@ -454,7 +540,7 @@ class LoginController private constructor(private val context:android.app.Applic
     fun retry(expectedGeneration:Long) {submit {
         val s=journal.snapshot();require(s.generation==expectedGeneration)
         when(s.phase) {
-            LoginPhase.RESERVED->prepareBrowser(s,bootstrap())
+            LoginPhase.RESERVED->if(s.method=="invite"){val retired=commit(s,LoginRecovery.cancel(s,s.generation));retire(retired)}else prepareBrowser(s,bootstrap())
             LoginPhase.RETIRING->retire(s)
             LoginPhase.SIGNED_OUT->Unit
             else->resumeWorker(s)
@@ -462,7 +548,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }}
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
-        commandEpoch++;browser=null;chatTicket=null;val previous=cached;cached=null;assignedRuntime.clear();discardQueued();policyChanged()
+        commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;assignedRuntime.clear();discardQueued();policyChanged()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {
@@ -507,6 +593,21 @@ class LoginController private constructor(private val context:android.app.Applic
             } catch(_:Exception) {
                 // Unknown/offline results retain the public tombstone for a fresh owner login.
             } finally {scope.cancel();synchronized(commands) {if(activeScope===scope)activeScope=null}}
+        }
+        val pendingInvite=previous?.second?.invitation
+        if(previous!=null && pendingInvite!=null && previous.first.keyAlias in s.retiringAliases) {
+            val scope=IdentityScope()
+            try {
+                previous.second.requireBound(previous.first)
+                synchronized(commands){current(s);check(activeScope==null);activeScope=scope}
+                val protocol=InvitationProtocol(previous.second.bootstrap,DeviceKey.open(previous.first.keyAlias),exchange(s.generation,previous.second.bootstrap,true),::boot,::elapsed)
+                val time=protocol.time(scope,pendingInvite.time)
+                val claimed=pendingInvite.reply?:protocol.claim(pendingInvite.claim,time,scope)
+                protocol.abandon(InvitationOperation.mutation("abandon",claimed.state.id),claimed,time,scope)
+                val tomb=RegistrationTombstone(previous.first.ownerTag,previous.first.thumbprint)
+                if(tomb in s.tombstones)s=commit(s,LoginRecovery.serverRevoked(s,s.generation,tomb))
+            }catch(_:Exception){ /* Unknown server outcome keeps a registration tombstone when needed. */ }
+            finally {scope.cancel();synchronized(commands){if(activeScope===scope)activeScope=null}}
         }
         for(alias in expected.retiringAliases) {
             DeviceKey.deleteOwned(alias)

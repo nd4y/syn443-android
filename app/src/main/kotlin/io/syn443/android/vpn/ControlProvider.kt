@@ -57,6 +57,13 @@ class ControlProvider : ContentProvider() {
                     return Bundle().apply {putString("json",LoginController.get(context).chatResult(requireNotNull(arg),requireNotNull(extras).getLong("generation",-1)).toString())}
                 }
                 "chat-cancel" -> {require(caller==Process.myUid());LoginController.get(context).chatCancel(requireNotNull(arg))}
+                "auth-invite-preview" -> {
+                    require(caller==Process.myUid())
+                    return Bundle().apply {putBoolean("admitted",LoginController.get(context).previewInvitation(requireNotNull(arg),requireNotNull(extras?.getString("link"))))}
+                }
+                "auth-invite-result" -> {require(caller==Process.myUid());return Bundle().apply {putString("json",LoginController.get(context).invitationPreview(requireNotNull(arg)).toString())}}
+                "auth-invite-start" -> {require(caller==Process.myUid());LoginController.get(context).startInvitation(requireNotNull(arg))}
+                "auth-trust-rotation" -> {require(caller==Process.myUid());LoginController.get(context).rotateBootstrap(requireNotNull(arg))}
                 "auth-status" -> return Bundle().apply {putBoolean("ok",true);putString("json",LoginController.get(context).status().toString())}
                 "auth-bootstrap-file" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller==2000)

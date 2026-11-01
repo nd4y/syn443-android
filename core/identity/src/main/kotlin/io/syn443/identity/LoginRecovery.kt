@@ -8,11 +8,11 @@ import kotlinx.serialization.json.*
 import java.security.interfaces.ECPublicKey
 
 @Serializable enum class LoginPhase {
-    SIGNED_OUT, RESERVED, BROWSER, EXCHANGING, AUTHENTICATED, CLEANUP, ENROLLING,
+    SIGNED_OUT, RESERVED, INVITING, BROWSER, EXCHANGING, AUTHENTICATED, CLEANUP, ENROLLING,
     PROVISIONING, POLICY_CACHED, REFRESHING, NEEDS_REAUTH, RETIRING
 }
 enum class LoginResume { IDLE, KEY_RESERVATION, BROWSER, AUTHENTICATED, RETRY_CLEANUP, RETRY_ENROLLMENT,
-    SESSION, REANCHOR_SESSION, RETRY_REFRESH, REAUTHENTICATE, CANCEL_AND_CLEANUP, COMPLETE_RETIRE }
+    RETRY_INVITATION, SESSION, REANCHOR_SESSION, RETRY_REFRESH, REAUTHENTICATE, CANCEL_AND_CLEANUP, COMPLETE_RETIRE }
 
 /** Nonsecret recovery metadata. Neither ownerTag nor thumbprint is an authorization credential. */
 @Serializable data class RegistrationTombstone(val ownerTag:String,val thumbprint:String) {
@@ -21,7 +21,7 @@ enum class LoginResume { IDLE, KEY_RESERVATION, BROWSER, AUTHENTICATED, RETRY_CL
 
 /** Public intent fence, written before the referenced protected payload/network effect. */
 @Serializable data class LoginIntent(
-    val generation:Long=0,val revision:Long=0,val phase:LoginPhase=LoginPhase.SIGNED_OUT,
+    val generation:Long=0,val revision:Long=0,val phase:LoginPhase=LoginPhase.SIGNED_OUT,val method:String="oidc",
     val authority:String="",val serviceId:String="",val keyAlias:String="",val thumbprint:String="",
     val ownerTag:String="",val protectedHash:String="",val maybeRegistered:Boolean=false,
     val deviceId:String="",val sessionGeneration:Long = -1,val policyHash:String="",
@@ -59,20 +59,22 @@ object LoginRecovery {
         }).toByteArray(Charsets.UTF_8))
     }
     fun validate(s:LoginIntent) {
-        require(s.generation in 0..maximum && s.revision in 0..maximum)
+        require(s.generation in 0..maximum && s.revision in 0..maximum && s.method in setOf("oidc","invite"))
         require(s.tombstones.size<=32 && s.tombstones.distinct().size==s.tombstones.size &&
             s.tombstones.all {digest(it.ownerTag) && digest(it.thumbprint)})
         require(s.retiringAliases.size<=32 && s.retiringAliases.distinct().size==s.retiringAliases.size && s.retiringAliases.all(::ownedAlias))
         if(s.phase in setOf(LoginPhase.SIGNED_OUT,LoginPhase.RETIRING)) {
             require(listOf(s.authority,s.serviceId,s.keyAlias,s.thumbprint,s.ownerTag,s.protectedHash,s.deviceId,s.policyHash).all {it.isEmpty()} &&
                 !s.maybeRegistered && s.sessionGeneration== -1L && s.operation==null && s.operationBoot== -1 && s.operationElapsedMs== -1L && s.refreshReturnPhase==null)
-            require((s.phase==LoginPhase.RETIRING)==s.retiringAliases.isNotEmpty());return
+            require(s.method=="oidc" && (s.phase==LoginPhase.RETIRING)==s.retiringAliases.isNotEmpty());return
         }
         require(digest(s.authority) && s.serviceId.matches(Regex("[A-Za-z0-9_-]{1,64}")) && ownedAlias(s.keyAlias) && s.keyAlias !in s.retiringAliases)
         if(s.phase==LoginPhase.RESERVED) require(s.thumbprint.isEmpty() && s.protectedHash.isEmpty())
         else require(digest(s.thumbprint) && digest(s.protectedHash))
         if(s.phase in setOf(LoginPhase.RESERVED,LoginPhase.BROWSER,LoginPhase.EXCHANGING)) require(s.ownerTag.isEmpty() && !s.maybeRegistered)
-        else require(digest(s.ownerTag) || s.phase==LoginPhase.NEEDS_REAUTH && s.ownerTag.isEmpty() && !s.maybeRegistered)
+        else require(digest(s.ownerTag) || s.phase in setOf(LoginPhase.NEEDS_REAUTH,LoginPhase.INVITING) && s.ownerTag.isEmpty() && !s.maybeRegistered)
+        if(s.method=="invite")require(s.phase !in setOf(LoginPhase.BROWSER,LoginPhase.EXCHANGING,LoginPhase.AUTHENTICATED,LoginPhase.CLEANUP,LoginPhase.ENROLLING))
+        if(s.phase==LoginPhase.INVITING)require(s.method=="invite" && s.deviceId.isEmpty())
         require(s.maybeRegistered || s.deviceId.isEmpty() && s.sessionGeneration== -1L && s.policyHash.isEmpty())
         require(!s.maybeRegistered || digest(s.ownerTag))
         require((s.deviceId.isEmpty() && s.sessionGeneration== -1L) || digest(s.deviceId) && s.sessionGeneration in 0..maximum)
@@ -100,14 +102,29 @@ object LoginRecovery {
         if(s.phase==LoginPhase.REFRESHING)require(s.refreshReturnPhase in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED))
         else require(s.refreshReturnPhase==null)
     }
-    fun reserve(s:LoginIntent,generation:Long,bootstrap:Bootstrap,alias:String):LoginIntent {
+    fun reserve(s:LoginIntent,generation:Long,bootstrap:Bootstrap,alias:String,method:String="oidc"):LoginIntent {
         current(s,generation);require(s.phase==LoginPhase.SIGNED_OUT && s.retiringAliases.isEmpty() && ownedAlias(alias))
         return revised(s.copy(generation=next(s.generation),phase=LoginPhase.RESERVED,
-            authority=Identity.bootstrapAuthority(bootstrap),serviceId=bootstrap.serviceId,keyAlias=alias))
+            authority=Identity.bootstrapAuthority(bootstrap),serviceId=bootstrap.serviceId,keyAlias=alias,method=method))
     }
     fun prepared(s:LoginIntent,generation:Long,thumbprint:String,protectedHash:String):LoginIntent {
-        current(s,generation);require(s.phase==LoginPhase.RESERVED && s.tombstones.none {it.thumbprint==thumbprint})
+        current(s,generation);require(s.phase==LoginPhase.RESERVED && s.method=="oidc" && s.tombstones.none {it.thumbprint==thumbprint})
         return revised(s.copy(phase=LoginPhase.BROWSER,thumbprint=thumbprint,protectedHash=protectedHash))
+    }
+    fun invitationPrepared(s:LoginIntent,generation:Long,thumbprint:String,protectedHash:String):LoginIntent {
+        current(s,generation);require(s.phase==LoginPhase.RESERVED && s.method=="invite" && s.tombstones.none {it.thumbprint==thumbprint})
+        return revised(s.copy(phase=LoginPhase.INVITING,thumbprint=thumbprint,protectedHash=protectedHash))
+    }
+    fun invitationProgress(s:LoginIntent,generation:Long,ownerTag:String,completing:Boolean,protectedHash:String):LoginIntent {
+        current(s,generation);require(s.phase==LoginPhase.INVITING && (ownerTag.isEmpty()||digest(ownerTag)) &&
+            (s.ownerTag.isEmpty()||s.ownerTag==ownerTag) && (!completing||ownerTag.isNotEmpty()) && (!s.maybeRegistered||completing))
+        return revised(s.copy(ownerTag=ownerTag,maybeRegistered=completing,protectedHash=protectedHash))
+    }
+    fun invited(s:LoginIntent,generation:Long,completed:InvitationCompletion,protectedHash:String):LoginIntent {
+        current(s,generation);val reply=completed.session
+        require(s.phase==LoginPhase.INVITING && s.method=="invite" && s.maybeRegistered && s.ownerTag==completed.ownerTag &&
+            reply.authority==s.authority && reply.keyThumbprint==s.thumbprint && reply.session.generation==0L)
+        return revised(s.copy(phase=LoginPhase.PROVISIONING,protectedHash=protectedHash,deviceId=reply.session.deviceId,sessionGeneration=0))
     }
     fun consumeCallback(s:LoginIntent,generation:Long):LoginIntent {
         current(s,generation);require(s.phase==LoginPhase.BROWSER)
@@ -191,6 +208,7 @@ object LoginRecovery {
             LoginPhase.EXCHANGING,LoginPhase.NEEDS_REAUTH->LoginResume.REAUTHENTICATE
             LoginPhase.AUTHENTICATED->if(anchorBoot==boot)LoginResume.AUTHENTICATED else LoginResume.REAUTHENTICATE
             LoginPhase.CLEANUP->if(retryable())LoginResume.RETRY_CLEANUP else LoginResume.REAUTHENTICATE
+            LoginPhase.INVITING->LoginResume.RETRY_INVITATION
             LoginPhase.ENROLLING->if(retryable())LoginResume.RETRY_ENROLLMENT else LoginResume.REAUTHENTICATE
             LoginPhase.REFRESHING->if(retryable())LoginResume.RETRY_REFRESH else LoginResume.REAUTHENTICATE
             LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED->if(anchorBoot==boot)LoginResume.SESSION else LoginResume.REANCHOR_SESSION
