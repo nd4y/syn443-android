@@ -10,6 +10,16 @@ from enrollment_fixture import Fixture
 from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition
 from run_route_lifecycle import RouteProxy
 
+def stopped_rollback_recovered(controller,generation):
+    # A provider read is the explicit recreation request. An empty PID must
+    # never short-circuit that read when no foreground UI is polling for us.
+    state=call('status')
+    assert not state['desiredOn'] and state['generation']==generation
+    assert not pid(':engine'),'Stop allowed an unexpected replacement native owner'
+    return (pid(':controller') not in ('',controller) and state.get('engineActive') is False and
+        state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
+        not call('auth-status')['busy'])
+
 def main():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish'),'Emulator only'
     assert PACKAGE+'.test/io.syn443.android.EnrollmentDriver' in adb('shell','pm','list','instrumentation').decode(),'Test APK enrollment driver is not installed'
@@ -114,9 +124,7 @@ def main():
                         # Prove the durable pointer survived, rather than mistaking an
                         # unavailable runtime-view field for a committed revision.
                         fixture.policy_status=503;controller=pid(':controller');call('fault-controller')
-                        await_condition(lambda:pid(':controller') not in ('',controller) and
-                            call('status')['policy']['phase']=='rolled_back' and
-                            call('status')['policy'].get('activeRevision')==1 and not call('auth-status')['busy'],45)
+                        await_condition(lambda:stopped_rollback_recovered(controller,generation_after),45)
                         assert call('status')['generation']==generation_after and not call('status')['desiredOn'] and stopped()
                     proxy.delay=0
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
