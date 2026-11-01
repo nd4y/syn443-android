@@ -41,6 +41,9 @@ class ProbePool : AutoCloseable {
     internal val executor = ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS, ArrayBlockingQueue(1),
         ThreadFactory { task -> Thread(task, "syn443-policy-probe").apply { isDaemon = true } },
         ThreadPoolExecutor.AbortPolicy()).apply { allowCoreThreadTimeOut(true) }
+    /** Read-only capacity counters; never opens another worker or clears queued work. */
+    fun counters(): Map<String, Long> = mapOf("workers" to executor.poolSize.toLong(), "active" to executor.activeCount.toLong(),
+        "queued" to executor.queue.size.toLong(), "completed" to executor.completedTaskCount, "shutdown" to if(executor.isShutdown) 1L else 0L)
     override fun close() { executor.shutdownNow() }
 }
 

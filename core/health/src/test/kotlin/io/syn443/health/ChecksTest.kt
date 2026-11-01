@@ -106,8 +106,10 @@ class ChecksTest {
             repeat(2) { pool.executor.submit { entered.countDown(); release.await() } }
             try {
                 assertTrue(entered.await(2, TimeUnit.SECONDS))
+                assertEquals(2L,pool.counters().getValue("active"));assertEquals(2L,pool.counters().getValue("workers"))
                 val job = CheckJob(pool, Probe { _, _ -> error("queued probe must not execute") }, checkMillis = 100)
                 assertEquals(Outcome.UNAVAILABLE, job.run(listOf(check)).outcomes.single())
+                assertEquals(0L,pool.counters().getValue("queued"));assertEquals(0L,pool.counters().getValue("shutdown"))
                 assertNull(job.failure); assertNull(job.failureStage)
                 assertEquals(0, pool.executor.queue.size)
             } finally { release.countDown() }

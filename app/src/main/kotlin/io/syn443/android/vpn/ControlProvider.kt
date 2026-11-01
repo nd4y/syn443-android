@@ -88,6 +88,10 @@ class ControlProvider : ContentProvider() {
                     return Bundle().apply { putBoolean("ok", true); putString("json", EngineExitDiagnostics.snapshot(context, arg?.toInt()).toString()) }
                 }
                 "resources" -> return Bundle().apply { putBoolean("ok", true); putString("json", resources.snapshot().toString()) }
+                "health-workers" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && (caller==2000 || caller==Process.myUid()))
+                    return Bundle().apply {putBoolean("ok",true);putString("json",PolicyChecks.diagnostics().toString())}
+                }
                 "status", "logs" -> Unit
                 "foreground-open" -> {
                     val generation = arg?.toLongOrNull()

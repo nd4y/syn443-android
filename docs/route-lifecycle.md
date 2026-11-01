@@ -69,6 +69,13 @@ to256 UTF-8 bytes. Probe-local exceptions become incomplete `probe_unavailable`
 evidence, with no exception text. Authorization is rechecked at I/O and completion
 using the boot clock, including after suspend.
 
+The DEBUG-only `health-workers` command samples the existing shared policy-check
+pool on explicit request: capacity counters and at most two fixed-name worker
+stacks, twelve class/method symbols each, cached for30s. It contains no targets,
+arguments, exceptions or configuration values, does not clear work or increase
+capacity, and is unavailable in release builds. Emulator policy failures capture
+this evidence instead of increasing activation deadlines or accepting incomplete checks.
+
 ## Lifecycle contract
 
 The provider and boot receiver can observe Direct Boot. While the user is locked,

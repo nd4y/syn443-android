@@ -55,6 +55,19 @@ class ResourceDiagnosticsTest {
             assertEquals(setOf("state", "elapsedMs", "awakeMs", "cpuMs", "cpuPermille"), process.getJSONObject("window").keys().asSequence().toSet())
         }
         val after = call("status")
+        val workers=call("health-workers");val cachedWorkers=call("health-workers")
+        assertTrue(cachedWorkers.getBoolean("cached"));assertEquals(workers.getLong("sampledElapsedMs"),cachedWorkers.getLong("sampledElapsedMs"))
+        assertEquals(setOf("schemaVersion","sampledElapsedMs","minIntervalMs","cached","pool","threads"),workers.keys().asSequence().toSet())
+        val capacity=workers.getJSONObject("pool")
+        assertEquals(setOf("workers","active","queued","completed","shutdown"),capacity.keys().asSequence().toSet())
+        assertTrue(capacity.getLong("workers") in 0..2);assertTrue(capacity.getLong("active") in 0..2);assertTrue(capacity.getLong("queued") in 0..1)
+        val threads=workers.getJSONArray("threads");assertTrue(threads.length()<=2)
+        for(i in 0 until threads.length()) {
+            val thread=threads.getJSONObject(i);assertEquals(setOf("state","frames"),thread.keys().asSequence().toSet())
+            assertTrue(thread.getString("state") in Thread.State.values().map {it.name})
+            val frames=thread.getJSONArray("frames");assertTrue(frames.length()<=12)
+            for(j in 0 until frames.length())assertEquals(setOf("class","method"),frames.getJSONObject(j).keys().asSequence().toSet())
+        }
         for (key in listOf("generation", "desiredOn", "configRevision")) assertEquals(before.opt(key), after.opt(key))
     }
 }

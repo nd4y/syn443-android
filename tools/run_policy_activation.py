@@ -39,6 +39,10 @@ def private_input(raw, method):
 def stage(envelope):
     return private_input(envelope, 'policy-stage-file')
 
+def probe_diagnostics():
+    try:print('Policy probe workers: '+json.dumps(call('health-workers')),flush=True)
+    except Exception as error:print('Policy probe diagnostics unavailable: '+type(error).__name__,flush=True)
+
 def main():
     assert adb('shell', 'getprop', 'ro.hardware').decode().strip() in ('ranchu', 'goldfish'), 'Emulator only'
     suite = ET.Element('testsuite', name='SYN443 managed activation')
@@ -66,7 +70,15 @@ def main():
         call('test-health', 'synthetic-http'); call('connect')
         await_condition(lambda: call('status').get('phase') == 'Online')
         private_input(json.dumps(publisher.binding(ports[1])), 'policy-bind-file')
-        await_condition(lambda: call('status').get('policy', {}).get('phase') == 'committed' and call('status')['policy'].get('activeRevision') == 1)
+        captured=set()
+        def committed():
+            snapshot=call('status')
+            pressure=[e for e in snapshot.get('events',[]) if e.get('intentGeneration')==snapshot['generation'] and e.get('code')=='policy_checks_unavailable']
+            for event in pressure:
+                if event['at'] not in captured and len(captured)<2:
+                    captured.add(event['at']);probe_diagnostics()
+            return snapshot.get('policy',{}).get('phase')=='committed' and snapshot['policy'].get('activeRevision')==1
+        await_condition(committed)
     scenarios = ['signedPolicyBootstrapsCurrentConfig', 'healthyChangedCandidateCommits', 'invalidPolicyAndImportCannotReplaceActive',
                  'failedNativeCandidateRollsBackAndCannotReplay', 'requiredRegressionRollsBack',
                  'baselineOutageCanCommitDegraded', 'stopFencesPendingPolicy',
@@ -184,6 +196,7 @@ def main():
                 # Status events contain only bounded internal reason codes and
                 # counters; never print raw engine config or provider logs.
                 print('Policy failure events: ' + json.dumps(snapshot.get('events', [])[-64:]), flush=True)
+                probe_diagnostics()
                 ET.SubElement(case, 'failure', message='Managed policy scenario failed; see bounded job output')
                 raise
     finally:
