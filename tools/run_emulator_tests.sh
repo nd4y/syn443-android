@@ -35,13 +35,19 @@ fi
 # also needs its own-UID driver, which exists exclusively in the test APK.
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb shell appops set io.syn443.android ACTIVATE_VPN allow
+# Fail early on the new OS scenarios. Missing old outcomes can never pass the
+# final evidence gate; successful runs still execute every previous scenario.
+if ! python3 tools/run_route_lifecycle.py; then
+  python3 tools/print_emulator_reports.py || true
+  exit 1
+fi
 python3 tools/run_vpn_process_faults.py || result=1
 python3 tools/run_vpn_revocation.py || result=1
 python3 tools/run_vpn_fatal.py || result=1
 python3 tools/run_vpn_competing.py || result=1
 python3 tools/run_policy_activation.py || result=1
 python3 tools/run_enrolled_vpn.py || result=1
-python3 tools/run_route_lifecycle.py || result=1
 python3 tools/check_test_evidence.py emulator || result=1
 exit "$result"
 
