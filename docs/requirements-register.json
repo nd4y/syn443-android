@@ -272,7 +272,10 @@
       "status": "partial",
       "evidence": [
         "docs/provisioning-retry.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/bootstrap-trust.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/BootstrapTrust.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt"
       ]
     },
     {
@@ -511,7 +514,10 @@
       "status": "partial",
       "evidence": [
         "docs/managed-policy.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/bootstrap-trust.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/BootstrapTrust.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt"
       ]
     },
     {
@@ -2152,7 +2158,10 @@
         "docs/managed-policy.md",
         "docs/enrollment-pilot.md",
         "docs/identity-lifecycle.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/bootstrap-trust.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/BootstrapTrust.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt"
       ]
     },
     {
