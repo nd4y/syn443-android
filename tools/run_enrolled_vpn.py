@@ -105,7 +105,19 @@ def main():
                     else:
                         await_condition(lambda:call('status')['policy']['phase']=='applying' and proxy.route_probes>probes,60)
                         call('disconnect');await_condition(stopped);generation_after=call('status')['generation'];time.sleep(5)
-                        state=call('status');assert not state['desiredOn'] and state['generation']==generation_after and state['policy']['activeRevision']==1 and stopped()
+                        state=call('status')
+                        assert not state['desiredOn'] and state['generation']==generation_after and stopped()
+                        # A trial permit authorizes only the candidate; the previous active
+                        # envelope is intentionally not reported as a usable current permit.
+                        assert state['policy']['phase'] in ('applying','rolled_back')
+                        assert state['policy'].get('activeRevision') in (None,1)
+                        # Prove the durable pointer survived, rather than mistaking an
+                        # unavailable runtime-view field for a committed revision.
+                        fixture.policy_status=503;controller=pid(':controller');call('fault-controller')
+                        await_condition(lambda:pid(':controller') not in ('',controller) and
+                            call('status')['policy']['phase']=='rolled_back' and
+                            call('status')['policy'].get('activeRevision')==1 and not call('auth-status')['busy'],45)
+                        assert call('status')['generation']==generation_after and not call('status')['desiredOn'] and stopped()
                     proxy.delay=0
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
                     fixture.policy_status=403;call('policy-refresh')
