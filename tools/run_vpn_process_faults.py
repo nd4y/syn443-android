@@ -131,6 +131,13 @@ def main():
         adb('shell', 'appops', 'set', PACKAGE, 'ACTIVATE_VPN', 'allow')
         adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
         call('disconnect')
+        await_condition(lambda: not pid(':engine') and not call('status')['engineActive'], timeout=30)
+        # Independent emulator suite: do not inherit the preceding lifecycle
+        # suite's legitimate restart spending. Never reset within this suite:
+        # its controller/native death sequence must exhaust the real limit.
+        call('policy-test-reset')
+        call('test-reset')
+        assert call('status').get('heavyWallMs', []) == []
         case = ET.SubElement(suite, 'testcase', classname='io.syn443.android.ExternalVpnProcessTest',
                              name='missingVpnConsentPreservesIntentWithoutStartingForegroundService')
         try:
