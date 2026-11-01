@@ -224,6 +224,11 @@ jobs:
           bash -n tools/prepare_media_tools.sh
           bash tools/prepare_media_tools.sh
           python3 tools/generate_chat_media_fixture.py
+      - name: Compile before starting the emulator
+        run: |
+          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+          ./gradlew --stop
+          free -m
       - name: Start ADB before emulator
         run: adb version && adb start-server
       - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808

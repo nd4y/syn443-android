@@ -5,6 +5,10 @@ collect_diagnostics() {
   result=$?
   trap - EXIT
   python3 tools/print_emulator_reports.py || true
+  printf '\n=== Disposable runner memory/disk ===\n'
+  free -m || true
+  df -h / || true
+  sudo dmesg | tail -80 | sed -n '/[Oo]ut of memory\|[Kk]illed process\|oom-kill/p' || true
   printf '\n=== Android crash buffer (diagnostics only) ===\n'
   timeout 20s adb logcat -b crash -d || true
   printf '\n=== Android service state (diagnostics only) ===\n'
@@ -17,7 +21,8 @@ adb shell getprop ro.build.version.sdk
 adb shell df -h /data
 # Disposable emulator only: prove the app stays dark with light system settings.
 adb shell cmd uimode night no
-./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+test -f app/build/outputs/apk/debug/app-debug.apk
+test -f app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 # Permission changes happen before the instrumentation process exists.
 adb shell appops set io.syn443.android ACTIVATE_VPN allow
@@ -27,7 +32,7 @@ fi
 result=0
 # Capture the actual failing assertion before long native fault scenarios. A
 # failed instrumentation run cannot satisfy the mandatory evidence gate anyway.
-if ! ./gradlew :app:connectedDebugAndroidTest --info --stacktrace; then
+if ! ./gradlew :app:connectedDebugAndroidTest --info --stacktrace --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8'; then
   python3 tools/print_emulator_reports.py || true
   exit 1
 fi
