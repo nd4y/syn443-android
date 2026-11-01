@@ -33,8 +33,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 25
-        versionName = "0.6.0-recovery-diagnostics"
+        versionCode = 26
+        versionName = "0.7.0-route-lifecycle"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }

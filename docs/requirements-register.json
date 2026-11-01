@@ -757,7 +757,10 @@
       "evidence": [
         "docs/m1-vpn.md",
         "docs/health-attribution.md",
-        "docs/fatal-recovery.md"
+        "docs/fatal-recovery.md",
+        "docs/route-lifecycle.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
+        "tools/run_route_lifecycle.py"
       ],
       "text": "UI, плитка, уведомление и status API отдельно показывают сохранённое намерение и факты: «Работает», «Частично работает», «Ожидание сети», «Повтор через N», «Требуется действие пользователя» с конкретной причиной. Online/Connected допустим только после required checks актуального поколения; наличие VpnService/TUN или desiredOn=true недостаточно. Следующий допуск указывается с оговоркой ожидания сети/ОС; после срока он пересчитывается без ложного обещания точного пробуждения. Невалидная конфигурация, NeedsPermission/NeedsUnlock/NeedsLogin и запрет запуска отображаются без частого retry. Даже при выключенном подробном логировании сохраняется bounded редактированный поток диагностических событий: intent/config/network/engine generations без приватных идентификаторов, слой/код отказа, попытка/решение/бюджет и следующий допуск/условие возобновления; секреты, raw endpoints и пользовательский трафик не записываются. Публикация/сбор телеметрии сохраняет действующие consent/retention/redaction ограничения."
     },
@@ -1148,8 +1151,12 @@
     {
       "id": "CHK-06",
       "text": "Пробы маршрута обязаны использовать его фактическую цепочку и физическую сеть. ICMP напрямую к входной ноде не считается ICMP до назначения через TCP-only proxy chain. Если метод не проходит через этот путь, конфиг отклоняется как unsupported; замена на TCP/HTTP возможна только явно указанным профилем/веткой.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
+        "tools/run_route_lifecycle.py"
+      ]
     },
     {
       "id": "CHK-07",
@@ -1172,8 +1179,12 @@
     {
       "id": "CHK-10",
       "text": "Результаты оцениваются по своему profile/version/path/networkEpoch; для одной цели могут существовать независимые методы. Отказ check endpoint отслеживается отдельно от proxy, с резервными целями/кворумом и сроком. Успех на одном protocol/IP family не переносится на другой.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
+        "tools/run_route_lifecycle.py"
+      ]
     },
     {
       "id": "CHK-11",
@@ -1995,7 +2006,10 @@
       "text": "Lifecycle table ниже является обязательным контрактом для boot locked/unlocked, app/native/service/controller process death, permission revoke, competing VPN, airplane/NoNetwork, Doze, APK update, logout и explicit Stop. На каждом разрешённом restart до побочных эффектов читаются REC-01, последний intentGeneration, валидность config/lease и реальные OS permission/always-on/lockdown. До unlock недоступные credential-encrypted секреты не обходятся; состояние NeedsUnlock честное. Повторный NetBird enrollment или сброс retry budgets из-за рестарта запрещён. Результат зависит от разрешённого ОС триггера: гарантированный самозапуск после любого уничтожения не обещается.",
       "status": "partial",
       "evidence": [
-        "docs/managed-policy.md"
+        "docs/managed-policy.md",
+        "docs/route-lifecycle.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
+        "tools/run_route_lifecycle.py"
       ]
     },
     {
@@ -2584,7 +2598,10 @@
       "id": "AC88",
       "status": "partial",
       "evidence": [
-        "docs/m1-vpn.md"
+        "docs/m1-vpn.md",
+        "docs/route-lifecycle.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
+        "tools/run_route_lifecycle.py"
       ],
       "specRow": " Cold start/reboot до и после unlock, Force stop, revoke, другой VPN, системные Always-on/lockdown и более новый Stop | Таблица ENG-02 подтверждена на целевых API и Pixel: нет обхода пользовательской остановки/OS restrictions, сохранены разрешённые config/identity, NeedsUnlock/NeedsAction честны; системный callback не переопределяет Stop |"
     },

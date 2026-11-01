@@ -25,7 +25,7 @@ object EngineConfig {
             value(0); require(reader.peek() == android.util.JsonToken.END_DOCUMENT)
         }
         val value = JSONObject(raw)
-        require(value.keys().asSequence().all { it in setOf("outbounds", "dns", "route") }) { "unsupported root field" }
+        require(value.keys().asSequence().all { it in setOf("outbounds", "dns", "route", "route_checks") }) { "unsupported root field" }
         val outbounds = value.getJSONArray("outbounds")
         require(outbounds.length() in 1..64)
         val tags = mutableSetOf<String>()
@@ -41,6 +41,7 @@ object EngineConfig {
         }
         val final = value.optJSONObject("route")?.optString("final").orEmpty()
         require(final.isEmpty() || final in tags)
+        RouteSnapshot.validate(value)
     }
     /** Overlay state must acquire an account namespace before managed enrollment advertises it. */
     fun validateAssigned(raw:String) {
@@ -50,6 +51,7 @@ object EngineConfig {
     }
     fun render(raw: String?, stateRoot: java.io.File): String {
         val value = if (raw == null) JSONObject("""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}""") else JSONObject(raw).also { validate(raw) }
+        value.remove("route_checks") // Client metadata is not a sing-box option.
         value.put("log", JSONObject().put("disabled", true))
         val outbounds = value.getJSONArray("outbounds")
         for (i in 0 until outbounds.length()) {

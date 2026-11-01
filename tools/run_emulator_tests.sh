@@ -41,6 +41,7 @@ python3 tools/run_vpn_fatal.py || result=1
 python3 tools/run_vpn_competing.py || result=1
 python3 tools/run_policy_activation.py || result=1
 python3 tools/run_enrolled_vpn.py || result=1
+python3 tools/run_route_lifecycle.py || result=1
 python3 tools/check_test_evidence.py emulator || result=1
 exit "$result"
 

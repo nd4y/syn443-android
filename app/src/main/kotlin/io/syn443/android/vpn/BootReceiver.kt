@@ -6,6 +6,9 @@ import android.content.Intent
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // Locked boot is observed without touching credential-encrypted state.
+        // The Direct-Boot-aware status provider reports NeedsUnlock/unknown intent.
+        if(!LifecycleAccess.unlocked(context))return
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         val store = StateStore.get(context)
         if (!store.checkpoint().desiredOn) return

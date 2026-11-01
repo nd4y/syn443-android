@@ -18,7 +18,10 @@ import javax.crypto.spec.GCMParameterSpec
 class StateStore private constructor(context: Context) {
     companion object {
         @Volatile private var instance: StateStore? = null
-        @Synchronized fun get(context: Context): StateStore = instance ?: StateStore(context.applicationContext).also { instance = it }
+        @Synchronized fun get(context: Context): StateStore {
+            check(LifecycleAccess.unlocked(context)) {"credential_storage_locked"}
+            return instance ?: StateStore(context.applicationContext).also { instance = it }
+        }
     }
     private val directory = context.noBackupFilesDir
     private val policyStore = RuntimePolicies(context)

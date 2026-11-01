@@ -4,13 +4,16 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	netbird "io.syn443/engine-netbird"
 	"net"
 	"net/netip"
 	"runtime/debug"
 	"sync"
 	"syscall"
+	"time"
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
@@ -46,6 +49,7 @@ type Runtime struct {
 	box      *box.Box
 	cancel   context.CancelFunc
 	platform *platform
+	routes   *routeRunner
 }
 
 func NewRuntime(config string, fd int32, protector Protector, name string, index int32, leaseDeadline int64) (*Runtime, error) {
@@ -93,11 +97,43 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 		cancel()
 		return nil, errors.New("engine construction failed")
 	}
-	return &Runtime{instance, cancel, p}, nil
+	r := &Runtime{box: instance, cancel: cancel, platform: p}
+	r.routes = newRouteRunner(ctx, func(tag string) (adapter.Outbound, bool) { return instance.Outbound().Outbound(tag) })
+	r.routes.limit = func() time.Duration {
+		if !guard.allowed() {
+			return 0
+		}
+		s := guard.state.Load()
+		remaining := int64(30_000)
+		if s.deadline > 0 && s.deadline-guard.clock() < remaining {
+			remaining = s.deadline - guard.clock()
+		}
+		if remaining <= 0 {
+			return 0
+		}
+		return time.Duration(remaining) * time.Millisecond
+	}
+	var routeConfig struct {
+		Outbounds []struct {
+			Tag    string `json:"tag"`
+			Detour string `json:"detour"`
+		} `json:"outbounds"`
+	}
+	_ = json.Unmarshal([]byte(config), &routeConfig)
+	r.routes.nodes = map[string]routeNode{}
+	for i, node := range routeConfig.Outbounds {
+		r.routes.nodes[node.Tag] = routeNode{ID: fmt.Sprintf("route-%d", i+1), Detour: node.Detour}
+	}
+	return r, nil
 }
 func (e *Runtime) Start() error { return e.box.Start() }
-func (e *Runtime) Cancel()      { e.cancel() }
-func (e *Runtime) Close() error { e.cancel(); return e.box.Close() }
+func (e *Runtime) Cancel()      { e.routes.stop(); e.cancel() }
+func (e *Runtime) Close() error { e.Cancel(); return e.box.Close() }
+
+// Bounded asynchronous probes never run on the native control/heartbeat worker.
+func (e *Runtime) StartRouteChecks(request string) bool { return e.routes.start(request) }
+func (e *Runtime) RouteCheckStatus() string             { return e.routes.snapshot() }
+func (e *Runtime) CancelRouteChecks()                   { e.routes.stop() }
 
 // The supervisor additionally checks actual HTTPS data-path progress; this is only runtime liveness.
 func (e *Runtime) Pulse() int64 { return 1 }

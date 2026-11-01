@@ -119,4 +119,13 @@ func protectTun(t tun.Tun, g *leaseGuard) tun.Tun {
 
 // The controller derives this from authenticated absolute expiry and CLOCK_BOOTTIME.
 // No wakeup/periodic timer is needed to deny packets after a suspended device wakes.
-func (e *Runtime) SetLeaseDeadline(deadline int64) error { return e.platform.lease.set(deadline) }
+func (e *Runtime) SetLeaseDeadline(deadline int64) error {
+	previous := e.platform.lease.state.Load()
+	if err := e.platform.lease.set(deadline); err != nil {
+		return err
+	}
+	if e.routes != nil && deadline > 0 && (previous == nil || previous.deadline == 0 || deadline < previous.deadline) {
+		e.routes.stop()
+	}
+	return nil
+}

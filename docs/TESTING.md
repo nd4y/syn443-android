@@ -69,3 +69,12 @@ The callback durably cancels intent and its OS marker, then posts retirement to 
 See [fatal recovery](fatal-recovery.md). Seven additional Android cases cover bounded/redacted exit metadata and visible on-demand UI. Four external cases require actual uncaught Java/Go faults, owner-death evidence, synthetic real-TUN recovery and persistent crash budgets/Stop precedence. All122 outcomes are mandatory on API29/35/37, retaining all prior110. Phone acceptance remains separate.
 
 The test APK includes an independent UID/TUN fixture restricted to documentation-network addresses. The real competing-owner case transfers Android VPN authorization, requires the original engine to drain with no retry fight across controller death, then explicitly reconnects. Emulator preauthorization is confined to a hardware-gated driver; physical phones use visible controls and the ordinary system VPN dialog. The fixture is absent from the client APK.
+
+### Per-route evidence and OS lifecycle (v26)
+
+See [route/lifecycle contract](route-lifecycle.md). Six recovery JVM methods, seven
+Android metadata/UI cases and eight external actual-route/OS cases are mandatory.
+Every API29/35/37 emulator requires137 passing outcomes, retaining the previous122.
+Real package replacement, secure boot/unlock and ordinary Settings Always-on/
+lockdown are exercised on disposable emulators. Physical credentials are never
+changed to simulate locked boot. Xperia USB/Wi-Fi evidence remains separate.

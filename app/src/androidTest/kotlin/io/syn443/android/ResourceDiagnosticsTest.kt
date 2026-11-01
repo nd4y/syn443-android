@@ -10,6 +10,17 @@ import androidx.compose.ui.test.*
 /** Safe on a configured physical phone: no imports, Connect, Stop or fault injection. */
 class ResourceDiagnosticsTest {
     @get:org.junit.Rule val compose = androidx.compose.ui.test.junit4.createAndroidComposeRule<MainActivity>()
+    @Test fun routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent() {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val uri="content://io.syn443.control".toUri()
+        val before=JSONObject(checkNotNull(context.contentResolver.call(uri,"status",null,null)?.getString("json")))
+        compose.onNodeWithTag("routes-title").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("routes-check").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("os-vpn-policy").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("vpn-system-settings").performScrollTo().assertIsDisplayed()
+        val after=JSONObject(checkNotNull(context.contentResolver.call(uri,"status",null,null)?.getString("json")))
+        assertEquals(before.getLong("generation"),after.getLong("generation"));assertEquals(before.getBoolean("desiredOn"),after.getBoolean("desiredOn"))
+    }
     @Test fun engineExitHistoryHasVisibleOnDemandControls() {
         compose.onNodeWithTag("exit-refresh").performScrollTo().performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("exit-status").fetchSemanticsNodes().isNotEmpty() }

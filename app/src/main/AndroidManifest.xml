@@ -38,11 +38,11 @@
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE" android:exported="true">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
         </service>
-        <receiver android:name=".vpn.BootReceiver" android:exported="false" android:process=":controller">
-            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+        <receiver android:name=".vpn.BootReceiver" android:exported="false" android:process=":controller" android:directBootAware="true">
+            <intent-filter><action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" /><action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
         </receiver>
         <provider android:name=".vpn.ControlProvider" android:authorities="io.syn443.control"
-            android:exported="false" android:process=":controller" />
+            android:exported="false" android:process=":controller" android:directBootAware="true" />
     </application>
 </manifest>
 

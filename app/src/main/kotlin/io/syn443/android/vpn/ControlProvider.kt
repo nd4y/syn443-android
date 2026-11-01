@@ -15,13 +15,18 @@ import io.syn443.recovery.Recovery
 class ControlProvider : ContentProvider() {
     private val resources by lazy { ResourceDiagnostics(checkNotNull(context).applicationContext) }
     companion object { @Volatile var explicitConnectInProcess = false }
-    override fun onCreate(): Boolean {
+    private var initialized=false
+    @Synchronized private fun initializeUnlocked() {
+        if(initialized)return
+        check(LifecycleAccess.unlocked(checkNotNull(context)))
         val store = StateStore.get(checkNotNull(context))
         OsIntentGate.observe(checkNotNull(context), store)
         if (store.checkpoint().desiredOn) store.event(if (store.read().optBoolean("resumeRequired")) "NeedsAction" else "Recovering", if (store.read().optBoolean("resumeRequired")) "explicit_resume_required" else "controller_recreated", store.read().optLong("networkEpoch"))
         LoginController.get(checkNotNull(context)).recover()
-        return true
+        runCatching {RouteSnapshot.configure(store.config(),store.read().optString("configRevision"))}
+        initialized=true
     }
+    override fun onCreate(): Boolean = true
     private fun requestReconcile(context: android.content.Context, store: StateStore, action: String = TunnelService.RECONCILE) {
         // A missing VPN grant also removes Android's background FGS exemption.
         // Persist intent, but wait for the ordinary Activity permission dialog.
@@ -35,8 +40,13 @@ class ControlProvider : ContentProvider() {
         val context = checkNotNull(context)
         val caller = Binder.getCallingUid()
         require(caller == Process.myUid() || (io.syn443.android.BuildConfig.DEBUG && caller == 2000)) { "unauthorized caller" }
-        val store = StateStore.get(context)
+        if(!LifecycleAccess.unlocked(context))return Bundle().apply {
+            putBoolean("ok",method=="status")
+            if(method=="status")putString("json",LifecycleAccess.lockedStatus().toString()) else putString("error","needs_unlock")
+        }
         return try {
+            initializeUnlocked()
+            val store = StateStore.get(context)
             when (method) {
                 "chat-start" -> {
                     require(caller==Process.myUid());val input=requireNotNull(extras)
@@ -117,6 +127,7 @@ class ControlProvider : ContentProvider() {
                         } finally { file.delete() }
                     } else Base64.decode(requireNotNull(arg), Base64.NO_WRAP).toString(Charsets.UTF_8)
                     store.importConfig(raw)
+                    RouteSnapshot.configure(raw,store.read().optString("configRevision"))
                 }
                 "connect", "disconnect" -> {
                     val on = method == "connect"
@@ -146,6 +157,12 @@ class ControlProvider : ContentProvider() {
                 "netbird-diagnose" -> {
                     require(store.checkpoint().desiredOn)
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
+                }
+                "routes-status" -> return Bundle().apply {putBoolean("ok",true);putString("json",RouteSnapshot.view(store.read()).toString())}
+                "routes-check", "routes-cancel" -> {
+                    require(store.checkpoint().desiredOn && store.read().optBoolean("engineActive"))
+                    require(arg==null || (method=="routes-check" && Regex("route-[1-9][0-9]?").matches(arg)))
+                    context.startService(Intent(context,TunnelService::class.java).setAction(method).also {if(arg!=null)it.putExtra("routeId",arg)})
                 }
                 "fault-ui", "fault-controller" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
@@ -180,7 +197,7 @@ class ControlProvider : ContentProvider() {
                 else -> error("unknown command")
             }
             val result = store.read()
-            if (method == "status") result.put("netbird", OverlaySnapshot.read()).put("policy", RuntimePolicies(context).status())
+            if (method == "status") result.put("netbird", OverlaySnapshot.read()).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",LifecycleAccess.policy(context))
             Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
         } catch (_: Exception) {
             Bundle().apply { putBoolean("ok", false); putString("error", "command_rejected") }

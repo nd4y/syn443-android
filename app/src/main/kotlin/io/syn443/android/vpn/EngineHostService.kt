@@ -81,6 +81,7 @@ class EngineHostService : Service() {
             worker.post { if (session == token && engine?.pulse() == 1L) {
                 callback?.event(session, PULSE)
                 engine?.netBirdStatus()?.let { callback?.overlayState(session, it) }
+                engine?.routeCheckStatus()?.let { callback?.routeState(session, it) }
             } }
         }
         override fun networkChanged(session: String, name: String, index: Int) {
@@ -103,6 +104,18 @@ class EngineHostService : Service() {
             if (session != token) return
             worker.post { if (session == token) engine?.diagnoseNetBird() }
         }
+        override fun checkRoutes(session:String,request:String) {
+            if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid() || request.length>32768)return
+            worker.post {if(session==token) {
+                val accepted=engine?.startRouteChecks(request)==true
+                val report=if(accepted) engine?.routeCheckStatus() else org.json.JSONObject().put("request",org.json.JSONObject(request).getString("request")).put("running",false).put("results",org.json.JSONArray()).toString()
+                report?.let {callback?.routeState(session,it)}
+            }}
+        }
+        override fun cancelRouteChecks(session:String) {
+            if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid())return
+            worker.post {if(session==token)engine?.cancelRouteChecks()}
+        }
     }
     @Volatile private var callback: IPlatform? = null
     override fun onBind(intent: Intent): IBinder = object : IEngineHost.Stub() {
@@ -114,6 +127,8 @@ class EngineHostService : Service() {
         override fun stop(token: String) = binder.stop(token)
         override fun pulse(token: String) = binder.pulse(token)
         override fun diagnoseNetBird(token: String) = binder.diagnoseNetBird(token)
+        override fun checkRoutes(token:String,request:String)=binder.checkRoutes(token,request)
+        override fun cancelRouteChecks(token:String)=binder.cancelRouteChecks(token)
         override fun debugFatal(token: String, kind: String) = binder.debugFatal(token, kind)
         override fun networkChanged(token: String, name: String, index: Int) = binder.networkChanged(token, name, index)
     }

@@ -112,7 +112,6 @@ fun VpnControls(consentGeneration: Long = -1) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("VPN: " + if (status.optBoolean("desiredOn")) "включён пользователем" else "выключен", Modifier.testTag("vpn-intent"))
-        if (status.optBoolean("alwaysOn") || status.optBoolean("lockdown")) Text("Android: Always-on=${status.optBoolean("alwaysOn")}; блокировка без VPN=${status.optBoolean("lockdown")}. Управляется в настройках Android.")
         if (status.optBoolean("testHealth")) Text("ТЕСТОВЫЙ СТЕНД: синтетический HTTP, проверка TLS не выполняется")
         Text(when (status.optString("phase")) {
             "Online" -> "Работает"
@@ -122,6 +121,7 @@ fun VpnControls(consentGeneration: Long = -1) {
             "Recovering" -> "Восстанавливаем соединение"
             "Connecting" -> "Подключаемся"
             "NeedsPermission", "NeedsAction" -> "Требуется действие пользователя"
+            "NeedsUnlock" -> "Нужно разблокировать телефон"
             else -> "Отключён"
         }, Modifier.testTag("vpn-status"))
         if (status.optString("reason").isNotEmpty()) Text("Диагностика: " + status.optString("reason"))
@@ -167,6 +167,7 @@ fun VpnControls(consentGeneration: Long = -1) {
         if (status.optBoolean("desiredOn") && next > System.currentTimeMillis()) Text("Повтор не ранее чем через ${(next - System.currentTimeMillis()) / 1_000} с, при доступной сети")
         Button(onClick = { requestConnect() }, modifier = Modifier.testTag("vpn-connect")) { Text("Подключиться") }
         Button(onClick = { command("disconnect") }, modifier = Modifier.testTag("vpn-disconnect")) { Text("Отключить") }
+        RouteControls(status){method,arg->command(method,arg)}
         Button(onClick = {
             resourcesBusy = true
             scope.launch {

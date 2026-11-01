@@ -96,5 +96,10 @@ unsupported overlay configuration is rejected, never silently removed. The full
 control panel remains gated on these checks. Do not use the development APK as
 a claim of complete provisioning, traffic-leak protection or production readiness.
 
+The [v26 route/lifecycle stage](route-lifecycle.md) implements bounded per-outbound
+assigned-target evidence and Direct Boot/actual OS policy visibility. Its new CI
+and physical acceptance must pass independently. Complete routing-rule predicate
+coverage, physical cellular, energy and endurance are not implied by those rows.
+
 
 System revocation persists Off and cancels its OS intent marker before scheduling ownership changes on main. It retains the bounded drain until native exit, so a late onDestroy cannot strand engineActive=true. Cleanup retires an older owner even when a newer Connect is waiting for permission, and cannot retire an owner already started for a newer generation. Framework permission revocation is distinct from the emulator-only callback injection used for deterministic CI.
