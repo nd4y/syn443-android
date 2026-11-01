@@ -101,6 +101,15 @@ package replacement. The synthetic PIN is confined to disposable emulators and
 is never set on a physical phone. Existing process/revocation/enrollment scenarios
 remain mandatory. Minimum137 outcomes on each API29/35/37; recovery JVM minimum14.
 
+The emulator reboot driver requires an advanced Android boot counter. If the
+owned host VM exits during reboot, it may cold-start that same AVD once using its
+preserved userdata and port, without wiping data, clearing the PIN or replaying
+Reboot/Connect. A live but unreachable VM is never replaced. The same150s boot
+budget and every locked/unlocked/config/intent/budget assertion remain required.
+PIN input waits for the real SystemUI keypad and verifies user unlock before
+expecting recovery. CI uses the supported software renderer; the former
+`swiftshader_indirect` mode is deprecated in [Android Emulator documentation](https://developer.android.com/studio/run/emulator-acceleration).
+
 Physical Xperia acceptance remains separate and pending for this stage. The phone's
 credentials must not be changed to manufacture a locked-boot test. USB/Wi-Fi can
 verify supported reboot/update/force-stop/system-policy behavior and real external/

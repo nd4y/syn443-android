@@ -9,7 +9,8 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from run_vpn_process_faults import ROOT, PACKAGE, Server, Proxy, adb, call, pid, await_condition
-from emulator_policy_ui import open_policy, toggle
+from emulator_policy_ui import open_policy, toggle, unlock_test_pin
+from emulator_boot import reboot_preserved
 
 
 class RouteProxy(socketserver.BaseRequestHandler):
@@ -56,8 +57,7 @@ def main():
         call('connect');await_condition(lambda:call('status')['phase']=='Online' and servers[0].progress>0,150)
     def row(index):return call('routes-status')['routes'][index]
     def reboot():
-        adb('reboot');adb('wait-for-device',timeout=150)
-        await_condition(lambda:adb('shell','getprop','sys.boot_completed').strip()==b'1',150);forward()
+        reboot_preserved(adb);forward()
     def new_case(name):return ET.SubElement(suite,'testcase',classname='io.syn443.android.RouteLifecycleTest',name=name)
     try:
         case=new_case('routeChecksUseActualOutboundsAndSelectedProxy')
@@ -102,10 +102,8 @@ def main():
         answer=adb('shell','locksettings','set-pin','2468');assert b'set to' in answer.lower();pin_set=True
         reboot();await_condition(lambda:call('status').get('phase')=='NeedsUnlock',60)
         locked=call('status');assert locked['desiredOn'] is None and not locked['desiredOnKnown'] and not locked['engineActive'] and not pid(':engine')
-        adb('shell','input','keyevent','KEYCODE_WAKEUP')
-        width,height=map(int,re.findall(r'(\d+)x(\d+)',adb('shell','wm','size').decode())[-1])
-        adb('shell','input','swipe',str(width//2),str(height*9//10),str(width//2),str(height//3),'300')
-        adb('shell','input','text','2468');adb('shell','input','keyevent','KEYCODE_ENTER')
+        unlock_test_pin()
+        await_condition(lambda:call('status').get('osPolicy',{}).get('unlocked') is True,30)
         await_condition(lambda:call('status').get('phase')=='Online',150)
         after=call('status');assert after['configRevision']==before['configRevision'] and after['generation']==before['generation']
         assert set(before.get('heavyWallMs',[])).issubset(after.get('heavyWallMs',[]))
@@ -135,6 +133,11 @@ def main():
         assert after['generation']==before['generation'];call('connect');await_condition(lambda:call('status')['phase']=='Online',150)
         print(case.get('name')+': passed',flush=True)
     except Exception as error:
+        try:
+            snapshot=call('status')
+            print('Route lifecycle failure state: '+json.dumps({k:snapshot.get(k) for k in ('phase','reason','desiredOn','generation','resumeRequired','osPolicy')}),flush=True)
+            print('Route lifecycle evidence: '+json.dumps([{k:r.get(k) for k in ('id','state','reason')} for r in snapshot.get('routeHealth',{}).get('routes',[])]),flush=True)
+        except Exception as diagnostic:print('Route lifecycle diagnostic unavailable: '+type(diagnostic).__name__,flush=True)
         if case is not None:ET.SubElement(case,'failure',message=type(error).__name__).text=str(error)
         raise
     finally:

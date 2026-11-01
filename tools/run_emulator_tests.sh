@@ -8,7 +8,9 @@ collect_diagnostics() {
   printf '\n=== Disposable runner memory/disk ===\n'
   free -m || true
   df -h / || true
-  sudo dmesg | tail -80 | sed -n '/[Oo]ut of memory\|[Kk]illed process\|oom-kill/p' || true
+  sudo dmesg | tail -200 | sed -n '/[Oo]ut of memory\|[Kk]illed process\|oom-kill\|segfault\|general protection\|qemu-system/p' || true
+  ps -C qemu-system-x86_64 -o pid=,stat=,rss=,etimes=,comm= || true
+  if [ -f "$RUNNER_TEMP/syn443-preserved-emulator.log" ]; then tail -40 "$RUNNER_TEMP/syn443-preserved-emulator.log"; fi
   printf '\n=== Android crash buffer (diagnostics only) ===\n'
   timeout 20s adb logcat -b crash -d || true
   printf '\n=== Android service state (diagnostics only) ===\n'

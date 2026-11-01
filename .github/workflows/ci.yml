@@ -188,6 +188,9 @@ jobs:
             cores: 4
             disk: 8G
             options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim -no-metrics -show-kernel
+    env:
+      SYN443_CI_AVD: syn443-ci
+      SYN443_CI_EMULATOR_OPTIONS: ${{ matrix.options || '-no-window -gpu software -no-snapshot -noaudio -no-boot-anim -no-metrics -feature -Vulkan -show-kernel' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -244,7 +247,7 @@ jobs:
           cores: ${{ matrix.cores || 2 }}
           disk-size: ${{ matrix.disk || '8G' }}
           emulator-boot-timeout: 900
-          emulator-options: ${{ matrix.options || '-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -no-metrics -feature -Vulkan -show-kernel' }}
+          emulator-options: ${{ env.SYN443_CI_EMULATOR_OPTIONS }}
           script: bash tools/run_emulator_tests.sh
       - name: Scan emulator report payloads
         id: emulator-scan
