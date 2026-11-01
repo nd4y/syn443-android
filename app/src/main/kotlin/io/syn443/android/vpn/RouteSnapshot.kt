@@ -27,7 +27,7 @@ object RouteSnapshot {
     private var revision = ""
     private val methods=setOf("tcp","tls","https_204","ssh_banner")
     private var measuredPaths=emptyMap<String,JSONArray>()
-    private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","path_changed","check_timeout")
+    private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","path_changed","check_timeout","probe_unavailable")
     fun validate(config: JSONObject) {
         if(!config.has("route_checks"))return
         val settings=config.getJSONArray("route_checks")

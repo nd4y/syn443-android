@@ -169,3 +169,65 @@ func TestRouteSSHFlushesLazyProxyRequestBeforeReadingServerBanner(t *testing.T) 
 		t.Fatal("server-first probe did not complete its lazy proxy handshake")
 	}
 }
+
+func TestRouteSuspendCannotRefreshAnOldBufferedSuccess(t *testing.T) {
+	var now int64 = 100
+	dial := func(context.Context, string, M.Socksaddr) (net.Conn, error) {
+		a, b := net.Pipe()
+		now += 60_000
+		go b.Close()
+		return a, nil
+	}
+	code, complete := probeRouteWithClock(context.Background(), dial, routeCheck{"tcp", "192.0.2.1:443"}, nil, func() int64 { return now })
+	if code != "check_timeout" || complete {
+		t.Fatal("suspend converted old data into a fresh success")
+	}
+}
+func TestRouteLeaseExpiryAfterDialCannotPublishSuccess(t *testing.T) {
+	var allowed atomic.Bool
+	allowed.Store(true)
+	outbound := routeTestOutbound{dial: func(context.Context, string, M.Socksaddr) (net.Conn, error) {
+		a, b := net.Pipe()
+		allowed.Store(false)
+		go b.Close()
+		return a, nil
+	}}
+	r := newRouteRunner(context.Background(), func(string) (adapter.Outbound, bool) { return outbound, true })
+	r.limit = func() time.Duration {
+		if allowed.Load() {
+			return 30 * time.Second
+		}
+		return 0
+	}
+	result := r.runPlan(context.Background(), routePlan{ID: "route-1", Outbound: "test", Checks: []routeCheck{{"tcp", "192.0.2.1:443"}}})
+	if result.OK || result.Complete || result.Code != "cancelled" {
+		t.Fatal("expired authorization published route readiness")
+	}
+}
+func TestRouteExpiredBootBudgetDoesNotDialAndProbePanicCannotKillOtherRoute(t *testing.T) {
+	calls := 0
+	outbound := routeTestOutbound{dial: func(context.Context, string, M.Socksaddr) (net.Conn, error) {
+		calls++
+		panic("synthetic probe failure")
+	}}
+	r := newRouteRunner(context.Background(), func(string) (adapter.Outbound, bool) { return outbound, true })
+	p := routePlan{ID: "route-1", Outbound: "test", Checks: []routeCheck{{"tcp", "192.0.2.1:443"}}}
+	closed := r.runPlan(context.WithValue(context.Background(), routeDeadlineKey{}, bootMillis()-1), p)
+	if closed.OK || closed.Complete || calls != 0 {
+		t.Fatal("expired batch admitted work")
+	}
+	failed := r.runPlan(context.Background(), p)
+	if failed.OK || failed.Complete || failed.Code != "probe_unavailable" {
+		t.Fatal("probe panic was not contained")
+	}
+	r.lookup = func(string) (adapter.Outbound, bool) {
+		return routeTestOutbound{dial: func(context.Context, string, M.Socksaddr) (net.Conn, error) {
+			a, b := net.Pipe()
+			go b.Close()
+			return a, nil
+		}}, true
+	}
+	if next := r.runPlan(context.Background(), p); !next.OK || !next.Complete {
+		t.Fatal("one probe exception poisoned independent work")
+	}
+}

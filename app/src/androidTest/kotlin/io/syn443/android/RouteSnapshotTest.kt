@@ -49,6 +49,7 @@ class RouteSnapshotTest {
         EngineConfig.validate(config)
         val invalid=listOf(config.replace("https_204","icmp"),config.replace("https://probe.example.org/generate_204","http://probe.example.org/"),config.replace("192.0.2.9:22","192.0.2.9:65536"),config.replace("\"outbound\":\"internal\"","\"outbound\":\"public\""),config.replace("\"required\":true","\"required\":\"yes\""))
         for(raw in invalid)assertThrows(IllegalArgumentException::class.java){EngineConfig.validate(raw)}
+        assertThrows(IllegalArgumentException::class.java){EngineConfig.validate(config.replace("\"tag\":\"unused\"","\"tag\":\""+"я".repeat(129)+"\""))}
         val large=JSONObject(config);large.put("route_checks",org.json.JSONArray(listOf("public","internal","unused").map {tag->
             JSONObject().put("outbound",tag).put("checks",org.json.JSONArray(List(4){JSONObject().put("method","https_204").put("target","https://probe.example.org/"+"x".repeat(2000))}))
         }))
@@ -59,6 +60,7 @@ class RouteSnapshotTest {
         val context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
         val rendered=JSONObject(EngineConfig.render(config,context.noBackupFilesDir))
         assertFalse(rendered.has("route_checks"));assertEquals(3,rendered.getJSONArray("outbounds").length())
+        assertThrows(IllegalArgumentException::class.java){EngineConfig.validateAssigned(config)}
     }
     @Test fun lockedBootStatusHasUnknownIntentAndNoCredentialFields() {
         val locked=LifecycleAccess.lockedStatus()

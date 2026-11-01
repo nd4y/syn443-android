@@ -61,6 +61,13 @@ ADB commands: `routes-status`, `routes-check` (optional `route-N` argument),
 `routes-cancel`. These do not Connect or change user intent. `status.routeHealth`
 uses the same memory view as UI. No check starts while Off; unassigned profiles
 are visible. Labels/target settings require ordinary protected configuration import.
+For now profiles are admitted only by the unmanaged M1 configuration import.
+Signed assignment containing this extension is rejected until its activation gate
+can include the same outbound-bound required evidence; it cannot silently commit
+such requirements through the older generic policy-check protocol. Tags are bounded
+to256 UTF-8 bytes. Probe-local exceptions become incomplete `probe_unavailable`
+evidence, with no exception text. Authorization is rechecked at I/O and completion
+using the boot clock, including after suspend.
 
 ## Lifecycle contract
 

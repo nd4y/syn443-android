@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -170,6 +171,13 @@ func (r *routeRunner) start(raw string) bool {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(r.ctx, duration)
+	startedBoot := bootMillis()
+	if startedBoot == math.MaxInt64 {
+		cancel()
+		r.mu.Unlock()
+		return false
+	}
+	ctx = context.WithValue(ctx, routeDeadlineKey{}, startedBoot+duration.Milliseconds())
 	r.cancel = cancel
 	r.serial++
 	serial := r.serial
@@ -185,30 +193,7 @@ func (r *routeRunner) start(raw string) bool {
 			go func() {
 				defer workers.Done()
 				for p := range tasks {
-					start := time.Now()
-					result := routeResult{ID: p.ID, Complete: true, OK: true, Code: "ok", Path: r.path(p.Outbound)}
-					outbound, ok := r.lookup(p.Outbound)
-					if !ok {
-						result.OK = false
-						result.Code = "outbound_unavailable"
-					} else {
-						for _, c := range p.Checks {
-							code, complete := probeRoute(ctx, outbound.DialContext, c)
-							if code != "ok" {
-								result.OK = false
-								result.Code = code
-								result.Complete = complete
-								break
-							}
-						}
-					}
-					if strings.Join(result.Path, "/") != strings.Join(r.path(p.Outbound), "/") {
-						result.Complete = false
-						result.OK = false
-						result.Code = "path_changed"
-					}
-					result.ElapsedMS = time.Since(start).Milliseconds()
-					result.SampledElapsedMS = bootMillis()
+					result := r.runPlan(ctx, p)
 					r.mu.Lock()
 					if r.serial == serial {
 						r.report.Results = append(r.report.Results, result)
@@ -238,10 +223,122 @@ func (r *routeRunner) start(raw string) bool {
 
 type routeDial func(context.Context, string, M.Socksaddr) (net.Conn, error)
 
+func (r *routeRunner) allowed() bool { return r.limit == nil || r.limit() > 0 }
+
+type routeDeadlineKey struct{}
+
+func routeBudgetCurrent(ctx context.Context) bool {
+	deadline, present := ctx.Value(routeDeadlineKey{}).(int64)
+	return ctx.Err() == nil && (!present || bootMillis() < deadline)
+}
+
+type authorizedRouteConn struct {
+	net.Conn
+	allowed func() bool
+}
+
+func (c *authorizedRouteConn) Read(b []byte) (int, error) {
+	if !c.allowed() {
+		return 0, errLeaseExpired
+	}
+	n, e := c.Conn.Read(b)
+	if !c.allowed() {
+		return 0, errLeaseExpired
+	}
+	return n, e
+}
+func (c *authorizedRouteConn) Write(b []byte) (int, error) {
+	if !c.allowed() {
+		return 0, errLeaseExpired
+	}
+	return c.Conn.Write(b)
+}
+func (c *authorizedRouteConn) NeedHandshakeForWrite() bool { return N.NeedHandshakeForWrite(c.Conn) }
+func (r *routeRunner) runPlan(ctx context.Context, p routePlan) (result routeResult) {
+	start := time.Now()
+	result = routeResult{ID: p.ID, Complete: true, OK: true, Code: "ok"}
+	defer func() {
+		if recover() != nil {
+			result.OK = false
+			result.Complete = false
+			result.Code = "probe_unavailable"
+		}
+		// CLOCK_BOOTTIME authorization remains decisive after suspend, even when a
+		// normal monotonic timer did not advance. Never publish an expired success.
+		if !routeBudgetCurrent(ctx) || !r.allowed() {
+			result.OK = false
+			result.Complete = false
+			result.Code = "cancelled"
+		}
+		result.ElapsedMS = time.Since(start).Milliseconds()
+		result.SampledElapsedMS = bootMillis()
+	}()
+	if !r.allowed() || !routeBudgetCurrent(ctx) {
+		result.OK = false
+		result.Complete = false
+		result.Code = "cancelled"
+		return
+	}
+	result.Path = r.path(p.Outbound)
+	outbound, ok := r.lookup(p.Outbound)
+	if !ok {
+		result.OK = false
+		result.Complete = false
+		result.Code = "outbound_unavailable"
+		return
+	}
+	dial := func(c context.Context, n string, a M.Socksaddr) (net.Conn, error) {
+		if !r.allowed() || !routeBudgetCurrent(ctx) {
+			return nil, errLeaseExpired
+		}
+		conn, err := outbound.DialContext(c, n, a)
+		if err != nil {
+			return nil, err
+		}
+		if conn == nil {
+			return nil, nil
+		} // Invalid adapter result is contained by probeRoute.
+		if !r.allowed() || !routeBudgetCurrent(ctx) {
+			conn.Close()
+			return nil, errLeaseExpired
+		}
+		return &authorizedRouteConn{Conn: conn, allowed: func() bool { return r.allowed() && routeBudgetCurrent(ctx) }}, nil
+	}
+	for _, c := range p.Checks {
+		code, complete := probeRoute(ctx, dial, c)
+		if code != "ok" {
+			result.OK = false
+			result.Complete = complete
+			result.Code = code
+			break
+		}
+	}
+	if strings.Join(result.Path, "/") != strings.Join(r.path(p.Outbound), "/") {
+		result.OK = false
+		result.Complete = false
+		result.Code = "path_changed"
+	}
+	return
+}
+
 func probeRoute(parent context.Context, dial routeDial, c routeCheck) (string, bool) {
 	return probeRouteWithRoots(parent, dial, c, nil)
 }
 func probeRouteWithRoots(parent context.Context, dial routeDial, c routeCheck, roots *x509.CertPool) (string, bool) {
+	return probeRouteWithClock(parent, dial, c, roots, bootMillis)
+}
+func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, roots *x509.CertPool, clock func() int64) (code string, complete bool) {
+	started := clock()
+	if started < 0 || started == math.MaxInt64 {
+		return "probe_unavailable", false
+	}
+	defer func() {
+		now := clock()
+		if now < started || now-started > 3000 {
+			code = "check_timeout"
+			complete = false
+		}
+	}()
 	if !validRouteCheck(c) {
 		return "unsupported", false
 	}
@@ -263,6 +360,9 @@ func probeRouteWithRoots(parent context.Context, dial routeDial, c routeCheck, r
 			return "cancelled", false
 		}
 		return "dial_failed", true
+	}
+	if conn == nil {
+		return "outbound_unavailable", false
 	}
 	defer conn.Close()
 	deadline, _ := ctx.Deadline()
