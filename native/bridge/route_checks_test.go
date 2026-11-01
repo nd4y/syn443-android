@@ -128,3 +128,44 @@ func TestParentCancellationIsIncompleteNotAProxyFailure(t *testing.T) {
 		t.Fatal("cancellation poisoned path health")
 	}
 }
+
+func TestRouteDialReturningAfterItsDeadlineCannotBecomeSuccess(t *testing.T) {
+	var peer net.Conn
+	dial := func(ctx context.Context, _ string, _ M.Socksaddr) (net.Conn, error) {
+		<-ctx.Done()
+		a, b := net.Pipe()
+		peer = b
+		return a, nil
+	}
+	code, complete := probeRoute(context.Background(), dial, routeCheck{"tcp", "192.0.2.1:443"})
+	if peer != nil {
+		peer.Close()
+	}
+	if code != "check_timeout" || !complete {
+		t.Fatal("late dial invented a passing observation")
+	}
+}
+
+type earlyRouteConn struct {
+	net.Conn
+	peer   net.Conn
+	writes int
+}
+
+func (c *earlyRouteConn) NeedHandshake() bool { return c.writes == 0 }
+func (c *earlyRouteConn) Write(b []byte) (int, error) {
+	if len(b) != 0 {
+		return c.Conn.Write(b)
+	}
+	c.writes++
+	go func() { defer c.peer.Close(); _, _ = io.WriteString(c.peer, "SSH-2.0-after-proxy-handshake\r\n") }()
+	return 0, nil
+}
+func TestRouteSSHFlushesLazyProxyRequestBeforeReadingServerBanner(t *testing.T) {
+	a, b := net.Pipe()
+	early := &earlyRouteConn{Conn: a, peer: b}
+	code, complete := probeRoute(context.Background(), func(context.Context, string, M.Socksaddr) (net.Conn, error) { return early, nil }, routeCheck{"ssh_banner", "192.0.2.9:22"})
+	if code != "ok" || !complete || early.writes != 1 {
+		t.Fatal("server-first probe did not complete its lazy proxy handshake")
+	}
+}

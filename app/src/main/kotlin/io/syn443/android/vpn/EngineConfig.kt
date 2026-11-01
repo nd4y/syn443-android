@@ -33,7 +33,7 @@ object EngineConfig {
         for (i in 0 until outbounds.length()) {
             val item = outbounds.getJSONObject(i)
             require(item.getString("type") in supported)
-            require(tags.add(item.getString("tag")))
+            require(item.getString("tag").length in 1..256 && tags.add(item.getString("tag")))
             if (item.getString("type") == "netbird") {
                 require(++overlays <= 1) { "one NetBird identity per native process" }
                 require(item.optString("connection_mode", "direct") in setOf("direct", "vless"))

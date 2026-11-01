@@ -31,7 +31,11 @@ class RouteSnapshotTest {
         assertFalse(RouteSnapshot.read(true,true,scope.copy(network=3)).getBoolean("requiredReady"))
     }
     @Test fun duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult() {
-        setup();val first=checkNotNull(RouteSnapshot.request(scope));assertTrue(RouteSnapshot.update(scope,report(first,true,true)))
+        setup();val first=checkNotNull(RouteSnapshot.request(scope))
+        val invalid=JSONObject(report(first,true,true));invalid.getJSONArray("results").getJSONObject(1).put("id","route-99")
+        assertThrows(IllegalArgumentException::class.java){RouteSnapshot.update(scope,invalid.toString())}
+        assertEquals("checking",RouteSnapshot.read(true,true,scope).getJSONArray("routes").getJSONObject(0).getString("state"))
+        assertTrue(RouteSnapshot.update(scope,report(first,true,true)))
         val before=RouteSnapshot.read(true,true,scope).getJSONArray("routes").getJSONObject(0).getLong("ageMs")
         Thread.sleep(30);assertTrue(RouteSnapshot.update(scope,report(first,true,true)))
         assertTrue(RouteSnapshot.read(true,true,scope).getJSONArray("routes").getJSONObject(0).getLong("ageMs")>=before+20)
@@ -43,6 +47,10 @@ class RouteSnapshotTest {
         EngineConfig.validate(config)
         val invalid=listOf(config.replace("https_204","icmp"),config.replace("https://probe.example.org/generate_204","http://probe.example.org/"),config.replace("192.0.2.9:22","192.0.2.9:65536"),config.replace("\"outbound\":\"internal\"","\"outbound\":\"public\""),config.replace("\"required\":true","\"required\":\"yes\""))
         for(raw in invalid)assertThrows(IllegalArgumentException::class.java){EngineConfig.validate(raw)}
+        val large=JSONObject(config);large.put("route_checks",org.json.JSONArray(listOf("public","internal","unused").map {tag->
+            JSONObject().put("outbound",tag).put("checks",org.json.JSONArray(List(4){JSONObject().put("method","https_204").put("target","https://probe.example.org/"+"x".repeat(2000))}))
+        }))
+        assertThrows(IllegalArgumentException::class.java){EngineConfig.validate(large.toString())}
         assertThrows(org.json.JSONException::class.java){EngineConfig.validate("""{"outbounds":[{"type":"direct","tag":"direct"}],"route_checks":false}""")}
     }
     @Test fun routeClientMetadataNeverReachesNativeConfiguration() {

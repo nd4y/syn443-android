@@ -27,11 +27,12 @@ object RouteSnapshot {
     private var revision = ""
     private val methods=setOf("tcp","tls","https_204","ssh_banner")
     private var measuredPaths=emptyMap<String,JSONArray>()
-    private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","path_changed")
+    private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","path_changed","check_timeout")
     fun validate(config: JSONObject) {
         if(!config.has("route_checks"))return
         val settings=config.getJSONArray("route_checks")
         require(settings.length()<=16)
+        require(settings.toString().toByteArray(Charsets.UTF_8).size<=24_000)
         val outbounds=config.getJSONArray("outbounds")
         val tags=(0 until outbounds.length()).map {outbounds.getJSONObject(it).getString("tag")}.toSet()
         val seen=mutableSetOf<String>()
@@ -106,7 +107,7 @@ object RouteSnapshot {
             val sampled=r.getLong("sampledElapsedMs");require(sampled in 0..now)
             require(!ok || (complete && code=="ok"))
             val path=r.optJSONArray("path") ?: JSONArray()
-            require(path.length()<=8 && (0 until path.length()).all {n->rows.any {it.id==path.getString(n)}})
+            require(path.length()<=64 && (0 until path.length()).all {n->rows.any {it.id==path.getString(n)}})
             // First receipt time is retained across repeated heartbeat snapshots.
             if(receipts[id]!=pending) {
                 nextObservations=nextObservations+(id to RouteObservation(scope,sampled,complete,ok));nextCodes=nextCodes+(id to code);nextTimings=nextTimings+(id to r.getLong("elapsedMs"));nextReceipts=nextReceipts+(id to pending)

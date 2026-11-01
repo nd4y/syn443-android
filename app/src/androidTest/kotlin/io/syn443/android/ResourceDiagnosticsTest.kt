@@ -20,6 +20,9 @@ class ResourceDiagnosticsTest {
         compose.onNodeWithTag("vpn-system-settings").performScrollTo().assertIsDisplayed()
         val after=JSONObject(checkNotNull(context.contentResolver.call(uri,"status",null,null)?.getString("json")))
         assertEquals(before.getLong("generation"),after.getLong("generation"));assertEquals(before.getBoolean("desiredOn"),after.getBoolean("desiredOn"))
+        val os=after.getJSONObject("osPolicy")
+        if(os.getBoolean("known")){assertEquals(os.getBoolean("alwaysOn"),after.getBoolean("alwaysOn"));assertEquals(os.getBoolean("lockdown"),after.getBoolean("lockdown"))}
+        else {assertTrue(after.isNull("alwaysOn"));assertTrue(after.isNull("lockdown"))}
     }
     @Test fun engineExitHistoryHasVisibleOnDemandControls() {
         compose.onNodeWithTag("exit-refresh").performScrollTo().performClick()

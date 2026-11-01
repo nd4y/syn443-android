@@ -17,6 +17,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 )
 
 type routeCheck struct {
@@ -63,7 +64,7 @@ type routeRunner struct {
 func (r *routeRunner) path(tag string) []string {
 	path := []string{}
 	seen := map[string]bool{}
-	for tag != "" && !seen[tag] && len(path) < 8 {
+	for tag != "" && !seen[tag] && len(path) < 64 {
 		seen[tag] = true
 		node, ok := r.nodes[tag]
 		if !ok {
@@ -271,16 +272,33 @@ func probeRouteWithRoots(parent context.Context, dial routeDial, c routeCheck, r
 	if parent.Err() != nil {
 		return "cancelled", false
 	}
+	if ctx.Err() != nil {
+		return "check_timeout", true
+	}
 	if c.Method == "tcp" {
-		if _, err := conn.Write(nil); err != nil {
-			return "dial_failed", true
+		if N.NeedHandshakeForWrite(conn) {
+			if _, err := conn.Write(nil); err != nil {
+				return "dial_failed", true
+			}
+		}
+		if ctx.Err() != nil {
+			return "check_timeout", true
 		}
 		return "ok", true
 	}
 	if c.Method == "ssh_banner" {
+		// VLESS lazy streams must send their request before a server-first banner.
+		if N.NeedHandshakeForWrite(conn) {
+			if _, err := conn.Write(nil); err != nil {
+				return "dial_failed", true
+			}
+		}
 		raw, err := bufio.NewReader(io.LimitReader(conn, 256)).ReadString('\n')
 		if parent.Err() != nil {
 			return "cancelled", false
+		}
+		if ctx.Err() != nil {
+			return "check_timeout", true
 		}
 		if err != nil || !strings.HasPrefix(raw, "SSH-2.0-") {
 			return "ssh_banner_mismatch", true
@@ -293,6 +311,9 @@ func probeRouteWithRoots(parent context.Context, dial routeDial, c routeCheck, r
 			return "cancelled", false
 		}
 		return "tls_failed", true
+	}
+	if ctx.Err() != nil {
+		return "check_timeout", true
 	}
 	if c.Method == "tls" {
 		return "ok", true
@@ -308,6 +329,9 @@ func probeRouteWithRoots(parent context.Context, dial routeDial, c routeCheck, r
 			return "cancelled", false
 		}
 		return "response_failed", true
+	}
+	if ctx.Err() != nil {
+		return "check_timeout", true
 	}
 	defer response.Body.Close()
 	length := response.Header.Get("Content-Length")

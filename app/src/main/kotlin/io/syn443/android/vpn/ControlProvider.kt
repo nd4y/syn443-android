@@ -197,7 +197,12 @@ class ControlProvider : ContentProvider() {
                 else -> error("unknown command")
             }
             val result = store.read()
-            if (method == "status") result.put("netbird", OverlaySnapshot.read()).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",LifecycleAccess.policy(context))
+            if (method == "status") {
+                val os=LifecycleAccess.policy(context)
+                result.put("netbird", OverlaySnapshot.read()).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",os)
+                // Legacy fields must not expose the old persisted sample as current.
+                for(key in listOf("alwaysOn","lockdown"))result.put(key,if(os.optBoolean("known"))os.getBoolean(key) else org.json.JSONObject.NULL)
+            }
             Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
         } catch (_: Exception) {
             Bundle().apply { putBoolean("ok", false); putString("error", "command_rejected") }

@@ -19,7 +19,8 @@ The optional client configuration field `route_checks` assigns a profile:
 }
 ```
 
-At most16 profiles, four checks each,64 total, using all-of semantics. Supported
+At most16 profiles, four checks each,64 total and24,000 UTF-8 bytes of profile
+metadata, using all-of semantics. Supported
 methods: `tcp`, `ssh_banner`, `tls`, `https_204`. HTTPS requires normal certificate
 and hostname verification, status204, no body/transfer encoding and no redirect.
 TCP means dial/transport establishment, not an application response or proof of
