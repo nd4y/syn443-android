@@ -41,12 +41,27 @@ class VpnLifecycleTest {
         // The ordinary process socket reaches the hermetic VPN proxy first.
         runCatching {Socket().use {it.connect(java.net.InetSocketAddress("198.51.100.11",80),1500);it.outputStream.write(1)}}
         await {controlProbes.get()==1}
-        val route=io.syn443.android.vpn.PhysicalIdentityRoute.capture(context)
-        assertTrue(route.resolve("localhost").isNotEmpty())
-        // This contains no HTTP request or credentials. The documentation address need not
-        // answer; it must never produce a second CONNECT through our own VPN proxy.
-        Socket().use {socket->route.bind(socket);runCatching {socket.connect(java.net.InetSocketAddress("198.51.100.11",80),1500)}}
-        route.check();Thread.sleep(250)
+        // Android may publish a new private-DNS validation/link snapshot while the
+        // emulator settles. Such an in-flight request must fail its original fence.
+        // Start a fresh request rather than silently rebinding the invalidated one.
+        val end=android.os.SystemClock.elapsedRealtime()+10_000
+        var completed=false
+        while(!completed && android.os.SystemClock.elapsedRealtime()<end) {
+            try {
+                val route=io.syn443.android.vpn.PhysicalIdentityRoute.capture(context)
+                assertTrue(route.resolve("localhost").isNotEmpty())
+                // No HTTP or credentials: an unanswered documentation address is enough
+                // to prove every attempt bypasses the active VPN's CONNECT proxy.
+                Socket().use {socket->route.bind(socket);runCatching {socket.connect(java.net.InetSocketAddress("198.51.100.11",80),1500)}}
+                route.check();completed=true
+            } catch(e:io.syn443.identity.DeliveryException) {
+                assertEquals(io.syn443.identity.DeliveryFailure.TRANSPORT,e.reason)
+            }
+            assertEquals(1,controlProbes.get())
+            if(!completed)Thread.sleep(200)
+        }
+        assertTrue("No stable physical request completed within the bounded fixture window",completed)
+        Thread.sleep(250)
         assertEquals(1,controlProbes.get());assertTrue(status().getBoolean("desiredOn"))
     }
     @Test fun externalConnectExtraCannotTurnVpnOn() {
