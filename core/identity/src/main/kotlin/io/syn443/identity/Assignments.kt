@@ -109,7 +109,7 @@ object Assignments {
     /** An interrupted/failed activation is poisoned without depending on a trustworthy wall clock. */
     fun abort(state:AssignmentState,login:LoginIntent,payload:LoginPayload,reason:String):AssignmentState {
         bound(state,login,payload)
-        require(reason in setOf("activation_deadline","interrupted_activation","native_activation_failed","candidate_expired_or_revoked"))
+        require(reason in setOf("activation_deadline","interrupted_activation","native_activation_failed","candidate_expired_or_revoked","required_route_failed"))
         if(state.journal.phase!="applying")return state
         val raw=checkNotNull(state.journal.candidate)
         val candidate=Policy.json.decodeFromString<io.syn443.policy.Payload>(Policy.utf8(Policy.decode64(raw.split('.')[1])))

@@ -7,13 +7,13 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=138
+    minimum=144
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
 elif mode=="recovery":
     paths=list((root/"core/recovery/build/test-results/test").glob("TEST-*.xml"))
-    minimum=14
+    minimum=15
 elif mode=="policy":
     paths=list((root/"core/policy/build/test-results/test").glob("TEST-*.xml"))
     minimum=15
@@ -39,6 +39,12 @@ for path in paths:
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="emulator":
+    route_activation_required={"assignedActivationWaitsForCandidateRoutesAndIgnoresOptionalFailure",
+        "assignedFinishRechecksLocalProofAfterEncryptedPreparation",
+        "assignedActivationCannotReusePriorScopeOrIncompleteRouteProof",
+        "enrolledAssignedRoutesCommitWithOptionalFailure",
+        "enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet",
+        "enrolledStopFencesPendingCandidateRouteSuccess"}
     live_engine_required={"savedEngineCheckpointCannotClaimAnUnownedLiveProcess"}
     route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
     fatal_required={"competingVpnOwnsTunAndRevokesOriginalWithoutRetryFight","fatalCommandsCannotStartAnOffNativeOwner","uncaughtJavaFaultRecoversRealTunAndRetainsIntent","uncaughtNativeFaultRecoversRealTunAndRetainsIntent","fatalCrashSeriesPreservesRestartBudgetAndStopFencesLateRecovery",
@@ -90,7 +96,7 @@ if mode=="emulator":
     required |= {"slowAndroidSocketReadHasAnAbsoluteDeadline", "cancelledAndroidBatchCannotBecomeAFalseBaseline",
                  "androidDnsLiteralNeverStartsPlatformQuery", "androidDnsCallbacksKeepFailuresDistinctAndCancelQuery",
                  "androidDnsDeadlineCancelsQueryAndRejectsLateSuccess", "androidDnsCancellationReleasesWorkersForNextPolicyCheck"}
-    required |= identity_required | chat_required
+    required |= identity_required | chat_required | route_activation_required
     required |= {"browserReservationAndCancellationPreserveVpnAndDeleteTheKey",
         "controllerRestartResumesSameBrowserGenerationWithoutANewKey",
         "exactErrorCallbackIsSingleUseAndNeverConnectsVpn"}

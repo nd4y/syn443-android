@@ -116,7 +116,7 @@ class Fixture:
         if self.policy_status!=200:return self.policy_status,{'code':'fixture_unavailable'},{}
         key=(thumb,self.revision)
         if key not in self.envelopes:
-            self.publisher.device=session['deviceId'];self.envelopes[key]=self.publisher.sign(self.config,revision=self.revision,key_thumbprint=thumb)
+            self.publisher.device=session['deviceId'];self.envelopes[key]=self.publisher.sign(self.config,revision=self.revision,key_thumbprint=thumb,degraded=getattr(self,'allow_degraded',False))
         return 200,self.envelopes[key],{'Content-Type':'application/jose'}
 
 class Handler(BaseHTTPRequestHandler):

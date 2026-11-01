@@ -35,4 +35,16 @@ class RouteEvidenceTest {
         for ((now,ttl) in listOf(-1L to 1_000L,1L to 999L,1L to 300_001L))
             assertThrows(IllegalArgumentException::class.java){RouteEvidence.classify(true,true,scope,pass,false,now,ttl)}
     }
+    @Test fun activationRequiresEveryRequiredRouteAndIgnoresOptionalOutages() {
+        assertEquals(RouteActivation.READY, RouteEvidence.activation(emptyList()))
+        for (state in RouteState.entries) {
+            assertEquals(RouteActivation.READY, RouteEvidence.activation(listOf(true to RouteState.WORKING, false to state)))
+            assertEquals(when(state) {
+                RouteState.WORKING -> RouteActivation.READY
+                RouteState.FAILED -> RouteActivation.FAILED
+                else -> RouteActivation.WAIT
+            }, RouteEvidence.activation(listOf(true to state)))
+        }
+        assertEquals(RouteActivation.FAILED, RouteEvidence.activation(listOf(true to RouteState.CHECKING, true to RouteState.FAILED)))
+    }
 }

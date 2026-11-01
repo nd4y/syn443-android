@@ -46,7 +46,6 @@ object EngineConfig {
     /** Overlay state must acquire an account namespace before managed enrollment advertises it. */
     fun validateAssigned(raw:String) {
         validate(raw)
-        require(!JSONObject(raw).has("route_checks")) { "managed_route_profile_handoff_pending" }
         val outbounds=JSONObject(raw).getJSONArray("outbounds")
         require((0 until outbounds.length()).none {outbounds.getJSONObject(it).getString("type")=="netbird"})
     }

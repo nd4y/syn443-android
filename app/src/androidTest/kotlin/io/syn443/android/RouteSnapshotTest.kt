@@ -4,6 +4,7 @@ import io.syn443.android.vpn.RouteSnapshot
 import io.syn443.android.vpn.EngineConfig
 import io.syn443.android.vpn.LifecycleAccess
 import io.syn443.recovery.RouteScope
+import io.syn443.recovery.RouteActivation
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -60,7 +61,44 @@ class RouteSnapshotTest {
         val context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
         val rendered=JSONObject(EngineConfig.render(config,context.noBackupFilesDir))
         assertFalse(rendered.has("route_checks"));assertEquals(3,rendered.getJSONArray("outbounds").length())
-        assertThrows(IllegalArgumentException::class.java){EngineConfig.validateAssigned(config)}
+        EngineConfig.validateAssigned(config)
+        assertThrows(IllegalArgumentException::class.java){EngineConfig.validateAssigned("""{"outbounds":[{"type":"netbird","tag":"overlay"}]}""")}
+    }
+    @Test fun assignedActivationWaitsForCandidateRoutesAndIgnoresOptionalFailure() {
+        val candidate=scope.copy(config="assigned-${java.util.UUID.randomUUID()}")
+        RouteSnapshot.configure(config,candidate.config);RouteSnapshot.owner(candidate)
+        assertEquals(RouteActivation.WAIT,RouteSnapshot.activation(candidate))
+        val request=checkNotNull(RouteSnapshot.request(candidate))
+        assertEquals(RouteActivation.WAIT,RouteSnapshot.activation(candidate))
+        assertTrue(RouteSnapshot.update(candidate,report(request,true)))
+        assertEquals(RouteActivation.READY,RouteSnapshot.activation(candidate))
+        val next=checkNotNull(RouteSnapshot.request(candidate,force=true))
+        assertTrue(RouteSnapshot.update(candidate,report(next,false)))
+        assertEquals(RouteActivation.FAILED,RouteSnapshot.activation(candidate))
+    }
+    @Test fun assignedActivationCannotReusePriorScopeOrIncompleteRouteProof() {
+        val initial=scope.copy(config="assigned-${java.util.UUID.randomUUID()}")
+        RouteSnapshot.configure(config,initial.config);RouteSnapshot.owner(initial)
+        val request=checkNotNull(RouteSnapshot.request(initial))
+        assertTrue(RouteSnapshot.update(initial,report(request,true)))
+        val started=android.os.SystemClock.elapsedRealtime()
+        assertTrue(RouteSnapshot.prepareActivation(initial,started))
+        assertFalse(RouteSnapshot.prepareActivation(initial,started))
+        assertFalse(RouteSnapshot.update(initial,report(request,true)))
+        assertEquals(RouteActivation.WAIT,RouteSnapshot.activation(initial,started))
+        for(candidate in listOf(initial.copy(intent=5),initial.copy(network=3),initial.copy(activation=4),initial.copy(engine="replacement"),initial.copy(config="other"))) {
+            assertEquals(RouteActivation.WAIT,RouteSnapshot.activation(candidate))
+        }
+        val candidate=initial.copy(activation=4);RouteSnapshot.owner(candidate)
+        assertTrue(RouteSnapshot.due(10_000));assertFalse(RouteSnapshot.update(initial,report(request,true)))
+        assertEquals(RouteActivation.WAIT,RouteSnapshot.activation(candidate))
+        val fresh=checkNotNull(RouteSnapshot.request(candidate))
+        val incomplete=JSONObject(report(fresh,false));incomplete.getJSONArray("results").getJSONObject(0).put("complete",false).put("code","cancelled")
+        assertTrue(RouteSnapshot.update(candidate,incomplete.toString()))
+        assertEquals(RouteActivation.WAIT,RouteSnapshot.activation(candidate))
+        assertFalse(RouteSnapshot.due(10_000))
+        RouteSnapshot.owner(null)
+        assertEquals(RouteActivation.WAIT,RouteSnapshot.activation(candidate))
     }
     @Test fun lockedBootStatusHasUnknownIntentAndNoCredentialFields() {
         val locked=LifecycleAccess.lockedStatus()

@@ -435,6 +435,19 @@ class LoginControllerTest {
         assertEquals(failed.journal,f.journal.readAssignment(f.journal.snapshot())!!.journal)
         assertEquals(config,f.controller.assignedRuntime.config(f.journal.snapshot()))
     }
+    @Test fun assignedFinishRechecksLocalProofAfterEncryptedPreparation() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val ticket=f.controller.assignmentTicket()
+        assertTrue(f.controller.beginAssignment(ticket,listOf(false)));f.idle()
+        val applying=f.journal.readAssignment(f.journal.snapshot())!!
+        val checks=java.util.concurrent.atomic.AtomicInteger()
+        assertTrue(f.controller.finishAssignment(ticket,listOf(true),true) {checks.incrementAndGet()==1})
+        f.idle()
+        assertEquals(2,checks.get())
+        assertEquals(applying.journal,f.journal.readAssignment(f.journal.snapshot())!!.journal)
+        assertTrue(f.controller.finishAssignment(ticket,listOf(true),true) {true});f.idle()
+        assertEquals("committed",f.journal.readAssignment(f.journal.snapshot())!!.journal.phase)
+    }
     @Test fun assignedInterruptedActivationIsPoisonedBeforeRecoveryCanPublishIt() = fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
         val ticket=f.controller.assignmentTicket()
