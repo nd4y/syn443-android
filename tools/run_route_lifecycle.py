@@ -29,6 +29,17 @@ class RouteProxy(socketserver.BaseRequestHandler):
             self.request.sendall(b'SSH-2.0-synthetic\r\n' if self.server.ssh_ok else b'wrong-protocol\r\n')
 
 
+def resume_blocked(before):
+    # Activity drawn is earlier than VpnControls' asynchronous foreground-open.
+    # Observe that completion, while failing immediately on any unsafe state.
+    snapshot=call('status')
+    assert not pid(':engine') and snapshot['engineActive'] is False,'Unexpected native owner after Force stop/update'
+    assert snapshot['configRevision']==before['configRevision'],'Configuration changed after Force stop/update'
+    assert snapshot['generation']==before['generation'],'Intent generation changed after Force stop/update'
+    assert snapshot['desiredOn'] is True,'Desired intent changed after Force stop/update'
+    return snapshot.get('resumeRequired') is True
+
+
 def main():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
     suite=ET.Element('testsuite',name='SYN443 route and Android lifecycle')
@@ -129,7 +140,7 @@ def main():
         prepare();before=call('status');adb('shell','am','force-stop',PACKAGE)
         adb('install','-r',str(ROOT/'app/build/outputs/apk/debug/app-debug.apk'),timeout=120)
         time.sleep(5);assert not pid(':engine');adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')
-        after=call('status');assert after['resumeRequired'] and not pid(':engine') and after['configRevision']==before['configRevision']
+        await_condition(lambda:resume_blocked(before),30);after=call('status')
         assert after['generation']==before['generation'];call('connect');await_condition(lambda:call('status')['phase']=='Online',150)
         print(case.get('name')+': passed',flush=True)
     except Exception as error:
