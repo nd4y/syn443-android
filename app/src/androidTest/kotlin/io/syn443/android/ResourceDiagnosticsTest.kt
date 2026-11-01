@@ -54,7 +54,6 @@ class ResourceDiagnosticsTest {
             assertEquals(setOf("role", "state", "cpuTimeMs", "rssBytes", "threads", "fileDescriptors", "window"), process.keys().asSequence().toSet())
             assertEquals(setOf("state", "elapsedMs", "awakeMs", "cpuMs", "cpuPermille"), process.getJSONObject("window").keys().asSequence().toSet())
         }
-        val after = call("status")
         val workers=call("health-workers");val cachedWorkers=call("health-workers")
         assertTrue(cachedWorkers.getBoolean("cached"));assertEquals(workers.getLong("sampledElapsedMs"),cachedWorkers.getLong("sampledElapsedMs"))
         assertEquals(setOf("schemaVersion","sampledElapsedMs","minIntervalMs","cached","pool","threads"),workers.keys().asSequence().toSet())
@@ -68,6 +67,7 @@ class ResourceDiagnosticsTest {
             val frames=thread.getJSONArray("frames");assertTrue(frames.length()<=12)
             for(j in 0 until frames.length())assertEquals(setOf("class","method"),frames.getJSONObject(j).keys().asSequence().toSet())
         }
+        val after = call("status")
         for (key in listOf("generation", "desiredOn", "configRevision")) assertEquals(before.opt(key), after.opt(key))
     }
 }
