@@ -116,7 +116,7 @@ PIN input waits for the real SystemUI keypad and verifies user unlock before
 expecting recovery. CI uses the supported software renderer; the former
 `swiftshader_indirect` mode is deprecated in [Android Emulator documentation](https://developer.android.com/studio/run/emulator-acceleration).
 
-Physical Xperia acceptance remains separate and pending for this stage. The phone's
+Physical Xperia acceptance is recorded separately from CI in the change's validation notes. The phone's
 credentials must not be changed to manufacture a locked-boot test. USB/Wi-Fi can
 verify supported reboot/update/force-stop/system-policy behavior and real external/
 internal traffic. LTE, natural unplugged battery/Doze/endurance and complete M1-M5

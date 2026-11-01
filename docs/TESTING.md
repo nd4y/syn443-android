@@ -72,9 +72,9 @@ The test APK includes an independent UID/TUN fixture restricted to documentation
 
 ### Per-route evidence and OS lifecycle (v26)
 
-See [route/lifecycle contract](route-lifecycle.md). Six recovery JVM methods, seven
+See [route/lifecycle contract](route-lifecycle.md). Six recovery JVM methods, eight
 Android metadata/UI cases and eight external actual-route/OS cases are mandatory.
-Every API29/35/37 emulator requires137 passing outcomes, retaining the previous122.
+Every API29/35/37 emulator requires138 passing outcomes, retaining the previous122.
 Real package replacement, secure boot/unlock and ordinary Settings Always-on/
 lockdown are exercised on disposable emulators. Physical credentials are never
 changed to simulate locked boot. Xperia USB/Wi-Fi evidence remains separate.
