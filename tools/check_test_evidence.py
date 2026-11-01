@@ -39,6 +39,7 @@ for path in paths:
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="emulator":
+    live_engine_required={"savedEngineCheckpointCannotClaimAnUnownedLiveProcess"}
     route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
     fatal_required={"competingVpnOwnsTunAndRevokesOriginalWithoutRetryFight","fatalCommandsCannotStartAnOffNativeOwner","uncaughtJavaFaultRecoversRealTunAndRetainsIntent","uncaughtNativeFaultRecoversRealTunAndRetainsIntent","fatalCrashSeriesPreservesRestartBudgetAndStopFencesLateRecovery",
         "exitSnapshotFiltersRolesBoundsAndSortsWithoutIdentifiers","exitCategoriesAreFixedAndUnknownReasonCannotBecomeCrash","exitReadFailureAndInvalidQueryReturnUnavailableWithoutText","exitPidFilterRejectsStaleFutureAndForeignRecords","exitMetadataReadsRealPlatformWithoutChangingIntent","emptyExitHistoryIsAvailableAndDoesNotInventSuccess","engineExitHistoryHasVisibleOnDemandControls"}
@@ -59,7 +60,7 @@ if mode=="emulator":
         "malformedOversizedOrMissingPublicIntentNeverBecomesSignedOut",
         "atomicBackupRecoveryAndBoundedCiphertextRejectTruncation",
         "cryptoIsWorkerOnlyAndPreparedPayloadsCannotCrossJournalsOrBeReusedAfterClose"}
-    required=fatal_required | route_required | {"selectionAndStaleNetworkResult", "explicitStopRejectsLateCompletion", "darkThemeByDefault",
+    required=fatal_required | route_required | live_engine_required | {"selectionAndStaleNetworkResult", "explicitStopRejectsLateCompletion", "darkThemeByDefault",
               "workerRunsInSeparateProcessAndStops", "wedgedWorkerCanBeTerminatedAndRebound",
               "foreignSessionCannotTerminateHost", "realTunTrafficAndExplicitStop",
               "nativeCrashRecoversButNewerStopWins", "fullyFrozenNativeProcessIsKilledOutsideItsControlLoop",

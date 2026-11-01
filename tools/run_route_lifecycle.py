@@ -33,7 +33,8 @@ def resume_blocked(before):
     # Activity drawn is earlier than VpnControls' asynchronous foreground-open.
     # Observe that completion, while failing immediately on any unsafe state.
     snapshot=call('status')
-    assert not pid(':engine') and snapshot['engineActive'] is False,'Unexpected native owner after Force stop/update'
+    assert not pid(':engine'),'Unexpected native owner after Force stop/update'
+    assert snapshot['engineActive'] is False,'Saved engine checkpoint leaked into current status'
     assert snapshot['configRevision']==before['configRevision'],'Configuration changed after Force stop/update'
     assert snapshot['generation']==before['generation'],'Intent generation changed after Force stop/update'
     assert snapshot['desiredOn'] is True,'Desired intent changed after Force stop/update'

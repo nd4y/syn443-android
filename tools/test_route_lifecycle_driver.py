@@ -16,7 +16,7 @@ class ForegroundResumeBoundaryTest(unittest.TestCase):
         self.assertTrue(self.check({'resumeRequired':True}))
     def test_native_owner_during_wait_is_an_immediate_failure(self):
         for changes,native in [({},'123'),({'engineActive':True},'')]:
-            with self.subTest(changes=changes,native=native),self.assertRaisesRegex(AssertionError,'native owner'):
+            with self.subTest(changes=changes,native=native),self.assertRaisesRegex(AssertionError,'native owner|engine checkpoint'):
                 self.check(changes,native)
     def test_config_generation_or_desired_intent_cannot_drift_during_wait(self):
         for changes in [{'configRevision':'other'},{'generation':8},{'desiredOn':False}]:
