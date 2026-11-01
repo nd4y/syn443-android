@@ -8,6 +8,23 @@ import xml.etree.ElementTree as ET
 from run_vpn_process_faults import ROOT, PACKAGE, Server, Proxy, adb, call, pid, await_condition
 
 
+def native_crash_matches(crash, owner):
+    """Associate the signal with this exact owner's crash record, not another PID."""
+    assert len(crash)<=2*1024*1024
+    records=list(re.finditer(rb'pid:\s*(\d+)\b',crash))
+    for i,record in enumerate(records):
+        if record[1]!=owner.encode():continue
+        end=records[i+1].start() if i+1<len(records) else len(crash)
+        if re.search(rb'signal\s+6\s*\(SIGABRT\)',crash[record.end():end]):return True
+    return False
+
+
+def await_native_crash(owner,read,wait=await_condition):
+    # Process disappearance can precede crash_dump's asynchronous log publication.
+    # Absence still fails within the existing 30-second exit-evidence budget.
+    wait(lambda:native_crash_matches(read(),owner),30)
+
+
 def main():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
     api=int(adb('shell','getprop','ro.build.version.sdk'))
@@ -42,8 +59,7 @@ def main():
             # API29 has no ApplicationExitInfo. Match the crashed owner in OS crash output.
             if kind=='java':assert b'FATAL EXCEPTION' in logs
             else:
-                crash=adb('logcat','-b','crash','-d','-t','2000',timeout=20)
-                assert re.search(rb'pid:\s*'+old.encode()+rb'\b',crash) and b'SIGABRT' in crash
+                await_native_crash(old,lambda:adb('logcat','-b','crash','-d','-t','2000',timeout=20))
     try:
         adb('reverse','tcp:'+port,'tcp:'+port)
         stop()
