@@ -5,6 +5,7 @@ import io.syn443.recovery.RouteEvidence
 import io.syn443.recovery.RouteObservation
 import io.syn443.recovery.RouteScope
 import io.syn443.recovery.RouteState
+import io.syn443.recovery.RouteActivation
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
@@ -25,6 +26,7 @@ object RouteSnapshot {
     private var lastStarted = -60_000L
     private var queued = emptySet<String>()
     private var revision = ""
+    private var activationAttempt:Pair<RouteScope,Long>?=null
     private val methods=setOf("tcp","tls","https_204","ssh_banner")
     private var measuredPaths=emptyMap<String,JSONArray>()
     private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","path_changed","check_timeout","probe_unavailable")
@@ -76,9 +78,30 @@ object RouteSnapshot {
         }
         revision=hash;invalidate()
     }
-    @Synchronized fun invalidate() {current=null;pending="";queued=emptySet();observations=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000}
-    @Synchronized fun due()=rows.any {it.checks.length()>0} && SystemClock.elapsedRealtime()-lastStarted>=60_000
-    @Synchronized fun owner(scope:RouteScope?){live=scope}
+    @Synchronized fun invalidate() {current=null;pending="";queued=emptySet();observations=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000;activationAttempt=null}
+    @Synchronized fun due(intervalMs:Long=60_000):Boolean {
+        require(intervalMs in 10_000..60_000)
+        return rows.any {it.checks.length()>0} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
+    }
+    @Synchronized fun owner(scope:RouteScope?){if(live!=scope){invalidate();live=scope}}
+    @Synchronized fun prepareActivation(scope:RouteScope,startedElapsed:Long):Boolean {
+        require(startedElapsed>=0)
+        val attempt=scope to startedElapsed
+        if(activationAttempt==attempt)return false
+        invalidate();activationAttempt=attempt
+        return true
+    }
+    @Synchronized fun activation(scope:RouteScope,startedElapsed:Long=0):RouteActivation {
+        require(startedElapsed>=0)
+        if(revision!=scope.config || live!=scope)return RouteActivation.WAIT
+        val values=read(true,true,scope).getJSONArray("routes")
+        return RouteEvidence.activation((0 until values.length()).map {i->
+            val row=values.getJSONObject(i)
+            val state=if((observations[row.getString("id")]?.elapsedMs ?: -1)<startedElapsed)RouteState.UNVERIFIED
+                else RouteState.valueOf(row.getString("state").uppercase(java.util.Locale.ROOT))
+            row.getBoolean("required") to state
+        })
+    }
     @Synchronized fun accepts(only:String?)=rows.any {(only==null || it.id==only) && it.checks.length()>0}
     @Synchronized fun view(status:JSONObject):JSONObject = read(status.optBoolean("desiredOn"),status.optBoolean("engineActive") && live!=null,
         live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch")))

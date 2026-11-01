@@ -22,8 +22,11 @@ local Stop, hard limits, ownership fences or authorization checks.
 OIDC/PKCE/DPoP, Keystore identity, SQL device sessions, separate API/publisher,
 signed assignments, cache/lease/refresh/revoke and transactional rollback have
 pilot code and tests. Remaining work includes release QR/manual invitations,
-managed overlay credential namespaces/retirement, signed route-check activation,
+managed overlay credential namespaces/retirement, extended activation acceptance,
 rotation and full end-user/operational acceptance.
+
+The [signed route-profile pilot](assigned-route-activation.md) adds independent
+native route gates and final storage fencing; physical acceptance remains separate.
 
 ## M3 - engines, sources and administration (partial foundation)
 Embedded engine adapters exist. One Remnawave API resource, subscription adapters,

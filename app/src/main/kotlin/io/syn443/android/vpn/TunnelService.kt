@@ -71,12 +71,12 @@ class TunnelService : VpnService() {
     private var lastProbe = 0L
     private var internetHealthy = false
     private fun routeScope() = token?.let {io.syn443.recovery.RouteScope(boundGeneration,epoch,policies.read().journal.activationGeneration,it,runningConfigHash)}
-    private fun checkRoutes(force:Boolean=false,only:String?=null) {
+    private fun checkRoutes(force:Boolean=false,only:String?=null,activation:Boolean=false) {
         if(!ready || network==null || retiring || !Recovery.current(store.checkpoint(),boundGeneration))return
-        if(!force && !RouteSnapshot.due())return
         val scope=routeScope() ?: return
         RouteSnapshot.owner(scope)
-        RouteSnapshot.request(scope,only,force)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
+        if(!force && !RouteSnapshot.due(if(activation)10_000 else 60_000))return
+        RouteSnapshot.request(scope,only,force || activation)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
     }
     private var registered = false
     private var foreground = false
@@ -196,16 +196,20 @@ class TunnelService : VpnService() {
             ?: candidates.firstOrNull()
         val signature = selected?.let { connectivity.getLinkProperties(it)?.toString() }
         if (selected == network && signature == linkSignature) return
-        linkSignature = signature
-        network = selected
-        epoch++
-        internetHealthy=false
-        RouteSnapshot.cancelled(true)
-        token?.let {runCatching {host?.cancelRouteChecks(it)}}
-        policyJob?.cancel()
-        healthJob?.cancel(); healthJob = null
-        stableSince = 0; successes = 0
-        store.update { value -> value.put("networkEpoch", epoch); store.put(value, Recovery.networkOpportunity(store.checkpoint(value), System.currentTimeMillis())) }
+        // Use the same outer lock as the final enrolled activation commit. A queued
+        // encrypted write cannot confirm proof after a newer network epoch publishes.
+        store.serialized {
+            linkSignature = signature
+            network = selected
+            epoch++
+            internetHealthy=false
+            RouteSnapshot.cancelled(true)
+            token?.let {runCatching {host?.cancelRouteChecks(it)}}
+            policyJob?.cancel()
+            healthJob?.cancel(); healthJob = null
+            stableSince = 0; successes = 0
+            store.update { value -> value.put("networkEpoch", epoch); store.put(value, Recovery.networkOpportunity(store.checkpoint(value), System.currentTimeMillis())) }
+        }
         if (selected == null) { RouteSnapshot.owner(null);phase("NoNetwork", "network_unavailable"); return }
         setUnderlyingNetworks(arrayOf(selected))
         val properties = connectivity.getLinkProperties(selected)
@@ -651,6 +655,23 @@ class TunnelService : VpnService() {
         }
         if (!ready || retiring || policyJob != null || network == null) return
         if (d.journal.phase == "applying" && runningConfigHash != candidate.payload.contentHash) { retire(true); return }
+        if (d.journal.phase == "applying") {
+            // Same-config renewal may retain its native owner and staged generation.
+            // The durable apply start still requires an independent new request receipt.
+            val scope=routeScope() ?: return
+            RouteSnapshot.owner(scope)
+            val started=d.applyDeadlineElapsed-candidate.payload.activation.timeoutSeconds*1000L
+            if(RouteSnapshot.prepareActivation(scope,started))token?.let {runCatching {host?.cancelRouteChecks(it)}}
+            checkRoutes(activation=true)
+            when (RouteSnapshot.activation(scope,started)) {
+                io.syn443.recovery.RouteActivation.WAIT -> return
+                io.syn443.recovery.RouteActivation.FAILED -> {
+                    if (policies.rollback("required_route_failed")) { retire(false); phase("Recovering", "policy_rollback") }
+                    return
+                }
+                io.syn443.recovery.RouteActivation.READY -> Unit
+            }
+        }
         if (android.os.SystemClock.elapsedRealtime() - lastPolicyCheck < 10_000) return
         lastPolicyCheck = android.os.SystemClock.elapsedRealtime()
         val job = PolicyChecks(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish") && store.read().optBoolean("testHealth")); policyJob = job
@@ -678,11 +699,27 @@ class TunnelService : VpnService() {
                     // applying view wakes policyTick, which then retires it before replacement.
                     if (began && !d.enrolled && runningConfigHash != candidate.payload.contentHash) retire(true)
                 } else if (policies.read().journal.phase == "applying") {
+                    // Global HTTPS is a separate gate, never proof for an individual outbound.
+                    val routeStarted=policies.read().applyDeadlineElapsed-candidate.payload.activation.timeoutSeconds*1000L
+                    when (RouteSnapshot.activation(routeScope() ?: return@post,routeStarted)) {
+                        io.syn443.recovery.RouteActivation.WAIT -> return@post
+                        io.syn443.recovery.RouteActivation.FAILED -> {
+                            if (policies.rollback("required_route_failed")) { retire(false); phase("Recovering", "policy_rollback") }
+                            return@post
+                        }
+                        io.syn443.recovery.RouteActivation.READY -> Unit
+                    }
                     val passed = candidate.payload.activation.checks.indices.all { !candidate.payload.activation.checks[it].required || results[it] }
                     val regressed = candidate.payload.activation.checks.indices.any { candidate.payload.activation.checks[it].required && !results[it] && policies.read().journal.baseline[it] }
                     if (passed || (!regressed && candidate.payload.activation.allowDegraded) || android.os.SystemClock.elapsedRealtime() >= policies.read().applyDeadlineElapsed) {
                         var finished = false
-                        store.effectCurrent(generation) { if (policies.read().journal.activationGeneration == activation && policies.read().journal.candidate == candidate.envelope) { finished = policies.finish(results, true) } }
+                        val proofScope=routeScope() ?: return@post
+                        store.effectCurrent(generation) { if (policies.read().journal.activationGeneration == activation && policies.read().journal.candidate == candidate.envelope) {
+                            finished = policies.finish(results, true) {
+                                !destroyed && token==session && epoch==currentEpoch && Recovery.current(store.checkpoint(),generation) &&
+                                    RouteSnapshot.activation(proofScope,routeStarted)==io.syn443.recovery.RouteActivation.READY
+                            }
+                        } }
                         if (!finished) return@post
                         if (policies.read().journal.phase == "rolled_back") { retire(false); phase("Recovering", "policy_rollback") }
                         else { store.config(); probe() }

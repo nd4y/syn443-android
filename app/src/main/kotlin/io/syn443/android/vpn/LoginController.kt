@@ -334,19 +334,20 @@ class LoginController private constructor(private val context:android.app.Applic
             else LoginRecovery.policyCached(s,s.generation,receipt,s.protectedHash)
         persistAssignment(s,p,next,target)
     }
-    private fun persistAssignment(s:LoginIntent,p:LoginPayload,next:AssignmentState,target:LoginIntent=s) {
+    private fun persistAssignment(s:LoginIntent,p:LoginPayload,next:AssignmentState,target:LoginIntent=s,canCommit:()->Boolean={true}) {
         val runtime=assignedRuntime.prepare(target,p,next)
-        journal.prepareAssignment(s,next).use {prepared->synchronized(commands) {
-            current(s);journal.commitAssignment(s,prepared)
+        journal.prepareAssignment(s,next).use {prepared->state().serialized {synchronized(commands) {
+            current(s);if(!canCommit())throw LoginStorageException(LoginStorageFailure.STALE)
+            journal.commitAssignment(s,prepared)
             val accepted=if(target==s)s else commit(s,target)
             cached=accepted to p;assignedRuntime.publish(runtime)
-        }}
+        }}}
         policyChanged()
     }
     internal fun assignmentTicket():AssignedPolicyRuntime.Ticket = assignedRead {assignedRuntime.ticket(it)}
     /** Commands persist on the identity worker. The native caller observes the resulting view;
      * acceptance is not a completed transition, and a lost/stale command grants no new permit. */
-    private fun transitionAssignment(ticket:AssignedPolicyRuntime.Ticket,invalidate:Boolean=false,
+    private fun transitionAssignment(ticket:AssignedPolicyRuntime.Ticket,invalidate:Boolean=false,canCommit:()->Boolean={true},
         change:(AssignmentState,LoginIntent,LoginPayload)->AssignmentState):Boolean = submitIfIdle(onAdmission={
         if(invalidate && runCatching {assignmentTicket()==ticket}.getOrDefault(false)) {assignedRuntime.clear();policyChanged()}
     }) {
@@ -354,7 +355,8 @@ class LoginController private constructor(private val context:android.app.Applic
         require(s.phase==LoginPhase.POLICY_CACHED && s.generation==ticket.loginGeneration && s.policyHash==ticket.receipt)
         val p=payload(s);val before=checkNotNull(journal.readAssignment(s))
         require(before.journal.activationGeneration==ticket.activation)
-        persistAssignment(s,p,change(before,s,p))
+        if(!canCommit())throw LoginStorageException(LoginStorageFailure.STALE)
+        persistAssignment(s,p,change(before,s,p),canCommit=canCommit)
     }
     internal fun beginAssignment(ticket:AssignedPolicyRuntime.Ticket,baseline:List<Boolean>):Boolean {
         val values=baseline.toList();require(values.size in 1..8)
@@ -363,12 +365,12 @@ class LoginController private constructor(private val context:android.app.Applic
             Assignments.begin(before,s,p,values,boot(),elapsed())
         }
     }
-    internal fun finishAssignment(ticket:AssignedPolicyRuntime.Ticket,actual:List<Boolean>,started:Boolean):Boolean {
+    internal fun finishAssignment(ticket:AssignedPolicyRuntime.Ticket,actual:List<Boolean>,started:Boolean,canCommit:()->Boolean={true}):Boolean {
         val values=actual.toList();require(values.size in 1..8)
-        return transitionAssignment(ticket) {before,s,p->Assignments.finish(before,s,p,values,started,boot(),elapsed())}
+        return transitionAssignment(ticket,canCommit=canCommit) {before,s,p->Assignments.finish(before,s,p,values,started,boot(),elapsed())}
     }
     internal fun abortAssignment(ticket:AssignedPolicyRuntime.Ticket,reason:String):Boolean {
-        require(reason in setOf("activation_deadline","interrupted_activation","native_activation_failed","candidate_expired_or_revoked"))
+        require(reason in setOf("activation_deadline","interrupted_activation","native_activation_failed","candidate_expired_or_revoked","required_route_failed"))
         // Invalidate the old view before waiting for encrypted persistence. A stale ticket cannot
         // erase the current account's permit; the worker independently checks the journal again.
         return transitionAssignment(ticket,true) {before,s,p->Assignments.abort(before,s,p,reason)}

@@ -520,8 +520,15 @@
       "status": "partial",
       "evidence": [
         "docs/managed-policy.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
-      ]
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/assigned-route-activation.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
+        "core/recovery/src/main/kotlin/io/syn443/recovery/RouteEvidence.kt",
+        "tools/run_enrolled_vpn.py"
+      ],
+      "implementationScope": "Signed route-profile activation pilot requires fresh candidate-scoped native outbound proof, independently of global HTTPS; final worker storage fence, bounded retries and required-route rollback. Optional routes remain independent.",
+      "remainingScope": "Full requirement remains open, including complete dependency graph/compiler, overlay account namespaces and all network/energy/operational scenarios. Exact device and CI evidence must be read separately."
     },
     {
       "id": "PROV-03",
@@ -538,8 +545,15 @@
       "status": "partial",
       "evidence": [
         "docs/managed-policy.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
-      ]
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/assigned-route-activation.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
+        "core/recovery/src/main/kotlin/io/syn443/recovery/RouteEvidence.kt",
+        "tools/run_enrolled_vpn.py"
+      ],
+      "implementationScope": "Signed route-profile activation pilot requires fresh candidate-scoped native outbound proof, independently of global HTTPS; final worker storage fence, bounded retries and required-route rollback. Optional routes remain independent.",
+      "remainingScope": "Full requirement remains open, including complete dependency graph/compiler, overlay account namespaces and all network/energy/operational scenarios. Exact device and CI evidence must be read separately."
     },
     {
       "id": "PROV-05",
@@ -825,9 +839,16 @@
       "status": "partial",
       "evidence": [
         "docs/m1-vpn.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/assigned-route-activation.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
+        "core/recovery/src/main/kotlin/io/syn443/recovery/RouteEvidence.kt",
+        "tools/run_enrolled_vpn.py"
       ],
-      "text": "Supervisor и контроль его прогресса находятся вне управляемого native runtime. Watchdog проверяет полезный прогресс/дедлайны операций, а не только живой PID или ответ отдельного control looper; полный native hang имеет fault-injection сценарий. После bounded graceful stop supervisor вправе завершить только аутентифицированный принадлежащий ему host с проверенными identity token/UID/handle, подтвердить его смерть и освобождение TUN duplicates/identity locks перед новым поколением. Timeout или PID не являются подтверждением. После смерти самого контроллера разрешённый ОС новый экземпляр сначала читает намерение/последний Stop, сверяет реальное владение и незавершённые эффекты, безопасно дожидается/завершает только своего старого host; два владельца TUN/identity и повторное enrollment исключены. Если прекращение владения не доказано, новый host не запускается, отображается блокировка/необходимое действие. Смерть владельца TUN может уничтожить интерфейс и оборвать трафик; отсутствие сети или процесса-владельца не сопровождается обещанием непрерывного соединения. Границы MOD-08/09 и системный lockdown остаются обязательными."
+      "text": "Supervisor и контроль его прогресса находятся вне управляемого native runtime. Watchdog проверяет полезный прогресс/дедлайны операций, а не только живой PID или ответ отдельного control looper; полный native hang имеет fault-injection сценарий. После bounded graceful stop supervisor вправе завершить только аутентифицированный принадлежащий ему host с проверенными identity token/UID/handle, подтвердить его смерть и освобождение TUN duplicates/identity locks перед новым поколением. Timeout или PID не являются подтверждением. После смерти самого контроллера разрешённый ОС новый экземпляр сначала читает намерение/последний Stop, сверяет реальное владение и незавершённые эффекты, безопасно дожидается/завершает только своего старого host; два владельца TUN/identity и повторное enrollment исключены. Если прекращение владения не доказано, новый host не запускается, отображается блокировка/необходимое действие. Смерть владельца TUN может уничтожить интерфейс и оборвать трафик; отсутствие сети или процесса-владельца не сопровождается обещанием непрерывного соединения. Границы MOD-08/09 и системный lockdown остаются обязательными.",
+      "implementationScope": "Signed route-profile activation pilot requires fresh candidate-scoped native outbound proof, independently of global HTTPS; final worker storage fence, bounded retries and required-route rollback. Optional routes remain independent.",
+      "remainingScope": "Full requirement remains open, including complete dependency graph/compiler, overlay account namespaces and all network/energy/operational scenarios. Exact device and CI evidence must be read separately."
     },
     {
       "id": "REC-05",
@@ -1258,18 +1279,29 @@
         "docs/route-lifecycle.md",
         "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
         "tools/run_route_lifecycle.py",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
-      ]
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/assigned-route-activation.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",
+        "core/recovery/src/main/kotlin/io/syn443/recovery/RouteEvidence.kt",
+        "tools/run_enrolled_vpn.py"
+      ],
+      "implementationScope": "Signed route-profile activation pilot requires fresh candidate-scoped native outbound proof, independently of global HTTPS; final worker storage fence, bounded retries and required-route rollback. Optional routes remain independent.",
+      "remainingScope": "Full requirement remains open, including complete dependency graph/compiler, overlay account namespaces and all network/energy/operational scenarios. Exact device and CI evidence must be read separately."
     },
     {
       "id": "CHK-07",
       "text": "Примеры настраиваемых профилей: INTERNAL - ICMP домашнему узлу плюс необязательная TCP/HTTP-проверка сервиса; RU - HTTP(S) к заданному российскому ресурсу, например 2ip.ru; NON_RU - малый HTTP(S) connectivity probe, например gstatic generate_204. Эти примеры можно полностью заменить в панели или разрешённом клиентском редакторе.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/assigned-route-activation.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
+        "core/recovery/src/main/kotlin/io/syn443/recovery/RouteEvidence.kt",
+        "tools/run_enrolled_vpn.py"
       ],
-      "implementationScope": "Per-outbound TCP/SSH/TLS/HTTPS all-of profiles and bounded scoped status/check/cancel.",
-      "remainingScope": "Full traffic-rule plans, any/quorum/stages, exit attribution and profile editor."
+      "implementationScope": "Signed route-profile activation pilot requires fresh candidate-scoped native outbound proof, independently of global HTTPS; final worker storage fence, bounded retries and required-route rollback. Optional routes remain independent.",
+      "remainingScope": "Full requirement remains open, including complete dependency graph/compiler, overlay account namespaces and all network/energy/operational scenarios. Exact device and CI evidence must be read separately."
     },
     {
       "id": "CHK-08",

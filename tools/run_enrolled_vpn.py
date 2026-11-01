@@ -8,13 +8,15 @@ import time
 import xml.etree.ElementTree as ET
 from enrollment_fixture import Fixture
 from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition
+from run_route_lifecycle import RouteProxy
 
 def main():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish'),'Emulator only'
     assert PACKAGE+'.test/io.syn443.android.EnrollmentDriver' in adb('shell','pm','list','instrumentation').decode(),'Test APK enrollment driver is not installed'
     suite=ET.Element('testsuite',name='SYN443 enrolled native VPN')
     out=ROOT/'app/build/outputs/androidTest-results/external/TEST-enrolled-vpn.xml'
-    proxy=Server(('127.0.0.1',0),Proxy);threading.Thread(target=proxy.serve_forever,daemon=True).start()
+    proxy=Server(('127.0.0.1',0),RouteProxy);threading.Thread(target=proxy.serve_forever,daemon=True).start()
+    proxy.ssh_ok=True;proxy.delay=0;proxy.health_ok=True;proxy.route_probes=0
     port=proxy.server_address[1];adb('reverse','tcp:'+str(port),'tcp:'+str(port))
     config={'outbounds':[{'type':'http','tag':'enrolled-proxy','server':'127.0.0.1','server_port':port}], 'route':{'final':'enrolled-proxy'}}
     fixture=None
@@ -50,7 +52,10 @@ def main():
         await_condition(lambda:call('status').get('phase')=='Online' and call('status').get('policy',{}).get('phase')=='committed' and proxy.progress>before)
     names=['enrolledPendingAssignmentRetriesWhileVisible','enrolledSignedAssignmentStartsRealTun','enrolledControllerDeathRecoversAuthorizedCache',
            'enrolledCandidateRegressionRollsBack','enrolledRevocationStopsNativeWithoutLocalFallback',
-           'enrolledLogoutRetiresFrozenNativeBeforeAcknowledging']
+           'enrolledLogoutRetiresFrozenNativeBeforeAcknowledging',
+           'enrolledAssignedRoutesCommitWithOptionalFailure',
+           'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
+           'enrolledStopFencesPendingCandidateRouteSuccess']
     try:
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
@@ -78,6 +83,30 @@ def main():
                     call('policy-refresh')
                     await_condition(lambda:call('status').get('policy',{}).get('phase')=='rolled_back' and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert call('status')['policy']['activeRevision']==1
+                elif name in ('enrolledAssignedRoutesCommitWithOptionalFailure','enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet','enrolledStopFencesPendingCandidateRouteSuccess'):
+                    changed=copy.deepcopy(config)
+                    changed['outbounds'].append({'type':'http','tag':'unavailable-route','server':'127.0.0.1','server_port':1})
+                    changed['route_checks']=[{'outbound':'enrolled-proxy','required':True,'checks':[{'method':'ssh_banner','target':'192.0.2.9:22'}]},
+                        {'outbound':'unavailable-route','required':False,'checks':[{'method':'tcp','target':'192.0.2.9:22'}]}]
+                    original=pid(':engine');probes=proxy.route_probes
+                    if name=='enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet':
+                        changed['route_checks'][1]['required']=True;fixture.allow_degraded=True
+                    if name=='enrolledStopFencesPendingCandidateRouteSuccess':proxy.delay=4
+                    fixture.config=changed;fixture.revision=2;call('policy-refresh')
+                    if name=='enrolledAssignedRoutesCommitWithOptionalFailure':
+                        await_condition(lambda:call('status').get('policy',{}).get('activeRevision')==2 and call('status')['policy']['phase']=='committed' and call('status')['phase']=='Online',90)
+                        rows=call('routes-status')['routes']
+                        assert rows[0]['state']=='working' and rows[1]['state']=='failed' and proxy.route_probes>probes
+                        assert pid(':engine')!=original and proxy.progress>before
+                    elif name=='enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet':
+                        await_condition(lambda:call('status')['policy']['phase']=='rolled_back' and call('status')['phase']=='Online',90)
+                        assert call('status')['policy']['activeRevision']==1 and call('status')['policy']['reason']=='required_route_failed'
+                        assert proxy.progress>before
+                    else:
+                        await_condition(lambda:call('status')['policy']['phase']=='applying' and proxy.route_probes>probes,60)
+                        call('disconnect');await_condition(stopped);generation_after=call('status')['generation'];time.sleep(5)
+                        state=call('status');assert not state['desiredOn'] and state['generation']==generation_after and state['policy']['activeRevision']==1 and stopped()
+                    proxy.delay=0
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
                     fixture.policy_status=403;call('policy-refresh')
                     await_condition(lambda:call('auth-status').get('phase')=='NEEDS_REAUTH' and stopped())
@@ -93,6 +122,7 @@ def main():
                 ET.SubElement(case,'failure',message='enrolled native VPN acceptance failed')
                 raise
             finally:
+                proxy.delay=0
                 logout()
     finally:
         try:logout()

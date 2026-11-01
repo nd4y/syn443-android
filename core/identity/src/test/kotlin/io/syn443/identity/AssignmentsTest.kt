@@ -175,6 +175,7 @@ class AssignmentsTest {
         assertSame(first,Assignments.abort(first,current,payload,"interrupted_activation"))
         val applying=Assignments.begin(first,current,payload,listOf(false),1,1000)
         val aborted=Assignments.abort(applying,current,payload,"interrupted_activation")
+        assertEquals("required_route_failed",Assignments.abort(applying,current,payload,"required_route_failed").journal.reason)
         assertEquals("rolled_back",aborted.journal.phase);assertNull(aborted.journal.active)
         assertTrue(aborted.journal.failedRevisions.contains(1));assertEquals(0L,aborted.applyDeadlineElapsed)
         invalid {Assignments.abort(applying,current,payload,"arbitrary sensitive reason")}

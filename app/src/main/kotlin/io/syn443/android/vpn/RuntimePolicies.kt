@@ -49,9 +49,9 @@ internal class RuntimePolicies(private val context:Context,
         val d=read()
         if(d.enrolled)login.beginAssignment(checkNotNull(d.ticket),values) else {legacy.begin(values);true}
     }.getOrDefault(false)
-    fun finish(values:List<Boolean>,started:Boolean):Boolean = runCatching {
+    fun finish(values:List<Boolean>,started:Boolean,canCommit:()->Boolean={true}):Boolean = runCatching {
         val d=read()
-        if(d.enrolled)login.finishAssignment(checkNotNull(d.ticket),values,started) else {legacy.finish(values,started);true}
+        if(d.enrolled)login.finishAssignment(checkNotNull(d.ticket),values,started,canCommit) else {require(canCommit());legacy.finish(values,started);true}
     }.getOrDefault(false)
     fun rollback(reason:String):Boolean = runCatching {
         val d=read();if(d.journal.phase!="applying")return@runCatching false
