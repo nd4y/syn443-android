@@ -2,6 +2,7 @@ package io.syn443.identity
 
 import io.syn443.policy.Canonical
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -104,5 +105,25 @@ class BootstrapTrustTest {
             link(code="invalid"),"x".repeat(BootstrapTrust.MAX_LINK+1),raw.replace("service=service-a","service=%FF"),raw+"&unknown=%G0")) {
             fail {BootstrapTrust.authenticate(bad,anchor,ServiceFloor(),now)}
         }
+    }
+    @Test fun sharedGoCertificatesMatchKotlinFloorsAndDualRootTransition() {
+        val raw=requireNotNull(javaClass.classLoader.getResourceAsStream("bootstrap-wire-vectors.json")).use {it.readBytes().toString(Charsets.UTF_8)}
+        val fixture=Canonical.parse(raw).jsonObject
+        require(fixture.getValue("version").jsonPrimitive.int==1)
+        val time=fixture.getValue("now").jsonPrimitive.long
+        fun parts(name:String):String {val value=fixture.getValue(name).jsonObject
+            return listOf("header","payload","signature").joinToString("."){value.getValue(it).jsonPrimitive.content}}
+        val root=Canonical.json.decodeFromString<TrustAnchor>(fixture.getValue("anchor").toString())
+        val expectedFloor=Canonical.json.decodeFromString<ServiceFloor>(fixture.getValue("floor").toString())
+        val (service,floor)=BootstrapTrust.descriptor(parts("manifest"),root,ServiceFloor(),time)
+        assertEquals(expectedFloor,floor)
+        val advanced=BootstrapTrust.advance(RootRotation(parts("previous"),parts("next")),root,time)
+        assertEquals(Canonical.json.decodeFromString<TrustAnchor>(fixture.getValue("advanced").toString()),advanced)
+        val (_,newFloor)=BootstrapTrust.descriptor(parts("fresh"),advanced,floor,time)
+        assertEquals(Canonical.json.decodeFromString<ServiceFloor>(fixture.getValue("newFloor").toString()),newFloor)
+        fail {BootstrapTrust.descriptor(parts("manifest"),advanced,ServiceFloor(),time)}
+        val code=fixture.getValue("code").jsonPrimitive.content
+        val url="syn443://enroll/v1?"+Identity.form(mapOf("service" to service.serviceId,"origin" to service.apiOrigin,"code" to code,"bootstrap" to parts("manifest")))
+        assertEquals(expectedFloor,BootstrapTrust.authenticate(url,root,ServiceFloor(),time).floor)
     }
 }
