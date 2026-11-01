@@ -19,7 +19,9 @@ class RouteProxy(socketserver.BaseRequestHandler):
         if line.startswith(b'CONNECT 203.0.113.10:80 '):
             self.request.sendall(b'HTTP/1.1 200 Connection established\r\n\r\n')
             if stream.readline(4096).startswith(b'GET /generate_204 '):
-                Proxy.headers(stream);self.request.sendall(b'HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n');self.server.progress+=1
+                Proxy.headers(stream)
+                self.request.sendall(b'HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n' if self.server.health_ok else b'HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\n\r\n')
+                self.server.progress+=1
         elif line.startswith(b'CONNECT 192.0.2.9:22 '):
             self.server.route_probes+=1;self.request.sendall(b'HTTP/1.1 200 Connection established\r\n\r\n')
             time.sleep(self.server.delay)
@@ -32,7 +34,7 @@ def main():
     out=ROOT/'app/build/outputs/androidTest-results/external/TEST-route-lifecycle.xml'
     servers=[Server(('127.0.0.1',0),RouteProxy) for _ in range(2)]
     for index,server in enumerate(servers):
-        server.ssh_ok=index==0;server.route_probes=0;server.delay=0
+        server.ssh_ok=index==0;server.route_probes=0;server.delay=0;server.health_ok=True
         threading.Thread(target=server.serve_forever,daemon=True).start()
     ports=[str(s.server_address[1]) for s in servers]
     config={'outbounds':[{'type':'http','tag':'working','server':'127.0.0.1','server_port':int(ports[0])},
@@ -48,7 +50,7 @@ def main():
     def stop():
         call('disconnect');await_condition(lambda:not pid(':engine') and not call('status')['engineActive'],30)
     def prepare():
-        stop();call('policy-test-reset');call('test-reset');servers[0].ssh_ok=True;servers[0].delay=0
+        stop();call('policy-test-reset');call('test-reset');servers[0].ssh_ok=True;servers[0].delay=0;servers[0].health_ok=True
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')
         call('import',base64.b64encode(raw.encode()).decode());call('test-health','synthetic-http');forward()
         call('connect');await_condition(lambda:call('status')['phase']=='Online' and servers[0].progress>0,150)
@@ -74,6 +76,12 @@ def main():
         assert pid(':engine')==before and call('status')['desiredOn']
         servers[0].ssh_ok=True;call('routes-check')
         await_condition(lambda:row(0)['state']=='working' and call('status')['phase']=='Online',40);assert pid(':engine')==before
+        servers[0].health_ok=False
+        await_condition(lambda:call('status')['phase']=='Degraded',40)
+        assert row(0)['state']=='working' and pid(':engine')==before
+        servers[0].health_ok=True
+        await_condition(lambda:call('status')['phase']=='Online',90)
+        assert pid(':engine')==before
         print(case.get('name')+': passed',flush=True)
 
         case=new_case('stopCancelsPendingRouteChecksAndRejectsLateSuccess')

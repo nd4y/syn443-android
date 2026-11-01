@@ -53,6 +53,9 @@ Unknown, stale or failed required evidence prevents Online. An optional failure
 does not restart the engine or withdraw independent traffic. Existing HTTPS/TUN
 readiness remains required too. Cancellation/incomplete evidence is not a proxy
 failure and does not consume the heavy restart budget.
+If global readiness fails while a current assigned-target route still works, the
+overall status is Degraded. Independent private traffic is retained; that partial
+success never hides the failed global requirement or becomes Online.
 
 ADB commands: `routes-status`, `routes-check` (optional `route-N` argument),
 `routes-cancel`. These do not Connect or change user intent. `status.routeHealth`

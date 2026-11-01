@@ -206,7 +206,7 @@ class TunnelService : VpnService() {
         healthJob?.cancel(); healthJob = null
         stableSince = 0; successes = 0
         store.update { value -> value.put("networkEpoch", epoch); store.put(value, Recovery.networkOpportunity(store.checkpoint(value), System.currentTimeMillis())) }
-        if (selected == null) { phase("NoNetwork", "network_unavailable"); return }
+        if (selected == null) { RouteSnapshot.owner(null);phase("NoNetwork", "network_unavailable"); return }
         setUnderlyingNetworks(arrayOf(selected))
         val properties = connectivity.getLinkProperties(selected)
         val name = properties?.interfaceName
@@ -537,7 +537,9 @@ class TunnelService : VpnService() {
                     internetHealthy=false
                     stableSince = 0; successes = 0
                     if (!store.updateCurrent(generation) { store.put(it, Recovery.failed(store.checkpoint(it), System.currentTimeMillis(), Math.random())) }) return@post
-                    phase("Recovering", code, generation)
+                    val routes=RouteSnapshot.view(store.read()).getJSONArray("routes")
+                    val partial=(0 until routes.length()).any {routes.getJSONObject(it).optString("state")=="working"}
+                    phase(if(partial)"Degraded" else "Recovering", code, generation)
                     // A target/network failure is not evidence that the native process must restart.
                 }
             }
