@@ -1,7 +1,7 @@
 import copy
 import unittest
 from unittest.mock import patch
-from run_enrolled_vpn import stopped_rollback_recovered
+from run_enrolled_vpn import stopped_rollback_recovered, failure_summary
 
 
 class StoppedControllerRecoveryTest(unittest.TestCase):
@@ -32,3 +32,15 @@ class StoppedControllerRecoveryTest(unittest.TestCase):
             def request(method):return state if method=='status' else {'busy':False}
             with patch('run_enrolled_vpn.call',side_effect=request),patch('run_enrolled_vpn.pid',side_effect=lambda suffix:'new-controller' if suffix==':controller' else ''):
                 self.assertFalse(stopped_rollback_recovered('old-controller',7))
+
+    def test_failure_diagnostics_never_copy_untrusted_or_private_fields(self):
+        import json
+        state=copy.deepcopy(self.state)
+        state.update(token='synthetic-secret',netbird={'peers':['private-fixture']},error='synthetic-secret')
+        state['policy'].update(phase='synthetic-secret',activeRevision='synthetic-secret',target='synthetic-secret')
+        with patch('run_enrolled_vpn.call',side_effect=lambda method:state if method=='status' else {'busy':False,'token':'synthetic-secret'}),patch('run_enrolled_vpn.pid',return_value=''):
+            result=failure_summary()
+        self.assertEqual('unknown',result['policy']['phase'])
+        self.assertNotIn('activeRevision',result['policy'])
+        self.assertNotIn('synthetic-secret',json.dumps(result))
+        self.assertNotIn('private-fixture',json.dumps(result))

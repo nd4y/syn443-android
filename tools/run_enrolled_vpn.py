@@ -20,6 +20,18 @@ def stopped_rollback_recovered(controller,generation):
         state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
         not call('auth-status')['busy'])
 
+def failure_summary():
+    state=call('status');auth=call('auth-status');policy=state.get('policy',{})
+    phases={'unmanaged','unavailable','blocked','prepared','applying','committed','degraded','rolled_back','rejected','released'}
+    safe_policy={'phase':policy.get('phase') if policy.get('phase') in phases else 'unknown'}
+    for name in ('activeRevision','lastKnownGoodRevision','candidateRevision','activationGeneration','maxRevision'):
+        value=policy.get(name)
+        if type(value) is int and 0<=value<=9007199254740991:safe_policy[name]=value
+    return {'desiredOn':state.get('desiredOn') is True,'engineActive':state.get('engineActive') is True,
+        'intentGeneration':state.get('generation') if type(state.get('generation')) is int else None,
+        'policy':safe_policy,'authBusy':auth.get('busy') is True,
+        'controllerPresent':bool(pid(':controller')),'nativePresent':bool(pid(':engine'))}
+
 def main():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish'),'Emulator only'
     assert PACKAGE+'.test/io.syn443.android.EnrollmentDriver' in adb('shell','pm','list','instrumentation').decode(),'Test APK enrollment driver is not installed'
@@ -139,6 +151,8 @@ def main():
                     assert entries==['intent.json']
                 print(name+': passed',flush=True)
             except Exception:
+                try:print('Enrolled failure state: '+json.dumps(failure_summary()),flush=True)
+                except Exception:print('Enrolled failure state unavailable',flush=True)
                 ET.SubElement(case,'failure',message='enrolled native VPN acceptance failed')
                 raise
             finally:
