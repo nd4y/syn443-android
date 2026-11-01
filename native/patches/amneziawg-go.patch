@@ -1,0 +1,2719 @@
+diff --git a/Dockerfile b/Dockerfile
+index b33c40d..98a7e9e 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,24 +1,18 @@
+-FROM golang:1.25.12 as awg
++FROM golang:1.24.4 as awg
+ COPY . /awg
+ WORKDIR /awg
+ RUN go mod download && \
+     go mod verify && \
+     go build -ldflags '-linkmode external -extldflags "-fno-PIC -static"' -v -o /usr/bin
+ 
+-FROM alpine:3.19 as tools
+-ARG AWGTOOLS_COMMIT="v3.1.20260812"
+-
+-RUN apk add --no-cache git build-base linux-headers && \
+-    git clone https://github.com/amnezia-vpn/amneziawg-tools.git /amneziawg-tools && \
+-    cd /amneziawg-tools && git checkout ${AWGTOOLS_COMMIT} && \
+-    cd src && make
+-
+ FROM alpine:3.19
++ARG AWGTOOLS_RELEASE="1.0.20250901"
+ 
+-RUN apk --no-cache add iproute2 iptables bash
+-COPY --from=tools /amneziawg-tools/src/wg /usr/bin/awg
+-COPY --from=tools /amneziawg-tools/src/wg-quick/linux.bash /usr/bin/awg-quick
+-RUN chmod +x /usr/bin/awg /usr/bin/awg-quick && \
++RUN apk --no-cache add iproute2 iptables bash && \
++    cd /usr/bin/ && \
++    wget https://github.com/amnezia-vpn/amneziawg-tools/releases/download/v${AWGTOOLS_RELEASE}/alpine-3.19-amneziawg-tools.zip && \
++    unzip -j alpine-3.19-amneziawg-tools.zip && \
++    chmod +x /usr/bin/awg /usr/bin/awg-quick && \
+     ln -s /usr/bin/awg /usr/bin/wg && \
+     ln -s /usr/bin/awg-quick /usr/bin/wg-quick
+ COPY --from=awg /usr/bin/amneziawg-go /usr/bin/amneziawg-go
+diff --git a/README.md b/README.md
+index 84dfd36..e1c7309 100644
+--- a/README.md
++++ b/README.md
+@@ -53,59 +53,9 @@ $ make
+ 
+ ## Configuration
+ 
+-### Data types and definitions
+-
+-`client-side` means the param is not required to be the same on both server and client, while  
+-`server-side` means this is mandatory the values are the same on server and on client  
+-
+-`range,x`, where x is the underlying type of left and right
+-* Format: "a-b", or "a", or "(off)"
+-* Example: PersistentKeepalive = 22-30
+-
+ > [!NOTE]
+ > If there is no value specified (for any param), AWG treats it as 0
+ 
+-### Header protection [AWG 3+]
+-
+-Header protection is the mechanism of protecting low-entropy values of packets' headers. The idea is to apply fast encryption to the specific fields which WireGuard does use for authentication and its own encryption. The cipher uses `S1-S4` crypto padding as nonce for each incoming packet.
+-
+-```
+-[Device]
+-+ HeaderProtectionKey: key,string - server-side # the key to be used in header protection
+-```
+-
+-> [!TIP]
+-> Use `awg genkey` to generate header protection key
+-
+-> [!IMPORTANT]
+-> Header protection requires `S1-S4` value to be 12 at least
+-
+-### Content padding [AWG 3+]
+-
+-```
+-[Device]
+-+ ContentPaddingAddition: uint32,range - client-side # the range to be used as a custom padding
+-```
+-
+-> [!TIP]
+-> It's important to specify content padding on both sides. However, this is not strictly required and could be omitted.
+-
+-### Timings [AWG 3+]
+-
+-This param could be used to customize default Wireguard's timings
+-
+-```
+-[Device]
+-+ RekeyAfterTime       = "uint32,range - client-side - seconds" # time, after which client tries to handshake
+-+ RekeyTimeout         = "uint32,range - client-side - seconds" # timeout, after which handshake is repeated
+-+ RejectAfterTime      = "uint32,range - client-side - seconds" # time, after which client forces handshake, and declines all incoming data
+-+ KeepaliveTimeout     = "uint32,range - client-side - seconds" # time from last data sending, after which keepalive is sent
+-+ MaxHandshakeAttempts = "uint32,range - client-side - amount"  # maximum attempts of handshake repetition
+-
+-[Peer]
+-M PersistentKeepalive  = "uint32,range - client-side - seconds" # interval of persistent keepalive
+-```
+-
+ ### Junk packets
+ 
+ The amount of junk packets specified in `Jc` with a random size between `Jmin` and `Jmax` would be generated and sent prior every handshake
+@@ -131,7 +81,7 @@ The amount of junk packets specified in `Jc` with a random size between `Jmin` a
+ Every message in wireguard has `uint32` type at the beginning of the packet. This field could be controlled by specifying the params below:
+ 
+ - `H1: string` - header range of handshake initial message
+-- `H2: string` - header range of handshake response message
++- `H2: string` - header range of handshake initial message
+ - `H3: string` - header range of handshake cookie message
+ - `H4: string` - header range of transport message
+ 
+@@ -160,4 +110,4 @@ Value is a sequence of tags specified below:
+ > Custom signature packets does not carry any actual data, so there is no need to specify it on both sides. General recommendation is to use it on the client side only
+ 
+ > [!IMPORTANT]
+-> If the final size of any packet exceeds system MTU, it would be fractured into fragments, which looks suspicious
++> If the final size of any packet exceeds system MTU, it would be fractured into fragments, which looks suspicious
+\ No newline at end of file
+diff --git a/conn/bind_windows.go b/conn/bind_windows.go
+index 77cf2a9..1a0e021 100644
+--- a/conn/bind_windows.go
++++ b/conn/bind_windows.go
+@@ -17,7 +17,7 @@ import (
+ 
+ 	"golang.org/x/sys/windows"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn/winrio"
++	"github.com/amnezia-vpn/amneziawg-go/conn/winrio"
+ )
+ 
+ const (
+@@ -582,24 +582,6 @@ func (bind *WinRingBind) BindSocketToInterface6(interfaceIndex uint32, blackhole
+ 	return nil
+ }
+ 
+-func (bind *WinRingBind) PeekLookAtSocketFd4() (fd int, err error) {
+-	bind.mu.RLock()
+-	defer bind.mu.RUnlock()
+-	if bind.isOpen.Load() != 1 {
+-		return -1, net.ErrClosed
+-	}
+-	return int(bind.v4.sock), nil
+-}
+-
+-func (bind *WinRingBind) PeekLookAtSocketFd6() (fd int, err error) {
+-	bind.mu.RLock()
+-	defer bind.mu.RUnlock()
+-	if bind.isOpen.Load() != 1 {
+-		return -1, net.ErrClosed
+-	}
+-	return int(bind.v6.sock), nil
+-}
+-
+ func bindSocketToInterface4(handle windows.Handle, interfaceIndex uint32) error {
+ 	const IP_UNICAST_IF = 31
+ 	/* MSDN says for IPv4 this needs to be in net byte order, so that it's like an IP address with leading zeros. */
+diff --git a/conn/bindtest/bindtest.go b/conn/bindtest/bindtest.go
+index 5e6a682..25b5eab 100644
+--- a/conn/bindtest/bindtest.go
++++ b/conn/bindtest/bindtest.go
+@@ -12,7 +12,7 @@ import (
+ 	"net/netip"
+ 	"os"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
+ )
+ 
+ type ChannelBind struct {
+diff --git a/conn/boundif.go b/conn/boundif_android.go
+similarity index 100%
+rename from conn/boundif.go
+rename to conn/boundif_android.go
+diff --git a/device/bind_test.go b/device/bind_test.go
+index 1afdc9a..24dec1f 100644
+--- a/device/bind_test.go
++++ b/device/bind_test.go
+@@ -8,7 +8,7 @@ package device
+ import (
+ 	"errors"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
+ )
+ 
+ type DummyDatagram struct {
+diff --git a/device/constants.go b/device/constants.go
+index bf8f81c..41da618 100644
+--- a/device/constants.go
++++ b/device/constants.go
+@@ -24,7 +24,6 @@ const (
+ 	CookieRefreshTime       = time.Second * 120
+ 	HandshakeInitationRate  = time.Second / 50
+ 	PaddingMultiple         = 16
+-	DefaultUdpWindow        = 500
+ )
+ 
+ const (
+diff --git a/device/device.go b/device/device.go
+index 781a899..2fdf85c 100644
+--- a/device/device.go
++++ b/device/device.go
+@@ -11,10 +11,10 @@ import (
+ 	"sync/atomic"
+ 	"time"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/ratelimiter"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/rwcancel"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/ratelimiter"
++	"github.com/amnezia-vpn/amneziawg-go/rwcancel"
++	"github.com/amnezia-vpn/amneziawg-go/tun"
+ )
+ 
+ type Device struct {
+@@ -91,44 +91,26 @@ type Device struct {
+ 	log      *Logger
+ 
+ 	junk struct {
+-		min   atomic.Uint32
+-		max   atomic.Uint32
+-		count atomic.Uint32
++		min   int
++		max   int
++		count int
+ 	}
+ 
+ 	headers struct {
+-		init      AtomicUintRange
+-		cookie    AtomicUintRange
+-		response  AtomicUintRange
+-		transport AtomicUintRange
++		init      *magicHeader
++		cookie    *magicHeader
++		response  *magicHeader
++		transport *magicHeader
+ 	}
+ 
+ 	paddings struct {
+-		init      atomic.Uint32
+-		response  atomic.Uint32
+-		cookie    atomic.Uint32
+-		transport atomic.Uint32
++		init      int
++		response  int
++		cookie    int
++		transport int
+ 	}
+ 
+ 	ipackets [5]*obfChain
+-
+-	headerProtection struct {
+-		sync.RWMutex
+-		key HeaderCipherKey
+-	}
+-
+-	contentPaddingAddition AtomicUintRange
+-
+-	timings struct {
+-		rekeyAfterTimeSec   AtomicUintRange
+-		rekeyTimeoutSec     AtomicUintRange
+-		rejectAfterTimeSec  AtomicUintRange
+-		keepaliveTimeoutSec AtomicUintRange
+-		maxHandshakeAttemps AtomicUintRange
+-	}
+-
+-	randomTrailers atomic.Bool
+-	disableCookies atomic.Bool
+ }
+ 
+ // deviceState represents the state of a Device.
+@@ -223,7 +205,7 @@ func (device *Device) upLocked() error {
+ 	device.peers.RLock()
+ 	for _, peer := range device.peers.keyMap {
+ 		peer.Start()
+-		if !peer.persistentKeepaliveInterval.Load().IsZero() {
++		if peer.persistentKeepaliveInterval.Load() > 0 {
+ 			peer.SendKeepalive()
+ 		}
+ 	}
+@@ -323,8 +305,6 @@ func (device *Device) SetPrivateKey(sk NoisePrivateKey) error {
+ }
+ 
+ func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
+-	var rang UintRange
+-
+ 	device := new(Device)
+ 	device.state.state.Store(uint32(deviceStateDown))
+ 	device.closed = make(chan struct{})
+@@ -341,14 +321,10 @@ func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {
+ 	device.rate.limiter.Init()
+ 	device.indexTable.Init()
+ 
+-	rang.FromUint32(MessageInitiationType, MessageInitiationType)
+-	device.headers.init.Store(rang)
+-	rang.FromUint32(MessageResponseType, MessageResponseType)
+-	device.headers.response.Store(rang)
+-	rang.FromUint32(MessageCookieReplyType, MessageCookieReplyType)
+-	device.headers.cookie.Store(rang)
+-	rang.FromUint32(MessageTransportType, MessageTransportType)
+-	device.headers.transport.Store(rang)
++	device.headers.init = &magicHeader{start: MessageInitiationType, end: MessageInitiationType}
++	device.headers.response = &magicHeader{start: MessageResponseType, end: MessageResponseType}
++	device.headers.cookie = &magicHeader{start: MessageCookieReplyType, end: MessageCookieReplyType}
++	device.headers.transport = &magicHeader{start: MessageTransportType, end: MessageTransportType}
+ 
+ 	device.PopulatePools()
+ 
+@@ -460,12 +436,10 @@ func (device *Device) SendKeepalivesToPeersWithCurrentKeypair() {
+ 		return
+ 	}
+ 
+-	timeout := device.keychainExpireTime()
+-
+ 	device.peers.RLock()
+ 	for _, peer := range device.peers.keyMap {
+ 		peer.keypairs.RLock()
+-		sendKeepalive := peer.keypairs.current != nil && !peer.keypairs.current.created.Add(timeout).Before(time.Now())
++		sendKeepalive := peer.keypairs.current != nil && !peer.keypairs.current.created.Add(RejectAfterTime).Before(time.Now())
+ 		peer.keypairs.RUnlock()
+ 		if sendKeepalive {
+ 			peer.SendKeepalive()
+diff --git a/device/device_test.go b/device/device_test.go
+index 1e13f9d..2f66185 100644
+--- a/device/device_test.go
++++ b/device/device_test.go
+@@ -23,10 +23,10 @@ import (
+ 
+ 	"go.uber.org/atomic"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn/bindtest"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun/tuntest"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/conn/bindtest"
++	"github.com/amnezia-vpn/amneziawg-go/tun"
++	"github.com/amnezia-vpn/amneziawg-go/tun/tuntest"
+ )
+ 
+ // uapiCfg returns a string that contains cfg formatted use with IpcSet.
+diff --git a/device/keypair.go b/device/keypair.go
+index e821809..05bce68 100644
+--- a/device/keypair.go
++++ b/device/keypair.go
+@@ -11,7 +11,7 @@ import (
+ 	"sync/atomic"
+ 	"time"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/replay"
++	"github.com/amnezia-vpn/amneziawg-go/replay"
+ )
+ 
+ /* Due to limitations in Go and /x/crypto there is currently
+diff --git a/device/magic-header.go b/device/magic-header.go
+new file mode 100644
+index 0000000..78e59d6
+--- /dev/null
++++ b/device/magic-header.go
+@@ -0,0 +1,63 @@
++package device
++
++import (
++	"crypto/rand"
++	"errors"
++	"fmt"
++	"math/big"
++	"strconv"
++	"strings"
++)
++
++type magicHeader struct {
++	start uint32
++	end   uint32
++}
++
++func newMagicHeader(spec string) (*magicHeader, error) {
++	parts := strings.Split(spec, "-")
++	if len(parts) < 1 || len(parts) > 2 {
++		return nil, errors.New("bad format")
++	}
++
++	start, err := strconv.ParseUint(parts[0], 10, 32)
++	if err != nil {
++		return nil, fmt.Errorf("failed to parse %s: %w", parts[0], err)
++	}
++
++	var end uint64
++	if len(parts) > 1 {
++		end, err = strconv.ParseUint(parts[1], 10, 32)
++		if err != nil {
++			return nil, fmt.Errorf("failed to parse %s: %w", parts[1], err)
++		}
++	} else {
++		end = start
++	}
++
++	if end < start {
++		return nil, errors.New("wrong range specified")
++	}
++
++	return &magicHeader{
++		start: uint32(start),
++		end:   uint32(end),
++	}, nil
++}
++
++func (h *magicHeader) GenSpec() string {
++	if h.start == h.end {
++		return fmt.Sprintf("%d", h.start)
++	}
++	return fmt.Sprintf("%d-%d", h.start, h.end)
++}
++
++func (h *magicHeader) Validate(val uint32) bool {
++	return h.start <= val && val <= h.end
++}
++
++func (h *magicHeader) Generate() uint32 {
++	high := int64(h.end - h.start + 1)
++	r, _ := rand.Int(rand.Reader, big.NewInt(high))
++	return h.start + uint32(r.Int64())
++}
+diff --git a/device/noise-protocol.go b/device/noise-protocol.go
+index c49f412..86346ac 100644
+--- a/device/noise-protocol.go
++++ b/device/noise-protocol.go
+@@ -6,18 +6,16 @@
+ package device
+ 
+ import (
+-	"crypto/rand"
+ 	"errors"
+ 	"fmt"
+ 	"sync"
+ 	"time"
+ 
+ 	"golang.org/x/crypto/blake2s"
+-	"golang.org/x/crypto/chacha20"
+ 	"golang.org/x/crypto/chacha20poly1305"
+ 	"golang.org/x/crypto/poly1305"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tai64n"
++	"github.com/amnezia-vpn/amneziawg-go/tai64n"
+ )
+ 
+ type handshakeState int
+@@ -196,7 +194,7 @@ func (device *Device) CreateMessageInitiation(peer *Peer) (*MessageInitiation, e
+ 
+ 	handshake.mixHash(handshake.remoteStatic[:])
+ 
+-	msgType := device.headers.init.Load().PickOne()
++	msgType := device.headers.init.Generate()
+ 
+ 	msg := MessageInitiation{
+ 		Type:      msgType,
+@@ -372,7 +370,7 @@ func (device *Device) CreateMessageResponse(peer *Peer) (*MessageResponse, error
+ 	}
+ 
+ 	var msg MessageResponse
+-	msg.Type = device.headers.response.Load().PickOne()
++	msg.Type = device.headers.response.Generate()
+ 	msg.Sender = handshake.localIndex
+ 	msg.Receiver = handshake.remoteIndex
+ 
+@@ -628,29 +626,3 @@ func (peer *Peer) ReceivedWithKeypair(receivedKeypair *Keypair) bool {
+ 	keypairs.next.Store(nil)
+ 	return true
+ }
+-
+-func (device *Device) JunkPackets() [][]byte {
+-	var bufs [][]byte
+-
+-	min := device.junk.min.Load()
+-	max := device.junk.max.Load()
+-
+-	for range device.junk.count.Load() {
+-		buf := make([]byte, min+fastrandn(max-min))
+-		rand.Read(buf)
+-		bufs = append(bufs, buf)
+-	}
+-
+-	return bufs
+-}
+-
+-func (device *Device) HeaderProtectionCipher(salt []byte) (*chacha20.Cipher, error) {
+-	device.headerProtection.RLock()
+-	defer device.headerProtection.RUnlock()
+-
+-	if device.headerProtection.key.IsZero() {
+-		return nil, nil
+-	}
+-
+-	return chacha20.NewUnauthenticatedCipher(device.headerProtection.key[:], salt)
+-}
+diff --git a/device/noise-types.go b/device/noise-types.go
+index 7c083ba..41c944e 100644
+--- a/device/noise-types.go
++++ b/device/noise-types.go
+@@ -9,18 +9,12 @@ import (
+ 	"crypto/subtle"
+ 	"encoding/hex"
+ 	"errors"
+-	"fmt"
+-	"strconv"
+-	"strings"
+-	"sync/atomic"
+ )
+ 
+ const (
+ 	NoisePublicKeySize    = 32
+ 	NoisePrivateKeySize   = 32
+ 	NoisePresharedKeySize = 32
+-	HeaderCipherKeySize   = 32
+-	HeaderCipherNonceSize = 12
+ )
+ 
+ type (
+@@ -28,7 +22,6 @@ type (
+ 	NoisePrivateKey   [NoisePrivateKeySize]byte
+ 	NoisePresharedKey [NoisePresharedKeySize]byte
+ 	NoiseNonce        uint64 // padded to 12-bytes
+-	HeaderCipherKey   [HeaderCipherKeySize]byte
+ )
+ 
+ func loadExactHex(dst []byte, src string) error {
+@@ -83,104 +76,3 @@ func (key NoisePublicKey) Equals(tar NoisePublicKey) bool {
+ func (key *NoisePresharedKey) FromHex(src string) error {
+ 	return loadExactHex(key[:], src)
+ }
+-
+-func (key HeaderCipherKey) IsZero() bool {
+-	var zero HeaderCipherKey
+-	return key.Equals(zero)
+-}
+-
+-func (key HeaderCipherKey) Equals(tar HeaderCipherKey) bool {
+-	return subtle.ConstantTimeCompare(key[:], tar[:]) == 1
+-}
+-
+-func (key *HeaderCipherKey) FromHex(src string) error {
+-	return loadExactHex(key[:], src)
+-}
+-
+-type UintRange uint64
+-
+-func (r *UintRange) FromUint32(lo, hi uint32) {
+-	*r = UintRange(uint64(hi)<<32 | uint64(lo))
+-}
+-
+-func (r *UintRange) FromString(str string) error {
+-	parts := strings.Split(str, "-")
+-	if len(parts) < 1 || len(parts) > 2 {
+-		return errors.New("wrong format")
+-	}
+-
+-	lo, err := strconv.ParseUint(parts[0], 10, 32)
+-	if err != nil {
+-		return err
+-	}
+-
+-	hi := lo
+-	if len(parts) > 1 {
+-		hi, err = strconv.ParseUint(parts[1], 10, 32)
+-		if err != nil {
+-			return err
+-		}
+-	}
+-
+-	if hi < lo {
+-		return errors.New("wrong range specified")
+-	}
+-
+-	r.FromUint32(uint32(lo), uint32(hi))
+-	return nil
+-}
+-
+-func (r UintRange) Contains(num uint32) bool {
+-	lo, hi := uint32(r), uint32(r>>32)
+-	return lo <= num && num <= hi
+-}
+-
+-func (r UintRange) IsZero() bool {
+-	return r == 0
+-}
+-
+-func (r UintRange) PickOne() uint32 {
+-	lo, hi := uint32(r), uint32(r>>32)
+-	return lo + fastrandn(hi-lo+1)
+-}
+-
+-func (r UintRange) ToString() string {
+-	lo, hi := uint32(r), uint32(r>>32)
+-
+-	if lo == hi {
+-		return fmt.Sprintf("%d", lo)
+-	} else {
+-		return fmt.Sprintf("%d-%d", lo, hi)
+-	}
+-}
+-
+-func (r UintRange) Overlap(right UintRange) bool {
+-	l_lo, l_hi := uint32(r), uint32(r>>32)
+-	r_lo, r_hi := uint32(right), uint32(right>>32)
+-
+-	return l_lo <= r_hi && r_lo <= l_hi
+-}
+-
+-func (r UintRange) Lo() uint32 {
+-	return uint32(r)
+-}
+-
+-func (r UintRange) Hi() uint32 {
+-	return uint32(r >> 32)
+-}
+-
+-type AtomicUintRange struct {
+-	v atomic.Uint64
+-}
+-
+-func (a *AtomicUintRange) Load() UintRange {
+-	return UintRange(a.v.Load())
+-}
+-
+-func (a *AtomicUintRange) Store(r UintRange) {
+-	a.v.Store(uint64(r))
+-}
+-
+-func (a *AtomicUintRange) Swap(r UintRange) UintRange {
+-	return UintRange(a.v.Swap(uint64(r)))
+-}
+diff --git a/device/noise_test.go b/device/noise_test.go
+index f2c2743..8f72f29 100644
+--- a/device/noise_test.go
++++ b/device/noise_test.go
+@@ -10,8 +10,8 @@ import (
+ 	"encoding/binary"
+ 	"testing"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun/tuntest"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/tun/tuntest"
+ )
+ 
+ func TestCurveWrappers(t *testing.T) {
+diff --git a/device/obf.go b/device/obf.go
+index cf2275c..53c55ff 100644
+--- a/device/obf.go
++++ b/device/obf.go
+@@ -85,9 +85,6 @@ func newObfChain(spec string) (*obfChain, error) {
+ 	if len(errs) > 0 {
+ 		return nil, errors.Join(errs...)
+ 	}
+-	if len(obfs) == 0 {
+-		return nil, nil
+-	}
+ 
+ 	return &obfChain{
+ 		Spec: spec,
+diff --git a/device/peer.go b/device/peer.go
+index 2bcb16c..8f88b2a 100644
+--- a/device/peer.go
++++ b/device/peer.go
+@@ -12,7 +12,7 @@ import (
+ 	"sync/atomic"
+ 	"time"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
+ )
+ 
+ type Peer struct {
+@@ -39,7 +39,6 @@ type Peer struct {
+ 		zeroKeyMaterial         *Timer
+ 		persistentKeepalive     *Timer
+ 		handshakeAttempts       atomic.Uint32
+-		maxHandshakeAttempts    atomic.Uint32
+ 		needAnotherKeepalive    atomic.Bool
+ 		sentLastMinuteHandshake atomic.Bool
+ 	}
+@@ -56,8 +55,7 @@ type Peer struct {
+ 
+ 	cookieGenerator             CookieGenerator
+ 	trieEntries                 list.List
+-	persistentKeepaliveInterval AtomicUintRange
+-	udpWindow                   atomic.Uint32
++	persistentKeepaliveInterval atomic.Uint32
+ }
+ 
+ func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
+@@ -80,8 +78,6 @@ func (device *Device) NewPeer(pk NoisePublicKey) (*Peer, error) {
+ 	// create peer
+ 	peer := new(Peer)
+ 
+-	peer.udpWindow.Store(DefaultUdpWindow)
+-
+ 	peer.cookieGenerator.Init(pk)
+ 	peer.device = device
+ 	peer.queue.outbound = newAutodrainingOutboundQueue(device)
+@@ -196,7 +192,7 @@ func (peer *Peer) Start() {
+ 	peer.stopping.Add(2)
+ 
+ 	peer.handshake.mutex.Lock()
+-	peer.handshake.lastSentHandshake = time.Now().Add(-(peer.device.rekeyMinTimeout() + time.Second))
++	peer.handshake.lastSentHandshake = time.Now().Add(-(RekeyTimeout + time.Second))
+ 	peer.handshake.mutex.Unlock()
+ 
+ 	peer.device.queue.encryption.wg.Add(1) // keep encryption queue open for our writes
+@@ -246,7 +242,7 @@ func (peer *Peer) ExpireCurrentKeypairs() {
+ 	handshake.mutex.Lock()
+ 	peer.device.indexTable.Delete(handshake.localIndex)
+ 	handshake.Clear()
+-	peer.handshake.lastSentHandshake = time.Now().Add(-(peer.device.rekeyMinTimeout() + time.Second))
++	peer.handshake.lastSentHandshake = time.Now().Add(-(RekeyTimeout + time.Second))
+ 	handshake.mutex.Unlock()
+ 
+ 	keypairs := &peer.keypairs
+@@ -286,9 +282,6 @@ func (peer *Peer) SetEndpointFromPacket(endpoint conn.Endpoint) {
+ 	if peer.endpoint.disableRoaming {
+ 		return
+ 	}
+-	if peer.endpoint.val != endpoint {
+-		peer.udpWindow.Store(DefaultUdpWindow)
+-	}
+ 	peer.endpoint.clearSrcOnTx = false
+ 	peer.endpoint.val = endpoint
+ }
+diff --git a/device/queueconstants_android.go b/device/queueconstants_android.go
+index 88662c2..741fcf3 100644
+--- a/device/queueconstants_android.go
++++ b/device/queueconstants_android.go
+@@ -5,7 +5,7 @@
+ 
+ package device
+ 
+-import "github.com/amnezia-vpn/amneziawg-go/v3/conn"
++import "github.com/amnezia-vpn/amneziawg-go/conn"
+ 
+ /* Reduce memory consumption for Android */
+ 
+diff --git a/device/queueconstants_default.go b/device/queueconstants_default.go
+index 80d3117..f19e9b1 100644
+--- a/device/queueconstants_default.go
++++ b/device/queueconstants_default.go
+@@ -7,7 +7,7 @@
+ 
+ package device
+ 
+-import "github.com/amnezia-vpn/amneziawg-go/v3/conn"
++import "github.com/amnezia-vpn/amneziawg-go/conn"
+ 
+ const (
+ 	QueueStagedSize            = conn.IdealBatchSize
+diff --git a/device/receive.go b/device/receive.go
+index d1901f8..b3b6105 100644
+--- a/device/receive.go
++++ b/device/receive.go
+@@ -13,7 +13,7 @@ import (
+ 	"sync"
+ 	"time"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
+ 	"golang.org/x/crypto/chacha20poly1305"
+ 	"golang.org/x/net/ipv4"
+ 	"golang.org/x/net/ipv6"
+@@ -32,7 +32,6 @@ type QueueInboundElement struct {
+ 	counter  uint64
+ 	keypair  *Keypair
+ 	endpoint conn.Endpoint
+-	padding  uint32
+ }
+ 
+ type QueueInboundElementsContainer struct {
+@@ -60,8 +59,7 @@ func (peer *Peer) keepKeyFreshReceiving() {
+ 		return
+ 	}
+ 	keypair := peer.keypairs.Current()
+-
+-	if keypair != nil && keypair.isInitiator && time.Since(keypair.created) > peer.device.keyRefreshTimeoutReceiving() {
++	if keypair != nil && keypair.isInitiator && time.Since(keypair.created) > (RejectAfterTime-KeepaliveTimeout-RekeyTimeout) {
+ 		peer.timers.sentLastMinuteHandshake.Store(true)
+ 		peer.SendHandshakeInitiation(false)
+ 	}
+@@ -97,7 +95,6 @@ func (device *Device) RoutineReceiveIncoming(
+ 		endpoints   = make([]conn.Endpoint, maxBatchSize)
+ 		deathSpiral int
+ 		elemsByPeer = make(map[*Peer]*QueueInboundElementsContainer, maxBatchSize)
+-		typeHashBuf [4]byte
+ 	)
+ 
+ 	for i := range maxBatchSize {
+@@ -141,28 +138,11 @@ func (device *Device) RoutineReceiveIncoming(
+ 			// check size of packet
+ 			packet := bufsArrs[i][:size]
+ 
+-			cip, err := device.HeaderProtectionCipher(packet[:HeaderCipherNonceSize])
+-			if err != nil {
+-				device.log.Errorf("Failed to initialize header cipher")
+-				continue
+-			}
+-
+-			typeHash := typeHashBuf[:]
+-			clear(typeHash)
+-			if cip != nil {
+-				cip.XORKeyStream(typeHash, typeHash)
+-			}
+-
+ 			// get message padding and type based on information from S1-S4 and H1-H4
+-			msgSize, msgType, padding := device.DeterminePacketTypeAndPadding(packet, typeHash)
+-
+-			packet = packet[padding:]
+-			if msgType != MessageTransportType {
+-				packet = packet[:msgSize]
+-			}
+-
+-			if cip != nil {
+-				applyHash(packet[:4], packet[:4], typeHash)
++			msgType, padding := device.DeterminePacketTypeAndPadding(packet, MessageUnknownType)
++			if padding > 0 {
++				copy(packet, packet[padding:])
++				packet = packet[:len(packet)-padding]
+ 			}
+ 
+ 			switch msgType {
+@@ -176,9 +156,6 @@ func (device *Device) RoutineReceiveIncoming(
+ 				if len(packet) < MessageTransportSize {
+ 					continue
+ 				}
+-				if cip != nil {
+-					cip.XORKeyStream(packet[4:MessageTransportHeaderSize], packet[4:MessageTransportHeaderSize])
+-				}
+ 
+ 				// lookup key pair
+ 
+@@ -193,7 +170,7 @@ func (device *Device) RoutineReceiveIncoming(
+ 
+ 				// check keypair expiry
+ 
+-				if keypair.created.Add(device.keychainExpireTime()).Before(time.Now()) {
++				if keypair.created.Add(RejectAfterTime).Before(time.Now()) {
+ 					continue
+ 				}
+ 
+@@ -205,7 +182,6 @@ func (device *Device) RoutineReceiveIncoming(
+ 				elem.keypair = keypair
+ 				elem.endpoint = endpoints[i]
+ 				elem.counter = 0
+-				elem.padding = padding
+ 
+ 				elemsForPeer, ok := elemsByPeer[peer]
+ 				if !ok {
+@@ -224,25 +200,16 @@ func (device *Device) RoutineReceiveIncoming(
+ 				if len(packet) != MessageInitiationSize {
+ 					continue
+ 				}
+-				if cip != nil {
+-					cip.XORKeyStream(packet[4:MessageInitiationSize], packet[4:MessageInitiationSize])
+-				}
+ 
+ 			case MessageResponseType:
+ 				if len(packet) != MessageResponseSize {
+ 					continue
+ 				}
+-				if cip != nil {
+-					cip.XORKeyStream(packet[4:MessageResponseSize], packet[4:MessageResponseSize])
+-				}
+ 
+ 			case MessageCookieReplyType:
+ 				if len(packet) != MessageCookieReplySize {
+ 					continue
+ 				}
+-				if cip != nil {
+-					cip.XORKeyStream(packet[4:MessageCookieReplySize], packet[4:MessageCookieReplySize])
+-				}
+ 
+ 			default:
+ 				device.log.Verbosef("Received message with unknown type")
+@@ -369,8 +336,7 @@ func (device *Device) RoutineHandshake(id int) {
+ 
+ 			// endpoints destination address is the source of the datagram
+ 
+-			disableCookies := device.disableCookies.Load()
+-			if !disableCookies && device.IsUnderLoad() {
++			if device.IsUnderLoad() {
+ 
+ 				// verify MAC2 field
+ 
+@@ -515,12 +481,7 @@ func (peer *Peer) RoutineSequentialReceiver(maxBatchSize int) {
+ 			}
+ 			rxBytesLen += uint64(len(elem.packet) + MinMessageSize)
+ 
+-			udpWindow := elem.padding + MessageTransportHeaderSize + uint32(len(elem.packet))
+-			if peer.udpWindow.Load() < udpWindow {
+-				peer.udpWindow.Store(udpWindow)
+-			}
+-
+-			if len(elem.packet) == 0 || elem.packet[0] == 0 {
++			if len(elem.packet) == 0 {
+ 				device.log.Verbosef("%v - Receiving keepalive packet", peer)
+ 				continue
+ 			}
+@@ -568,7 +529,10 @@ func (peer *Peer) RoutineSequentialReceiver(maxBatchSize int) {
+ 				continue
+ 			}
+ 
+-			bufs = append(bufs, elem.buffer[int(elem.padding):int(elem.padding)+MessageTransportHeaderSize+len(elem.packet)])
++			bufs = append(
++				bufs,
++				elem.buffer[:MessageTransportOffsetContent+len(elem.packet)],
++			)
+ 		}
+ 
+ 		peer.rxBytes.Add(rxBytesLen)
+@@ -596,64 +560,56 @@ func (peer *Peer) RoutineSequentialReceiver(maxBatchSize int) {
+ 	}
+ }
+ 
+-func applyHash(dst, src, hash []byte) {
+-	for i := range len(dst) {
+-		dst[i] = src[i] ^ hash[i]
+-	}
+-}
+-
+-func (device *Device) DeterminePacketTypeAndPadding(packet []byte, typeHash []byte) (int, uint32, uint32) {
+-	var headerBytes [4]byte
+-	var padding uint32
+-	var header UintRange
+-	var expectedSize int
+-
++func (device *Device) DeterminePacketTypeAndPadding(packet []byte, expectedType uint32) (uint32, int) {
+ 	size := len(packet)
+-	randomTrailers := device.randomTrailers.Load()
+ 
+-	padding = device.paddings.init.Load()
+-	header = device.headers.init.Load()
+-	expectedSize = int(padding) + MessageInitiationSize
++	if expectedType == MessageUnknownType || expectedType == MessageInitiationType {
++		padding := device.paddings.init
++		header := device.headers.init
+ 
+-	if size == expectedSize || randomTrailers && size > expectedSize {
+-		applyHash(headerBytes[:], packet[padding:padding+4], typeHash)
+-		if header.Contains(binary.LittleEndian.Uint32(headerBytes[:])) {
+-			return MessageInitiationSize, MessageInitiationType, padding
++		if size == padding+MessageInitiationSize {
++			data := packet[padding:]
++			if header.Validate(binary.LittleEndian.Uint32(data)) {
++				return MessageInitiationType, padding
++			}
+ 		}
+ 	}
+ 
+-	padding = device.paddings.response.Load()
+-	header = device.headers.response.Load()
+-	expectedSize = int(padding) + MessageResponseSize
++	if expectedType == MessageUnknownType || expectedType == MessageResponseType {
++		padding := device.paddings.response
++		header := device.headers.response
+ 
+-	if size == expectedSize || randomTrailers && size > expectedSize {
+-		applyHash(headerBytes[:], packet[padding:padding+4], typeHash)
+-		if header.Contains(binary.LittleEndian.Uint32(headerBytes[:])) {
+-			return MessageResponseSize, MessageResponseType, padding
++		if size == padding+MessageResponseSize {
++			data := packet[padding:]
++			if header.Validate(binary.LittleEndian.Uint32(data)) {
++				return MessageResponseType, padding
++			}
+ 		}
+ 	}
+ 
+-	padding = device.paddings.cookie.Load()
+-	header = device.headers.cookie.Load()
+-	expectedSize = int(padding) + MessageCookieReplySize
++	if expectedType == MessageUnknownType || expectedType == MessageCookieReplyType {
++		padding := device.paddings.cookie
++		header := device.headers.cookie
+ 
+-	if size == expectedSize || randomTrailers && size > expectedSize {
+-		applyHash(headerBytes[:], packet[padding:padding+4], typeHash)
+-		if header.Contains(binary.LittleEndian.Uint32(headerBytes[:])) {
+-			return MessageCookieReplySize, MessageCookieReplyType, padding
++		if size == padding+MessageCookieReplySize {
++			data := packet[padding:]
++			if header.Validate(binary.LittleEndian.Uint32(data)) {
++				return MessageCookieReplyType, padding
++			}
+ 		}
+ 	}
+ 
+-	padding = device.paddings.transport.Load()
+-	header = device.headers.transport.Load()
+-	expectedSize = int(padding) + MessageTransportSize
++	if expectedType == MessageUnknownType || expectedType == MessageTransportType {
++		padding := device.paddings.transport
++		header := device.headers.transport
+ 
+-	if size >= expectedSize {
+-		applyHash(headerBytes[:], packet[padding:padding+4], typeHash)
+-		if header.Contains(binary.LittleEndian.Uint32(headerBytes[:])) {
+-			return MessageTransportSize, MessageTransportType, padding
++		if size >= padding+MessageTransportHeaderSize {
++			data := packet[padding:]
++			if header.Validate(binary.LittleEndian.Uint32(data)) {
++				return MessageTransportType, padding
++			}
+ 		}
+ 	}
+ 
+-	return 0, MessageUnknownType, 0
++	return MessageUnknownType, 0
+ }
+diff --git a/device/send.go b/device/send.go
+index 2b0a475..0cc57da 100644
+--- a/device/send.go
++++ b/device/send.go
+@@ -10,14 +10,14 @@ import (
+ 	"crypto/rand"
+ 	"encoding/binary"
+ 	"errors"
++	"math/big"
+ 	"net"
+ 	"os"
+-	"slices"
+ 	"sync"
+ 	"time"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/tun"
+ 	"golang.org/x/crypto/chacha20poly1305"
+ 	"golang.org/x/net/ipv4"
+ 	"golang.org/x/net/ipv6"
+@@ -48,13 +48,11 @@ import (
+  */
+ 
+ type QueueOutboundElement struct {
+-	buffer      *[MaxMessageSize]byte // slice holding the packet data
+-	packet      []byte                // slice of "buffer" (always!)
+-	nonce       uint64                // nonce for encryption
+-	keypair     *Keypair              // keypair for encryption
+-	peer        *Peer                 // related peer
+-	padding     uint32
+-	isKeepalive bool
++	buffer  *[MaxMessageSize]byte // slice holding the packet data
++	packet  []byte                // slice of "buffer" (always!)
++	nonce   uint64                // nonce for encryption
++	keypair *Keypair              // keypair for encryption
++	peer    *Peer                 // related peer
+ }
+ 
+ type QueueOutboundElementsContainer struct {
+@@ -66,8 +64,6 @@ func (device *Device) NewOutboundElement() *QueueOutboundElement {
+ 	elem := device.GetOutboundElement()
+ 	elem.buffer = device.GetMessageBuffer()
+ 	elem.nonce = 0
+-	elem.padding = device.paddings.transport.Load()
+-	elem.isKeepalive = false
+ 	// keypair and peer were cleared (if necessary) by clearPointers.
+ 	return elem
+ }
+@@ -88,7 +84,6 @@ func (elem *QueueOutboundElement) clearPointers() {
+ func (peer *Peer) SendKeepalive() {
+ 	if len(peer.queue.staged) == 0 && peer.isRunning.Load() {
+ 		elem := peer.device.NewOutboundElement()
+-		elem.isKeepalive = true
+ 		elemsContainer := peer.device.GetOutboundElementsContainer()
+ 		elemsContainer.elems = append(elemsContainer.elems, elem)
+ 		select {
+@@ -106,20 +101,17 @@ func (peer *Peer) SendKeepalive() {
+ func (peer *Peer) SendHandshakeInitiation(isRetry bool) error {
+ 	if !isRetry {
+ 		peer.timers.handshakeAttempts.Store(0)
+-		peer.timers.maxHandshakeAttempts.Store(peer.device.maxHandshakeAttemps())
+ 	}
+ 
+-	timeout := peer.device.rekeyMinTimeout()
+-
+ 	peer.handshake.mutex.RLock()
+-	if time.Since(peer.handshake.lastSentHandshake) < timeout {
++	if time.Since(peer.handshake.lastSentHandshake) < RekeyTimeout {
+ 		peer.handshake.mutex.RUnlock()
+ 		return nil
+ 	}
+ 	peer.handshake.mutex.RUnlock()
+ 
+ 	peer.handshake.mutex.Lock()
+-	if time.Since(peer.handshake.lastSentHandshake) < timeout {
++	if time.Since(peer.handshake.lastSentHandshake) < RekeyTimeout {
+ 		peer.handshake.mutex.Unlock()
+ 		return nil
+ 	}
+@@ -144,17 +136,21 @@ func (peer *Peer) SendHandshakeInitiation(isRetry bool) error {
+ 		}
+ 	}
+ 
+-	sendBuffer = append(sendBuffer, peer.device.JunkPackets()...)
+-
+-	padding := int(peer.device.paddings.init.Load())
+-	trailerLen := max(peer.randomTrailer(padding+MessageInitiationSize), 0)
++	jc := peer.device.junk.count
++	jmin := peer.device.junk.min
++	jmax := peer.device.junk.max
+ 
+-	buf := make([]byte, padding+MessageInitiationSize+trailerLen)
++	for i := 0; i < jc; i++ {
++		nBig, _ := rand.Int(rand.Reader, big.NewInt(int64(jmax-jmin+1)))
++		n := int(nBig.Int64()) + jmin
+ 
+-	crypt := buf[:padding]
+-	rand.Read(crypt)
++		buf := make([]byte, n)
++		rand.Read(buf)
++		sendBuffer = append(sendBuffer, buf)
++	}
+ 
+-	writer := bytes.NewBuffer(buf[padding:padding])
++	var buf [MessageInitiationSize]byte
++	writer := bytes.NewBuffer(buf[:0])
+ 	binary.Write(writer, binary.LittleEndian, msg)
+ 	packet := writer.Bytes()
+ 	peer.cookieGenerator.AddMacs(packet)
+@@ -162,18 +158,15 @@ func (peer *Peer) SendHandshakeInitiation(isRetry bool) error {
+ 	peer.timersAnyAuthenticatedPacketTraversal()
+ 	peer.timersAnyAuthenticatedPacketSent()
+ 
+-	cip, err := peer.device.HeaderProtectionCipher(crypt[:HeaderCipherNonceSize])
+-	if err != nil {
+-		return err
+-	}
+-	if cip != nil {
+-		cip.XORKeyStream(packet, packet)
++	if padding := peer.device.paddings.init; padding > 0 {
++		buf := make([]byte, padding+len(packet))
++		rand.Read(buf[:padding])
++		copy(buf[padding:], packet)
++		packet = buf
+ 	}
+ 
+-	trailer := buf[padding+MessageInitiationSize:]
+-	rand.Read(trailer)
++	sendBuffer = append(sendBuffer, packet)
+ 
+-	sendBuffer = append(sendBuffer, buf)
+ 	err = peer.SendBuffers(sendBuffer)
+ 	if err != nil {
+ 		peer.device.log.Errorf("%v - Failed to send handshake initiation: %v", peer, err)
+@@ -196,15 +189,9 @@ func (peer *Peer) SendHandshakeResponse() error {
+ 		return err
+ 	}
+ 
+-	padding := int(peer.device.paddings.response.Load())
+-	trailerLen := max(peer.randomTrailer(padding+MessageResponseSize), 0)
+-
+-	buf := make([]byte, padding+MessageResponseSize+trailerLen)
++	var buf [MessageResponseSize]byte
++	writer := bytes.NewBuffer(buf[:0])
+ 
+-	crypt := buf[:padding]
+-	rand.Read(crypt)
+-
+-	writer := bytes.NewBuffer(buf[padding:padding])
+ 	binary.Write(writer, binary.LittleEndian, response)
+ 	packet := writer.Bytes()
+ 	peer.cookieGenerator.AddMacs(packet)
+@@ -219,19 +206,15 @@ func (peer *Peer) SendHandshakeResponse() error {
+ 	peer.timersAnyAuthenticatedPacketTraversal()
+ 	peer.timersAnyAuthenticatedPacketSent()
+ 
+-	cip, err := peer.device.HeaderProtectionCipher(crypt[:HeaderCipherNonceSize])
+-	if err != nil {
+-		return err
+-	}
+-	if cip != nil {
+-		cip.XORKeyStream(packet, packet)
++	if padding := peer.device.paddings.response; padding > 0 {
++		buf := make([]byte, padding+len(packet))
++		rand.Read(buf[:padding])
++		copy(buf[padding:], packet)
++		packet = buf
+ 	}
+ 
+-	trailer := buf[padding+MessageResponseSize:]
+-	rand.Read(trailer)
+-
+ 	// TODO: allocation could be avoided
+-	err = peer.SendBuffers([][]byte{buf})
++	err = peer.SendBuffers([][]byte{packet})
+ 	if err != nil {
+ 		peer.device.log.Errorf("%v - Failed to send handshake response: %v", peer, err)
+ 	}
+@@ -242,7 +225,7 @@ func (device *Device) SendHandshakeCookie(initiatingElem *QueueHandshakeElement)
+ 	device.log.Verbosef("Sending cookie response for denied handshake message for %v", initiatingElem.endpoint.DstToString())
+ 
+ 	sender := binary.LittleEndian.Uint32(initiatingElem.packet[4:8])
+-	msgType := device.headers.cookie.Load().PickOne()
++	msgType := device.headers.cookie.Generate()
+ 
+ 	reply, err := device.cookieChecker.CreateReply(
+ 		initiatingElem.packet,
+@@ -255,31 +238,20 @@ func (device *Device) SendHandshakeCookie(initiatingElem *QueueHandshakeElement)
+ 		return err
+ 	}
+ 
+-	padding := int(device.paddings.cookie.Load())
+-	trailerLen := max(device.randomTrailer(padding+MessageCookieReplySize), 0)
+-
+-	buf := make([]byte, padding+MessageCookieReplySize+trailerLen)
+-
+-	crypt := buf[:padding]
+-	rand.Read(crypt)
+-
+-	writer := bytes.NewBuffer(buf[padding:padding])
++	var buf [MessageCookieReplySize]byte
++	writer := bytes.NewBuffer(buf[:0])
+ 	binary.Write(writer, binary.LittleEndian, reply)
+ 	packet := writer.Bytes()
+ 
+-	cip, err := device.HeaderProtectionCipher(crypt[:HeaderCipherNonceSize])
+-	if err != nil {
+-		return err
+-	}
+-	if cip != nil {
+-		cip.XORKeyStream(packet, packet)
++	if padding := device.paddings.cookie; padding > 0 {
++		buf := make([]byte, padding+len(packet))
++		rand.Read(buf[:padding])
++		copy(buf[padding:], packet)
++		packet = buf
+ 	}
+ 
+-	trailer := buf[padding+MessageCookieReplySize:]
+-	rand.Read(trailer)
+-
+ 	// TODO: allocation could be avoided
+-	device.net.bind.Send([][]byte{buf}, initiatingElem.endpoint)
++	device.net.bind.Send([][]byte{packet}, initiatingElem.endpoint)
+ 	return nil
+ }
+ 
+@@ -289,7 +261,7 @@ func (peer *Peer) keepKeyFreshSending() {
+ 		return
+ 	}
+ 	nonce := keypair.sendNonce.Load()
+-	if nonce > RekeyAfterMessages || (keypair.isInitiator && time.Since(keypair.created) > peer.device.keyRefreshTimeoutSending()) {
++	if nonce > RekeyAfterMessages || (keypair.isInitiator && time.Since(keypair.created) > RekeyAfterTime) {
+ 		peer.SendHandshakeInitiation(false)
+ 	}
+ }
+@@ -311,6 +283,7 @@ func (device *Device) RoutineReadFromTUN() {
+ 		elemsByPeer = make(map[*Peer]*QueueOutboundElementsContainer, batchSize)
+ 		count       = 0
+ 		sizes       = make([]int, batchSize)
++		offset      = MessageTransportHeaderSize
+ 	)
+ 
+ 	for i := range elems {
+@@ -328,9 +301,6 @@ func (device *Device) RoutineReadFromTUN() {
+ 	}()
+ 
+ 	for {
+-		padding := device.paddings.transport.Load()
+-		offset := MessageTransportHeaderSize + int(padding)
+-
+ 		// read packets
+ 		count, readErr = device.tun.device.Read(bufs, sizes, offset)
+ 		for i := 0; i < count; i++ {
+@@ -340,7 +310,6 @@ func (device *Device) RoutineReadFromTUN() {
+ 
+ 			elem := elems[i]
+ 			elem.packet = bufs[i][offset : offset+sizes[i]]
+-			elem.padding = padding
+ 
+ 			// lookup peer
+ 			var peer *Peer
+@@ -435,7 +404,7 @@ top:
+ 	}
+ 
+ 	keypair := peer.keypairs.Current()
+-	if keypair == nil || keypair.sendNonce.Load() >= RejectAfterMessages || time.Since(keypair.created) >= peer.device.keychainExpireTime() {
++	if keypair == nil || keypair.sendNonce.Load() >= RejectAfterMessages || time.Since(keypair.created) >= RejectAfterTime {
+ 		peer.SendHandshakeInitiation(false)
+ 		return
+ 	}
+@@ -525,55 +494,13 @@ func calculatePaddingSize(packetSize, mtu int) int {
+ 	return paddedSize - lastUnit
+ }
+ 
+-func (peer *Peer) randomPaddingAddition(packetSize int) int {
+-	addition := peer.device.contentPaddingAddition.Load()
+-
+-	if addition.IsZero() {
+-		return -1
+-	}
+-
+-	udpWindow := int(peer.udpWindow.Load())
+-	if udpWindow < packetSize {
+-		return 0
+-	}
+-
+-	add := int(addition.PickOne())
+-	space := udpWindow - packetSize
+-	if add > space {
+-		add = space
+-	}
+-	return add
+-}
+-
+-func (device *Device) randomTrailer(packetSize int) int {
+-	if !device.randomTrailers.Load() {
+-		return -1
+-	}
+-
+-	if DefaultUdpWindow < packetSize {
+-		return 0
+-	}
+-	return int(fastrandn(uint32(DefaultUdpWindow - packetSize)))
+-}
+-
+-func (peer *Peer) randomTrailer(packetSize int) int {
+-	if !peer.device.randomTrailers.Load() {
+-		return -1
+-	}
+-
+-	udpWindow := int(peer.udpWindow.Load())
+-	if udpWindow < packetSize {
+-		return 0
+-	}
+-	return int(fastrandn(uint32(udpWindow - packetSize)))
+-}
+-
+ /* Encrypts the elements in the queue
+  * and marks them for sequential consumption (by releasing the mutex)
+  *
+  * Obs. One instance per core
+  */
+ func (device *Device) RoutineEncryption(id int) {
++	var paddingZeros [PaddingMultiple]byte
+ 	var nonce [chacha20poly1305.NonceSize]byte
+ 
+ 	defer device.log.Verbosef("Routine: encryption worker %d - stopped", id)
+@@ -581,63 +508,32 @@ func (device *Device) RoutineEncryption(id int) {
+ 
+ 	for elemsContainer := range device.queue.encryption.c {
+ 		for _, elem := range elemsContainer.elems {
+-			udpWindow := elem.padding + MinMessageSize + uint32(len(elem.packet))
+-			if elem.peer.udpWindow.Load() < udpWindow {
+-				elem.peer.udpWindow.Store(udpWindow)
+-			}
+-
+-			// fill crypto padding
+-			crypt := elem.buffer[:elem.padding]
+-			rand.Read(crypt)
+-
+ 			// populate header fields
+-			header := elem.buffer[elem.padding : elem.padding+MessageTransportHeaderSize]
++			header := elem.buffer[:MessageTransportHeaderSize]
+ 
+ 			fieldType := header[0:4]
+ 			fieldReceiver := header[4:8]
+ 			fieldNonce := header[8:16]
+ 
+-			binary.LittleEndian.PutUint32(fieldType, device.headers.transport.Load().PickOne())
++			msgType := device.headers.transport.Generate()
++
++			binary.LittleEndian.PutUint32(fieldType, msgType)
+ 			binary.LittleEndian.PutUint32(fieldReceiver, elem.keypair.remoteIndex)
+ 			binary.LittleEndian.PutUint64(fieldNonce, elem.nonce)
+ 
+-			packetSize := len(elem.packet) + MinMessageSize + int(elem.padding)
+-			mtu := int(device.tun.mtu.Load())
+-
+-			paddingSize := elem.peer.randomPaddingAddition(packetSize)
+-			if paddingSize < 0 {
+-				paddingSize = elem.peer.randomTrailer(packetSize)
+-			}
+-			if paddingSize < 0 {
+-				// pad content to multiple of 16
+-				paddingSize = calculatePaddingSize(len(elem.packet), mtu)
+-			}
+-
+-			// append trailing zeroes
+-			oldLen := len(elem.packet)
+-			elem.packet = slices.Grow(elem.packet, paddingSize)
+-			elem.packet = elem.packet[:oldLen+paddingSize]
+-			clear(elem.packet[oldLen:])
++			// pad content to multiple of 16
++			paddingSize := calculatePaddingSize(len(elem.packet), int(device.tun.mtu.Load()))
++			elem.packet = append(elem.packet, paddingZeros[:paddingSize]...)
+ 
+ 			// encrypt content and release to consumer
+ 
+ 			binary.LittleEndian.PutUint64(nonce[4:], elem.nonce)
+ 			elem.packet = elem.keypair.send.Seal(
+-				elem.buffer[:elem.padding+MessageTransportHeaderSize],
++				header,
+ 				nonce[:],
+ 				elem.packet,
+ 				nil,
+ 			)
+-
+-			cip, err := device.HeaderProtectionCipher(crypt[:HeaderCipherNonceSize])
+-			if err != nil {
+-				device.log.Errorf("Routing: header obfuscation failed - packet dropped")
+-				elem.packet = nil
+-				continue
+-			}
+-			if cip != nil {
+-				cip.XORKeyStream(header, header)
+-			}
+ 		}
+ 		elemsContainer.Unlock()
+ 	}
+@@ -676,10 +572,18 @@ func (peer *Peer) RoutineSequentialSender(maxBatchSize int) {
+ 		dataSent := false
+ 		elemsContainer.Lock()
+ 		for _, elem := range elemsContainer.elems {
+-			if !elem.isKeepalive {
++			if len(elem.packet) != MessageKeepaliveSize {
+ 				dataSent = true
+ 			}
+-
++			if padding := device.paddings.transport; padding > 0 {
++				// elem.packet is stored at the start of elem.buffer
++				// with zero padding
++				for i := len(elem.packet) - 1; i >= 0; i-- {
++					elem.buffer[i+padding] = elem.buffer[i]
++				}
++				rand.Read(elem.buffer[:padding])
++				elem.packet = elem.buffer[:padding+len(elem.packet)]
++			}
+ 			bufs = append(bufs, elem.packet)
+ 		}
+ 
+diff --git a/device/sticky_default.go b/device/sticky_default.go
+index 811c621..1751927 100644
+--- a/device/sticky_default.go
++++ b/device/sticky_default.go
+@@ -3,8 +3,8 @@
+ package device
+ 
+ import (
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/rwcancel"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/rwcancel"
+ )
+ 
+ func (device *Device) startRouteListener(_ conn.Bind) (*rwcancel.RWCancel, error) {
+diff --git a/device/sticky_linux.go b/device/sticky_linux.go
+index 17b1e2f..2edb628 100644
+--- a/device/sticky_linux.go
++++ b/device/sticky_linux.go
+@@ -20,8 +20,8 @@ import (
+ 
+ 	"golang.org/x/sys/unix"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/rwcancel"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/rwcancel"
+ )
+ 
+ func (device *Device) startRouteListener(bind conn.Bind) (*rwcancel.RWCancel, error) {
+diff --git a/device/timers.go b/device/timers.go
+index 4a5499d..32519aa 100644
+--- a/device/timers.go
++++ b/device/timers.go
+@@ -22,25 +22,24 @@ type Timer struct {
+ 	*time.Timer
+ 	modifyingLock sync.RWMutex
+ 	runningLock   sync.Mutex
+-	duration      time.Duration
++	isPending     bool
+ }
+ 
+-func (peer *Peer) NewTimer(expirationFunction func(*Peer, time.Duration)) *Timer {
++func (peer *Peer) NewTimer(expirationFunction func(*Peer)) *Timer {
+ 	timer := &Timer{}
+ 	timer.Timer = time.AfterFunc(time.Hour, func() {
+ 		timer.runningLock.Lock()
+ 		defer timer.runningLock.Unlock()
+ 
+ 		timer.modifyingLock.Lock()
+-		if timer.duration == 0 {
++		if !timer.isPending {
+ 			timer.modifyingLock.Unlock()
+ 			return
+ 		}
+-		duration := timer.duration
++		timer.isPending = false
+ 		timer.modifyingLock.Unlock()
+-		timer.duration = 0
+ 
+-		expirationFunction(peer, duration)
++		expirationFunction(peer)
+ 	})
+ 	timer.Stop()
+ 	return timer
+@@ -48,14 +47,14 @@ func (peer *Peer) NewTimer(expirationFunction func(*Peer, time.Duration)) *Timer
+ 
+ func (timer *Timer) Mod(d time.Duration) {
+ 	timer.modifyingLock.Lock()
+-	timer.duration = d
++	timer.isPending = true
+ 	timer.Reset(d)
+ 	timer.modifyingLock.Unlock()
+ }
+ 
+ func (timer *Timer) Del() {
+ 	timer.modifyingLock.Lock()
+-	timer.duration = 0
++	timer.isPending = false
+ 	timer.Stop()
+ 	timer.modifyingLock.Unlock()
+ }
+@@ -70,18 +69,16 @@ func (timer *Timer) DelSync() {
+ func (timer *Timer) IsPending() bool {
+ 	timer.modifyingLock.RLock()
+ 	defer timer.modifyingLock.RUnlock()
+-	return timer.duration > 0
++	return timer.isPending
+ }
+ 
+ func (peer *Peer) timersActive() bool {
+ 	return peer.isRunning.Load() && peer.device != nil && peer.device.isUp()
+ }
+ 
+-func expiredRetransmitHandshake(peer *Peer, d time.Duration) {
+-	maxAttempts := peer.timers.maxHandshakeAttempts.Load()
+-
+-	if peer.timers.handshakeAttempts.Load() > maxAttempts {
+-		peer.device.log.Verbosef("%s - Handshake did not complete after %d attempts, giving up", peer, maxAttempts+2)
++func expiredRetransmitHandshake(peer *Peer) {
++	if peer.timers.handshakeAttempts.Load() > MaxTimerHandshakes {
++		peer.device.log.Verbosef("%s - Handshake did not complete after %d attempts, giving up", peer, MaxTimerHandshakes+2)
+ 
+ 		if peer.timersActive() {
+ 			peer.timers.sendKeepalive.Del()
+@@ -96,11 +93,11 @@ func expiredRetransmitHandshake(peer *Peer, d time.Duration) {
+ 		 * of a partial exchange.
+ 		 */
+ 		if peer.timersActive() && !peer.timers.zeroKeyMaterial.IsPending() {
+-			peer.timers.zeroKeyMaterial.Mod(peer.device.keychainExpireTime() * 3)
++			peer.timers.zeroKeyMaterial.Mod(RejectAfterTime * 3)
+ 		}
+ 	} else {
+ 		peer.timers.handshakeAttempts.Add(1)
+-		peer.device.log.Verbosef("%s - Handshake did not complete after %d seconds, retrying (try %d)", peer, int(d.Seconds()), peer.timers.handshakeAttempts.Load()+1)
++		peer.device.log.Verbosef("%s - Handshake did not complete after %d seconds, retrying (try %d)", peer, int(RekeyTimeout.Seconds()), peer.timers.handshakeAttempts.Load()+1)
+ 
+ 		/* We clear the endpoint address src address, in case this is the cause of trouble. */
+ 		peer.markEndpointSrcForClearing()
+@@ -109,30 +106,30 @@ func expiredRetransmitHandshake(peer *Peer, d time.Duration) {
+ 	}
+ }
+ 
+-func expiredSendKeepalive(peer *Peer, d time.Duration) {
++func expiredSendKeepalive(peer *Peer) {
+ 	peer.SendKeepalive()
+ 	if peer.timers.needAnotherKeepalive.Load() {
+ 		peer.timers.needAnotherKeepalive.Store(false)
+ 		if peer.timersActive() {
+-			peer.timers.sendKeepalive.Mod(peer.sendKeepaliveTimeout())
++			peer.timers.sendKeepalive.Mod(KeepaliveTimeout)
+ 		}
+ 	}
+ }
+ 
+-func expiredNewHandshake(peer *Peer, d time.Duration) {
+-	peer.device.log.Verbosef("%s - Retrying handshake because we stopped hearing back after %d seconds", peer, int(d.Seconds()))
++func expiredNewHandshake(peer *Peer) {
++	peer.device.log.Verbosef("%s - Retrying handshake because we stopped hearing back after %d seconds", peer, int((KeepaliveTimeout + RekeyTimeout).Seconds()))
+ 	/* We clear the endpoint address src address, in case this is the cause of trouble. */
+ 	peer.markEndpointSrcForClearing()
+ 	peer.SendHandshakeInitiation(false)
+ }
+ 
+-func expiredZeroKeyMaterial(peer *Peer, d time.Duration) {
+-	peer.device.log.Verbosef("%s - Removing all keys, since we haven't received a new one in %d seconds", peer, int(d.Seconds()))
++func expiredZeroKeyMaterial(peer *Peer) {
++	peer.device.log.Verbosef("%s - Removing all keys, since we haven't received a new one in %d seconds", peer, int((RejectAfterTime * 3).Seconds()))
+ 	peer.ZeroAndFlushAll()
+ }
+ 
+-func expiredPersistentKeepalive(peer *Peer, d time.Duration) {
+-	if !peer.persistentKeepaliveInterval.Load().IsZero() {
++func expiredPersistentKeepalive(peer *Peer) {
++	if peer.persistentKeepaliveInterval.Load() > 0 {
+ 		peer.SendKeepalive()
+ 	}
+ }
+@@ -140,7 +137,7 @@ func expiredPersistentKeepalive(peer *Peer, d time.Duration) {
+ /* Should be called after an authenticated data packet is sent. */
+ func (peer *Peer) timersDataSent() {
+ 	if peer.timersActive() && !peer.timers.newHandshake.IsPending() {
+-		peer.timers.newHandshake.Mod(peer.newHandshakeTimeout() + time.Millisecond*time.Duration(fastrandn(RekeyTimeoutJitterMaxMs)))
++		peer.timers.newHandshake.Mod(KeepaliveTimeout + RekeyTimeout + time.Millisecond*time.Duration(fastrandn(RekeyTimeoutJitterMaxMs)))
+ 	}
+ }
+ 
+@@ -148,7 +145,7 @@ func (peer *Peer) timersDataSent() {
+ func (peer *Peer) timersDataReceived() {
+ 	if peer.timersActive() {
+ 		if !peer.timers.sendKeepalive.IsPending() {
+-			peer.timers.sendKeepalive.Mod(peer.sendKeepaliveTimeout())
++			peer.timers.sendKeepalive.Mod(KeepaliveTimeout)
+ 		} else {
+ 			peer.timers.needAnotherKeepalive.Store(true)
+ 		}
+@@ -172,7 +169,7 @@ func (peer *Peer) timersAnyAuthenticatedPacketReceived() {
+ /* Should be called after a handshake initiation message is sent. */
+ func (peer *Peer) timersHandshakeInitiated() {
+ 	if peer.timersActive() {
+-		peer.timers.retransmitHandshake.Mod(peer.retransmitHandshakeTimeout() + time.Millisecond*time.Duration(fastrandn(RekeyTimeoutJitterMaxMs)))
++		peer.timers.retransmitHandshake.Mod(RekeyTimeout + time.Millisecond*time.Duration(fastrandn(RekeyTimeoutJitterMaxMs)))
+ 	}
+ }
+ 
+@@ -182,7 +179,6 @@ func (peer *Peer) timersHandshakeComplete() {
+ 		peer.timers.retransmitHandshake.Del()
+ 	}
+ 	peer.timers.handshakeAttempts.Store(0)
+-	peer.timers.maxHandshakeAttempts.Store(peer.device.maxHandshakeAttemps())
+ 	peer.timers.sentLastMinuteHandshake.Store(false)
+ 	peer.lastHandshakeNano.Store(time.Now().UnixNano())
+ }
+@@ -190,15 +186,15 @@ func (peer *Peer) timersHandshakeComplete() {
+ /* Should be called after an ephemeral key is created, which is before sending a handshake response or after receiving a handshake response. */
+ func (peer *Peer) timersSessionDerived() {
+ 	if peer.timersActive() {
+-		peer.timers.zeroKeyMaterial.Mod(peer.device.keychainExpireTime() * 3)
++		peer.timers.zeroKeyMaterial.Mod(RejectAfterTime * 3)
+ 	}
+ }
+ 
+ /* Should be called before a packet with authentication -- keepalive, data, or handshake -- is sent, or after one is received. */
+ func (peer *Peer) timersAnyAuthenticatedPacketTraversal() {
+ 	keepalive := peer.persistentKeepaliveInterval.Load()
+-	if !keepalive.IsZero() && peer.timersActive() {
+-		peer.timers.persistentKeepalive.Mod(time.Duration(keepalive.PickOne()) * time.Second)
++	if keepalive > 0 && peer.timersActive() {
++		peer.timers.persistentKeepalive.Mod(time.Duration(keepalive) * time.Second)
+ 	}
+ }
+ 
+@@ -212,7 +208,6 @@ func (peer *Peer) timersInit() {
+ 
+ func (peer *Peer) timersStart() {
+ 	peer.timers.handshakeAttempts.Store(0)
+-	peer.timers.maxHandshakeAttempts.Store(peer.device.maxHandshakeAttemps())
+ 	peer.timers.sentLastMinuteHandshake.Store(false)
+ 	peer.timers.needAnotherKeepalive.Store(false)
+ }
+@@ -224,95 +219,3 @@ func (peer *Peer) timersStop() {
+ 	peer.timers.zeroKeyMaterial.DelSync()
+ 	peer.timers.persistentKeepalive.DelSync()
+ }
+-
+-func (peer *Peer) retransmitHandshakeTimeout() time.Duration {
+-	timeout := RekeyTimeout
+-
+-	if t := peer.device.timings.rekeyTimeoutSec.Load(); !t.IsZero() {
+-		timeout = time.Duration(t.PickOne()) * time.Second
+-	}
+-
+-	return timeout
+-}
+-
+-func (peer *Peer) sendKeepaliveTimeout() time.Duration {
+-	timeout := KeepaliveTimeout
+-
+-	if t := peer.device.timings.keepaliveTimeoutSec.Load(); !t.IsZero() {
+-		timeout = time.Duration(t.PickOne()) * time.Second
+-	}
+-
+-	return timeout
+-}
+-
+-func (peer *Peer) newHandshakeTimeout() time.Duration {
+-	keepaliveTimeout := KeepaliveTimeout
+-	rekeyTimeout := RekeyTimeout
+-
+-	if t := peer.device.timings.keepaliveTimeoutSec.Load(); !t.IsZero() {
+-		keepaliveTimeout = time.Duration(t.Hi()) * time.Second
+-	}
+-	if t := peer.device.timings.rekeyTimeoutSec.Load(); !t.IsZero() {
+-		rekeyTimeout = time.Duration(t.PickOne()) * time.Second
+-	}
+-
+-	return keepaliveTimeout + rekeyTimeout
+-}
+-
+-func (device *Device) keyRefreshTimeoutSending() time.Duration {
+-	rekeyAfterTime := RekeyAfterTime
+-
+-	if t := device.timings.rekeyAfterTimeSec.Load(); !t.IsZero() {
+-		rekeyAfterTime = time.Duration(t.PickOne()) * time.Second
+-	}
+-
+-	return rekeyAfterTime
+-}
+-
+-func (device *Device) keyRefreshTimeoutReceiving() time.Duration {
+-	rejectAfterTime := RejectAfterTime
+-	keepaliveTimeout := KeepaliveTimeout
+-	rekeyTimeout := RekeyTimeout
+-
+-	if t := device.timings.rejectAfterTimeSec.Load(); !t.IsZero() {
+-		rejectAfterTime = time.Duration(t.PickOne()) * time.Second
+-	}
+-	if t := device.timings.keepaliveTimeoutSec.Load(); !t.IsZero() {
+-		keepaliveTimeout = time.Duration(t.Lo()) * time.Second
+-	}
+-	if t := device.timings.rekeyTimeoutSec.Load(); !t.IsZero() {
+-		rekeyTimeout = time.Duration(t.Lo()) * time.Second
+-	}
+-
+-	return max(0, rejectAfterTime-keepaliveTimeout-rekeyTimeout)
+-}
+-
+-func (device *Device) keychainExpireTime() time.Duration {
+-	rejectAfterTime := RejectAfterTime
+-
+-	if t := device.timings.rejectAfterTimeSec.Load(); !t.IsZero() {
+-		rejectAfterTime = time.Duration(t.Hi()) * time.Second
+-	}
+-
+-	return rejectAfterTime
+-}
+-
+-func (device *Device) rekeyMinTimeout() time.Duration {
+-	rekeyTimeout := RekeyTimeout
+-
+-	if t := device.timings.rekeyTimeoutSec.Load(); !t.IsZero() {
+-		rekeyTimeout = time.Duration(t.Lo()) * time.Second
+-	}
+-
+-	return rekeyTimeout
+-}
+-
+-func (device *Device) maxHandshakeAttemps() uint32 {
+-	res := uint32(MaxTimerHandshakes)
+-
+-	if t := device.timings.maxHandshakeAttemps.Load(); !t.IsZero() {
+-		res = t.PickOne()
+-	}
+-
+-	return res
+-}
+diff --git a/device/tun.go b/device/tun.go
+index 2b92331..42178b2 100644
+--- a/device/tun.go
++++ b/device/tun.go
+@@ -8,7 +8,7 @@ package device
+ import (
+ 	"fmt"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
++	"github.com/amnezia-vpn/amneziawg-go/tun"
+ )
+ 
+ const DefaultMTU = 1420
+diff --git a/device/uapi.go b/device/uapi.go
+index 4fc162e..cff247e 100644
+--- a/device/uapi.go
++++ b/device/uapi.go
+@@ -18,7 +18,7 @@ import (
+ 	"sync"
+ 	"time"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/ipc"
++	"github.com/amnezia-vpn/amneziawg-go/ipc"
+ )
+ 
+ type IPCError struct {
+@@ -70,18 +70,6 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
+ 		}
+ 		buf.WriteByte('\n')
+ 	}
+-	boolf := func(prefix string, val bool) {
+-		buf.Grow(3 + len(prefix))
+-		buf.WriteString(prefix)
+-		buf.WriteByte('=')
+-		if val {
+-			buf.WriteByte('1')
+-		} else {
+-			buf.WriteByte('0')
+-		}
+-		buf.WriteByte('\n')
+-
+-	}
+ 
+ 	func() {
+ 		// lock required resources
+@@ -95,9 +83,6 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
+ 		device.peers.RLock()
+ 		defer device.peers.RUnlock()
+ 
+-		device.headerProtection.RLock()
+-		defer device.headerProtection.RUnlock()
+-
+ 		// serialize device related values
+ 
+ 		if !device.staticIdentity.privateKey.IsZero() {
+@@ -112,48 +97,48 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
+ 			sendf("fwmark=%d", device.net.fwmark)
+ 		}
+ 
+-		if count := device.junk.count.Load(); count != 0 {
+-			sendf("jc=%d", count)
++		if device.junk.count != 0 {
++			sendf("jc=%d", device.junk.count)
+ 		}
+ 
+-		if min := device.junk.min.Load(); min != 0 {
+-			sendf("jmin=%d", min)
++		if device.junk.min != 0 {
++			sendf("jmin=%d", device.junk.min)
+ 		}
+ 
+-		if max := device.junk.max.Load(); max != 0 {
+-			sendf("jmax=%d", max)
++		if device.junk.max != 0 {
++			sendf("jmax=%d", device.junk.max)
+ 		}
+ 
+-		if padding := device.paddings.init.Load(); padding != 0 {
+-			sendf("s1=%d", padding)
++		if device.paddings.init != 0 {
++			sendf("s1=%d", device.paddings.init)
+ 		}
+ 
+-		if padding := device.paddings.response.Load(); padding != 0 {
+-			sendf("s2=%d", padding)
++		if device.paddings.response != 0 {
++			sendf("s2=%d", device.paddings.response)
+ 		}
+ 
+-		if padding := device.paddings.cookie.Load(); padding != 0 {
+-			sendf("s3=%d", padding)
++		if device.paddings.cookie != 0 {
++			sendf("s3=%d", device.paddings.cookie)
+ 		}
+ 
+-		if padding := device.paddings.transport.Load(); padding != 0 {
+-			sendf("s4=%d", padding)
++		if device.paddings.transport != 0 {
++			sendf("s4=%d", device.paddings.transport)
+ 		}
+ 
+-		if header := device.headers.init.Load(); !header.IsZero() {
+-			sendf("h1=%s", header.ToString())
++		if device.headers.init != nil {
++			sendf("h1=%s", device.headers.init.GenSpec())
+ 		}
+ 
+-		if header := device.headers.response.Load(); !header.IsZero() {
+-			sendf("h2=%s", header.ToString())
++		if device.headers.response != nil {
++			sendf("h2=%s", device.headers.response.GenSpec())
+ 		}
+ 
+-		if header := device.headers.cookie.Load(); !header.IsZero() {
+-			sendf("h3=%s", header.ToString())
++		if device.headers.cookie != nil {
++			sendf("h3=%s", device.headers.cookie.GenSpec())
+ 		}
+ 
+-		if header := device.headers.transport.Load(); !header.IsZero() {
+-			sendf("h4=%s", header.ToString())
++		if device.headers.transport != nil {
++			sendf("h4=%s", device.headers.transport.GenSpec())
+ 		}
+ 
+ 		for i, ipacket := range device.ipackets {
+@@ -162,32 +147,6 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
+ 			}
+ 		}
+ 
+-		if !device.headerProtection.key.IsZero() {
+-			keyf("header_protection_key", (*[32]byte)(&device.headerProtection.key))
+-		}
+-
+-		if addition := device.contentPaddingAddition.Load(); !addition.IsZero() {
+-			sendf("content_padding_addition=%s", addition.ToString())
+-		}
+-
+-		if timing := device.timings.rekeyAfterTimeSec.Load(); !timing.IsZero() {
+-			sendf("rekey_after_time=%s", timing.ToString())
+-		}
+-		if timing := device.timings.rekeyTimeoutSec.Load(); !timing.IsZero() {
+-			sendf("rekey_timeout=%s", timing.ToString())
+-		}
+-		if timing := device.timings.rejectAfterTimeSec.Load(); !timing.IsZero() {
+-			sendf("reject_after_time=%s", timing.ToString())
+-		}
+-		if timing := device.timings.keepaliveTimeoutSec.Load(); !timing.IsZero() {
+-			sendf("keepalive_timeout=%s", timing.ToString())
+-		}
+-		if rang := device.timings.maxHandshakeAttemps.Load(); !rang.IsZero() {
+-			sendf("max_handshake_attempts=%s", rang.ToString())
+-		}
+-		boolf("random_trailers", device.randomTrailers.Load())
+-		boolf("disable_cookies", device.disableCookies.Load())
+-
+ 		for _, peer := range device.peers.keyMap {
+ 			// Serialize peer state.
+ 			peer.handshake.mutex.RLock()
+@@ -209,10 +168,7 @@ func (device *Device) IpcGetOperation(w io.Writer) error {
+ 			sendf("last_handshake_time_nsec=%d", nano)
+ 			sendf("tx_bytes=%d", peer.txBytes.Load())
+ 			sendf("rx_bytes=%d", peer.rxBytes.Load())
+-
+-			if keepalive := peer.persistentKeepaliveInterval.Load(); !keepalive.IsZero() {
+-				sendf("persistent_keepalive_interval=%s", keepalive.ToString())
+-			}
++			sendf("persistent_keepalive_interval=%d", peer.persistentKeepaliveInterval.Load())
+ 
+ 			device.allowedips.EntriesForPeer(peer, func(prefix netip.Prefix) bool {
+ 				sendf("allowed_ip=%s", prefix.String())
+@@ -242,7 +198,6 @@ func (device *Device) IpcSetOperation(r io.Reader) (err error) {
+ 	}()
+ 
+ 	ipcDev := new(ipcSetDevice)
+-	ipcDev.fromDevice(device)
+ 	peer := new(ipcSetPeer)
+ 	deviceConfig := true
+ 
+@@ -282,7 +237,7 @@ func (device *Device) IpcSetOperation(r io.Reader) (err error) {
+ 
+ 		var err error
+ 		if deviceConfig {
+-			err = device.handleDeviceLine(ipcDev, key, value)
++			err = device.handleDeviceLine(key, value)
+ 		} else {
+ 			err = device.handlePeerLine(peer, key, value)
+ 		}
+@@ -302,7 +257,7 @@ func (device *Device) IpcSetOperation(r io.Reader) (err error) {
+ 	return nil
+ }
+ 
+-func (device *Device) handleDeviceLine(ipcDev *ipcSetDevice, key, value string) error {
++func (device *Device) handleDeviceLine(key, value string) error {
+ 	switch key {
+ 	case "private_key":
+ 		var sk NoisePrivateKey
+@@ -353,87 +308,109 @@ func (device *Device) handleDeviceLine(ipcDev *ipcSetDevice, key, value string)
+ 		device.RemoveAllPeers()
+ 
+ 	case "jc":
+-		jc, err := strconv.ParseUint(value, 10, 32)
++		jc, err := strconv.Atoi(value)
+ 		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse jc: %w", err)
+ 		}
+-
++		if jc <= 0 {
++			return ipcErrorf(ipc.IpcErrorInvalid, "jc must be a positive value")
++		}
+ 		device.log.Verbosef("UAPI: Updating junk count")
+-		device.junk.count.Store(uint32(jc))
++		device.junk.count = jc
+ 
+ 	case "jmin":
+-		jmin, err := strconv.ParseUint(value, 10, 32)
++		jmin, err := strconv.Atoi(value)
+ 		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse jmin: %w", err)
+ 		}
+-
++		if jmin <= 0 {
++			return ipcErrorf(ipc.IpcErrorInvalid, "jmin must be a positive value")
++		}
+ 		device.log.Verbosef("UAPI: Updating junk min")
+-		device.junk.min.Store(uint32(jmin))
++		device.junk.min = jmin
+ 
+ 	case "jmax":
+-		jmax, err := strconv.ParseUint(value, 10, 32)
++		jmax, err := strconv.Atoi(value)
+ 		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse jmax: %w", err)
+ 		}
+-
++		if jmax <= 0 {
++			return ipcErrorf(ipc.IpcErrorInvalid, "jmax must be a positive value")
++		}
+ 		device.log.Verbosef("UAPI: Updating junk max")
+-		device.junk.max.Store(uint32(jmax))
++		device.junk.max = jmax
+ 
+ 	case "s1":
+-		padding, err := strconv.ParseUint(value, 10, 16)
++		padding, err := strconv.Atoi(value)
+ 		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse s1: %w", err)
+ 		}
+-		ipcDev.paddings.init = uint32(padding)
++		if padding < 0 {
++			return ipcErrorf(ipc.IpcErrorInvalid, "s1 must be non-negative")
++		}
++		device.log.Verbosef("UAPI: Updating s1 padding")
++		device.paddings.init = padding
+ 
+ 	case "s2":
+-		padding, err := strconv.ParseUint(value, 10, 16)
++		padding, err := strconv.Atoi(value)
+ 		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse s2: %w", err)
+ 		}
+-		ipcDev.paddings.response = uint32(padding)
++		if padding < 0 {
++			return ipcErrorf(ipc.IpcErrorInvalid, "s2 must be non-negative")
++		}
++		device.log.Verbosef("UAPI: Updating s2 padding")
++		device.paddings.response = padding
+ 
+ 	case "s3":
+-		padding, err := strconv.ParseUint(value, 10, 16)
++		padding, err := strconv.Atoi(value)
+ 		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse s3: %w", err)
+ 		}
+-		ipcDev.paddings.cookie = uint32(padding)
++		if padding < 0 {
++			return ipcErrorf(ipc.IpcErrorInvalid, "s3 must be non-negative")
++		}
++		device.log.Verbosef("UAPI: Updating s3 padding")
++		device.paddings.cookie = padding
+ 
+ 	case "s4":
+-		padding, err := strconv.ParseUint(value, 10, 16)
++		padding, err := strconv.Atoi(value)
+ 		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse s4: %w", err)
+ 		}
+-		ipcDev.paddings.transport = uint32(padding)
++		if padding < 0 {
++			return ipcErrorf(ipc.IpcErrorInvalid, "s4 must be non-negative")
++		}
++		device.log.Verbosef("UAPI: Updating s4 padding")
++		device.paddings.transport = padding
+ 
+ 	case "h1":
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
++		header, err := newMagicHeader(value)
++		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse H1: %w", err)
+ 		}
+-		ipcDev.headers.init = rang
++		device.headers.init = header
+ 
+ 	case "h2":
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
++		header, err := newMagicHeader(value)
++		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse H2: %w", err)
+ 		}
+-		ipcDev.headers.response = rang
++		device.headers.response = header
+ 
+ 	case "h3":
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
++		header, err := newMagicHeader(value)
++		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse H3: %w", err)
+ 		}
+-		ipcDev.headers.cookie = rang
++		device.headers.cookie = header
+ 
+ 	case "h4":
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
++		header, err := newMagicHeader(value)
++		if err != nil {
+ 			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse H4: %w", err)
+ 		}
+-		ipcDev.headers.transport = rang
++		device.headers.transport = header
+ 
+ 	case "i1":
+ 		chain, err := newObfChain(value)
+@@ -470,79 +447,6 @@ func (device *Device) handleDeviceLine(ipcDev *ipcSetDevice, key, value string)
+ 		}
+ 		device.ipackets[4] = chain
+ 
+-	case "header_protection_key":
+-		var key HeaderCipherKey
+-		err := key.FromHex(value)
+-		if err != nil {
+-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set header_protection_key: %w", err)
+-		}
+-		ipcDev.headerProtectionKey = key
+-
+-	case "content_padding_addition":
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
+-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse content_padding_addition: %w", err)
+-		}
+-
+-		device.log.Verbosef("UAPI: Updating content padding addition")
+-		device.contentPaddingAddition.Store(rang)
+-
+-	case "rekey_after_time":
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
+-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse rekey after time: %w", err)
+-		}
+-		device.log.Verbosef("UAPI: Updating rekey after time")
+-		device.timings.rekeyAfterTimeSec.Store(rang)
+-
+-	case "rekey_timeout":
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
+-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse rekey timeout: %w", err)
+-		}
+-		device.log.Verbosef("UAPI: Updating rekey timeout")
+-		device.timings.rekeyTimeoutSec.Store(rang)
+-
+-	case "reject_after_time":
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
+-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse reject after time: %w", err)
+-		}
+-		device.log.Verbosef("UAPI: Updating reject after time")
+-		device.timings.rejectAfterTimeSec.Store(rang)
+-
+-	case "keepalive_timeout":
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
+-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse keepalive timeout: %w", err)
+-		}
+-		device.log.Verbosef("UAPI: Updating keepalive timeout")
+-		device.timings.keepaliveTimeoutSec.Store(rang)
+-
+-	case "max_handshake_attempts":
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
+-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse max handshake attempts: %w", err)
+-		}
+-		device.log.Verbosef("UAPI: Updating max handshake attempts")
+-		device.timings.maxHandshakeAttemps.Store(rang)
+-
+-	case "random_trailers":
+-		val, err := strconv.ParseBool(value)
+-		if err != nil {
+-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse random trailers: %w", err)
+-		}
+-		device.log.Verbosef("UAPI: Updating random trailers")
+-		device.randomTrailers.Store(val)
+-
+-	case "disable_cookies":
+-		val, err := strconv.ParseBool(value)
+-		if err != nil {
+-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to parse disable cookies: %w", err)
+-		}
+-		device.log.Verbosef("UAPI: Updating disable cookies")
+-		device.disableCookies.Store(val)
+-
+ 	default:
+ 		return ipcErrorf(ipc.IpcErrorInvalid, "invalid UAPI device key: %v", key)
+ 	}
+@@ -663,15 +567,19 @@ func (device *Device) handlePeerLine(
+ 	case "persistent_keepalive_interval":
+ 		device.log.Verbosef("%v - UAPI: Updating persistent keepalive interval", peer.Peer)
+ 
+-		var rang UintRange
+-		if err := rang.FromString(value); err != nil {
+-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set persistent keepalive interval: %w", err)
++		secs, err := strconv.ParseUint(value, 10, 16)
++		if err != nil {
++			return ipcErrorf(
++				ipc.IpcErrorInvalid,
++				"failed to set persistent keepalive interval: %w",
++				err,
++			)
+ 		}
+ 
+-		old := peer.persistentKeepaliveInterval.Swap(rang)
++		old := peer.persistentKeepaliveInterval.Swap(uint32(secs))
+ 
+ 		// Send immediate keepalive if we're turning it on and before it wasn't on.
+-		peer.pkaOn = old.IsZero() && !rang.IsZero()
++		peer.pkaOn = old == 0 && secs != 0
+ 
+ 	case "replace_allowed_ips":
+ 		device.log.Verbosef("%v - UAPI: Removing all allowedips", peer.Peer)
+@@ -790,88 +698,46 @@ func (device *Device) IpcHandle(socket net.Conn) {
+ 
+ type ipcSetDevice struct {
+ 	headers struct {
+-		init      UintRange
+-		response  UintRange
+-		cookie    UintRange
+-		transport UintRange
+-	}
+-	paddings struct {
+-		init      uint32
+-		response  uint32
+-		cookie    uint32
+-		transport uint32
++		init      *magicHeader
++		response  *magicHeader
++		cookie    *magicHeader
++		transport *magicHeader
+ 	}
+-	headerProtectionKey HeaderCipherKey
+ }
+ 
+-func (d *ipcSetDevice) fromDevice(device *Device) {
+-	device.headerProtection.RLock()
+-	defer device.headerProtection.RUnlock()
+-
+-	d.headers.init = device.headers.init.Load()
+-	d.headers.response = device.headers.response.Load()
+-	d.headers.cookie = device.headers.cookie.Load()
+-	d.headers.transport = device.headers.transport.Load()
++func (d *ipcSetDevice) mergeWithDevice(device *Device) error {
++	if d.headers.init == nil {
++		d.headers.init = device.headers.init
++	}
+ 
+-	d.paddings.init = device.paddings.init.Load()
+-	d.paddings.response = device.paddings.response.Load()
+-	d.paddings.cookie = device.paddings.cookie.Load()
+-	d.paddings.transport = device.paddings.transport.Load()
++	if d.headers.response == nil {
++		d.headers.response = device.headers.response
++	}
+ 
+-	d.headerProtectionKey = device.headerProtection.key
+-}
++	if d.headers.cookie == nil {
++		d.headers.cookie = device.headers.cookie
++	}
+ 
+-func (d *ipcSetDevice) mergeWithDevice(device *Device) error {
+-	device.headerProtection.Lock()
+-	defer device.headerProtection.Unlock()
++	if d.headers.transport == nil {
++		d.headers.transport = device.headers.transport
++	}
+ 
+-	headers := []UintRange{d.headers.init, d.headers.response, d.headers.cookie, d.headers.transport}
++	headers := []*magicHeader{d.headers.init, d.headers.response, d.headers.cookie, d.headers.transport}
+ 	for i := 0; i < len(headers); i++ {
+ 		for j := i + 1; j < len(headers); j++ {
+ 			left := headers[i]
+ 			right := headers[j]
+ 
+-			if left.Overlap(right) {
++			if left.start <= right.end && right.start <= left.end {
+ 				return errors.New("headers must not overlap")
+ 			}
+ 		}
+ 	}
+ 
+-	device.log.Verbosef("UAPI: Updating h1 padding")
+-	device.headers.init.Store(d.headers.init)
+-
+-	device.log.Verbosef("UAPI: Updating h2 padding")
+-	device.headers.response.Store(d.headers.response)
+-
+-	device.log.Verbosef("UAPI: Updating h3 padding")
+-	device.headers.cookie.Store(d.headers.cookie)
+-
+-	device.log.Verbosef("UAPI: Updating h4 padding")
+-	device.headers.transport.Store(d.headers.transport)
+-
+-	if !d.headerProtectionKey.IsZero() {
+-		paddings := []uint32{d.paddings.init, d.paddings.response, d.paddings.cookie, d.paddings.transport}
+-		for i, padding := range paddings {
+-			if padding < HeaderCipherNonceSize {
+-				return fmt.Errorf("S%d must be more then %d to use headerProtection", i, HeaderCipherNonceSize)
+-			}
+-		}
+-	}
+-
+-	device.log.Verbosef("UAPI: Updating s1 padding")
+-	device.paddings.init.Store(d.paddings.init)
+-
+-	device.log.Verbosef("UAPI: Updating s2 padding")
+-	device.paddings.response.Store(d.paddings.response)
+-
+-	device.log.Verbosef("UAPI: Updating s3 padding")
+-	device.paddings.cookie.Store(d.paddings.cookie)
+-
+-	device.log.Verbosef("UAPI: Updating s4 padding")
+-	device.paddings.transport.Store(d.paddings.transport)
+-
+-	device.log.Verbosef("UAPI: Updating header protection key")
+-	device.headerProtection.key = d.headerProtectionKey
++	device.headers.init = d.headers.init
++	device.headers.response = d.headers.response
++	device.headers.cookie = d.headers.cookie
++	device.headers.transport = d.headers.transport
+ 
+ 	return nil
+ }
+diff --git a/go.mod b/go.mod
+index 6493e57..a5f6548 100644
+--- a/go.mod
++++ b/go.mod
+@@ -1,13 +1,13 @@
+-module github.com/amnezia-vpn/amneziawg-go/v3
++module github.com/amnezia-vpn/amneziawg-go
+ 
+-go 1.25.0
++go 1.24.4
+ 
+ require (
+-	github.com/goccy/go-yaml v1.17.1
++	github.com/stretchr/testify v1.10.0
++	github.com/tevino/abool v1.2.0
+ 	go.uber.org/atomic v1.11.0
+-	golang.getoutline.org/sdk v0.0.23
+-	golang.getoutline.org/sdk/x v0.2.0
+ 	golang.org/x/crypto v0.42.0
++	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842
+ 	golang.org/x/net v0.44.0
+ 	golang.org/x/sys v0.36.0
+ 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
+@@ -15,21 +15,18 @@ require (
+ )
+ 
+ require (
+-	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
++	github.com/Jigsaw-Code/outline-sdk v0.0.20 // indirect
++	github.com/Jigsaw-Code/outline-sdk/x v0.0.8 // indirect
++	github.com/davecgh/go-spew v1.1.1 // indirect
++	github.com/goccy/go-yaml v1.17.1 // indirect
+ 	github.com/google/btree v1.1.3 // indirect
+-	github.com/google/pprof v0.0.0-20211214055906-6f57359322fd // indirect
+ 	github.com/gorilla/websocket v1.5.3 // indirect
+-	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
+-	github.com/quic-go/qpack v0.5.1 // indirect
+-	github.com/quic-go/quic-go v0.48.1 // indirect
++	github.com/pmezard/go-difflib v1.0.0 // indirect
+ 	github.com/shadowsocks/go-shadowsocks2 v0.1.5 // indirect
+-	github.com/stretchr/testify v1.10.0 // indirect
+-	go.uber.org/mock v0.4.0 // indirect
+-	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
+ 	golang.org/x/mobile v0.0.0-20240520174638-fa72addaaa1b // indirect
+ 	golang.org/x/mod v0.28.0 // indirect
+ 	golang.org/x/sync v0.17.0 // indirect
+-	golang.org/x/text v0.29.0 // indirect
+ 	golang.org/x/time v0.9.0 // indirect
+ 	golang.org/x/tools v0.37.0 // indirect
++	gopkg.in/yaml.v3 v3.0.1 // indirect
+ )
+diff --git a/go.sum b/go.sum
+index a18d2a0..8dde512 100644
+--- a/go.sum
++++ b/go.sum
+@@ -1,60 +1,34 @@
+-github.com/chzyer/logex v1.1.10/go.mod h1:+Ywpsq7O8HXn0nuIou7OrIPyXbp3wmkHB+jjWRnGsAI=
+-github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e/go.mod h1:nSuG5e5PlCu98SY8svDHJxuZscDgtXS6KTTbou5AhLI=
+-github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1/go.mod h1:Q3SI9o4m/ZMnBNeIyt5eFwwo7qiLfzFZmjNmxjkiQlU=
+-github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
++github.com/Jigsaw-Code/outline-sdk v0.0.20 h1:4ep7MK9lFmcyPIRIbn4xrP1VKdJNsqR6+iJEOHDKnNg=
++github.com/Jigsaw-Code/outline-sdk v0.0.20/go.mod h1:CFDKyGZA4zatKE4vMLe8TyQpZCyINOeRFbMAmYHxodw=
++github.com/Jigsaw-Code/outline-sdk/x v0.0.8 h1:fFHFXW7CKhRiegyNSdP25S/WIiVrRnMKysHDoO/N2Xg=
++github.com/Jigsaw-Code/outline-sdk/x v0.0.8/go.mod h1:zqSH7yEYIQ0pYOhrr4QnodATVb5X/eZXV4AjUp9zhvs=
+ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
+ github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+-github.com/go-logr/logr v1.2.4 h1:g01GSCwiDw2xSZfjJ2/T9M+S6pFdcNtFYsp+Y43HYDQ=
+-github.com/go-logr/logr v1.2.4/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
+-github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 h1:tfuBGBXKqDEevZMzYi5KSi8KkcZtzBcTgAUUtapy0OI=
+-github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572/go.mod h1:9Pwr4B2jHnOSGXyyzV8ROjYa2ojvAY6HCGYYfMoC3Ls=
+ github.com/goccy/go-yaml v1.17.1 h1:LI34wktB2xEE3ONG/2Ar54+/HJVBriAGJ55PHls4YuY=
+ github.com/goccy/go-yaml v1.17.1/go.mod h1:XBurs7gK8ATbW4ZPGKgcbrY1Br56PdM69F7LkFRi1kA=
+-github.com/golang/protobuf v1.5.3 h1:KhyjKVUg7Usr/dYsdSqoFveMYd5ko72D+zANwlG1mmg=
+-github.com/golang/protobuf v1.5.3/go.mod h1:XVQd3VNwM+JqD3oG2Ue2ip4fOMUkwXdXDdiuN0vRsmY=
+ github.com/google/btree v1.1.3 h1:CVpQJjYgC4VbzxeGVHfvZrv1ctoYCAI8vbl07Fcxlyg=
+ github.com/google/btree v1.1.3/go.mod h1:qOPhT0dTNdNzV6Z/lhRX0YXUafgPLFUh+gZMl761Gm4=
+-github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
+-github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
+-github.com/google/gopacket v1.1.19 h1:ves8RnFZPGiFnTS0uPQStjwru6uO6h+nlr9j6fL7kF8=
+-github.com/google/gopacket v1.1.19/go.mod h1:iJ8V8n6KS+z2U1A8pUwu8bW5SyEMkXJB8Yo/Vo+TKTo=
+-github.com/google/pprof v0.0.0-20211214055906-6f57359322fd h1:1FjCyPC+syAzJ5/2S8fqdZK1R22vvA0J7JZKcuOIQ7Y=
+-github.com/google/pprof v0.0.0-20211214055906-6f57359322fd/go.mod h1:KgnwoLYCZ8IQu3XUZ8Nc/bM9CCZFOyjUNOSygVozoDg=
+ github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+ github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+-github.com/ianlancetaylor/demangle v0.0.0-20210905161508-09a460cdf81d/go.mod h1:aYm2/VgdVmcIU8iMfdMvDMsRAQjcfZSKFby6HOFvi/w=
+-github.com/onsi/ginkgo/v2 v2.12.0 h1:UIVDowFPwpg6yMUpPjGkYvf06K3RAiJXUhCxEwQVHRI=
+-github.com/onsi/ginkgo/v2 v2.12.0/go.mod h1:ZNEzXISYlqpb8S36iN71ifqLi3vVD1rVJGvWRCJOUpQ=
+-github.com/onsi/gomega v1.27.10 h1:naR28SdDFlqrG6kScpT8VWpu1xWY5nJRCF3XaYyBjhI=
+-github.com/onsi/gomega v1.27.10/go.mod h1:RsS8tutOdbdgzbPtzzATp12yT7kM5I5aElG3evPbQ0M=
+ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
+ github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+-github.com/quic-go/qpack v0.5.1 h1:giqksBPnT/HDtZ6VhtFKgoLOWmlyo9Ei6u9PqzIMbhI=
+-github.com/quic-go/qpack v0.5.1/go.mod h1:+PC4XFrEskIVkcLzpEkbLqq1uCoxPhQuvK5rH1ZgaEg=
+-github.com/quic-go/quic-go v0.48.1 h1:y/8xmfWI9qmGTc+lBr4jKRUWLGSlSigv847ULJ4hYXA=
+-github.com/quic-go/quic-go v0.48.1/go.mod h1:yBgs3rWBOADpga7F+jJsb6Ybg1LSYiQvwWlLX+/6HMs=
+-github.com/riobard/go-bloom v0.0.0-20200614022211-cdc8013cb5b3 h1:f/FNXud6gA3MNr8meMVVGxhp+QBTqY91tM8HjEuMjGg=
+ github.com/riobard/go-bloom v0.0.0-20200614022211-cdc8013cb5b3/go.mod h1:HgjTstvQsPGkxUsCd2KWxErBblirPizecHcpD3ffK+s=
+ github.com/shadowsocks/go-shadowsocks2 v0.1.5 h1:PDSQv9y2S85Fl7VBeOMF9StzeXZyK1HakRm86CUbr28=
+ github.com/shadowsocks/go-shadowsocks2 v0.1.5/go.mod h1:AGGpIoek4HRno4xzyFiAtLHkOpcoznZEkAccaI/rplM=
+-github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
+-github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
+ github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOfJA=
+ github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
+-github.com/things-go/go-socks5 v0.0.5 h1:qvKaGcBkfDrUL33SchHN93srAmYGzb4CxSM2DPYufe8=
+-github.com/things-go/go-socks5 v0.0.5/go.mod h1:mtzInf8v5xmsBpHZVbIw2YQYhc4K0jRwzfsH64Uh0IQ=
++github.com/tevino/abool v1.2.0 h1:heAkClL8H6w+mK5md9dzsuohKeXHUpY7Vw0ZCKW+huA=
++github.com/tevino/abool v1.2.0/go.mod h1:qc66Pna1RiIsPa7O4Egxxs9OqkuxDX55zznh9K07Tzg=
+ go.uber.org/atomic v1.11.0 h1:ZvwS0R+56ePWxUNi+Atn9dWONBPp/AUETXlHW0DxSjE=
+ go.uber.org/atomic v1.11.0/go.mod h1:LUxbIzbOniOlMKjJjyPfpl4v+PKK2cNJn91OQbhoJI0=
+-go.uber.org/mock v0.4.0 h1:VcM4ZOtdbR4f6VXfiOpwpVJDL6lCReaZ6mw31wqh7KU=
+-go.uber.org/mock v0.4.0/go.mod h1:a6FSlNadKUHUa9IP5Vyt1zh4fC7uAwxMutEAscFbkZc=
+-golang.getoutline.org/sdk v0.0.23 h1:UKoKCrRH3Ed6Jpg8ODYwOo6O1B1lvfIHPreMrTkSTcc=
+-golang.getoutline.org/sdk v0.0.23/go.mod h1:nKZlO//e/sRFk+rp8gm8EJ5RasDSyY+fGDNSd3I2iaA=
+-golang.getoutline.org/sdk/x v0.2.0 h1:4kuT2SgkPXktwPwT6CXuF+Jwe+COAGqiBDZbgJkS5fM=
+-golang.getoutline.org/sdk/x v0.2.0/go.mod h1:vyWoHW0PUsnRHdLXiDGv1Z8X48Asp2ALgwIQfJfAaNs=
+ golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
+ golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83/go.mod h1:jdWPYTVW3xRLrWPugEBEK3UY2ZEsg3UU495nc5E+M+I=
++golang.org/x/crypto v0.39.0 h1:SHs+kF4LP+f+p14esP5jAoDpHU8Gu/v9lFRK6IT5imM=
++golang.org/x/crypto v0.39.0/go.mod h1:L+Xg3Wf6HoL4Bn4238Z6ft6KfEpN0tJGo53AAPC632U=
+ golang.org/x/crypto v0.42.0 h1:chiH31gIWm57EkTXpwnqf8qeuMUi0yekh6mT2AvFlqI=
+ golang.org/x/crypto v0.42.0/go.mod h1:4+rDnOTJhQCx2q7/j6rAN5XDw8kPjeaXEUR2eL94ix8=
++golang.org/x/exp v0.0.0-20230725093048-515e97ebf090 h1:Di6/M8l0O2lCLc6VVRWhgCiApHV8MnQurBnFSHsQtNY=
++golang.org/x/exp v0.0.0-20230725093048-515e97ebf090/go.mod h1:FXUEEKJgO7OQYeo8N01OfiKP8RXMtf6e8aTskBGqWdc=
+ golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 h1:vr/HnozRka3pE4EsMEg1lgkXJkTFJCVUX+S/ZT6wYzM=
+ golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842/go.mod h1:XtvwrStGgqGPLc4cjQfWqZHG1YFdYs6swckp8vpsjnc=
+ golang.org/x/mobile v0.0.0-20240520174638-fa72addaaa1b h1:WX7nnnLfCEXg+FmdYZPai2XuP3VqCP1HZVMST0n9DF0=
+@@ -62,33 +36,28 @@ golang.org/x/mobile v0.0.0-20240520174638-fa72addaaa1b/go.mod h1:EiXZlVfUTaAyySF
+ golang.org/x/mod v0.28.0 h1:gQBtGhjxykdjY9YhZpSlZIsbnaE2+PgjfLWUQTnoZ1U=
+ golang.org/x/mod v0.28.0/go.mod h1:yfB/L0NOf/kmEbXjzCPOx1iK1fRutOydrCMsqRhEBxI=
+ golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
++golang.org/x/net v0.41.0 h1:vBTly1HeNPEn3wtREYfy4GZ/NECgw2Cnl+nK6Nz3uvw=
++golang.org/x/net v0.41.0/go.mod h1:B/K4NNqkfmg07DQYrbwvSluqCJOOXwUjeb/5lOisjbA=
+ golang.org/x/net v0.44.0 h1:evd8IRDyfNBMBTTY5XRF1vaZlD+EmWx6x8PkhR04H/I=
+ golang.org/x/net v0.44.0/go.mod h1:ECOoLqd5U3Lhyeyo/QDCEVQ4sNgYsqvCZ722XogGieY=
+ golang.org/x/sync v0.17.0 h1:l60nONMj9l5drqw6jlhIELNv9I0A4OFgRsG9k2oT9Ug=
+ golang.org/x/sync v0.17.0/go.mod h1:9KTHXmSnoGruLpwFjVSX0lNNA75CykiMECbovNTZqGI=
+ golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
+ golang.org/x/sys v0.0.0-20191026070338-33540a1f6037/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+-golang.org/x/sys v0.0.0-20211007075335-d3039528d8ac/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
++golang.org/x/sys v0.33.0 h1:q3i8TbbEz+JRD9ywIRlyRAQbM0qF7hu24q3teo2hbuw=
++golang.org/x/sys v0.33.0/go.mod h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k=
+ golang.org/x/sys v0.36.0 h1:KVRy2GtZBrk1cBYA7MKu5bEZFxQk4NIDV6RLVcC8o0k=
+ golang.org/x/sys v0.36.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=
+ golang.org/x/term v0.0.0-20201117132131-f5c789dd3221/go.mod h1:Nr5EML6q2oocZ2LXRh80K7BxOlk5/8JxuGnuhpl+muw=
+ golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
+-golang.org/x/text v0.29.0 h1:1neNs90w9YzJ9BocxfsQNHKuAT4pkghyXc4nhZ6sJvk=
+-golang.org/x/text v0.29.0/go.mod h1:7MhJOA9CD2qZyOKYazxdYMF85OwPdEr9jTtBpO7ydH4=
+ golang.org/x/time v0.9.0 h1:EsRrnYcQiGH+5FfbgvV4AP7qEZstoyrHB0DzarOQ4ZY=
+ golang.org/x/time v0.9.0/go.mod h1:3BpzKBy/shNhVucY/MWOyx10tF3SFh9QdLuxbVysPQM=
+ golang.org/x/tools v0.37.0 h1:DVSRzp7FwePZW356yEAChSdNcQo6Nsp+fex1SUW09lE=
+ golang.org/x/tools v0.37.0/go.mod h1:MBN5QPQtLMHVdvsbtarmTNukZDdgwdwlO5qGacAzF0w=
+-golang.org/x/tools/go/expect v0.1.1-deprecated h1:jpBZDwmgPhXsKZC6WhL20P4b/wmnpsEAGHaNy0n/rJM=
+-golang.org/x/tools/go/expect v0.1.1-deprecated/go.mod h1:eihoPOH+FgIqa3FpoTwguz/bVUSGBlGQU67vpBeOrBY=
+-golang.org/x/tools/go/packages/packagestest v0.1.1-deprecated h1:1h2MnaIAIXISqTFKdENegdpAgUXz6NrPEsbIeWaBRvM=
+-golang.org/x/tools/go/packages/packagestest v0.1.1-deprecated/go.mod h1:RVAQXBGNv1ib0J382/DPCRS/BPnsGebyM1Gj5VSDpG8=
+ golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 h1:B82qJJgjvYKsXS9jeunTOisW56dUokqW/FOteYJJ/yg=
+ golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2/go.mod h1:deeaetjYA+DHMHg+sMSMI58GrEteJUUzzw7en6TJQcI=
+-google.golang.org/protobuf v1.33.0 h1:uNO2rsAINq/JlFpSdYEKIZ0uKD/R9cpdv0T+yoGwGmI=
+-google.golang.org/protobuf v1.33.0/go.mod h1:c6P6GXX6sHbq/GpV6MGZEdwhWPcYBgnhAHhKbcUYpos=
++gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
+ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
+-gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+ gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+ gvisor.dev/gvisor v0.0.0-20231202080848-1f7806d17489 h1:ze1vwAdliUAr68RQ5NtufWaXaOg8WUO2OACzEV+TNdE=
+diff --git a/ipc/namedpipe/namedpipe_test.go b/ipc/namedpipe/namedpipe_test.go
+index 7d7326b..9f9cd6a 100644
+--- a/ipc/namedpipe/namedpipe_test.go
++++ b/ipc/namedpipe/namedpipe_test.go
+@@ -20,7 +20,7 @@ import (
+ 	"testing"
+ 	"time"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/ipc/namedpipe"
++	"github.com/amnezia-vpn/amneziawg-go/ipc/namedpipe"
+ 	"golang.org/x/sys/windows"
+ )
+ 
+diff --git a/ipc/uapi_linux.go b/ipc/uapi_linux.go
+index d8a8e84..058e8e7 100644
+--- a/ipc/uapi_linux.go
++++ b/ipc/uapi_linux.go
+@@ -9,7 +9,7 @@ import (
+ 	"net"
+ 	"os"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/rwcancel"
++	"github.com/amnezia-vpn/amneziawg-go/rwcancel"
+ 	"golang.org/x/sys/unix"
+ )
+ 
+diff --git a/ipc/uapi_windows.go b/ipc/uapi_windows.go
+index 434ca78..321fe60 100644
+--- a/ipc/uapi_windows.go
++++ b/ipc/uapi_windows.go
+@@ -8,7 +8,7 @@ package ipc
+ import (
+ 	"net"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/ipc/namedpipe"
++	"github.com/amnezia-vpn/amneziawg-go/ipc/namedpipe"
+ 	"golang.org/x/sys/windows"
+ )
+ 
+diff --git a/main.go b/main.go
+index b0d479c..f8fded9 100644
+--- a/main.go
++++ b/main.go
+@@ -14,10 +14,10 @@ import (
+ 	"runtime"
+ 	"strconv"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/ipc"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/device"
++	"github.com/amnezia-vpn/amneziawg-go/ipc"
++	"github.com/amnezia-vpn/amneziawg-go/tun"
+ 	"golang.org/x/sys/unix"
+ )
+ 
+diff --git a/main_windows.go b/main_windows.go
+index fb494df..d3e2fe6 100644
+--- a/main_windows.go
++++ b/main_windows.go
+@@ -12,11 +12,11 @@ import (
+ 
+ 	"golang.org/x/sys/windows"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/ipc"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/device"
++	"github.com/amnezia-vpn/amneziawg-go/ipc"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
++	"github.com/amnezia-vpn/amneziawg-go/tun"
+ )
+ 
+ const (
+diff --git a/outline/dialer.go b/outline/dialer.go
+index 99ba248..86aaff5 100644
+--- a/outline/dialer.go
++++ b/outline/dialer.go
+@@ -6,10 +6,10 @@ import (
+ 	"net"
+ 	"net/netip"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
+-	"golang.getoutline.org/sdk/transport"
++	"github.com/Jigsaw-Code/outline-sdk/transport"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/device"
++	"github.com/amnezia-vpn/amneziawg-go/tun/netstack"
+ 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
+ )
+ 
+diff --git a/outline/fallback.go b/outline/fallback.go
+index c4b64cc..0f75dc9 100644
+--- a/outline/fallback.go
++++ b/outline/fallback.go
+@@ -9,10 +9,10 @@ import (
+ 	"strconv"
+ 	"strings"
+ 
++	"github.com/Jigsaw-Code/outline-sdk/transport"
++	"github.com/Jigsaw-Code/outline-sdk/x/mobileproxy"
++	"github.com/Jigsaw-Code/outline-sdk/x/smart"
+ 	"github.com/goccy/go-yaml"
+-	"golang.getoutline.org/sdk/transport"
+-	"golang.getoutline.org/sdk/x/mobileproxy"
+-	"golang.getoutline.org/sdk/x/smart"
+ )
+ 
+ type DeviceConfig struct {
+diff --git a/outline/fallback_test.go b/outline/fallback_test.go
+index a6ae59f..496f949 100644
+--- a/outline/fallback_test.go
++++ b/outline/fallback_test.go
+@@ -3,8 +3,8 @@ package outline_test
+ import (
+ 	"testing"
+ 
+-	awg "github.com/amnezia-vpn/amneziawg-go/v3/outline"
+-	"golang.getoutline.org/sdk/x/mobileproxy"
++	"github.com/Jigsaw-Code/outline-sdk/x/mobileproxy"
++	awg "github.com/amnezia-vpn/amneziawg-go/outline"
+ )
+ 
+ const cfg = `
+diff --git a/tun/netstack/examples/http_client.go b/tun/netstack/examples/http_client.go
+index b1cbb58..8b12ecc 100644
+--- a/tun/netstack/examples/http_client.go
++++ b/tun/netstack/examples/http_client.go
+@@ -13,9 +13,9 @@ import (
+ 	"net/http"
+ 	"net/netip"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/device"
++	"github.com/amnezia-vpn/amneziawg-go/tun/netstack"
+ )
+ 
+ func main() {
+diff --git a/tun/netstack/examples/http_server.go b/tun/netstack/examples/http_server.go
+index b3024ae..80cd036 100644
+--- a/tun/netstack/examples/http_server.go
++++ b/tun/netstack/examples/http_server.go
+@@ -14,9 +14,9 @@ import (
+ 	"net/http"
+ 	"net/netip"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/device"
++	"github.com/amnezia-vpn/amneziawg-go/tun/netstack"
+ )
+ 
+ func main() {
+diff --git a/tun/netstack/examples/ping_client.go b/tun/netstack/examples/ping_client.go
+index 2705763..b243b5c 100644
+--- a/tun/netstack/examples/ping_client.go
++++ b/tun/netstack/examples/ping_client.go
+@@ -17,9 +17,9 @@ import (
+ 	"golang.org/x/net/icmp"
+ 	"golang.org/x/net/ipv4"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/device"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/device"
++	"github.com/amnezia-vpn/amneziawg-go/tun/netstack"
+ )
+ 
+ func main() {
+diff --git a/tun/netstack/tun.go b/tun/netstack/tun.go
+index 39821b9..48a428b 100644
+--- a/tun/netstack/tun.go
++++ b/tun/netstack/tun.go
+@@ -22,7 +22,7 @@ import (
+ 	"syscall"
+ 	"time"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
++	"github.com/amnezia-vpn/amneziawg-go/tun"
+ 
+ 	"golang.org/x/net/dns/dnsmessage"
+ 	"gvisor.dev/gvisor/pkg/buffer"
+diff --git a/tun/offload_linux.go b/tun/offload_linux.go
+index f7682fa..b61654b 100644
+--- a/tun/offload_linux.go
++++ b/tun/offload_linux.go
+@@ -12,7 +12,7 @@ import (
+ 	"io"
+ 	"unsafe"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
+ 	"golang.org/x/sys/unix"
+ )
+ 
+diff --git a/tun/offload_linux_test.go b/tun/offload_linux_test.go
+index 9f32f20..c04e003 100644
+--- a/tun/offload_linux_test.go
++++ b/tun/offload_linux_test.go
+@@ -9,7 +9,7 @@ import (
+ 	"net/netip"
+ 	"testing"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
+ 	"golang.org/x/sys/unix"
+ 	"gvisor.dev/gvisor/pkg/tcpip"
+ 	"gvisor.dev/gvisor/pkg/tcpip/header"
+diff --git a/tun/tun_linux.go b/tun/tun_linux.go
+index b1254fd..bc6e7c1 100644
+--- a/tun/tun_linux.go
++++ b/tun/tun_linux.go
+@@ -17,8 +17,8 @@ import (
+ 	"time"
+ 	"unsafe"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
+-	"github.com/amnezia-vpn/amneziawg-go/v3/rwcancel"
++	"github.com/amnezia-vpn/amneziawg-go/conn"
++	"github.com/amnezia-vpn/amneziawg-go/rwcancel"
+ 	"golang.org/x/sys/unix"
+ )
+ 
+diff --git a/tun/tuntest/tuntest.go b/tun/tuntest/tuntest.go
+index 84e344b..0fa70b0 100644
+--- a/tun/tuntest/tuntest.go
++++ b/tun/tuntest/tuntest.go
+@@ -11,7 +11,7 @@ import (
+ 	"net/netip"
+ 	"os"
+ 
+-	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
++	"github.com/amnezia-vpn/amneziawg-go/tun"
+ )
+ 
+ func Ping(dst, src netip.Addr) []byte {

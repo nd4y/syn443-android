@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <application android:label="SYN443 Acceptance">
+        <activity android:name="io.syn443.android.acceptance.CompetingVpnActivity" android:exported="true" />
+        <service android:name="io.syn443.android.acceptance.CompetingVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE" android:exported="true"
+            android:process=":acceptance" android:foregroundServiceType="specialUse">
+            <intent-filter><action android:name="android.net.VpnService" /></intent-filter>
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Temporary competing VPN acceptance fixture" />
+        </service>
+    </application>
+</manifest>
