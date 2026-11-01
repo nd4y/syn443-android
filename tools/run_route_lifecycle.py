@@ -61,6 +61,11 @@ def main():
         case=new_case('routeChecksUseActualOutboundsAndSelectedProxy')
         prepare();assert row(0)['state']=='working' and row(1)['state']=='failed' and row(2)['state']=='working'
         assert row(2)['measuredPath']==['route-3','route-1'] and all(s.route_probes>0 for s in servers)
+        controller=pid(':controller')
+        try:call('routes-check','route-99')
+        except AssertionError:pass
+        else:raise AssertionError('Unknown route command was accepted')
+        assert pid(':controller')==controller and call('status')['phase']=='Online'
         print(case.get('name')+': passed',flush=True)
 
         case=new_case('requiredRouteFailureDegradesWithoutRestartAndRecovers')

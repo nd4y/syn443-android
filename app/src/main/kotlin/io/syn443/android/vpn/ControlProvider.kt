@@ -162,6 +162,7 @@ class ControlProvider : ContentProvider() {
                 "routes-check", "routes-cancel" -> {
                     require(store.checkpoint().desiredOn && store.read().optBoolean("engineActive"))
                     require(arg==null || (method=="routes-check" && Regex("route-[1-9][0-9]?").matches(arg)))
+                    require(method!="routes-check" || RouteSnapshot.accepts(arg))
                     context.startService(Intent(context,TunnelService::class.java).setAction(method).also {if(arg!=null)it.putExtra("routeId",arg)})
                 }
                 "fault-ui", "fault-controller" -> {

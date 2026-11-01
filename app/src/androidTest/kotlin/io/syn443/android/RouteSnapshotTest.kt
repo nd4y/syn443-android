@@ -24,7 +24,9 @@ class RouteSnapshotTest {
         assertFalse(view.toString().contains("192.0.2.9"));assertFalse(view.toString().contains("probe.example.org"))
     }
     @Test fun routeLateNetworkAndEngineResultsCannotOverrideStop() {
-        setup();val request=checkNotNull(RouteSnapshot.request(scope))
+        setup();assertFalse(RouteSnapshot.accepts("route-99"));assertFalse(RouteSnapshot.accepts("route-3"))
+        assertNull(RouteSnapshot.request(scope,only="route-99",force=true))
+        val request=checkNotNull(RouteSnapshot.request(scope))
         assertFalse(RouteSnapshot.update(scope.copy(network=3),report(request,true)))
         assertFalse(RouteSnapshot.update(scope.copy(engine="new-engine"),report(request,true)))
         assertEquals("off",RouteSnapshot.read(false,true,scope).getJSONArray("routes").getJSONObject(0).getString("state"))

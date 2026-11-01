@@ -79,13 +79,14 @@ object RouteSnapshot {
     @Synchronized fun invalidate() {current=null;pending="";queued=emptySet();observations=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000}
     @Synchronized fun due()=rows.any {it.checks.length()>0} && SystemClock.elapsedRealtime()-lastStarted>=60_000
     @Synchronized fun owner(scope:RouteScope?){live=scope}
+    @Synchronized fun accepts(only:String?)=rows.any {(only==null || it.id==only) && it.checks.length()>0}
     @Synchronized fun view(status:JSONObject):JSONObject = read(status.optBoolean("desiredOn"),status.optBoolean("engineActive") && live!=null,
         live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch")))
     @Synchronized fun request(scope:RouteScope, only:String?=null, force:Boolean=false):String? {
         val now=SystemClock.elapsedRealtime()
         if(pending.isNotEmpty() && now-startedAt<35_000) return null
         if(!force && now-lastStarted<60_000) return null
-        require(only==null || rows.any {it.id==only})
+        if(only!=null && rows.none {it.id==only})return null
         val selected=rows.filter {(only==null || it.id==only) && it.checks.length()>0}
         if(selected.isEmpty())return null
         // Never stamp a previous observation with this new scope.
