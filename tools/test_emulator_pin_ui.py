@@ -21,6 +21,15 @@ class EmulatorPinUiTest(unittest.TestCase):
         with patch('emulator_policy_ui.adb',return_value=b'qcom') as adb:
             with self.assertRaises(AssertionError):unlock_test_pin()
             adb.assert_called_once_with('shell','getprop','ro.hardware')
+    def test_late_keyguard_gets_wake_swipe_but_digits_only_once(self):
+        def reply(*args,**kwargs):
+            if args==('shell','getprop','ro.hardware'):return b'ranchu'
+            if args==('shell','wm','size'):return b'Physical size: 1080x2400'
+            return b''
+        with patch('emulator_policy_ui.adb',side_effect=reply) as adb,patch('emulator_policy_ui.tree',side_effect=[ET.Element('hierarchy'),self.keypad()]),patch('emulator_policy_ui.tap') as tap,patch('emulator_policy_ui.time.sleep'):
+            unlock_test_pin()
+            self.assertEqual(2,sum(c.args==('shell','input','keyevent','KEYCODE_WAKEUP') for c in adb.call_args_list))
+            self.assertEqual(4,tap.call_count)
 
 
 if __name__=='__main__':unittest.main()

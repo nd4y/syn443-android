@@ -99,7 +99,13 @@ package update while Off, real secure locked boot/unlock, reboot while Off,
 ordinary Settings Always-on/lockdown with newer Stop, and Force stop followed by
 package replacement. The synthetic PIN is confined to disposable emulators and
 is never set on a physical phone. Existing process/revocation/enrollment scenarios
-remain mandatory. Minimum137 outcomes on each API29/35/37; recovery JVM minimum14.
+remain mandatory. Minimum138 outcomes on each API29/35/37; recovery JVM minimum14.
+
+The persisted engine-active flag is a recovery checkpoint. Status reports false
+when no live controller service and no owned engine process exist, and unknown
+when an orphan process or unavailable OS process inventory prevents a current
+ownership claim. This response projection never changes durable intent, restart
+budgets or the recovery checkpoint.
 
 The emulator reboot driver requires an advanced Android boot counter. If the
 owned host VM exits during reboot, it may cold-start that same AVD once using its

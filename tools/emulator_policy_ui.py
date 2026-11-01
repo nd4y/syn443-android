@@ -46,6 +46,10 @@ def unlock_test_pin():
             if enter is not None:tap(enter)
             else:adb('shell','input','keyevent','KEYCODE_ENTER')
             return
+        # sys.boot_completed can precede a responsive Keyguard. Repeating only
+        # wake/swipe before any digits are entered does not replay a PIN attempt.
+        adb('shell','input','keyevent','KEYCODE_WAKEUP')
+        adb('shell','input','swipe',str(width//2),str(height*9//10),str(width//2),str(height//3),'300')
         time.sleep(1)
     raise AssertionError('Disposable emulator PIN bouncer did not become ready')
 
