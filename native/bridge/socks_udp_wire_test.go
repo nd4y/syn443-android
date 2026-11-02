@@ -60,11 +60,28 @@ func socksUDPWire(t *testing.T, destination *net.UDPAddr) (*wireFixture, *atomic
 			return
 		}
 		var header [4]byte
-		if _, e := io.ReadFull(c, header[:]); e != nil || header != [4]byte{5, 3, 0, 1} {
+		if _, e := io.ReadFull(c, header[:]); e != nil || header[0] != 5 || header[1] != 3 || header[2] != 0 {
 			return
 		}
-		var address [6]byte
-		if _, e := io.ReadFull(c, address[:]); e != nil {
+		// The pinned sing client deliberately sends IPv6 unspecified for a
+		// loopback UDP ASSOCIATE. This is a bind request, not the datagram's
+		// destination; support both valid IP address families without allowing
+		// another command, nonzero client port or a nonlocal bind address.
+		size := 0
+		switch header[3] {
+		case 1:
+			size = 4
+		case 4:
+			size = 16
+		default:
+			return
+		}
+		address := make([]byte, size+2)
+		if _, e := io.ReadFull(c, address); e != nil {
+			return
+		}
+		ip := net.IP(address[:size])
+		if (!ip.IsUnspecified() && !ip.IsLoopback()) || binary.BigEndian.Uint16(address[size:]) != 0 {
 			return
 		}
 		relay, e := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
