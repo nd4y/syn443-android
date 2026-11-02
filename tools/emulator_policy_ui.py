@@ -62,18 +62,23 @@ def profile_settings(root):
         return tuple(map(int,values)) if len(values)==4 else None
     for label in root.iter('node'):
         if label.get('package')!='com.android.settings' or label.get('text')!='SYN443':continue
-        label_bounds=bounds(label)
-        if label_bounds is None:continue
         container=label
         for _ in range(4):
             container=parents.get(container,container)
-            for gear in container.iter('node'):
-                if gear.get('package')!='com.android.settings':continue
+            gears=[n for n in container.iter('node') if n.get('package')=='com.android.settings' and
+                   (n.get('resource-id','').endswith('/settings_button') or n.get('content-desc')=='Settings for SYN443')]
+            titles=[n for n in container.iter('node') if n.get('package')=='com.android.settings' and n.get('resource-id')=='android:id/title']
+            # A two-line preference can place its title above the gear. Match
+            # their unique owned row, not overlapping text/icon rectangles or
+            # an English-only description. Never ascend into multiple VPN rows.
+            if len(gears)!=1 or len(titles)>1 or titles and titles[0] is not label:continue
+            for gear in gears:
                 description=gear.get('content-desc','')
-                if description and description!='Settings for SYN443':continue
-                if description!='Settings for SYN443' and not gear.get('resource-id','').endswith('/settings_button'):continue
+                if description.startswith('Settings for ') and description!='Settings for SYN443':continue
+                row_bounds=bounds(container);label_bounds=bounds(label)
                 gear_bounds=bounds(gear)
-                if gear_bounds is not None and max(label_bounds[1],gear_bounds[1])<min(label_bounds[3],gear_bounds[3]):return gear
+                if row_bounds is None or label_bounds is None or gear_bounds is None:continue
+                if all(row_bounds[0]<=b[0]<b[2]<=row_bounds[2] and row_bounds[1]<=b[1]<b[3]<=row_bounds[3] for b in (label_bounds,gear_bounds)):return gear
     return None
 
 
@@ -99,7 +104,9 @@ def open_policy():
     nodes=[] if root is None else list(root.iter('node'))
     packages=sorted({n.get('package','') for n in nodes})[:8]
     resources=sorted({n.get('resource-id','') for n in nodes if n.get('package') in ('com.android.settings','com.android.systemui')})[:32]
-    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'ownedLabel':any(n.get('package')=='com.android.settings' and n.get('text')=='SYN443' for n in nodes)}),flush=True)
+    owned=[{'id':n.get('resource-id',''),'bounds':n.get('bounds','')} for n in nodes if n.get('package')=='com.android.settings' and n.get('text')=='SYN443']
+    gears=[{'bounds':n.get('bounds',''),'description':('expected' if n.get('content-desc')=='Settings for SYN443' else 'present' if n.get('content-desc') else 'empty')} for n in nodes if n.get('package')=='com.android.settings' and n.get('resource-id','').endswith('/settings_button')]
+    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears}),flush=True)
     raise AssertionError('Owned VPN settings entry unavailable')
 
 
