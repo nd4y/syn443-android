@@ -44,8 +44,9 @@ clock/reboot behavior, pending/error/cancel mapping and shared login transitions
 New critical classes join the unchanged90% per-class identity line gate. Emulator
 tests cover QR decoding, durable bootstrap floors/dual-root rotation/corruption,
 and the actual controller/Keystore/journal with cryptographically checked
-synthetic invitation/session replies, including cancellation during a held claim. Exact new Actions
-results and physical Xperia USB/Wi-Fi enrollment/UI/recovery acceptance are pending.
+synthetic invitation/session replies, including cancellation during a held claim. The version0.9.1 component snapshot has exact Actions and physical USB/Wi-Fi
+evidence described in [the acceptance note](manual-enrollment-acceptance.md).
+Later changes need their own exact-source verification.
 This implementation is not evidence that all M2/M3 requirements are complete.
 
 QR decoding uses the exact ZXing core3.5.4 artifact from Maven Central

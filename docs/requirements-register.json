@@ -278,7 +278,8 @@
         "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt",
         "docs/manual-enrollment.md",
         "core/identity/src/main/kotlin/io/syn443/identity/InvitationProtocol.kt",
-        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt"
+        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt",
+        "docs/manual-enrollment-acceptance.md"
       ]
     },
     {
@@ -331,7 +332,8 @@
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/manual-enrollment.md",
         "core/identity/src/main/kotlin/io/syn443/identity/InvitationProtocol.kt",
-        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt"
+        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt",
+        "docs/manual-enrollment-acceptance.md"
       ]
     },
     {
@@ -716,8 +718,13 @@
     {
       "id": "OVL-06",
       "text": "Идентичности, токены, state directory и секреты разделяются по overlayId/provider/resource. Публикация политики не конвертирует идентичность одной сети в другую. Реализация 1.0 не объединяет автоматически peers, DNS-зоны или маршруты нескольких overlay-провайдеров.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-overlay.md",
+        "contracts/v1/overlay-namespace-vectors.json",
+        "core/identity/src/main/kotlin/io/syn443/identity/ManagedOverlay.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/ManagedOverlayTest.kt"
+      ]
     },
     {
       "id": "OVL-07",

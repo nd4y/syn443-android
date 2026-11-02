@@ -23,7 +23,8 @@ tasks.jacocoTestCoverageVerification {
             "io.syn443.identity.Assignments", "io.syn443.identity.AssignmentIdentity", "io.syn443.identity.AssignmentState", "io.syn443.identity.AssignmentPermit", "io.syn443.identity.ProvisioningRetry",
             "io.syn443.identity.BootstrapTrust", "io.syn443.identity.AuthenticatedInvite",
             "io.syn443.identity.InvitationProtocol", "io.syn443.identity.InvitationOperation", "io.syn443.identity.InvitationOperation.Companion",
-            "io.syn443.identity.InvitationState", "io.syn443.identity.InvitationPending")
+            "io.syn443.identity.InvitationState", "io.syn443.identity.InvitationPending",
+            "io.syn443.identity.ManagedOverlay", "io.syn443.identity.OverlayAddress")
         limit { counter = "LINE"; minimum = "0.90".toBigDecimal() }
     } }
 }
