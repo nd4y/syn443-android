@@ -18,6 +18,62 @@ import java.util.Base64
 import java.util.Locale
 
 class AuthProtocolTest {
+    private fun overlayBinding()=OverlayCredentialBinding(OverlayAddress(b.serviceId,Identity.hash("owner".toByteArray()),session().deviceId,"home","netbird","resource","tenant",1,"https://overlay.example.invalid"),Identity.thumbprint(pub),Identity.hash("reference".toByteArray()),1,0,now+120_000)
+    private fun overlayEnvelope(binding:OverlayCredentialBinding):String {
+        val a=binding.address
+        val body=buildJsonObject {
+            put("schemaVersion",1);put("audience","syn443-overlay-credential")
+            putJsonObject("address") {
+                put("serviceId",a.serviceId);put("ownerTag",a.ownerTag);put("deviceId",a.deviceId);put("overlayId",a.overlayId);put("provider",a.provider);put("resourceId",a.resourceId);put("networkId",a.networkId);put("identityEpoch",a.identityEpoch);put("managementURL",a.managementURL)
+            }
+            put("keyThumbprint",binding.keyThumbprint);put("reference",binding.reference);put("version",binding.version);put("securityEpoch",binding.securityEpoch);put("kind","netbird.setup-key");put("issuedAtMs",now);put("notBeforeMs",now);put("expiresMs",now+60_000);put("value",java.util.UUID.randomUUID().toString())
+        }
+        val header=buildJsonObject {put("alg","ES256");put("kid","test-root");put("typ","syn443-overlay-credential+jws")}
+        val input=Identity.encode(Canonical.encode(header).toByteArray())+"."+Identity.encode(Canonical.encode(body).toByteArray())
+        return input+"."+Identity.encode(Signature.getInstance("SHA256withECDSAinP1363Format").run {initSign(root.private);update(input.toByteArray());sign()})
+    }
+    @Test fun addressedOverlayDeliveryBindsProofBodySessionAndIndependentEnvelope() {
+        val f=Fixture();val binding=overlayBinding()
+        val operation=OverlayOperation(Identity.random(),ManagedOverlay.namespace(binding.address),binding.reference,binding.version)
+        val envelope=overlayEnvelope(binding)
+        f.handler={method,url,headers,bytes,_,maximum->
+            assertEquals("POST",method);assertEquals(b.apiOrigin+"/v1/device/overlay/fetch",url);assertEquals(24576,maximum)
+            assertEquals(operation.body(),bytes!!.toString(Charsets.UTF_8))
+            val proof=Identity.objectJSON(Policy.utf8(Policy.decode64(headers.getValue("DPoP").split('.')[1])))
+            assertEquals(Identity.hash(bytes),proof.getValue("req_hash").jsonPrimitive.content)
+            assertEquals(Identity.hash(f.current().session.accessToken.toByteArray()),proof.getValue("ath").jsonPrimitive.content)
+            json(text=Canonical.encode(buildJsonObject {put("envelope",envelope);put("consumed",false)}))
+        }
+        val reply=f.client.overlay(operation,false,binding,f.current(),IdentityScope())
+        assertEquals(envelope,reply.envelope);assertFalse(reply.consumed);assertFalse(reply.toString().contains(envelope))
+        f.handler={_,url,_,bytes,_,_->
+            assertEquals(b.apiOrigin+"/v1/device/overlay/consume",url);assertEquals(operation.body(),bytes!!.toString(Charsets.UTF_8));json(text="{\"consumed\":true}")
+        }
+        val ack=f.client.overlay(operation,true,binding,f.current(),IdentityScope())
+        assertTrue(ack.consumed);assertNull(ack.envelope)
+        val canceled=IdentityScope().also {it.cancel()}
+        error(AuthFailure.CANCELLED){f.client.overlay(operation,true,binding,f.current(),canceled)}
+    }
+    @Test fun overlayCannotAcceptUnsignedSecretCrossScopeOrFalseConsumption() {
+        val f=Fixture();val binding=overlayBinding()
+        fun op(b:OverlayCredentialBinding)=OverlayOperation(Identity.random(),ManagedOverlay.namespace(b.address),b.reference,b.version)
+        for(body in listOf("{}","{\"consumed\":true}","{\"consumed\":false,\"envelope\":\"unsigned\"}","{\"consumed\":false,\"envelope\":\"\",\"extra\":true}")) {
+            f.handler={_,_,_,_,_,_->json(text=body)};error(AuthFailure.INVALID_REPLY){f.client.overlay(op(binding),false,binding,f.current(),IdentityScope())}
+        }
+        for(body in listOf("{\"consumed\":false}","{\"consumed\":true,\"envelope\":\"must-not-appear\"}","{\"consumed\":\"true\"}")) {
+            f.handler={_,_,_,_,_,_->json(text=body)};error(AuthFailure.INVALID_REPLY){f.client.overlay(op(binding),true,binding,f.current(),IdentityScope())}
+        }
+        f.handler={_,_,_,_,_,_->json(text="{\"consumed\":true}").copy(headers=mapOf("content-type" to listOf("text/html"),"date" to listOf(date())))}
+        error(AuthFailure.INVALID_REPLY){f.client.overlay(op(binding),true,binding,f.current(),IdentityScope())}
+        for(changed in listOf(binding.copy(address=binding.address.copy(serviceId="other")),binding.copy(address=binding.address.copy(deviceId="another-device")),binding.copy(keyThumbprint=Identity.hash("other".toByteArray())))) {
+            error(AuthFailure.INVALID_REPLY){f.client.overlay(op(changed),false,changed,f.current(),IdentityScope())}
+        }
+        error(AuthFailure.INVALID_REPLY){f.client.overlay(op(binding),false,binding.copy(version=2),f.current(),IdentityScope())}
+        error(AuthFailure.INVALID_REPLY){f.client.overlay(op(binding),false,binding,f.current(session().copy(accessUntilMs=now)),IdentityScope())}
+        for((status,reason) in listOf(403 to AuthFailure.ACCESS_DENIED,409 to AuthFailure.CONFLICT,503 to AuthFailure.UNAVAILABLE)) {
+            f.handler={_,_,_,_,_,_->json(status)};error(reason){f.client.overlay(op(binding),false,binding,f.current(),IdentityScope())}
+        }
+    }
     @Test fun publicationReauthenticationIsDistinctFromAnIdempotencyConflict() {
         val f=Fixture()
         for((code,expected) in listOf("reauthentication_required" to AuthFailure.REAUTHENTICATE,"idempotency_conflict" to AuthFailure.CONFLICT)) {

@@ -25,7 +25,7 @@ tasks.jacocoTestCoverageVerification {
             "io.syn443.identity.InvitationProtocol", "io.syn443.identity.InvitationOperation", "io.syn443.identity.InvitationOperation.Companion",
             "io.syn443.identity.InvitationState", "io.syn443.identity.InvitationPending",
             "io.syn443.identity.ManagedOverlay", "io.syn443.identity.OverlayAddress",
-            "io.syn443.identity.OverlayCredentials", "io.syn443.identity.OverlayCredentialBinding", "io.syn443.identity.OverlaySetupSecret")
+            "io.syn443.identity.OverlayCredentials", "io.syn443.identity.OverlayCredentialBinding", "io.syn443.identity.OverlaySetupSecret", "io.syn443.identity.OverlayOperation", "io.syn443.identity.OverlayEnrollment", "io.syn443.identity.OverlayEnrollments", "io.syn443.identity.OverlayAssignments")
         limit { counter = "LINE"; minimum = "0.90".toBigDecimal() }
     } }
 }

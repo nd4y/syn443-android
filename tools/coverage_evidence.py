@@ -7,7 +7,7 @@ IDENTITY_CLASSES = {'io.syn443.identity.' + name for name in (
     'IdentityOperation', 'IdentityOperation.Companion',
     'LoginRecovery', 'LoginIntent', 'RegistrationTombstone', 'LoginPayload', 'LoginPayload.Companion',
     'Assignments', 'AssignmentIdentity', 'AssignmentState', 'AssignmentPermit', 'ProvisioningRetry', 'BootstrapTrust', 'AuthenticatedInvite',
-    'InvitationProtocol', 'InvitationOperation', 'InvitationOperation.Companion', 'InvitationState', 'InvitationPending', 'ManagedOverlay', 'OverlayAddress', 'OverlayCredentials', 'OverlayCredentialBinding', 'OverlaySetupSecret')}
+    'InvitationProtocol', 'InvitationOperation', 'InvitationOperation.Companion', 'InvitationState', 'InvitationPending', 'ManagedOverlay', 'OverlayAddress', 'OverlayCredentials', 'OverlayCredentialBinding', 'OverlaySetupSecret', 'OverlayOperation', 'OverlayEnrollment', 'OverlayEnrollments', 'OverlayAssignments')}
 
 
 def verify_classes(path, required):

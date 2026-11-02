@@ -41,6 +41,9 @@ class IssuerState internal constructor(internal val keys:Map<String,RSAPublicKey
 @Serializable data class SessionReply(val session:DeviceSession,val time:TrustedTime,val authority:String,val keyThumbprint:String) {
     override fun toString()="SessionReply([redacted])"
 }
+data class OverlayDeliveryReply(val envelope:String?,val consumed:Boolean,val time:TrustedTime) {
+    override fun toString()="OverlayDeliveryReply([redacted])"
+}
 data class PolicyReply(val envelope:String,val time:TrustedTime) {
     override fun toString()="PolicyReply([redacted])"
 }
@@ -208,6 +211,28 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
         val upper=result.time.window(boot(),elapsed()).upperMs
         Policy.verifyBound(envelope,bootstrap.roots,current.session.deviceId,thumbprint,upper)
         PolicyReply(envelope,result.time)
+    }
+    /** A stable protected operation is persisted before dispatch. Every retry has
+     * a fresh proof; account, key, namespace and conservative time are local. */
+    fun overlay(operation:OverlayOperation,consume:Boolean,binding:OverlayCredentialBinding,
+        current:SessionReply,scope:IdentityScope):OverlayDeliveryReply=checked {
+        bound(current);operation.requireBound(binding)
+        require(binding.address.serviceId==bootstrap.serviceId && binding.address.deviceId==current.session.deviceId && binding.keyThumbprint==thumbprint)
+        require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val result=api("/v1/device/overlay/"+(if(consume)"consume" else "fetch"),operation.body(),current.session.accessToken,current.session.nonce,current.time,scope,24_576)
+        require(result.reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+        val value=json(result.reply)
+        val consumed=value.getValue("consumed").jsonPrimitive.let {require(!it.isString);it.boolean}
+        if(consume) {
+            require(consumed && value.keys==setOf("consumed"))
+            OverlayDeliveryReply(null,true,result.time)
+        } else {
+            require(!consumed && value.keys==setOf("envelope","consumed"))
+            val envelope=value.getValue("envelope").text()
+            val time=result.time.window(boot(),elapsed())
+            OverlayCredentials.verify(envelope,bootstrap.roots,binding,time.lowerMs,time.upperMs).close()
+            OverlayDeliveryReply(envelope,false,result.time)
+        }
     }
     /** One bounded chunk/operation; the controller rechecks the account before every call. */
     fun chat(action:String,body:String,current:SessionReply,scope:IdentityScope):String=checked {

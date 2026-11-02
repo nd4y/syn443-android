@@ -27,6 +27,8 @@ import (
 	"github.com/sagernet/sing-box/protocol/direct"
 	proxyhttp "github.com/sagernet/sing-box/protocol/http"
 	"github.com/sagernet/sing-box/protocol/socks"
+	proxyssh "github.com/sagernet/sing-box/protocol/ssh"
+	"github.com/sagernet/sing-box/protocol/vless"
 	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/service"
 )
@@ -35,19 +37,27 @@ import (
 // external provider is needed, so these run with the ordinary native Actions gate.
 func wireBox(t *testing.T, nodes ...map[string]any) *box.Box {
 	t.Helper()
+	return wireConfiguredBox(t, nil, nodes)
+}
+func wireConfiguredBox(t *testing.T, listeners, nodes []map[string]any) *box.Box {
+	t.Helper()
 	registry := outbound.NewRegistry()
 	direct.RegisterOutbound(registry)
 	proxyhttp.RegisterOutbound(registry)
 	socks.RegisterOutbound(registry)
+	vless.RegisterOutbound(registry)
+	proxyssh.RegisterOutbound(registry)
+	ir := inbound.NewRegistry()
+	vless.RegisterInbound(ir)
 	dr := dns.NewTransportRegistry()
 	registerPhysicalDNS(dr, dnsProtector{exchange: func([]byte) ([]byte, error) {
 		t.Error("IP-only wire fixture attempted DNS")
 		return nil, errors.New("unexpected fixture DNS")
 	}})
-	ctx := box.Context(context.Background(), inbound.NewRegistry(), registry,
+	ctx := box.Context(context.Background(), ir, registry,
 		endpoint.NewRegistry(), dr, boxservice.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
-	raw, err := json.Marshal(map[string]any{"log": map[string]any{"disabled": true}, "outbounds": nodes})
+	raw, err := json.Marshal(map[string]any{"log": map[string]any{"disabled": true}, "outbounds": nodes, "inbounds": listeners})
 	if err != nil {
 		t.Fatal(err)
 	}
