@@ -125,3 +125,13 @@ New core/Keystore/controller tests cover persistence, old-format compatibility,
 lock contention, incomplete cleanup, late cancellation and resumed logout. Their
 Actions acceptance is pending. Setup delivery/materialization/registration/ack and
 the provider issuer still need integration before assigned NetBird is enabled.
+
+## Consumption after reference refresh (acceptance pending)
+
+The client cleanup request retains its original operation/reference/version and
+DPoP body hash when the current verified assignment refreshes the reference or
+security epoch for the same namespace. It still rejects another identity epoch,
+service, device or key. Fetch continues requiring an exact current reference/version
+and independently verified unexpired credential; consumption never returns a
+secret. The server counterpart passed all8 jobs at5ab9cb4fc9bc90f367ef3a0d58e2f9373f2f9534,
+Actions41409513759. The new client case awaits its next exact Actions acceptance.

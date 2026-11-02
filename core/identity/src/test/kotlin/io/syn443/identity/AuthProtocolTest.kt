@@ -74,6 +74,24 @@ class AuthProtocolTest {
             f.handler={_,_,_,_,_,_->json(status)};error(reason){f.client.overlay(op(binding),false,binding,f.current(),IdentityScope())}
         }
     }
+    @Test fun overlayConsumptionKeepsItsOperationAfterCurrentReferenceAndEpochRefresh() {
+        val f=Fixture();val initial=overlayBinding()
+        val operation=OverlayOperation(Identity.random(),ManagedOverlay.namespace(initial.address),initial.reference,initial.version)
+        val refreshed=initial.copy(reference=Identity.hash("renewed reference".toByteArray()),version=2,securityEpoch=1)
+        var calls=0
+        f.handler={_,url,headers,bytes,_,_->
+            calls++;assertEquals(b.apiOrigin+"/v1/device/overlay/consume",url)
+            assertEquals(operation.body(),bytes!!.toString(Charsets.UTF_8))
+            val proof=Identity.objectJSON(Policy.utf8(Policy.decode64(headers.getValue("DPoP").split('.')[1])))
+            assertEquals(Identity.hash(bytes),proof.getValue("req_hash").jsonPrimitive.content)
+            json(text="{\"consumed\":true}")
+        }
+        val ack=f.client.overlay(operation,true,refreshed,f.current(),IdentityScope())
+        assertTrue(ack.consumed);assertNull(ack.envelope);assertEquals(1,calls)
+        error(AuthFailure.INVALID_REPLY){f.client.overlay(operation,false,refreshed,f.current(),IdentityScope())}
+        error(AuthFailure.INVALID_REPLY){f.client.overlay(operation,true,refreshed.copy(address=refreshed.address.copy(identityEpoch=2)),f.current(),IdentityScope())}
+        assertEquals(1,calls)
+    }
     @Test fun publicationReauthenticationIsDistinctFromAnIdempotencyConflict() {
         val f=Fixture()
         for((code,expected) in listOf("reauthentication_required" to AuthFailure.REAUTHENTICATE,"idempotency_conflict" to AuthFailure.CONFLICT)) {

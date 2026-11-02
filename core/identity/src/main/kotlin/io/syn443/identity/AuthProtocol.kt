@@ -216,7 +216,9 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
      * a fresh proof; account, key, namespace and conservative time are local. */
     fun overlay(operation:OverlayOperation,consume:Boolean,binding:OverlayCredentialBinding,
         current:SessionReply,scope:IdentityScope):OverlayDeliveryReply=checked {
-        bound(current);operation.requireBound(binding)
+        bound(current)
+        if(consume)require(operation.namespace==ManagedOverlay.namespace(binding.address))
+        else operation.requireBound(binding)
         require(binding.address.serviceId==bootstrap.serviceId && binding.address.deviceId==current.session.deviceId && binding.keyThumbprint==thumbprint)
         require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
         val result=api("/v1/device/overlay/"+(if(consume)"consume" else "fetch"),operation.body(),current.session.accessToken,current.session.nonce,current.time,scope,24_576)

@@ -89,3 +89,16 @@ Native loopback tests additionally exercise the registered HTTP CONNECT and SOCK
 clients, authenticated CONNECT, HTTP-over-SOCKS detour payloads, refused proxies
 and bad authentication with a target counter proving no direct fallback. These
 are not the complete VLESS/XHTTP/SSH/UDP interoperability matrix.
+
+Diagnostic bind ownership: run41405230512 passed native/JVM and API29/37 but
+API35 failed the existing wedgedWorkerCanBeTerminatedAndRebound at its10-second
+replacement-bind wait. All120 connected cases ran;119 passed, including the new
+namespace/vault/controller cleanup cases. Missing callback is the proven failure;
+its exact framework cause was not recorded. The new harness waits for both Binder
+death and the framework disconnect within the existing5-second total death bound,
+uses a session-specific bind action and reports null/dead binding callbacks.
+A real rejected-interface unbind regression requires an owned response afterward;
+a stale/foreign unbind cannot kill the current debug session. Existing10-second
+bind and5-second response limits, actual worker hang/death/rebound and foreign
+message rejection remain. No rerun/skip or production-supervisor shortcut is used.
+The new case is mandatory by exact method name; minimum160 Android outcomes.
