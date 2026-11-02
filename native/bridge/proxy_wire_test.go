@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -38,8 +39,13 @@ func wireBox(t *testing.T, nodes ...map[string]any) *box.Box {
 	direct.RegisterOutbound(registry)
 	proxyhttp.RegisterOutbound(registry)
 	socks.RegisterOutbound(registry)
+	dr := dns.NewTransportRegistry()
+	registerPhysicalDNS(dr, dnsProtector{exchange: func([]byte) ([]byte, error) {
+		t.Error("IP-only wire fixture attempted DNS")
+		return nil, errors.New("unexpected fixture DNS")
+	}})
 	ctx := box.Context(context.Background(), inbound.NewRegistry(), registry,
-		endpoint.NewRegistry(), dns.NewTransportRegistry(), boxservice.NewRegistry())
+		endpoint.NewRegistry(), dr, boxservice.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	raw, err := json.Marshal(map[string]any{"log": map[string]any{"disabled": true}, "outbounds": nodes})
 	if err != nil {
