@@ -10,6 +10,24 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class PolicyTest {
+    @Test fun runningManagedHealthUsesEveryRequiredSignedHTTPSTargetWithoutDefaultFallback() {
+        val checks=listOf(Check("first","https_204","https://health.example.org/generate_204"),
+            Check("second","https_204","https://alternate.example.org/204"),
+            Check("optional","https_204","https://optional.example.org/204",required=false),
+            Check("home","tcp_banner","192.0.2.1",22,"SSH-"))
+        val v=verify(sign(payload().copy(activation=Gate(30,false,checks))))
+        assertEquals(checks.take(2),Policy.internetChecks(true,v,v.payload.contentHash))
+        invalid {Policy.internetChecks(true,v,"foreign-running-engine")}
+        invalid {Policy.internetChecks(true,null,v.payload.contentHash)}
+        val empty=v.copy(payload=v.payload.copy(activation=Gate(30,false,checks.drop(2))))
+        invalid {Policy.internetChecks(true,empty,v.payload.contentHash)}
+        val tooMany=v.copy(payload=v.payload.copy(activation=Gate(30,false,List(9){checks.first()})))
+        invalid {Policy.internetChecks(true,tooMany,v.payload.contentHash)}
+    }
+    @Test fun unmanagedHealthHasExplicitProductionAndEmulatorDefaults() {
+        assertEquals("https://www.gstatic.com/generate_204",Policy.internetChecks(false,null,"").single().target)
+        assertEquals("https://health.example.org/generate_204",Policy.internetChecks(false,null,"",true).single().target)
+    }
     @Test fun revokedAccessClosesBeforeBudgetWaitWithoutStartingCandidateDeadline() {
         val v = verify(sign())
         val staged = Policy.stage(Journal(active = "old", lastGood = "old"), v)

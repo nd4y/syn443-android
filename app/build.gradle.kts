@@ -33,8 +33,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 28
-        versionName = "0.9.0-managed-enrollment"
+        versionCode = 29
+        versionName = "0.9.1-signed-health"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }

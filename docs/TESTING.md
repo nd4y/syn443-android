@@ -78,3 +78,14 @@ Every API29/35/37 emulator requires138 passing outcomes, retaining the previous1
 Real package replacement, secure boot/unlock and ordinary Settings Always-on/
 lockdown are exercised on disposable emulators. Physical credentials are never
 changed to simulate locked boot. Xperia USB/Wi-Fi evidence remains separate.
+
+Managed ongoing HTTPS health now follows every required HTTPS target from the
+still-authorized signed policy for the actual running engine, including the
+applying candidate. A missing/expired/wrong-engine managed view has no public
+URL fallback. Pure checks cover multiple/optional/banner targets and bounds;
+the actual controller test covers candidate, active and withdrawn views.
+Unmanaged production and visibly synthetic emulator defaults stay explicit.
+Native loopback tests additionally exercise the registered HTTP CONNECT and SOCKS5
+clients, authenticated CONNECT, HTTP-over-SOCKS detour payloads, refused proxies
+and bad authentication with a target counter proving no direct fallback. These
+are not the complete VLESS/XHTTP/SSH/UDP interoperability matrix.

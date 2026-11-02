@@ -505,11 +505,16 @@ class TunnelService : VpnService() {
         val currentToken = token; val currentEpoch = epoch; val generation = boundGeneration
         val activation = policies.read().journal.activationGeneration
         val synthetic = io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish") && store.read().optBoolean("testHealth")
+        val targets=runCatching {policies.internetChecks(runningConfigHash,synthetic)}.getOrElse {
+            internetHealthy=false
+            phase("BlockedByPolicy","health_policy_not_authorized",generation)
+            return
+        }
         val job = PolicyChecks(synthetic); healthJob = job
         lastProbe = SystemClock.uptimeMillis()
         checks.execute {
-            val result = job.run(listOf(io.syn443.policy.Check("internet", "https_204", if (synthetic) "https://health.example.org/generate_204" else "https://www.gstatic.com/generate_204")))
-            val ok = result.complete && result.values().single()
+            val result = job.run(targets)
+            val ok = result.complete && result.values().all {it}
             val code = when (job.failure) {
                 io.syn443.health.Failure.DNS -> "dns_resolution_failed"
                 io.syn443.health.Failure.TLS -> "tls_failed"
@@ -529,6 +534,11 @@ class TunnelService : VpnService() {
                 if (healthJob !== job) return@post
                 healthJob = null
                 if (destroyed || retiring || !ready || currentToken != token || currentEpoch != epoch || activation != policies.read().journal.activationGeneration || !Recovery.current(store.checkpoint(), generation)) return@post
+                if(runCatching {policies.internetChecks(runningConfigHash,synthetic)==targets}.getOrDefault(false).not()) {
+                    internetHealthy=false
+                    phase("BlockedByPolicy","health_policy_not_authorized",generation)
+                    return@post
+                }
                 if (!result.complete) { internetHealthy=false;phase("Recovering", "health_check_" + checkNotNull(result.incompleteOutcome).name.lowercase(java.util.Locale.ROOT), generation); return@post }
                 if (ok) {
                     internetHealthy=true

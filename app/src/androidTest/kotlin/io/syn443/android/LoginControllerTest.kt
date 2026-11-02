@@ -504,7 +504,19 @@ class LoginControllerTest {
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
         val policies=io.syn443.android.vpn.RuntimePolicies(context) {f.controller}
         assertEquals("prepared",policies.read().journal.phase)
+        // No running signed candidate exists yet. A managed client must not use
+        // an unrelated default endpoint or the unapproved candidate as health.
+        assertTrue(runCatching {policies.internetChecks("foreign")}.isFailure)
+        val ticket=f.controller.assignmentTicket()
+        assertTrue(f.controller.beginAssignment(ticket,listOf(false)));f.idle()
+        val applying=policies.read()
+        val candidate=checkNotNull(policies.allowed(applying.journal.candidate,applying))
+        assertEquals(candidate.payload.activation.checks.filter {it.required && it.type=="https_204"},policies.internetChecks(candidate.payload.contentHash))
+        assertTrue(runCatching {policies.internetChecks("foreign")}.isFailure)
+        assertTrue(f.controller.finishAssignment(f.controller.assignmentTicket(),listOf(true),true));f.idle()
+        assertEquals(candidate.payload.activation.checks.filter {it.required && it.type=="https_204"},policies.internetChecks(candidate.payload.contentHash))
         f.controller.assignedRuntime.clear()
+        assertTrue(runCatching {policies.internetChecks(candidate.payload.contentHash)}.isFailure)
         assertTrue(policies.managed());assertEquals("blocked",policies.read().journal.phase)
         assertFalse(policies.begin(listOf(false)));assertFalse(policies.finish(listOf(true),true))
         assertFalse(policies.rollback("native_activation_failed"))
