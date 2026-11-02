@@ -6,7 +6,7 @@
       "url": "https://github.com/AlwaysBusyStack/sing-box.git",
       "base": "476d2436e84995f97fb3af605934cf07d3f95907",
       "revision": "f4cd71253d9ce90126dcd78d58dd7428a6e622a0",
-      "patchSha256": "921bdccb617a80f78c0f13507e53588cada6a4e99bf86394e121acdab5d23b67",
+      "patchSha256": "c91a4aa96d5fd0e28688fdf18d15f36576dcb00d33c9b543ef43f13b90335987",
       "license": "GPL-3.0-or-later",
       "localWorkingPatch": true
     },

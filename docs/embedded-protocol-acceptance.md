@@ -84,3 +84,20 @@ TLS flag, resolver fallback or public endpoint is involved. Fixture sockets, str
 framing and listener retirement are bounded. The server portable DNS compiler
 passed Actions41397718493, but its full native integration and these additional
 wire cases await the next exact Actions build.
+
+## Per-engine dial options (acceptance pending)
+
+The DNS matrix passed ordinary traffic after removing an unsupported explicit
+empty-direct detour. The subsequent race run41402601925 exposed a pinned fork
+global: constructing a router wrote concurrent-dial mode while another router's
+Reality handshake read it. No historical phone-cause claim follows from this.
+
+The new patch moves parallel-dial and interface-selection options into immutable
+per-engine context values captured by each dialer. TCP, UDP listener and TFO helpers
+use that captured context; the explicit no-concurrent request guard still wins. A
+new Box cannot change an existing engine's socket multiplicity. Android installs
+its interface-selection behavior in the owning context instead of a process flag.
+The complete dialer package is now included in the mandatory upstream race gate,
+with generated loopback TCP/UDP tests and an actual two-Box HTTP-path regression.
+Patch application and byte readback were checked against the exact pinned source;
+compiled acceptance is pending Actions.

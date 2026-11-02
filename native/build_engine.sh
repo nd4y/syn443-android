@@ -45,7 +45,8 @@ if [ "${SYN443_RACE:-0}" = 1 ]; then
     go test -race -count=1 -timeout=90s -tags=with_gvisor,with_utls,with_quic \
       github.com/sagernet/sing-box/transport/v2raygrpclite \
       github.com/sagernet/sing-box/transport/v2rayxhttp \
-      github.com/sagernet/sing-box/common/xray/buf
+      github.com/sagernet/sing-box/common/xray/buf \
+      github.com/sagernet/sing-box/common/dialer
 fi
 go test github.com/netbirdio/netbird/client/internal/peer -run 'Test(DirectFirstDefersRelayUntilUnreachable|SuccessfulP2PDoesNotOpenRelayUntilLost|DirectFirstWaitCancelsWithEngine)$' -count=1
 go test github.com/netbirdio/netbird/client/underlay -count=1

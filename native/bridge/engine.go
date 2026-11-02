@@ -60,7 +60,6 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 		return nil, err
 	}
 	netbird.DiagnosticsAllowed = guard.allowed
-	dialer.DoNotSelectInterface = true
 	installOverlayPlatform(protector)
 	ir := inbound.NewRegistry()
 	tunin.RegisterInbound(ir)
@@ -77,7 +76,7 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 	registerPhysicalDNS(dr, protector)
 	netbird.RegisterDNSTransport(dr)
 	registerRemoteDNS(dr)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(dialer.WithRuntimeOptions(context.Background(), dialer.RuntimeOptions{SkipInterfaceSelection: true}))
 	ctx = box.Context(ctx, ir, or, endpoint.NewRegistry(), dr, boxservice.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	p := &platform{fd: int(fd), protector: protector, iface: control.Interface{Index: int(index), Name: name, MTU: 1500, Flags: net.FlagUp}, lease: guard}

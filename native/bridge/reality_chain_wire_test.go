@@ -162,3 +162,20 @@ func TestRegisteredVLESSCarriesActualUDPThroughTCPHTTPEntry(t *testing.T) {
 		})
 	}
 }
+
+func TestAnotherBoxCannotEnableConcurrentDialsInAnExistingProxy(t *testing.T) {
+	target := listenWire(t, func(conn net.Conn) { _, _ = io.Copy(conn, conn) })
+	entry := httpWire(t, target.listener.Addr().String(), "", "")
+	client, _ := wireNetworkBox(t, nil, []map[string]any{entry.node("http", "entry")}, map[string]any{"route": map[string]any{"concurrent_dial": false}})
+	proxy, _ := client.Outbound().Outbound("entry")
+	for iteration := 0; iteration < 8; iteration++ {
+		other, _ := wireNetworkBox(t, nil, []map[string]any{{"type": "direct", "tag": "direct"}}, map[string]any{"route": map[string]any{"concurrent_dial": true}})
+		if err := payloadWire(t, proxy, target.listener.Addr().String()); err != nil {
+			t.Fatal(err)
+		}
+		_ = other.Close()
+	}
+	if entry.calls.Load() != 8 || target.calls.Load() != 8 {
+		t.Fatal("new router changed the existing engine's socket multiplicity")
+	}
+}
