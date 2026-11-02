@@ -11,7 +11,10 @@ Accepted baseline atfb18f759fd0aa5df937a213a05aa2af76b96b829,
 HTTP CONNECT authentication, SOCKS5 TCP, HTTP over SOCKS, wrong HTTP authentication
 and refused HTTP/SOCKS, with no target connection on failure.
 
-New fixtures awaiting exact Actions acceptance:
+Additional wire fixtures passed the native job at430283e34f5d3582acea52c8ca2ae1599f7a112a,
+[Actions41389169139](https://github.com/nd4y/syn443-android/actions/runs/41389169139).
+The complete run remained red because an external API37 Settings-navigation case
+failed; that failure is distinct from the native protocol result.
 
 | Path | Actual traffic and boundary |
 | --- | --- |
@@ -53,5 +56,18 @@ Additional bounded regression files cover setup/read/close races, frame integrit
 request-body duplicate release, queue reorder/gap behavior and a blocking body.
 Actions now run the complete three affected upstream packages under race detector
 in addition to the actual outbound wire checks. The source patch hash remains
-pinned. Exact acceptance of this fix is pending; it is not proof about the cause
-of a historical phone hang. The new APK version is30/0.9.2-transport-lifecycle.
+pinned. These native race checks passed at430283e; this is not proof about the
+cause of a historical phone hang. Version30/0.9.2-transport-lifecycle has not been
+physically accepted while the mandatory full-run gate remains red.
+
+## Additional protocol/chain cases awaiting Actions
+
+New actual-wire cases cover VLESS Reality with generated X25519/short-ID/UUID,
+a local TLS1.3 camouflage origin and no public network dependency. A wrong public
+key, short ID or UUID must never reach the payload target. A four-hop path uses
+HTTP, SOCKS, SSH and VLESS in order, with independent counters for every hop.
+An actual selector used as a VLESS entry must switch the complete chain, reject
+unknown members and never implicitly escape a failed selected member. VLESS UDP
+inside a TLS/TCP stream through HTTP CONNECT must deliver an actual echoed datagram;
+wrong VLESS authentication must not send a physical UDP packet to the target.
+These additions remain unaccepted until their exact native Actions results exist.

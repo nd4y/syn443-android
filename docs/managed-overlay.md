@@ -59,6 +59,48 @@ Cancellation only writes a bounded retirement fence; crypto/native cleanup runs
 off the UI/Binder threads. Confirmed native ownership release is required before
 retirement finishes. The vault cannot select or delete an operator SDK directory.
 
-New JVM/protocol/state tests and Android Keystore/corruption/late-result tests are
-authored and awaiting Actions. No native managed activation, actual provider
-registration or physical acceptance is implied by these storage components.
+At430283e34f5d3582acea52c8ca2ae1599f7a112a, the JVM/protocol/state suite and
+Android Keystore/corruption/late-result cases passed Actions. All six vault cases
+also passed API37 before an unrelated external Settings-navigation failure.
+The complete API29/35 runs passed. These storage components do not establish
+managed native activation, actual provider registration or physical acceptance.
+
+## Native SDK ownership and registration evidence
+
+The optional local `managed_namespace` material must end in the independently
+derived `managed-netbird/<digest>` directory. The two owned path components and
+key files cannot be symlinks; the preceding app-storage root is supplied locally
+and may use Android's own system alias. A canonical, private, bounded ownership
+manifest is reserved while the native identity lock is held. Existing SDK files
+without that manifest are never adopted. The established SDK config must contain
+valid WireGuard and SSH private keys matching its persisted public-key digest.
+Missing, corrupted or changed keys fail before SDK construction, preventing the
+SDK's automatic key generation from silently creating another Cloud peer.
+
+Fresh offline SDK construction is followed by config sync, a directory sync and
+an atomic initialized-manifest readback before SDK Start may contact management.
+An interrupted offline construction can resume with the same valid keys. The
+manifest is an ownership/key-continuity fence, not proof of Cloud registration.
+The separate native proof additionally requires the current ready owner, both
+management and signal connections and a valid assigned IP. It rechecks ownership
+and authorization after the SDK recorder returns; Stop cannot publish a late proof.
+Private-key files retain the SDK's app-private storage semantics; they are not
+claimed to be nonexportable Keystore keys. Temporary Go/SDK key strings remain
+subject to GC despite clearing owned byte buffers.
+
+Generated-key, damaged-state, interruption, namespace, real pinned SDK offline
+construction and owner-lifecycle tests are authored for Actions. This component
+is not yet connected to the controller's credential/acknowledgment/retirement flow.
+The assigned-NetBird guard and advertised capability remain unchanged until that
+complete path and its affected physical tests pass.
+
+The Android SDK-storage cleanup helper holds `engine-owner.lock` for the complete
+operation and requires no live app-native process. It accepts only a derived
+namespace, checks a closed ownership manifest and preflights a bounded tree before
+deleting anything. A wrong key fingerprint, unknown SDK state, symlink or oversized
+tree leaves the namespace pending. The ownership manifest is deleted last, so an
+interrupted cleanup can retry the same namespace without adopting unclaimed keys.
+Cancellation is rechecked between deletions. Sibling identities and the legacy
+operator root are outside its selectable tree. Six additional required emulator
+cases cover these paths and actual file-lock contention; their acceptance remains
+pending. This helper still needs the controller's durable retirement integration.

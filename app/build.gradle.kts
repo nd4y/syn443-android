@@ -33,8 +33,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 30
-        versionName = "0.9.2-transport-lifecycle"
+        versionCode = 31
+        versionName = "0.9.3-managed-identity"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }

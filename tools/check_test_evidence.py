@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=150
+    minimum=156
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -48,6 +48,8 @@ if mode=="identity":
         "transportCancellationAndServerErrorsRemainDistinct",
         "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
+    overlay_storage_required={'ownedNamespaceRetiresUnderLockAndLeavesEverySiblingAndOperatorFileUntouched', 'wrongEvidenceUnclaimedSDKAndAmbiguousManifestNeverAuthorizeErasure', 'symlinkAndOversizedTreesFailBeforeDeletingAnyOwnedFile', 'heldNativeOwnershipPreventsAllDeletionAndCancellationCannotBorrowIt', 'nativeOwnershipIsHeldThroughoutCleanupAndMainThreadCannotErase', 'interruptedDeletionKeepsOwnershipUntilTheSameRetirementCompletes'}
+    assert {("io.syn443.android.ManagedOverlayStorageTest",name) for name in overlay_storage_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required owned SDK retirement cases missing"
     overlay_vault_required={'perGrantKeyCiphertextAndDurableOperationSurviveProcessObjectsThenEraseBeforeAck', 'aLateCredentialCannotBeCachedOrBorrowedAfterTheTrustedUpperDeadline', 'missingKeyTamperingUnknownJournalAndOrphanCipherNeverResetEnrollment', 'cancellationRejectsLateAndQueuedCryptoAndWaitsForConfirmedOwnerRelease', 'interruptedCacheCommitRetainsReservedOperationAndCannotCrossStorageArea', 'mainThreadCannotEncryptDecryptOrMutateEnrollmentButMayPersistCancellation'}
     assert {("io.syn443.android.OverlayVaultTest",name) for name in overlay_vault_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required overlay Keystore/retirement cases missing"
     route_activation_required={"assignedActivationWaitsForCandidateRoutesAndIgnoresOptionalFailure",

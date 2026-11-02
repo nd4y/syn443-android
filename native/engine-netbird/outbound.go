@@ -30,25 +30,26 @@ func RegisterOutbound(registry *outbound.Registry) {
 
 type Outbound struct {
 	outbound.Adapter
-	ctx             context.Context
-	logger          log.ContextLogger
-	options         OutboundOptions
-	manager         adapter.OutboundManager
-	diagMu          sync.Mutex
-	job             DiagnosticJob
-	diagCancel      context.CancelFunc
-	diagEpoch       uint64
-	notifyPending   atomic.Bool
-	mu              sync.RWMutex
-	client          peerClient
-	newClient       func(embed.Options) (peerClient, error)
-	underlay        *trackedUnderlay
-	closed          bool
-	ready           bool
-	startDone       chan struct{}
-	startCancel     context.CancelFunc
-	releaseIdentity func()
-	releaseProcess  func()
+	ctx              context.Context
+	logger           log.ContextLogger
+	options          OutboundOptions
+	manager          adapter.OutboundManager
+	diagMu           sync.Mutex
+	job              DiagnosticJob
+	diagCancel       context.CancelFunc
+	diagEpoch        uint64
+	notifyPending    atomic.Bool
+	mu               sync.RWMutex
+	client           peerClient
+	newClient        func(embed.Options) (peerClient, error)
+	underlay         *trackedUnderlay
+	closed           bool
+	ready            bool
+	startDone        chan struct{}
+	startCancel      context.CancelFunc
+	releaseIdentity  func()
+	releaseProcess   func()
+	identityEvidence string
 }
 
 type peerClient interface {
@@ -79,6 +80,9 @@ func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger
 	}
 	if options.StateDirectory == "" || !filepath.IsAbs(options.StateDirectory) {
 		return nil, errors.New("netbird requires an absolute persistent state_directory")
+	}
+	if options.ManagedNamespace != "" && validateManagedPath(options.StateDirectory, options.ManagedNamespace) != nil {
+		return nil, errManagedIdentity
 	}
 	manager := service.FromContext[adapter.OutboundManager](ctx)
 	if manager == nil {
@@ -122,6 +126,9 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	} else if PhysicalResolver == nil {
 		return errors.New("physical DNS resolver is unavailable")
 	}
+	if o.options.ManagedNamespace != "" && validateManagedParents(o.options.StateDirectory, o.options.ManagedNamespace) != nil {
+		return errManagedIdentity
+	}
 	if strings.TrimSpace(o.options.SetupKey) == "" {
 		info, err := os.Stat(filepath.Join(o.options.StateDirectory, "config.json"))
 		if err != nil || info.IsDir() {
@@ -141,6 +148,13 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	o.mu.Lock()
 	o.releaseIdentity = releaseIdentity
 	o.mu.Unlock()
+	var ownedIdentity *managedIdentity
+	if o.options.ManagedNamespace != "" {
+		ownedIdentity, err = prepareManagedIdentity(o.options.StateDirectory, o.options.ManagedNamespace)
+		if err != nil {
+			return errManagedIdentity
+		}
+	}
 	u := newUnderlay(o.ctx, vlessGroupDialer{manager: o.manager, tag: o.options.Detour})
 	o.mu.Lock()
 	if o.closed {
@@ -182,6 +196,20 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	o.mu.Lock()
 	o.client = client
 	o.mu.Unlock()
+	if ownedIdentity != nil {
+		evidence, sealErr := ownedIdentity.seal()
+		if sealErr != nil {
+			u.Close()
+			return errManagedIdentity
+		}
+		o.mu.Lock()
+		o.identityEvidence = evidence
+		o.mu.Unlock()
+	}
+	if ctx.Err() != nil {
+		u.Close()
+		return ctx.Err()
+	}
 	if err = client.Start(ctx); err != nil {
 		u.Close()
 		return fmt.Errorf("start netbird (%s): %w", o.options.ConnectionMode, err)

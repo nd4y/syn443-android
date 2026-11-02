@@ -156,7 +156,13 @@
         "app/src/debug/kotlin/io/syn443/android/HostProbeService.kt",
         "app/src/androidTest/kotlin/io/syn443/android/HostProcessTest.kt",
         "docs/process-probe.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/managed-overlay.md",
+        "native/engine-netbird/managed_state.go",
+        "native/engine-netbird/managed_state_test.go",
+        "native/engine-netbird/managed_proof.go",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayStorage.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedOverlayStorageTest.kt"
       ],
       "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests.",
       "remainingScope": "Complete capabilities/version/SBOM/release/update and physical acceptance."
@@ -263,7 +269,13 @@
       "evidence": [
         "docs/enrollment-pilot.md",
         "docs/identity-lifecycle.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/managed-overlay.md",
+        "native/engine-netbird/managed_state.go",
+        "native/engine-netbird/managed_state_test.go",
+        "native/engine-netbird/managed_proof.go",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayStorage.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedOverlayStorageTest.kt"
       ]
     },
     {
@@ -723,7 +735,12 @@
         "docs/managed-overlay.md",
         "contracts/v1/overlay-namespace-vectors.json",
         "core/identity/src/main/kotlin/io/syn443/identity/ManagedOverlay.kt",
-        "core/identity/src/test/kotlin/io/syn443/identity/ManagedOverlayTest.kt"
+        "core/identity/src/test/kotlin/io/syn443/identity/ManagedOverlayTest.kt",
+        "native/engine-netbird/managed_state.go",
+        "native/engine-netbird/managed_state_test.go",
+        "native/engine-netbird/managed_proof.go",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayStorage.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedOverlayStorageTest.kt"
       ]
     },
     {

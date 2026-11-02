@@ -25,6 +25,7 @@ import (
 	"github.com/sagernet/sing-box/dns"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/direct"
+	"github.com/sagernet/sing-box/protocol/group"
 	proxyhttp "github.com/sagernet/sing-box/protocol/http"
 	"github.com/sagernet/sing-box/protocol/socks"
 	proxyssh "github.com/sagernet/sing-box/protocol/ssh"
@@ -47,6 +48,8 @@ func wireConfiguredBox(t *testing.T, listeners, nodes []map[string]any) *box.Box
 	socks.RegisterOutbound(registry)
 	vless.RegisterOutbound(registry)
 	proxyssh.RegisterOutbound(registry)
+	group.RegisterSelector(registry)
+	group.RegisterURLTest(registry)
 	ir := inbound.NewRegistry()
 	vless.RegisterInbound(ir)
 	dr := dns.NewTransportRegistry()
