@@ -57,7 +57,8 @@ class EngineHostService : Service() {
                     val outbounds=org.json.JSONObject(config).getJSONArray("outbounds")
                     managedProofEnabled=(0 until outbounds.length()).any {
                         val outbound=outbounds.getJSONObject(it)
-                        outbound.optString("managed_namespace").isNotEmpty() && outbound.optString("setup_key").isNotEmpty()
+                        outbound.optString("managed_namespace").isNotEmpty() &&
+                            (outbound.optString("setup_key").isNotEmpty() || outbound.optBoolean("recover_existing",false))
                     }
                     lockFile = RandomAccessFile(File(noBackupFilesDir, "engine-owner.lock"), "rw")
                     lock = lockFile!!.channel.tryLock() ?: error("identity already owned")

@@ -41,7 +41,9 @@ class OverlayEnrollmentTest {
         val enrolling=OverlayEnrollments.enrolling(cached)
         val registered=OverlayEnrollments.registered(enrolling,digest("native"))
         val erasing=OverlayEnrollments.erasing(registered);val erased=OverlayEnrollments.erased(erasing)
-        for(value in listOf(reserved,cached,enrolling,registered,erasing,erased,OverlayEnrollments.acknowledged(erased))) {
+        val reconcilingErasure=OverlayEnrollments.reconcilingErasure(enrolling)
+        val reconciling=OverlayEnrollments.reconciling(reconcilingErasure)
+        for(value in listOf(reserved,cached,enrolling,registered,erasing,erased,OverlayEnrollments.acknowledged(erased),reconcilingErasure,reconciling)) {
             val retiring=OverlayEnrollments.retiring(value);val retired=OverlayEnrollments.retired(retiring)
             assertEquals("",retiring.protectedHash);assertEquals(0L,retiring.credentialUntilMs)
             OverlayEnrollments.validate(retired)
@@ -51,6 +53,35 @@ class OverlayEnrollmentTest {
             invalid{OverlayEnrollments.retired(value)}
             invalid{OverlayEnrollments.enrolling(retired)}
         }
+    }
+    @Test fun interruptedRegistrationErasesSetupBeforeKeylessProbeAndNeedsNativeProof() {
+        val b=binding();val initial=OverlayEnrollments.enrolling(OverlayEnrollments.cached(OverlayEnrollments.reserve(b,7),digest("cipher"),100))
+        val erasing=OverlayEnrollments.reconcilingErasure(initial)
+        assertEquals(initial.operation,erasing.operation);assertEquals("",erasing.protectedHash);assertEquals(0L,erasing.credentialUntilMs)
+        assertEquals("",erasing.identityEvidence)
+        invalid{OverlayEnrollments.registeredRecovered(erasing,digest("premature"))}
+        val probe=OverlayEnrollments.reconciling(erasing)
+        assertEquals(OverlayPhase.RECONCILING,probe.phase);assertEquals(initial.operation,probe.operation)
+        OverlayEnrollments.requireAuthorized(probe,b.copy(securityEpoch=3),7)
+        invalid{OverlayEnrollments.registered(probe,digest("not-setup-registration"))}
+        invalid{OverlayEnrollments.registeredRecovered(probe,"invalid")}
+        invalid{OverlayEnrollments.cached(probe,digest("must-not-return"),200)}
+        val proven=OverlayEnrollments.registeredRecovered(probe,digest("native-proof"))
+        assertEquals(OverlayPhase.ERASED,proven.phase);assertEquals(initial.operation,proven.operation)
+        assertEquals(digest("native-proof"),proven.identityEvidence)
+        assertEquals(OverlayPhase.ACKNOWLEDGED,OverlayEnrollments.acknowledged(proven).phase)
+    }
+    @Test fun keylessProbeCannotBorrowAnotherIdentityOrInventFreshEnrollment() {
+        val b=binding();val initial=OverlayEnrollments.enrolling(OverlayEnrollments.cached(OverlayEnrollments.reserve(b,8),digest("cipher"),100))
+        val probe=OverlayEnrollments.reconciling(OverlayEnrollments.reconcilingErasure(initial))
+        for(changed in listOf(b.copy(keyThumbprint=digest("other-key")),b.copy(address=b.address.copy(identityEpoch=2)),b.copy(address=b.address.copy(resourceId="other-resource")),b.copy(address=b.address.copy(ownerTag=digest("other-owner"))))) {
+            invalid{OverlayEnrollments.requireAuthorized(probe,changed,8)}
+        }
+        invalid{OverlayEnrollments.requireAuthorized(probe,b,9)}
+        val discarded=OverlayEnrollments.discarded(OverlayEnrollments.discarding(probe))
+        invalid{OverlayEnrollments.replaceDiscarded(discarded,b,8)}
+        val fresh=OverlayEnrollments.replaceDiscarded(discarded,b.copy(reference=digest("explicit-fresh-ref"),version=2),8)
+        assertEquals(initial.identityTag,fresh.identityTag);assertNotEquals(initial.operation,fresh.operation)
     }
     @Test fun pendingAuthorityCannotSwitchAccountKeyDeviceEpochReferenceOrGeneration() {
         val b=binding();val s=OverlayEnrollments.reserve(b,9)

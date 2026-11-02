@@ -645,20 +645,26 @@
       "text": "В обычной сети используются прямые management/signal и P2P пути. Relay разрешён только после неудачи прямого соединения или потери пути; начальный direct ICE timeout - 8 секунд, настраиваемый в проверяемом диапазоне. После relay сохраняются ограниченные попытки вернуться к P2P. Такое предпочтение соответствует модели NetBird. [Как работает NetBird](https://docs.netbird.io/about-netbird/how-netbird-works).",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "core/identity/src/main/kotlin/io/syn443/identity/OverlayEnrollment.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayProvisioner.kt",
+        "native/engine-netbird/managed_state_test.go"
       ],
-      "implementationScope": "Direct-first SDK/strict VLESS detour, local identity and bounded roster/probes.",
-      "remainingScope": "Managed peer credentials/retirement, DNS conflicts and full cellular matrix."
+      "implementationScope": "Addressed managed overlay delivery, Keystore grant erasure and strict native sealed-key ownership. New expiry-to-keyless-reconciliation and local activation retry fixes have pending Actions acceptance.",
+      "remainingScope": "Managed issuer/resource integration, provider peer reconciliation, complete UI and exact physical Cloud/keyless-recovery acceptance remain open."
     },
     {
       "id": "NB-02",
       "text": "В ограниченной сети при разрешённой автоматике включается отдельный проверенный вариант NetBird через VLESS. Внешние соединения этого варианта должны идти через выбранный VLESS путь без скрытого direct bootstrap; неподдержанные UDP-пути не обходят прокси. В UI явно различаются direct/through VLESS и P2P/relay. Это разные свойства соединения.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "core/identity/src/main/kotlin/io/syn443/identity/OverlayEnrollment.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayProvisioner.kt",
+        "native/engine-netbird/managed_state_test.go"
       ],
-      "implementationScope": "Direct-first SDK/strict VLESS detour, local identity and bounded roster/probes.",
-      "remainingScope": "Managed peer credentials/retirement, DNS conflicts and full cellular matrix."
+      "implementationScope": "Addressed managed overlay delivery, Keystore grant erasure and strict native sealed-key ownership. New expiry-to-keyless-reconciliation and local activation retry fixes have pending Actions acceptance.",
+      "remainingScope": "Managed issuer/resource integration, provider peer reconciliation, complete UI and exact physical Cloud/keyless-recovery acceptance remain open."
     },
     {
       "id": "NB-03",

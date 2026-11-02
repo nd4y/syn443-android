@@ -21,7 +21,7 @@ import kotlinx.serialization.json.*
 }
 internal fun overlayDigest(value:String)=value.length==43 && runCatching {Policy.decode64(value).size==32}.getOrDefault(false)
 
-enum class OverlayPhase { RESERVED, CACHED, ENROLLING, REGISTERED, ERASING, ERASED, ACKNOWLEDGED, DISCARDING, DISCARDED, RETIRING, RETIRED }
+enum class OverlayPhase { RESERVED, CACHED, ENROLLING, REGISTERED, ERASING, ERASED, ACKNOWLEDGED, DISCARDING, DISCARDED, RETIRING, RETIRED, RECONCILING_ERASING, RECONCILING }
 
 /** No setup bytes, key paths or SDK private identity enter this durable ledger.
  * A reserved operation precedes any request; ENROLLING precedes native effects.
@@ -52,7 +52,7 @@ object OverlayEnrollments {
             OverlayPhase.CACHED,OverlayPhase.ENROLLING -> require(overlayDigest(value.protectedHash) && value.credentialUntilMs>0 && value.identityEvidence.isEmpty())
             OverlayPhase.REGISTERED,OverlayPhase.ERASING -> require(overlayDigest(value.protectedHash) && value.credentialUntilMs>0 && overlayDigest(value.identityEvidence))
             OverlayPhase.ERASED,OverlayPhase.ACKNOWLEDGED -> require(value.protectedHash.isEmpty() && value.credentialUntilMs==0L && overlayDigest(value.identityEvidence))
-            OverlayPhase.DISCARDING,OverlayPhase.DISCARDED -> require(value.protectedHash.isEmpty() && value.credentialUntilMs==0L && value.identityEvidence.isEmpty())
+            OverlayPhase.DISCARDING,OverlayPhase.DISCARDED,OverlayPhase.RECONCILING_ERASING,OverlayPhase.RECONCILING -> require(value.protectedHash.isEmpty() && value.credentialUntilMs==0L && value.identityEvidence.isEmpty())
             OverlayPhase.RETIRING,OverlayPhase.RETIRED -> require(value.protectedHash.isEmpty() && value.credentialUntilMs==0L)
         }
     }
@@ -89,6 +89,23 @@ object OverlayEnrollments {
         validate(value);require(value.phase==OverlayPhase.ENROLLING)
         return next(value,OverlayPhase.REGISTERED).copy(identityEvidence=evidence).also(::validate)
     }
+    /** An expired unconfirmed grant cannot prove whether Cloud registration
+     * won before a crash. Erase the setup value, then probe only existing SDK
+     * keys. Neither key files nor this transition establish registration. */
+    fun reconcilingErasure(value:OverlayEnrollment):OverlayEnrollment {
+        validate(value);require(value.phase in setOf(OverlayPhase.ENROLLING,OverlayPhase.RECONCILING_ERASING))
+        return next(value,OverlayPhase.RECONCILING_ERASING).copy(protectedHash="",credentialUntilMs=0).also(::validate)
+    }
+    fun reconciling(value:OverlayEnrollment):OverlayEnrollment {
+        validate(value);require(value.phase==OverlayPhase.RECONCILING_ERASING)
+        return next(value,OverlayPhase.RECONCILING).also(::validate)
+    }
+    /** Only the current private native proof may complete a keyless probe.
+     * The old grant was already locally erased; keep its exact consume receipt. */
+    fun registeredRecovered(value:OverlayEnrollment,evidence:String):OverlayEnrollment {
+        validate(value);require(value.phase==OverlayPhase.RECONCILING)
+        return next(value,OverlayPhase.ERASED).copy(identityEvidence=evidence).also(::validate)
+    }
     fun erasing(value:OverlayEnrollment):OverlayEnrollment {
         validate(value);require(value.phase in setOf(OverlayPhase.REGISTERED,OverlayPhase.ERASING))
         return next(value,OverlayPhase.ERASING).also(::validate)
@@ -102,7 +119,7 @@ object OverlayEnrollments {
         return next(value,OverlayPhase.ACKNOWLEDGED).also(::validate)
     }
     fun discarding(value:OverlayEnrollment):OverlayEnrollment {
-        validate(value);require(value.phase in setOf(OverlayPhase.RESERVED,OverlayPhase.CACHED,OverlayPhase.ENROLLING,OverlayPhase.DISCARDING))
+        validate(value);require(value.phase in setOf(OverlayPhase.RESERVED,OverlayPhase.CACHED,OverlayPhase.ENROLLING,OverlayPhase.DISCARDING,OverlayPhase.RECONCILING))
         return next(value,OverlayPhase.DISCARDING).copy(protectedHash="",credentialUntilMs=0).also(::validate)
     }
     fun discarded(value:OverlayEnrollment):OverlayEnrollment {

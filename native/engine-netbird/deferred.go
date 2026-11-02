@@ -147,6 +147,12 @@ func (d *Deferred) run() {
 		<-d.ctx.Done()
 		return
 	}
+	if d.options.RecoverExisting {
+		if _, err := os.Stat(filepath.Join(d.options.StateDirectory, "config.json")); err != nil {
+			d.set("NeedsAction", "identity_unavailable", retry)
+			return
+		}
+	}
 	if err := os.MkdirAll(d.options.StateDirectory, 0700); err != nil {
 		d.set("NeedsAction", "state_unavailable", retry)
 		return
@@ -264,6 +270,10 @@ func (d *Deferred) run() {
 		d.current = nil
 		d.mu.Unlock()
 		if d.ctx.Err() != nil {
+			return
+		}
+		if d.options.RecoverExisting && errors.Is(err, errManagedIdentity) {
+			d.set("NeedsAction", "identity_unavailable", retry)
 			return
 		}
 		switch status.Code(err) {

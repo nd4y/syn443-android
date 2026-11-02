@@ -22,14 +22,20 @@ internal class ManagedOverlayProvisioner(private val vault:OverlayVault,
         require(value.phase !in setOf(OverlayPhase.RETIRING,OverlayPhase.RETIRED))
         require(binding.offlineUntilMs>window().upperMs)
     }
-    /** The returned owner is RAM only. A known registered identity returns null
-     * and must start from its sealed SDK keys, never from another setup key. */
+    /** The returned owner is RAM only. A null result means either registered keyless use or a RECONCILING
+     * probe; callers must inspect the durable phase. Only a private native
+     * registration proof can confirm a probe, never merely existing key files. */
     fun prepare():OverlaySetupSecret? {
         worker();if(!admitted())throw LoginStorageException(LoginStorageFailure.STALE)
         var value=vault.snapshot() ?: vault.reserve(binding,generation)
         current(value)
+        if(value.phase==OverlayPhase.RECONCILING_ERASING || value.phase==OverlayPhase.ENROLLING &&
+            value.operation.reference==binding.reference && value.operation.version==binding.version && value.credentialUntilMs<=window().upperMs) {
+            value=vault.reconcileExisting(value);current(value)
+        }
+        if(value.phase==OverlayPhase.RECONCILING && value.operation.reference==binding.reference && value.operation.version==binding.version)return null
         val pending=value.phase in setOf(OverlayPhase.RESERVED,OverlayPhase.CACHED,OverlayPhase.ENROLLING)
-        if(value.phase in setOf(OverlayPhase.DISCARDING,OverlayPhase.DISCARDED) || pending &&
+        if(value.phase in setOf(OverlayPhase.DISCARDING,OverlayPhase.DISCARDED,OverlayPhase.RECONCILING) || pending &&
             (runCatching{OverlayEnrollments.requireAuthorized(value,binding,generation)}.isFailure ||
                 value.credentialUntilMs>0 && value.credentialUntilMs<=window().upperMs)) {
             if(value.phase!=OverlayPhase.DISCARDED)value=vault.discardUnregistered(value)
@@ -62,6 +68,7 @@ internal class ManagedOverlayProvisioner(private val vault:OverlayVault,
         require(evidence.length==43 && Policy.decode64(evidence).size==32)
         check(stillCurrent());var value=checkNotNull(vault.snapshot());current(value)
         if(value.phase==OverlayPhase.ENROLLING)value=vault.registered(value,evidence)
+        else if(value.phase==OverlayPhase.RECONCILING)value=vault.registeredRecovered(value,evidence)
         else require(value.identityEvidence==evidence)
         check(stillCurrent());current(value)
         if(value.phase in setOf(OverlayPhase.REGISTERED,OverlayPhase.ERASING))value=vault.eraseRegistered(value)

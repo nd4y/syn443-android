@@ -8,6 +8,7 @@ import io.syn443.android.vpn.*
 import io.syn443.identity.*
 import io.syn443.policy.Canonical
 import kotlinx.serialization.json.*
+import kotlinx.serialization.encodeToString
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -186,6 +187,45 @@ class OverlayVaultTest {
         assertEquals(ack,provisioner.registered(f.namespace,evidence){true})
         assertThrows(IllegalArgumentException::class.java){provisioner.registered(f.namespace,Identity.random()){true}}
         assertFalse(provisioner.toString().contains(f.binding.reference))
+    }
+    @Test fun expiredUnconfirmedGrantErasesBeforeExistingIdentityProbeAndNeverFetchesAReplacement()=fixture{f->
+        val old=f.vault.enrolling(f.cached());f.upper.set(now+60_000)
+        var fetches=0;var consumes=0
+        val p=ManagedOverlayProvisioner(f.vault,f.binding,4,f.roots,{f.authorized.get()},{TimeWindow(f.upper.get(),f.upper.get())},
+            {fetches++;error("expired enrollment must probe existing identity")},{op->assertEquals(old.operation,op);consumes++})
+        assertNull(p.prepare());val probe=f.vault.snapshot()!!
+        assertEquals(OverlayPhase.RECONCILING,probe.phase);assertEquals(old.operation,probe.operation)
+        assertFalse(f.store().containsAlias(f.alias));assertFalse(File(f.directory,"credential.bin").exists())
+        assertEquals("",probe.identityEvidence);assertEquals(0,fetches);assertEquals(0,consumes)
+        assertNull(p.prepare());assertEquals(probe,f.reopen().snapshot())
+        val raw=managedConfig(f.binding)
+        OverlayRuntimeMaterial(f.binding,io.syn443.policy.Policy.hash(raw),4,"",null,{f.authorized.get()},
+            {TimeWindow(f.upper.get(),f.upper.get())},reconciling=true).use{material->
+            assertEquals("reconciling",material.launchMode)
+            val outbound=org.json.JSONObject(EngineConfig.renderManaged(raw,File(context.noBackupFilesDir,f.area),material)).getJSONArray("outbounds").getJSONObject(0)
+            assertTrue(outbound.getBoolean("recover_existing"));assertFalse(outbound.has("setup_key"));assertFalse(outbound.has("credential_pending"))
+            assertFalse(File(outbound.getString("state_directory")).exists())
+        }
+        assertThrows(IllegalStateException::class.java){p.registered(f.namespace,Identity.random()){false}}
+        assertEquals(probe,f.vault.snapshot())
+        val proven=p.registered(f.namespace,Identity.random()){true}
+        assertEquals(OverlayPhase.ERASED,proven.phase);assertEquals(old.operation,proven.operation)
+        assertEquals(OverlayPhase.ACKNOWLEDGED,p.acknowledge().phase);assertEquals(1,consumes);assertEquals(0,fetches)
+    }
+    @Test fun interruptedRecoveryErasureFinishesWithoutBorrowingTheOldCiphertext()=fixture{f->
+        val old=f.vault.enrolling(f.cached())
+        val erasing=OverlayEnrollments.reconcilingErasure(old)
+        // Simulate process loss after the durable phase fence and key erasure,
+        // before ciphertext deletion. Only this UUID-owned fixture is changed.
+        File(f.directory,"ledger.json").writeText(Canonical.json.encodeToString(erasing))
+        f.store().deleteEntry(f.alias)
+        val reopened=f.reopen();assertEquals(erasing,reopened.snapshot())
+        val probe=reopened.reconcileExisting(erasing)
+        assertEquals(OverlayPhase.RECONCILING,probe.phase);assertEquals(old.operation,probe.operation)
+        assertFalse(File(f.directory,"credential.bin").exists());assertFalse(f.store().containsAlias(f.alias))
+        assertEquals(probe,reopened.reconcileExisting(probe))
+        reason(LoginStorageFailure.UNAVAILABLE){reopened.credential(probe,f.binding,f.roots,now,now)}
+        f.authorized.set(false);reason(LoginStorageFailure.STALE){reopened.reconcileExisting(probe)}
     }
     @Test fun managedProvisionerRenewalRetriesLostAckAndNeverResetsSdkKeys()=fixture{f->
         val old=f.vault.enrolling(f.cached());f.upper.set(now+60_000)

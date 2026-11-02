@@ -181,3 +181,39 @@ state instead of the stale caller argument. The recovery case advances only the
 credential API clock by two seconds and checks durable restoration without another
 fetch. The policy lease, generation, envelope and configuration hash are unchanged.
 Exact new Actions acceptance is pending.
+
+## Interrupted registration recovery (implementation, acceptance pending)
+
+An expired ENROLLING grant with the same addressed reference now enters a durable
+RECONCILING_ERASING/RECONCILING flow. It erases the per-grant Keystore alias and
+ciphertext before a keyless probe, preserves the consume operation and never
+fetches a replacement under that reference. This phase does not claim registration.
+Only a current private native owner proof can move it to ERASED/acknowledgment.
+An explicitly authorized new setup reference still follows separate discard/ACK
+replacement rules; an existing SDK identity is never inferred from a directory.
+
+The local recovery render flag cannot be imported or supplied by a signed policy.
+Native recovery accepts only an already initialized managed ownership manifest
+whose private-key evidence still matches. Missing, unclaimed, uninitialized or
+corrupt identity never reaches SDK.New or automatic key generation. A missing
+identity stops without creating SDK storage or spending network retry attempts.
+The pinned SDK embed.Start calls Auth.Login, which first tries the existing key;
+its empty setup/JWT path fails registration validation rather than launching SSO.
+The local host samples registration proof for this probe and retires it once after
+confirmed recovery, then uses the same keys in steady state without setup material.
+
+New Actions cases cover the complete ledger/proof restrictions, interrupted local
+erasure, real Keystore deletion, no replacement fetch, current controller/native
+proof fencing, expired credential recovery, strict native sealed-key admission
+and missing-key fail-closed behavior. Core identity minimum97 and Android minimum177
+include the new named cases. Actual provider registration/revocation and final
+physical acceptance remain separate; the controller fixture injects its private
+proof and is not evidence of a Cloud enrollment.
+
+At74a479c the fresh-time recovery reached enrolling as intended; its only API35
+connected failure (135 cases, one failure, zero skips) observed four fetches
+instead of two. Both local activation transitions retried the unavailable grant.
+Those transitions now prepare only local cached authority; network retry stays
+in synchronization and explicit retry. The regression explicitly checks one
+initial failed request across begin/commit and exactly one successful retry.
+No timeout, assertion or credential verification was relaxed.

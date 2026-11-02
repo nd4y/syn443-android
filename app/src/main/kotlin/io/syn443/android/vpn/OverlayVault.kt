@@ -153,6 +153,7 @@ internal class OverlayVault(context:Context,private val namespace:String,
     fun enrolling(expected:OverlayEnrollment)=guarded{worker();synchronized(filesLock){commitLocked(expected,OverlayEnrollments.enrolling(expected))}}
     /** Only the controller's confirmed native-registration event may call this. */
     fun registered(expected:OverlayEnrollment,evidence:String)=guarded{worker();synchronized(filesLock){commitLocked(expected,OverlayEnrollments.registered(expected,evidence))}}
+    fun registeredRecovered(expected:OverlayEnrollment,evidence:String)=guarded{worker();synchronized(filesLock){commitLocked(expected,OverlayEnrollments.registeredRecovered(expected,evidence))}}
     private fun eraseKey(expected:OverlayEnrollment)=synchronized(keysLock){
         val store=KeyStore.getInstance("AndroidKeyStore").apply{load(null)};store.deleteEntry(alias(expected));check(!store.containsAlias(alias(expected)))
     }
@@ -163,6 +164,13 @@ internal class OverlayVault(context:Context,private val namespace:String,
         synchronized(filesLock){current(erasing);eraseCipher();commitLocked(erasing,OverlayEnrollments.erased(erasing))}
     }
     fun acknowledged(expected:OverlayEnrollment)=guarded{worker();synchronized(filesLock){commitLocked(expected,OverlayEnrollments.acknowledged(expected))}}
+    fun reconcileExisting(expected:OverlayEnrollment):OverlayEnrollment=guarded{
+        worker()
+        if(expected.phase==OverlayPhase.RECONCILING) {synchronized(filesLock){current(expected)};return@guarded expected}
+        val erasing=synchronized(filesLock){commitLocked(expected,OverlayEnrollments.reconcilingErasure(expected))}
+        eraseKey(erasing)
+        synchronized(filesLock){current(erasing);eraseCipher();commitLocked(erasing,OverlayEnrollments.reconciling(erasing))}
+    }
     /** Retire only an unconfirmed setup grant. Never remove or recreate SDK keys.
      * DISCARDING is durable before key deletion, including after a lost response. */
     fun discardUnregistered(expected:OverlayEnrollment):OverlayEnrollment=guarded{

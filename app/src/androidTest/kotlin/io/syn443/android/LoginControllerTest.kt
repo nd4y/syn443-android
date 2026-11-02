@@ -64,6 +64,8 @@ class LoginControllerTest {
         @Volatile var dropOverlayFetch=false
         @Volatile var overlayFetchStatus=200
         @Volatile var overlayTimeAdvanceMs=0L
+        @Volatile var policyTimeAdvanceMs=0L
+        @Volatile var overlayCredentialLifetimeMs=300_000L
         @Volatile var holdOverlayFetch=false
         @Volatile var dropOverlayConsume=false
         var beforeOverlayFetch:(()->Unit)?=null
@@ -104,7 +106,7 @@ class LoginControllerTest {
                     put("provider",a.provider);put("resourceId",a.resourceId);put("networkId",a.networkId);put("identityEpoch",a.identityEpoch);put("managementURL",a.managementURL)
                 }
                 put("keyThumbprint",if(badOverlayGrant)Identity.random() else thumb);put("reference",b.reference);put("version",b.version);put("securityEpoch",b.securityEpoch)
-                put("kind","netbird.setup-key");put("issuedAtMs",issued);put("notBeforeMs",issued);put("expiresMs",issued+300_000);put("value",overlaySetupValue)
+                put("kind","netbird.setup-key");put("issuedAtMs",issued);put("notBeforeMs",issued);put("expiresMs",issued+overlayCredentialLifetimeMs);put("value",overlaySetupValue)
             }
             val input=Identity.encode("""{"alg":"ES256","kid":"root","typ":"syn443-overlay-credential+jws"}""".toByteArray())+"."+Identity.encode(Canonical.encode(payload).toByteArray())
             val envelope=input+"."+Identity.encode(Identity.derToRaw(Signature.getInstance("SHA256withECDSA").run {initSign(root.private);update(input.toByteArray());sign()}))
@@ -225,7 +227,7 @@ class LoginControllerTest {
                         Identity.encode(Canonical.encode(Canonical.parse(Policy.json.encodeToString(payload))).toByteArray())
                     input+"."+Identity.encode(Identity.derToRaw(Signature.getInstance("SHA256withECDSA").run {initSign(root.private);update(input.toByteArray());sign()}))
                 }
-                val response=reply(text=envelope)
+                val response=reply(text=envelope,timeMs=now()+policyTimeAdvanceMs)
                 return response.copy(headers=response.headers+mapOf("content-type" to listOf("application/jose")))
             }
             if(url.endsWith("/identity/devices/revoke")) {
@@ -802,6 +804,7 @@ class LoginControllerTest {
         assertTrue(f.controller.finishAssignment(f.controller.assignmentTicket(),listOf(true),true));f.idle()
         assertEquals(raw,f.controller.assignedRuntime.config(f.journal.snapshot()))
         val beforeTime=checkNotNull(f.journal.readAssignment(f.journal.snapshot())!!.time)
+        assertEquals(1,f.server.overlayFetchBodies.size)
         f.server.dropOverlayFetch=false;f.server.overlayTimeAdvanceMs=2_000;f.controller.retry(login.generation);f.idle()
         assertEquals("enrolling",f.controller.overlayLaunchMode(hash));assertTrue(f.controller.overlayHasSetup(hash))
         assertEquals(record.operation,OverlayVault(context,owned,{true},{0},f.namespace).snapshot()!!.operation)
@@ -832,6 +835,30 @@ class LoginControllerTest {
             }
             assertEquals(1,f.server.overlayFetchBodies.size);assertTrue(f.server.overlayConsumeBodies.isEmpty())
         }
+    }
+    @Test fun interruptedManagedRegistrationExpiresIntoKeylessProbeUntilCurrentNativeProof()=fixture{f->
+        f.server.policyReady=true;f.server.managedOverlayPolicy=true;f.server.overlayCredentialLifetimeMs=10_000
+        f.controller.callback(f.begin());f.idle()
+        assertTrue(f.controller.beginAssignment(f.controller.assignmentTicket(),listOf(false)));f.idle()
+        assertTrue(f.controller.finishAssignment(f.controller.assignmentTicket(),listOf(true),true));f.idle()
+        val login=f.journal.snapshot();val raw=f.controller.assignedRuntime.config(login);val hash=Policy.hash(raw)
+        val owned=login.overlayNamespaces.single();val vault=OverlayVault(context,owned,{true},{0},f.namespace)
+        val original=vault.snapshot()!!;assertEquals(OverlayPhase.ENROLLING,original.phase)
+        f.server.policyTimeAdvanceMs=15_000;f.server.overlayTimeAdvanceMs=15_000
+        f.controller.retry(login.generation);f.idle()
+        assertEquals(OverlayPhase.RECONCILING,vault.snapshot()!!.phase);assertEquals(original.operation,vault.snapshot()!!.operation)
+        assertEquals("reconciling",f.controller.overlayLaunchMode(hash));assertFalse(f.controller.overlayHasSetup(hash))
+        val probe=org.json.JSONObject(f.controller.renderAssigned(raw,File(context.noBackupFilesDir,f.namespace))).getJSONArray("outbounds").getJSONObject(0)
+        assertTrue(probe.getBoolean("recover_existing"));assertFalse(probe.has("setup_key"));assertEquals(1,f.server.overlayFetchBodies.size)
+        val session=UUID.randomUUID().toString();f.controller.overlayStarting(session,hash)
+        val proof=org.json.JSONObject().put("namespace",owned).put("identityEvidence",Identity.random()).toString()
+        assertFalse(f.controller.overlayIdentity(session,hash,proof){false})
+        assertTrue(f.controller.overlayIdentity(session,hash,proof){true});f.idle()
+        assertEquals(OverlayPhase.ACKNOWLEDGED,vault.snapshot()!!.phase)
+        assertEquals("keyless",f.controller.overlayLaunchMode(hash));assertEquals(1,f.server.overlayFetchBodies.size)
+        val keyless=org.json.JSONObject(f.controller.renderAssigned(raw,File(context.noBackupFilesDir,f.namespace))).getJSONArray("outbounds").getJSONObject(0)
+        assertFalse(keyless.has("setup_key"));assertFalse(keyless.has("recover_existing"))
+        f.restart();assertEquals("keyless",f.controller.overlayLaunchMode(hash));assertEquals(1,f.server.overlayFetchBodies.size)
     }
 
     @Test fun activePendingIdentityAndFreshCandidateNeverConsumeEachOthersGrant()=fixture{f->

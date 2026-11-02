@@ -120,6 +120,49 @@ func TestManagedCredentialWaitingNeverStartsSDKTouchesStorageOrEscapesPrivateRou
 	}
 }
 
+func TestManagedRecoveryWithMissingKeysRemainsClosedWithoutCreatingSDKStorage(t *testing.T) {
+	dir, namespace := managedTestDirectory(t)
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	ctx := service.ContextWithDefaultRegistry(context.Background())
+	service.MustRegister[adapter.OutboundManager](ctx, fakeManager{})
+	options := OutboundOptions{ConnectionMode: "direct", ManagementURL: "https://overlay.example.invalid", StateDirectory: dir, ManagedNamespace: namespace, RecoverExisting: true}
+	value, err := NewDeferredOutbound(ctx, nil, logger.NOP(), "overlay", options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := value.(*Deferred)
+	defer d.Close()
+	if err = d.Start(adapter.StartStateStarted); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-d.done:
+	case <-time.After(time.Second):
+		t.Fatal("missing recovery identity retried indefinitely")
+	}
+	state := d.state.Load().(moduleState)
+	if state.Phase != "NeedsAction" || state.Reason != "identity_unavailable" || state.Retry.Attempt != 0 {
+		t.Fatal("missing keys invented registration")
+	}
+	if _, err = os.Lstat(dir); !os.IsNotExist(err) {
+		t.Fatal("recovery created SDK storage")
+	}
+	if conn, err := d.DialContext(context.Background(), "tcp", M.ParseSocksaddr("198.51.100.7:443")); err == nil || conn != nil {
+		t.Fatal("missing key recovery escaped private route")
+	}
+	for _, invalid := range []OutboundOptions{
+		{ConnectionMode: "direct", ManagementURL: options.ManagementURL, StateDirectory: dir, RecoverExisting: true},
+		{ConnectionMode: "direct", ManagementURL: options.ManagementURL, StateDirectory: dir, ManagedNamespace: namespace, RecoverExisting: true, SetupKey: "synthetic-key"},
+		{ConnectionMode: "direct", ManagementURL: options.ManagementURL, StateDirectory: dir, ManagedNamespace: namespace, RecoverExisting: true, CredentialPending: true},
+	} {
+		if _, err := NewDeferredOutbound(ctx, nil, logger.NOP(), "overlay", invalid); err == nil {
+			t.Fatal("recovery accepted enrollment/foreign state")
+		}
+	}
+}
+
 type stuckPeer struct {
 	peerClient
 	entered, release chan struct{}

@@ -591,7 +591,8 @@ class TunnelService : VpnService() {
                 terminateOwned(); retire(false); phase("BlockedByPolicy", "policy_lease_time_or_scope_invalid")
             } else if(policies.read().journal.phase!="applying" &&
                 (runningHasSetup && policies.overlayNeedsRotation(runningConfigHash) ||
-                    runningOverlayMode=="waiting" && policies.overlayLaunchMode(runningConfigHash) in setOf("enrolling","keyless"))) {
+                    runningOverlayMode=="waiting" && policies.overlayLaunchMode(runningConfigHash) in setOf("enrolling","reconciling","keyless") ||
+                    runningOverlayMode=="reconciling" && policies.overlayLaunchMode(runningConfigHash)=="keyless")) {
                 // Registration is durable and the local grant is erased. Wait
                 // for activation commit, then retire SDK/Go String copies once
                 // and restart from the same owned keys without a setup key.

@@ -32,6 +32,7 @@ class OverlayAssignmentsTest {
             JsonObject(outbound()+("setup_key" to JsonPrimitive("forbidden"))),
             JsonObject(outbound()+("state_directory" to JsonPrimitive("/forbidden"))),
             JsonObject(outbound()+("credential_pending" to JsonPrimitive(true))),
+            JsonObject(outbound()+("recover_existing" to JsonPrimitive(true))),
             JsonObject(outbound()+("managed_namespace" to JsonPrimitive("forbidden"))),
             JsonObject(outbound()+("managed" to JsonObject(metadata+("setupReference" to JsonPrimitive("bad"))))),
             JsonObject(outbound()+("managed" to JsonObject(metadata+("setupVersion" to JsonPrimitive(0))))),

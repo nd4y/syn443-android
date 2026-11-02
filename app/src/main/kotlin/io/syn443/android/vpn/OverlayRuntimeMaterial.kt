@@ -12,17 +12,18 @@ internal class OverlayLaunchPending:IllegalArgumentException("overlay_credential
  * volatile admission/clock reads, not network, Keystore or controller locks. */
 internal class OverlayRuntimeMaterial(val binding:OverlayCredentialBinding,val configHash:String,
     val loginGeneration:Long,val identityEvidence:String,private val secret:OverlaySetupSecret?,
-    private val admitted:()->Boolean,private val window:()->TimeWindow,val waiting:Boolean=false):AutoCloseable {
+    private val admitted:()->Boolean,private val window:()->TimeWindow,val waiting:Boolean=false,val reconciling:Boolean=false):AutoCloseable {
     val namespace=ManagedOverlay.namespace(binding.address)
     @Volatile private var closed=false
     init {
         require(configHash.matches(Regex("[0-9a-f]{64}")) && loginGeneration>=0)
-        require(if(waiting)secret==null && identityEvidence.isEmpty()
+        require(!(waiting && reconciling))
+        require(if(waiting || reconciling)secret==null && identityEvidence.isEmpty()
             else if(secret==null)identityEvidence.length==43 && Policy.decode64(identityEvidence).size==32 else identityEvidence.isEmpty())
         secret?.let{require(it.namespace==namespace && it.reference==binding.reference && it.version==binding.version && it.securityEpoch==binding.securityEpoch)}
     }
     fun available():Boolean=runCatching{requireCurrent();true}.getOrDefault(false)
-    val launchMode:String get()=if(waiting)"waiting" else if(secret!=null)"enrolling" else "keyless"
+    val launchMode:String get()=if(waiting)"waiting" else if(reconciling)"reconciling" else if(secret!=null)"enrolling" else "keyless"
     fun authorized():Boolean=runCatching{requireAuthorized();true}.getOrDefault(false)
     private fun requireAuthorized() {
         check(!closed && admitted()){"overlay_material_unavailable"}
@@ -37,7 +38,7 @@ internal class OverlayRuntimeMaterial(val binding:OverlayCredentialBinding,val c
     internal fun validateOutbound(outbound:JSONObject) {
         requireAuthorized()
         require(outbound.getString("type")=="netbird" && !outbound.has("setup_key") &&
-            !outbound.has("state_directory") && !outbound.has("managed_namespace") && !outbound.has("credential_pending"))
+            !outbound.has("state_directory") && !outbound.has("managed_namespace") && !outbound.has("credential_pending") && !outbound.has("recover_existing"))
         require(ManagedOverlay.managementOrigin(outbound.getString("management_url"))==ManagedOverlay.managementOrigin(binding.address.managementURL))
         val metadata=outbound.getJSONObject("managed")
         require(metadata.keys().asSequence().toSet()==setOf("overlayId","resourceId","networkId","identityEpoch","setupReference","setupVersion"))
@@ -56,6 +57,7 @@ internal class OverlayRuntimeMaterial(val binding:OverlayCredentialBinding,val c
         // The authenticated namespace, never an imported path, selects storage.
         outbound.put("state_directory",File(stateRoot.canonicalFile,namespace).absolutePath)
         if(waiting)outbound.put("credential_pending",true)
+        if(reconciling)outbound.put("recover_existing",true)
         secret?.useValue {bytes->outbound.put("setup_key",bytes.toString(Charsets.US_ASCII))}
         requireCurrent()
     }

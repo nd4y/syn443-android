@@ -17,4 +17,5 @@ type OutboundOptions struct {
 	// Local-only fail-closed placeholder. It cannot start the SDK or touch
 	// identity storage while addressed credentials are unavailable.
 	CredentialPending bool `json:"credential_pending,omitempty"`
+	RecoverExisting   bool `json:"recover_existing,omitempty"`
 }

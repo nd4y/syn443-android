@@ -565,7 +565,7 @@ class LoginController private constructor(private val context:android.app.Applic
                 secret=overlayProvisioner(s,p,binding,hash,protocol,scope,network).prepare()
                 val record=checkNotNull(overlayVault(binding,hash,s.generation).snapshot())
                 val material=OverlayRuntimeMaterial(binding,hash,s.generation,if(secret==null)record.identityEvidence else "",secret,
-                    {overlayAdmitted(binding,hash,s.generation)},{overlayWindow(hash,s.generation)})
+                    {overlayAdmitted(binding,hash,s.generation)},{overlayWindow(hash,s.generation)},reconciling=record.phase==OverlayPhase.RECONCILING)
                 try {synchronized(commands) {
                     current(s);material.requireCurrent()
                     val old=overlayMaterials[hash];overlayMaterials=(overlayMaterials+(hash to material)).toMap();old?.close();secret=null
@@ -649,7 +649,10 @@ class LoginController private constructor(private val context:android.app.Applic
         if(!canCommit())throw LoginStorageException(LoginStorageFailure.STALE)
         val after=change(before,s,p)
         val accepted=persistAssignment(s,p,after,canCommit=canCommit)
-        prepareOverlays(accepted,p,after)
+        // Activation consumes already prepared local authority. Credential
+        // network retries belong to synchronization/explicit retry, not each
+        // begin/commit transition on its bounded activation deadline.
+        prepareOverlays(accepted,p,after,network=false)
     }
     internal fun beginAssignment(ticket:AssignedPolicyRuntime.Ticket,baseline:List<Boolean>):Boolean {
         val values=baseline.toList();require(values.size in 1..8)

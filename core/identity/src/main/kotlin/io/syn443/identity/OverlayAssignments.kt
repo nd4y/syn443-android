@@ -21,7 +21,7 @@ object OverlayAssignments {
             val outbound=value.jsonObject
             if(text(outbound,"type")!="netbird") {require("managed" !in outbound);continue}
             require(result==null && "overlay.credentials.v1" in p.requiredCapabilities)
-            require("setup_key" !in outbound && "state_directory" !in outbound && "managed_namespace" !in outbound && "credential_pending" !in outbound)
+            require("setup_key" !in outbound && "state_directory" !in outbound && "managed_namespace" !in outbound && "credential_pending" !in outbound && "recover_existing" !in outbound)
             val metadata=outbound.getValue("managed").jsonObject
             require(metadata.keys==setOf("overlayId","resourceId","networkId","identityEpoch","setupReference","setupVersion"))
             val address=OverlayAddress(serviceId,ownerTag,deviceId,text(metadata,"overlayId"),"netbird",text(metadata,"resourceId"),text(metadata,"networkId"),number(metadata,"identityEpoch"),text(outbound,"management_url"))

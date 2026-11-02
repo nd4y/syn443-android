@@ -389,6 +389,65 @@ func TestManagedStartSealsKeysBeforeNetworkAndRejectsCorruptionBeforeSDK(t *test
 	}
 }
 
+func TestManagedRecoveryUsesOnlySealedExistingKeysAndNeverCarriesSetupMaterial(t *testing.T) {
+	for _, scenario := range []string{"sealed", "unsealed", "missing-manifest", "corrupt-config"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir, namespace := managedTestDirectory(t)
+			identity, err := prepareManagedIdentity(dir, namespace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			keys := writeManagedTestKeys(t, dir)
+			if scenario != "unsealed" {
+				if _, err = identity.seal(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "missing-manifest" {
+				if err = os.Remove(filepath.Join(dir, managedManifestName)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "corrupt-config" {
+				keys = []byte(`{"invalid":true}`)
+				if err = os.WriteFile(filepath.Join(dir, "config.json"), keys, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			constructors := 0
+			peer := &managedTestPeer{snapshot: embed.ConnectionSnapshot{ManagementConnected: true, SignalConnected: true, IP: "198.51.100.7/24"}, start: func(context.Context) error { return nil }}
+			o := &Outbound{ctx: context.Background(), logger: logger.NOP(), manager: fakeManager{}, options: OutboundOptions{ConnectionMode: "vless", StateDirectory: dir, ManagedNamespace: namespace, RecoverExisting: true, DialerOptions: option.DialerOptions{Detour: "vless"}}}
+			o.newClient = func(opts embed.Options) (peerClient, error) {
+				constructors++
+				if opts.SetupKey != "" || opts.JWTToken != "" || opts.ConfigPath != filepath.Join(dir, "config.json") {
+					t.Fatal("recovery received enrollment credentials or another identity")
+				}
+				return peer, nil
+			}
+			err = o.Start(adapter.StartStateStarted)
+			if scenario == "sealed" {
+				if err != nil || constructors != 1 || ManagedRegistrationProof() == "{}" {
+					t.Fatal("sealed keyless recovery", err)
+				}
+			} else if !errors.Is(err, errManagedIdentity) || constructors != 0 {
+				t.Fatal("unknown/damaged identity reached SDK", err)
+			}
+			if err = o.Close(); err != nil {
+				t.Fatal(err)
+			}
+			after, err := os.ReadFile(filepath.Join(dir, "config.json"))
+			if err != nil || !bytes.Equal(keys, after) {
+				t.Fatal("recovery regenerated private keys", err)
+			}
+			if scenario == "missing-manifest" {
+				if _, err = os.Stat(filepath.Join(dir, managedManifestName)); !os.IsNotExist(err) {
+					t.Fatal("recovery adopted an unclaimed identity")
+				}
+			}
+		})
+	}
+}
+
 func TestManagedRegistrationRejectsLateRecorderAfterStop(t *testing.T) {
 	dir, namespace := managedTestDirectory(t)
 	identity, err := prepareManagedIdentity(dir, namespace)

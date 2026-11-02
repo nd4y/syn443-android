@@ -87,6 +87,9 @@ func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger
 	if options.CredentialPending && (options.ManagedNamespace == "" || options.SetupKey != "") {
 		return nil, errManagedIdentity
 	}
+	if options.RecoverExisting && (options.CredentialPending || options.ManagedNamespace == "" || options.SetupKey != "") {
+		return nil, errManagedIdentity
+	}
 	manager := service.FromContext[adapter.OutboundManager](ctx)
 	if manager == nil {
 		return nil, errors.New("netbird outbound manager is unavailable")
@@ -156,6 +159,13 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	o.mu.Unlock()
 	var ownedIdentity *managedIdentity
 	if o.options.ManagedNamespace != "" {
+		if o.options.RecoverExisting {
+			manifest, readErr := readManagedManifest(o.options.StateDirectory)
+			evidence, configErr := managedConfigEvidence(o.options.StateDirectory, o.options.ManagedNamespace, false)
+			if readErr != nil || configErr != nil || !manifest.Initialized || manifest.Namespace != o.options.ManagedNamespace || manifest.IdentityEvidence != evidence {
+				return errManagedIdentity
+			}
+		}
 		ownedIdentity, err = prepareManagedIdentity(o.options.StateDirectory, o.options.ManagedNamespace)
 		if err != nil {
 			return errManagedIdentity
