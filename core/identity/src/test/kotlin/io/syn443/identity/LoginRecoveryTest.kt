@@ -1,7 +1,9 @@
 package io.syn443.identity
 
 import io.syn443.policy.Policy
+import io.syn443.policy.Canonical
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.security.KeyPairGenerator
@@ -10,6 +12,48 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class LoginRecoveryTest {
+    @Test fun namespaceClaimSurvivesRefreshAndCancelUntilActualErasureCompletes() {
+        val f=Flow();val initial=f.cached();val first="managed-netbird/"+h();val second="managed-netbird/"+h()
+        val claimed=LoginRecovery.claimOverlay(initial,f.generation,first)
+        assertEquals(claimed,LoginRecovery.claimOverlay(claimed,f.generation,first))
+        val both=LoginRecovery.claimOverlay(claimed,f.generation,second)
+        assertEquals(listOf(first,second),both.overlayNamespaces)
+        assertEquals(both,LoginRecovery.decode(LoginRecovery.encode(both)))
+        assertEquals(both.overlayNamespaces,LoginRecovery.beginRefresh(both,f.generation,2,2000).overlayNamespaces)
+        assertEquals(both.overlayNamespaces,LoginRecovery.needsReauthentication(both,f.generation).overlayNamespaces)
+        var retiring=LoginRecovery.cancel(both,f.generation)
+        assertTrue(retiring.overlayNamespaces.isEmpty());assertEquals(listOf(first,second),retiring.retiringOverlays)
+        invalid{LoginRecovery.retired(retiring,retiring.generation,initial.keyAlias,true,true)}
+        for(flags in listOf(listOf(false,true,true),listOf(true,false,true),listOf(true,true,false)))
+            invalid{LoginRecovery.overlayRetired(retiring,retiring.generation,first,flags[0],flags[1],flags[2])}
+        invalid{LoginRecovery.overlayRetired(retiring,f.generation,first,true,true,true)}
+        invalid{LoginRecovery.overlayRetired(retiring,retiring.generation,"managed-netbird/"+h(),true,true,true)}
+        retiring=LoginRecovery.overlayRetired(retiring,retiring.generation,first,true,true,true)
+        invalid{LoginRecovery.retired(retiring,retiring.generation,initial.keyAlias,true,true)}
+        retiring=LoginRecovery.overlayRetired(retiring,retiring.generation,second,true,true,true)
+        val retired=LoginRecovery.retired(retiring,retiring.generation,initial.keyAlias,true,true)
+        assertEquals(LoginPhase.SIGNED_OUT,retired.phase);assertTrue(retired.retiringOverlays.isEmpty())
+    }
+    @Test fun namespaceClaimsRejectUnsafePathsUnboundedSetsAndUnprovisionedAuthority() {
+        val f=Flow();var state=f.cached()
+        for(bad in listOf("netbird/operator","managed-netbird/../escape","managed-netbird/"+h()+"="))
+            invalid{LoginRecovery.claimOverlay(state,f.generation,bad)}
+        invalid{LoginRecovery.claimOverlay(state,f.generation-1,"managed-netbird/"+h())}
+        invalid{LoginRecovery.claimOverlay(f.browser,f.generation,"managed-netbird/"+h())}
+        repeat(16){state=LoginRecovery.claimOverlay(state,f.generation,"managed-netbird/"+h())}
+        invalid{LoginRecovery.claimOverlay(state,f.generation,"managed-netbird/"+h())}
+        invalid{LoginRecovery.validate(state.copy(overlayNamespaces=state.overlayNamespaces+state.overlayNamespaces.first()))}
+        invalid{LoginRecovery.validate(LoginIntent(overlayNamespaces=state.overlayNamespaces))}
+        invalid{LoginRecovery.validate(state.copy(retiringOverlays=state.overlayNamespaces))}
+        val retiring=LoginRecovery.cancel(state,f.generation)
+        invalid{LoginRecovery.validate(retiring.copy(retiringOverlays=retiring.retiringOverlays+retiring.retiringOverlays.first()))}
+        invalid{LoginRecovery.overlayRetired(state,state.generation,state.overlayNamespaces.first(),true,true,true)}
+    }
+    @Test fun recoveryMetadataBeforeManagedOverlaysRetainsEmptyOwnershipClaims() {
+        val state=Flow().cached()
+        val old=JsonObject(Identity.objectJSON(LoginRecovery.encode(state)).filterKeys{it !in setOf("overlayNamespaces","retiringOverlays")})
+        assertEquals(state,LoginRecovery.decode(Canonical.encode(old)))
+    }
     companion object {
         private val root=KeyPairGenerator.getInstance("EC").apply {initialize(ECGenParameterSpec("secp256r1"))}.generateKeyPair()
         private val bootstrap=Bootstrap("fixture","https://id.example.invalid/realms/test","syn443-android","https://api.example.invalid",

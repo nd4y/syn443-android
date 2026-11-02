@@ -23,7 +23,6 @@ import (
 	boxservice "github.com/sagernet/sing-box/adapter/service"
 	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/dns"
-	"github.com/sagernet/sing-box/dns/transport"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/direct"
 	"github.com/sagernet/sing-box/protocol/group"
@@ -77,10 +76,7 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 	dr := dns.NewTransportRegistry()
 	registerPhysicalDNS(dr, protector)
 	netbird.RegisterDNSTransport(dr)
-	transport.RegisterUDP(dr)
-	transport.RegisterTCP(dr)
-	transport.RegisterTLS(dr)
-	transport.RegisterHTTPS(dr)
+	registerRemoteDNS(dr)
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = box.Context(ctx, ir, or, endpoint.NewRegistry(), dr, boxservice.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
@@ -147,6 +143,12 @@ func (e *Runtime) DebugFatal() {
 
 // No SDK locks on the native host control loop.
 func (e *Runtime) NetBirdStatus() string { return netbird.DeferredStatus() }
+func (e *Runtime) NetBirdIdentityProof() string {
+	if e.platform == nil || !e.platform.lease.allowed() {
+		return "{}"
+	}
+	return netbird.ManagedRegistrationProof()
+}
 func (e *Runtime) DiagnoseNetBird() bool { return netbird.RequestDiagnostics() }
 func (e *Runtime) UpdateNetwork(name string, index int32) {
 	e.platform.mu.Lock()

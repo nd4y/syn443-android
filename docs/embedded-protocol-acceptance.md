@@ -60,7 +60,7 @@ pinned. These native race checks passed at430283e; this is not proof about the
 cause of a historical phone hang. Version30/0.9.2-transport-lifecycle has not been
 physically accepted while the mandatory full-run gate remains red.
 
-## Additional protocol/chain cases awaiting Actions
+## Additional protocol/chain native acceptance
 
 New actual-wire cases cover VLESS Reality with generated X25519/short-ID/UUID,
 a local TLS1.3 camouflage origin and no public network dependency. A wrong public
@@ -70,4 +70,17 @@ An actual selector used as a VLESS entry must switch the complete chain, reject
 unknown members and never implicitly escape a failed selected member. VLESS UDP
 inside a TLS/TCP stream through HTTP CONNECT must deliver an actual echoed datagram;
 wrong VLESS authentication must not send a physical UDP packet to the target.
-These additions remain unaccepted until their exact native Actions results exist.
+These native cases passed atf07df7392981650db85f0bffa8703da52429ccc6,
+Actions41396916494. Its JVM/APK and API29/37 jobs also passed; API35 was still
+pending when recorded. This does not establish physical acceptance.
+
+## DNS transport matrix (acceptance pending)
+
+The native DNS registry adds QUIC and HTTP/3 alongside UDP/TCP/TLS/HTTPS. New
+loopback cases exercise the actual DNS router with a complete question and answer
+over all six transports. TLS1.3/DoH/QUIC/H3 use generated certificates and strict
+trust; a wrong root must deliver no DNS question to the test authority. No insecure
+TLS flag, resolver fallback or public endpoint is involved. Fixture sockets, stream
+framing and listener retirement are bounded. The server portable DNS compiler
+passed Actions41397718493, but its full native integration and these additional
+wire cases await the next exact Actions build.

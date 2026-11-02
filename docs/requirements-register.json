@@ -275,7 +275,12 @@
         "native/engine-netbird/managed_state_test.go",
         "native/engine-netbird/managed_proof.go",
         "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayStorage.kt",
-        "app/src/androidTest/kotlin/io/syn443/android/ManagedOverlayStorageTest.kt"
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedOverlayStorageTest.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlayVault.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/OverlayVaultTest.kt"
       ]
     },
     {
@@ -740,7 +745,12 @@
         "native/engine-netbird/managed_state_test.go",
         "native/engine-netbird/managed_proof.go",
         "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayStorage.kt",
-        "app/src/androidTest/kotlin/io/syn443/android/ManagedOverlayStorageTest.kt"
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedOverlayStorageTest.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlayVault.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/OverlayVaultTest.kt"
       ]
     },
     {

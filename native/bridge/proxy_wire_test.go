@@ -41,6 +41,10 @@ func wireBox(t *testing.T, nodes ...map[string]any) *box.Box {
 	return wireConfiguredBox(t, nil, nodes)
 }
 func wireConfiguredBox(t *testing.T, listeners, nodes []map[string]any) *box.Box {
+	instance, _ := wireNetworkBox(t, listeners, nodes, nil)
+	return instance
+}
+func wireNetworkBox(t *testing.T, listeners, nodes []map[string]any, network map[string]any) (*box.Box, context.Context) {
 	t.Helper()
 	registry := outbound.NewRegistry()
 	direct.RegisterOutbound(registry)
@@ -57,10 +61,18 @@ func wireConfiguredBox(t *testing.T, listeners, nodes []map[string]any) *box.Box
 		t.Error("IP-only wire fixture attempted DNS")
 		return nil, errors.New("unexpected fixture DNS")
 	}})
+	registerRemoteDNS(dr)
 	ctx := box.Context(context.Background(), ir, registry,
 		endpoint.NewRegistry(), dr, boxservice.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
-	raw, err := json.Marshal(map[string]any{"log": map[string]any{"disabled": true}, "outbounds": nodes, "inbounds": listeners})
+	value := map[string]any{"log": map[string]any{"disabled": true}, "outbounds": nodes, "inbounds": listeners}
+	for key, field := range network {
+		if key != "dns" && key != "route" {
+			t.Fatal("unexpected fixture network field")
+		}
+		value[key] = field
+	}
+	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +88,7 @@ func wireConfiguredBox(t *testing.T, listeners, nodes []map[string]any) *box.Box
 	if err = instance.Start(); err != nil {
 		t.Fatal(err)
 	}
-	return instance
+	return instance, ctx
 }
 
 type wireFixture struct {

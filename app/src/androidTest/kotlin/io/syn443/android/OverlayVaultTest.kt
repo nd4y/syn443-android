@@ -136,4 +136,13 @@ class OverlayVaultTest {
         }
         assertTrue(f.vault.finishRetirement(checkNotNull(f.vault.snapshot())){true})
     }
+    @Test fun retiredMetadataIsRemovedOnlyAfterConfirmedCredentialAndSdkErasure()=fixture{f->
+        val cached=f.cached();f.authorized.set(false)
+        val retiring=f.vault.retiring(cached)
+        reason(LoginStorageFailure.UNAVAILABLE){f.vault.removeRetired(retiring)}
+        assertFalse(f.vault.finishRetirement(retiring){false});assertTrue(File(f.directory,"credential.bin").isFile)
+        assertTrue(f.vault.finishRetirement(retiring){true});val retired=checkNotNull(f.vault.snapshot())
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {reason(LoginStorageFailure.WRONG_THREAD){f.vault.removeRetired(retired)}}
+        assertTrue(f.vault.removeRetired(retired));assertNull(f.vault.snapshot());assertFalse(f.directory.exists())
+    }
 }

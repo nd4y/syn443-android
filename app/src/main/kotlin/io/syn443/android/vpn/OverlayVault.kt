@@ -169,4 +169,18 @@ internal class OverlayVault(context:Context,private val namespace:String,
         eraseKey(expected)
         synchronized(filesLock){current(expected,false);eraseCipher();commitLocked(expected,OverlayEnrollments.retired(expected),false)};true
     }
+    /** Erasure is verified before dropping the last operation/key reference.
+     * An interrupted caller retries its still-persisted login namespace claim. */
+    fun removeRetired(expected:OverlayEnrollment):Boolean=guarded{
+        worker();require(expected.phase==OverlayPhase.RETIRED)
+        synchronized(filesLock){current(expected,false);check(!exists(cipherFile))}
+        synchronized(keysLock){check(!KeyStore.getInstance("AndroidKeyStore").apply{load(null)}.containsAlias(alias(expected)))}
+        synchronized(filesLock){
+            current(expected,false);check(!exists(cipherFile))
+            val names=setOf(ledger.baseFile.name,ledger.baseFile.name+".bak",ledger.baseFile.name+".new")
+            check(directory.listFiles()?.all{it.isFile && it.name in names}==true)
+            ledger.delete();File(ledger.baseFile.path+".new").let{if(it.exists())check(it.delete())}
+            check(!exists(ledger) && !exists(cipherFile) && directory.delete());true
+        }
+    }
 }

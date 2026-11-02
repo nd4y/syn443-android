@@ -9,6 +9,8 @@ import io.syn443.android.vpn.DeviceKey
 import io.syn443.android.vpn.LoginController
 import io.syn443.android.vpn.LoginJournal
 import io.syn443.android.vpn.LoginStorageException
+import io.syn443.android.vpn.ManagedOverlayStorage
+import io.syn443.android.vpn.OverlayVault
 import io.syn443.identity.*
 import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
@@ -375,6 +377,53 @@ class LoginControllerTest {
         val view=f.controller.status().getJSONObject("assignedPolicy")
         assertFalse(view.getBoolean("candidateValidated"));assertFalse(view.getBoolean("runtimeAuthorized"))
         assertThrows(IllegalStateException::class.java) {f.controller.assignedRuntime.config(s)}
+    }
+    @Test fun persistedOverlayClaimsSurviveRestartAndRetireBeforeDeviceKey()=fixture{f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val before=f.journal.snapshot()
+        val binding=OverlayCredentialBinding(OverlayAddress(f.server.bootstrap.serviceId,before.ownerTag,before.deviceId,"home","netbird","resource","tenant",1,"https://mesh.example.invalid"),before.thumbprint,Identity.random(),1,0,1_800_000_120_000L)
+        val owned=ManagedOverlay.namespace(binding.address)
+        val claimed=f.journal.commit(before,LoginRecovery.claimOverlay(before,before.generation,owned))
+        val vault=OverlayVault(context,owned,{true},{0},f.namespace);vault.reserve(binding,claimed.generation)
+        val storage=ManagedOverlayStorage(context,f.namespace);val directory=storage.directory(owned);check(directory.mkdirs())
+        val evidence=Identity.hash("synthetic public SDK key proof".toByteArray())
+        File(directory,"syn443-managed-identity.json").writeText("""{"schemaVersion":1,"namespace":"$owned","initialized":true,"identityEvidence":"$evidence"}""")
+        val sdk=File(directory,"config.json").apply{writeText("synthetic owned SDK state")}
+        try {
+            f.restart();assertEquals(listOf(owned),f.journal.snapshot().overlayNamespaces)
+            java.io.RandomAccessFile(File(context.noBackupFilesDir,"engine-owner.lock"),"rw").use{file->file.channel.lock().use{
+                val started=SystemClock.elapsedRealtime();f.controller.cancel()
+                assertTrue(SystemClock.elapsedRealtime()-started<1000)
+                assertEquals(listOf(owned),f.journal.snapshot().retiringOverlays)
+                Thread.sleep(150);assertTrue(sdk.isFile)
+                assertTrue(java.security.KeyStore.getInstance("AndroidKeyStore").apply{load(null)}.containsAlias(before.keyAlias))
+            }}
+            f.idle();assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+            assertFalse(directory.exists());assertNull(vault.snapshot())
+            assertFalse(java.security.KeyStore.getInstance("AndroidKeyStore").apply{load(null)}.containsAlias(before.keyAlias))
+        } finally {
+            if(directory.exists()){sdk.delete();File(directory,"syn443-managed-identity.json").delete();directory.delete()}
+            directory.parentFile?.delete();directory.parentFile?.parentFile?.delete()
+        }
+    }
+    @Test fun unreadableOwnedOverlayKeepsLogoutPendingUntilTheSameCleanupCanResume()=fixture{f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val before=f.journal.snapshot();val owned="managed-netbird/"+Identity.random()
+        f.journal.commit(before,LoginRecovery.claimOverlay(before,before.generation,owned))
+        val storage=ManagedOverlayStorage(context,f.namespace);val directory=storage.directory(owned);check(directory.mkdirs())
+        val manifest=File(directory,"syn443-managed-identity.json").apply{writeText("corrupt")}
+        val sdk=File(directory,"config.json").apply{writeText("preserve until ownership is readable")}
+        try {
+            f.controller.cancel();f.idle()
+            assertEquals(LoginPhase.RETIRING,f.journal.snapshot().phase);assertEquals(listOf(owned),f.journal.snapshot().retiringOverlays)
+            assertTrue(sdk.isFile);assertTrue(java.security.KeyStore.getInstance("AndroidKeyStore").apply{load(null)}.containsAlias(before.keyAlias))
+            manifest.writeText("""{"schemaVersion":1,"namespace":"$owned","initialized":false,"identityEvidence":""}""")
+            f.controller.recover();f.idle()
+            assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase);assertFalse(directory.exists())
+        } finally {
+            if(directory.exists()){sdk.delete();manifest.delete();directory.delete()}
+            directory.parentFile?.delete();directory.parentFile?.parentFile?.delete()
+        }
     }
     @Test fun assignedRuntimeViewIsWorkerPreparedAndCannotOutliveLogout() = fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()

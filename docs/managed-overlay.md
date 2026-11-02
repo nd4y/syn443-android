@@ -104,3 +104,24 @@ Cancellation is rechecked between deletions. Sibling identities and the legacy
 operator root are outside its selectable tree. Six additional required emulator
 cases cover these paths and actual file-lock contention; their acceptance remains
 pending. This helper still needs the controller's durable retirement integration.
+
+## Durable login ownership and logout cleanup (acceptance pending)
+
+Login recovery now carries a bounded list of managed namespace claims. A verified
+worker must persist a claim before credentials or SDK side effects. Refresh and
+reauthentication retain it; cancellation moves it into the retirement intent. The
+device key cannot retire until all claimed SDK/cache erasures are acknowledged.
+Older login intents without these fields decode with empty claims. Imported paths,
+unprovisioned states, stale generations and more than16 claims are rejected.
+
+The real logout worker now discovers these durable claims after a process restart,
+waits for actual native exit, retires only their owned SDK directories and vault
+keys/ciphertexts, verifies erasure and removes the operation metadata. It keeps the
+login key and pending claim if an SDK manifest is unreadable. Repairing the same
+ownership data permits the same retirement to resume; no alternate identity is
+adopted. Server revocation tombstones keep their existing offline/retry semantics.
+
+New core/Keystore/controller tests cover persistence, old-format compatibility,
+lock contention, incomplete cleanup, late cancellation and resumed logout. Their
+Actions acceptance is pending. Setup delivery/materialization/registration/ack and
+the provider issuer still need integration before assigned NetBird is enabled.

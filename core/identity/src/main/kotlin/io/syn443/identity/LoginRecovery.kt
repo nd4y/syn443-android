@@ -27,7 +27,8 @@ enum class LoginResume { IDLE, KEY_RESERVATION, BROWSER, AUTHENTICATED, RETRY_CL
     val deviceId:String="",val sessionGeneration:Long = -1,val policyHash:String="",
     val operation:IdentityOperation?=null,val operationBoot:Int = -1,val operationElapsedMs:Long = -1,
     val refreshReturnPhase:LoginPhase?=null,val tombstones:List<RegistrationTombstone> = emptyList(),
-    val retiringAliases:List<String> = emptyList()
+    val retiringAliases:List<String> = emptyList(),val overlayNamespaces:List<String> = emptyList(),
+    val retiringOverlays:List<String> = emptyList()
 ) {
     override fun toString()="LoginIntent(phase=$phase, [redacted])"
 }
@@ -38,6 +39,7 @@ object LoginRecovery {
     private fun digest(value:String)=value.matches(Regex("[A-Za-z0-9_-]{43}")) &&
         runCatching {Policy.decode64(value).size==32}.getOrDefault(false)
     fun ownedAlias(alias:String)=alias.startsWith("syn443-dpop-") && digest(alias.removePrefix("syn443-dpop-"))
+    private fun ownedOverlay(value:String)=value.startsWith("managed-netbird/") && digest(value.removePrefix("managed-netbird/"))
     private fun next(n:Long)=Math.addExact(n,1).also {require(it<=maximum)}
     private fun current(s:LoginIntent,generation:Long) {validate(s);require(s.generation==generation)}
     private fun revised(s:LoginIntent)=s.copy(revision=next(s.revision)).also(::validate)
@@ -63,11 +65,17 @@ object LoginRecovery {
         require(s.tombstones.size<=32 && s.tombstones.distinct().size==s.tombstones.size &&
             s.tombstones.all {digest(it.ownerTag) && digest(it.thumbprint)})
         require(s.retiringAliases.size<=32 && s.retiringAliases.distinct().size==s.retiringAliases.size && s.retiringAliases.all(::ownedAlias))
+        for(names in listOf(s.overlayNamespaces,s.retiringOverlays))
+            require(names.size<=16 && names.distinct().size==names.size && names.all(::ownedOverlay))
+        require(s.phase==LoginPhase.RETIRING || s.retiringOverlays.isEmpty())
         if(s.phase in setOf(LoginPhase.SIGNED_OUT,LoginPhase.RETIRING)) {
+            require(s.overlayNamespaces.isEmpty())
             require(listOf(s.authority,s.serviceId,s.keyAlias,s.thumbprint,s.ownerTag,s.protectedHash,s.deviceId,s.policyHash).all {it.isEmpty()} &&
                 !s.maybeRegistered && s.sessionGeneration== -1L && s.operation==null && s.operationBoot== -1 && s.operationElapsedMs== -1L && s.refreshReturnPhase==null)
             require(s.method=="oidc" && (s.phase==LoginPhase.RETIRING)==s.retiringAliases.isNotEmpty());return
         }
+        require(s.overlayNamespaces.isEmpty() || s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING,LoginPhase.NEEDS_REAUTH))
+        require(s.overlayNamespaces.isEmpty() || s.maybeRegistered && digest(s.ownerTag) && s.deviceId.isNotEmpty() && s.policyHash.isNotEmpty())
         require(digest(s.authority) && s.serviceId.matches(Regex("[A-Za-z0-9_-]{1,64}")) && ownedAlias(s.keyAlias) && s.keyAlias !in s.retiringAliases)
         if(s.phase==LoginPhase.RESERVED) require(s.thumbprint.isEmpty() && s.protectedHash.isEmpty())
         else require(digest(s.thumbprint) && digest(s.protectedHash))
@@ -184,10 +192,21 @@ object LoginRecovery {
         if(s.phase in setOf(LoginPhase.SIGNED_OUT,LoginPhase.RETIRING))return s
         val tombstones=if(s.maybeRegistered)(s.tombstones+RegistrationTombstone(s.ownerTag,s.thumbprint)).distinct() else s.tombstones
         return LoginIntent(generation=next(s.generation),revision=next(s.revision),phase=LoginPhase.RETIRING,
-            tombstones=tombstones,retiringAliases=(s.retiringAliases+s.keyAlias).distinct()).also(::validate)
+            tombstones=tombstones,retiringAliases=(s.retiringAliases+s.keyAlias).distinct(),retiringOverlays=s.overlayNamespaces).also(::validate)
+    }
+    /** The worker resolves the namespace from its verified assignment first.
+     * Persist ownership before fetching a setup credential or creating SDK files. */
+    fun claimOverlay(s:LoginIntent,generation:Long,namespace:String):LoginIntent {
+        current(s,generation);require(s.phase==LoginPhase.POLICY_CACHED && ownedOverlay(namespace))
+        if(namespace in s.overlayNamespaces)return s
+        return revised(s.copy(overlayNamespaces=s.overlayNamespaces+namespace))
+    }
+    fun overlayRetired(s:LoginIntent,generation:Long,namespace:String,nativeOwnerReleased:Boolean,sdkErased:Boolean,credentialErased:Boolean):LoginIntent {
+        current(s,generation);require(s.phase==LoginPhase.RETIRING && namespace in s.retiringOverlays && nativeOwnerReleased && sdkErased && credentialErased)
+        return revised(s.copy(retiringOverlays=s.retiringOverlays-namespace))
     }
     fun retired(s:LoginIntent,generation:Long,alias:String,nativeOwnerReleased:Boolean,protectedStateErased:Boolean):LoginIntent {
-        current(s,generation);require(s.phase==LoginPhase.RETIRING && alias in s.retiringAliases && nativeOwnerReleased && protectedStateErased)
+        current(s,generation);require(s.phase==LoginPhase.RETIRING && s.retiringOverlays.isEmpty() && alias in s.retiringAliases && nativeOwnerReleased && protectedStateErased)
         val remaining=s.retiringAliases-alias
         return revised(s.copy(phase=if(remaining.isEmpty())LoginPhase.SIGNED_OUT else LoginPhase.RETIRING,retiringAliases=remaining))
     }

@@ -586,9 +586,30 @@ class LoginController private constructor(private val context:android.app.Applic
             if(runCatching {noVpn();NativeRetirement.released(context)}.getOrDefault(false))break
             check(elapsed()<deadline) {"native_retirement_pending"};Thread.sleep(100)
         }
-        if(namespace=="device-login-v1")io.syn443.android.chat.ChatOutbox.erase(context)
-        check(journal.eraseRetired(expected))
         var s=expected
+        val vaultArea=if(namespace=="device-login-v1")"managed-overlay-v1" else namespace
+        val sdkStorage=ManagedOverlayStorage(context,if(namespace=="device-login-v1")"" else namespace)
+        for(owned in expected.retiringOverlays) {
+            current(s)
+            val vault=OverlayVault(context,owned,{false},{Long.MAX_VALUE},vaultArea)
+            val record=vault.snapshot()
+            fun allowed()=runCatching{current(s);noVpn();true}.getOrDefault(false)
+            if(record==null)check(sdkStorage.retire(owned,null,::allowed))
+            else {
+                var ownedRecord=record
+                if(ownedRecord.phase!=io.syn443.identity.OverlayPhase.RETIRED) {
+                    if(ownedRecord.phase!=io.syn443.identity.OverlayPhase.RETIRING)ownedRecord=vault.retiring(ownedRecord)
+                    val retiring=ownedRecord
+                    check(vault.finishRetirement(retiring){sdkStorage.retire(owned,retiring.identityEvidence.takeIf{it.isNotEmpty()},::allowed)})
+                    ownedRecord=checkNotNull(vault.snapshot())
+                }
+                check(vault.removeRetired(ownedRecord))
+            }
+            current(s);noVpn()
+            s=commit(s,LoginRecovery.overlayRetired(s,s.generation,owned,true,true,true))
+        }
+        if(namespace=="device-login-v1")io.syn443.android.chat.ChatOutbox.erase(context)
+        check(journal.eraseRetired(s))
         val session=previous?.second?.session
         if(previous!=null && session!=null && previous.first.keyAlias in s.retiringAliases) {
             val scope=IdentityScope()
