@@ -289,7 +289,7 @@ func (o *Outbound) ListenPacket(ctx context.Context, _ M.Socksaddr) (net.PacketC
 func (o *Outbound) InterfaceUpdated() {
 	o.diagMu.Lock()
 	o.diagEpoch++
-	if len(o.job.Results) > 0 {
+	if len(o.job.Results) > 0 || !o.job.Started.IsZero() {
 		o.job.Stale = true
 	}
 	if o.diagCancel != nil {

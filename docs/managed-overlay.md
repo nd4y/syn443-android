@@ -255,8 +255,26 @@ config is replaced to repair metadata. Actions exercise the real pinned
 management DNS-label validator, actual outbound-to-SDK options, stable/reopened
 and distinct identities, explicit overrides, local file modes, key-file
 preservation and unsafe metadata. Startup codes cover every non-OK gRPC status
-and the empty/invalid-hostname and unavailable-management cases. Actual Cloud
-registration and subsequent Wi-Fi recovery remain pending acceptance.
+and the empty/invalid-hostname and unavailable-management cases.
 
 Upstream source: [SDK context lookup](https://github.com/netbirdio/netbird/blob/cf017119711184a0661062a0c8ac2043e4e8d411/client/system/info.go#L168),
 [management DNS-label validation](https://github.com/netbirdio/netbird/blob/cf017119711184a0661062a0c8ac2043e4e8d411/dns/dns.go#L103).
+
+### Diagnostic readiness after network changes
+
+An empty SDK recorder during reconnect does not prove successful peer checks.
+Explicit diagnostics report `no_peers` with zero results, remain retryable and
+become stale across another network change. The UI explains that there are no
+peers to check and the list may still be refreshing. This state is distinct from
+`completed`, whose individual peer outcomes still determine reachability.
+
+Private USB/Wi-Fi acceptance of source492cdb52d75649340af0d13c8119dc9724992474
+verified managed registration, required internal peer DNS/TCP, external HTTPS,
+native crash/hang recovery and bounded Wi-Fi rebound with stable SDK keys. An
+initial zero-roster check exposed the reporting issue above; it is retained as
+failed evidence rather than counted as recovery success. Automatic scoped Cloud
+retirement, unchanged existing inventory and complete local configuration/OS
+restoration were independently checked. No account/device/resource identifiers
+or credential material are published. Version34 requires its own Actions and
+affected physical acceptance; these are not full M2/M3 completion or LTE/energy
+acceptance.

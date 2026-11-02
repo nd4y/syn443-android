@@ -173,6 +173,15 @@ func StartDiagnostics() string {
 		o.diagMu.Unlock()
 		return `{"state":"unavailable","results":[]}`
 	}
+	// A network restart can briefly expose an empty recorder while the control
+	// connection is already up. Zero attempted probes is not a completed health
+	// check; make this condition explicit and allow a fresh subsequent request.
+	if len(peers) == 0 {
+		now := time.Now()
+		o.job = DiagnosticJob{State: "no_peers", Started: now, Finished: now, Results: []ProbeResult{}}
+		o.diagMu.Unlock()
+		return RuntimeDiagnostics()
+	}
 	// Avoid unbounded jobs for a pathological roster. Every peer is listed, with a
 	// distinct limit result beyond the supported active probe budget.
 	ctx, cancel := context.WithTimeout(o.ctx, 2*time.Minute)

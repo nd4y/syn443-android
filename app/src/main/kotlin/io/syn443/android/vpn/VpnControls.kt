@@ -154,7 +154,15 @@ fun VpnControls(consentGeneration: Long = -1) {
             Button(onClick = { command("netbird-diagnose") }, enabled = peerState.optBoolean("active")) { Text("Проверить пиры NetBird") }
             val diagnostics = overlay.optJSONObject("diagnostics")
             if (diagnostics != null) {
-                Text("Проверка пиров: ${diagnostics.optString("state")}")
+                val diagnosticState = when (diagnostics.optString("state")) {
+                    "no_peers" -> "Нет пиров для проверки. После подключения список может ещё обновляться."
+                    "running" -> "Выполняется"
+                    "completed" -> "Завершена"
+                    "cancelled" -> "Отменена"
+                    "unavailable" -> "Недоступна"
+                    else -> "Нет данных"
+                }
+                Text("Проверка пиров: $diagnosticState")
                 if (diagnostics.optBoolean("stale")) Text("Результат проверки относится к предыдущей сети")
                 val results = diagnostics.optJSONArray("results")
                 if (results != null) for (i in 0 until minOf(results.length(), 128)) {
