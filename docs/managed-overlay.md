@@ -170,3 +170,14 @@ transport-exception type in its outage fixture, and adds202/400/409/429/503 vs
 401/403 cases. Cancellation/authentication denial still withdraw authority; none
 of these replies permits using a setup value. Exact corrected Actions acceptance
 is pending.
+
+The28ae correction left one failing API35 connected case (135 total, one failure,
+no skips): recovery stayed in waiting after credential delivery. The grant API
+validated its new HTTPS Date, but the vault then rechecked the same credential
+against an older policy-time anchor. The controller now persists the newly
+verified, monotonic bounded Date in the assignment journal before vault caching,
+checks the same current signed configuration/lease, and publishes that refreshed
+state instead of the stale caller argument. The recovery case advances only the
+credential API clock by two seconds and checks durable restoration without another
+fetch. The policy lease, generation, envelope and configuration hash are unchanged.
+Exact new Actions acceptance is pending.

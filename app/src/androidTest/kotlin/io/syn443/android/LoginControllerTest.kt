@@ -63,6 +63,7 @@ class LoginControllerTest {
         @Volatile var badOverlayGrant=false
         @Volatile var dropOverlayFetch=false
         @Volatile var overlayFetchStatus=200
+        @Volatile var overlayTimeAdvanceMs=0L
         @Volatile var holdOverlayFetch=false
         @Volatile var dropOverlayConsume=false
         var beforeOverlayFetch:(()->Unit)?=null
@@ -87,7 +88,7 @@ class LoginControllerTest {
             if(consume) {
                 overlayConsumeBodies+=request.toString(Charsets.UTF_8)
                 if(dropOverlayConsume)throw java.io.IOException("synthetic lost overlay consumption ACK")
-                return reply(text="""{"consumed":true}""")
+                return reply(text="""{"consumed":true}""",timeMs=now()+overlayTimeAdvanceMs)
             }
             check(operation.getValue("reference").jsonPrimitive.content==b.reference && operation.getValue("version").jsonPrimitive.long==b.version)
             beforeOverlayFetch?.invoke();overlayFetchBodies+=request.toString(Charsets.UTF_8);overlayFetchEntered.countDown()
@@ -95,6 +96,7 @@ class LoginControllerTest {
             if(overlayFetchStatus!=200)return reply(status=overlayFetchStatus)
             if(holdOverlayFetch)check(releaseOverlayFetch.await(10,TimeUnit.SECONDS))
             val a=b.address
+            val issued=now()+overlayTimeAdvanceMs
             val payload=buildJsonObject {
                 put("schemaVersion",1);put("audience","syn443-overlay-credential")
                 putJsonObject("address") {
@@ -102,11 +104,11 @@ class LoginControllerTest {
                     put("provider",a.provider);put("resourceId",a.resourceId);put("networkId",a.networkId);put("identityEpoch",a.identityEpoch);put("managementURL",a.managementURL)
                 }
                 put("keyThumbprint",if(badOverlayGrant)Identity.random() else thumb);put("reference",b.reference);put("version",b.version);put("securityEpoch",b.securityEpoch)
-                put("kind","netbird.setup-key");put("issuedAtMs",now());put("notBeforeMs",now());put("expiresMs",now()+300_000);put("value",overlaySetupValue)
+                put("kind","netbird.setup-key");put("issuedAtMs",issued);put("notBeforeMs",issued);put("expiresMs",issued+300_000);put("value",overlaySetupValue)
             }
             val input=Identity.encode("""{"alg":"ES256","kid":"root","typ":"syn443-overlay-credential+jws"}""".toByteArray())+"."+Identity.encode(Canonical.encode(payload).toByteArray())
             val envelope=input+"."+Identity.encode(Identity.derToRaw(Signature.getInstance("SHA256withECDSA").run {initSign(root.private);update(input.toByteArray());sign()}))
-            return reply(text=Canonical.encode(buildJsonObject{put("consumed",false);put("envelope",envelope)}))
+            return reply(text=Canonical.encode(buildJsonObject{put("consumed",false);put("envelope",envelope)}),timeMs=issued)
         }
         @Volatile var policyRevision=1L
         @Volatile var engineTag="direct"
@@ -124,9 +126,9 @@ class LoginControllerTest {
         private val refreshReceipts=mutableMapOf<String,Pair<String,String>>()
         private val policies=mutableMapOf<String,String>()
         private fun now()=System.currentTimeMillis()/1000*1000
-        private fun reply(status:Int=200,text:String="{}")=Reply(status,mapOf(
+        private fun reply(status:Int=200,text:String="{}",timeMs:Long=now())=Reply(status,mapOf(
             "content-type" to listOf("application/json; charset=utf-8"),
-            "date" to listOf(DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'",Locale.US).withZone(ZoneOffset.UTC).format(Instant.ofEpochMilli(now())))),text.toByteArray())
+            "date" to listOf(DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'",Locale.US).withZone(ZoneOffset.UTC).format(Instant.ofEpochMilli(timeMs)))),text.toByteArray())
         private fun jwt(id:Boolean,thumb:String):String {
             val claims=buildJsonObject {
                 put("iss",bootstrap.issuer);put("sub","synthetic-owner");put("aud",if(id)bootstrap.clientId else "syn443-api")
@@ -799,12 +801,16 @@ class LoginControllerTest {
         assertTrue(f.controller.beginAssignment(f.controller.assignmentTicket(),listOf(false)));f.idle()
         assertTrue(f.controller.finishAssignment(f.controller.assignmentTicket(),listOf(true),true));f.idle()
         assertEquals(raw,f.controller.assignedRuntime.config(f.journal.snapshot()))
-        f.server.dropOverlayFetch=false;f.controller.retry(login.generation);f.idle()
+        val beforeTime=checkNotNull(f.journal.readAssignment(f.journal.snapshot())!!.time)
+        f.server.dropOverlayFetch=false;f.server.overlayTimeAdvanceMs=2_000;f.controller.retry(login.generation);f.idle()
         assertEquals("enrolling",f.controller.overlayLaunchMode(hash));assertTrue(f.controller.overlayHasSetup(hash))
         assertEquals(record.operation,OverlayVault(context,owned,{true},{0},f.namespace).snapshot()!!.operation)
         val ready=org.json.JSONObject(f.controller.renderAssigned(raw,File(context.noBackupFilesDir,f.namespace))).getJSONArray("outbounds").getJSONObject(0)
         assertEquals(f.server.overlaySetupValue,ready.getString("setup_key"));assertFalse(ready.has("credential_pending"))
         assertEquals(2,f.server.overlayFetchBodies.size);assertEquals(1,f.server.overlayFetchBodies.toSet().size)
+        val persisted=checkNotNull(f.journal.readAssignment(f.journal.snapshot())!!.time)
+        assertTrue(persisted.window(persisted.boot,SystemClock.elapsedRealtime()).lowerMs>beforeTime.window(beforeTime.boot,SystemClock.elapsedRealtime()).lowerMs)
+        f.restart();assertEquals("enrolling",f.controller.overlayLaunchMode(hash));assertEquals(2,f.server.overlayFetchBodies.size)
     }
 
     @Test fun managedGrantFailureNeverUsesAKeyAndAuthenticationDenialWithdrawsBaseAuthority() {

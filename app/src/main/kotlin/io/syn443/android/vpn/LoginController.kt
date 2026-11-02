@@ -481,8 +481,10 @@ class LoginController private constructor(private val context:android.app.Applic
             if(!network)throw AuthException(AuthFailure.TRANSPORT)
             current(s)
             fun request(api:AuthProtocol,child:IdentityScope)=api.overlay(operation,consume,binding,checkNotNull(p.session),child)
-            return if(protocol!=null)request(protocol,checkNotNull(scope))
+            val delivered=if(protocol!=null)request(protocol,checkNotNull(scope))
                 else withProtocol(s,p.bootstrap){api,child->request(api,child)}
+            adoptOverlayTime(s,p,binding,hash,delivered.time)
+            return delivered
         }
         return ManagedOverlayProvisioner(overlayVault(binding,hash,s.generation),binding,s.generation,p.bootstrap.roots,
             {overlayAdmitted(binding,hash,s.generation)},{overlayWindow(hash,s.generation)},
@@ -492,6 +494,25 @@ class LoginController private constructor(private val context:android.app.Applic
         runCatching{provisioner.acknowledge()}.exceptionOrNull()?.let {e->
             if(e is AuthException && e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))throw e
             if(e is LoginStorageException && e.reason==LoginStorageFailure.STALE)throw e
+        }
+    }
+    /** The addressed API reply already passed proof/signature checks. Persist
+     * its trusted Date before the vault verifies a newly issued not-before time;
+     * otherwise an older policy anchor can reject a valid fresh credential.
+     * Neither signed lease nor identity/activation generation changes here. */
+    private fun adoptOverlayTime(s:LoginIntent,p:LoginPayload,binding:OverlayCredentialBinding,hash:String,time:TrustedTime) {
+        current(s);require(overlayAdmitted(binding,hash,s.generation))
+        val before=checkNotNull(journal.readAssignment(s));val at=elapsed();val currentBoot=boot()
+        val previous=checkNotNull(before.time).window(currentBoot,at);val observed=time.window(currentBoot,at)
+        require(observed.upperMs>=previous.lowerMs && observed.lowerMs<=Math.addExact(previous.upperMs,30_000))
+        val next=before.copy(time=time)
+        require(listOf(true,false).any{candidate->runCatching {
+            Assignments.authorized(next,s,p,currentBoot,at,candidate).payload.contentHash==hash
+        }.getOrDefault(false)})
+        persistAssignment(s,p,next)
+        synchronized(commands) {
+            current(s);require(overlayAdmitted(binding,hash,s.generation))
+            overlayAuthority=checkNotNull(overlayAuthority).copy(time=time)
         }
     }
     /** Persist namespace ownership before any grant/SDK effect. Preparation can
@@ -569,7 +590,9 @@ class LoginController private constructor(private val context:android.app.Applic
                 }}catch(e:Exception){waiting.close();throw e}
             }
         }
-        val prepared=assignedRuntime.prepare(s,p,assignment)
+        // A delivery may have durably advanced the trusted time. Do not publish
+        // the older argument over that freshly anchored worker view.
+        val prepared=assignedRuntime.prepare(s,p,checkNotNull(journal.readAssignment(s)))
         synchronized(commands){current(s);assignedRuntime.publish(prepared)}
         policyChanged()
     }
