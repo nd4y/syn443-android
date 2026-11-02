@@ -50,6 +50,7 @@ type Outbound struct {
 	releaseIdentity  func()
 	releaseProcess   func()
 	identityEvidence string
+	startup          startupTrace
 }
 
 type peerClient interface {
@@ -198,7 +199,7 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 		BlockInbound:   true,
 		DisableIPv6:    true,
 		LogLevel:       "warn",
-		LogOutput:      logWriter{logger: o.logger, secret: o.options.SetupKey},
+		LogOutput:      logWriter{logger: o.logger, secret: o.options.SetupKey, startup: &o.startup},
 	}
 	if o.options.ConnectionMode == "direct" {
 		opts.UnderlayDialer = nil
@@ -378,11 +379,13 @@ func (o *Outbound) stopClient(ctx context.Context) error {
 }
 
 type logWriter struct {
-	logger log.ContextLogger
-	secret string
+	logger  log.ContextLogger
+	secret  string
+	startup *startupTrace
 }
 
 func (w logWriter) Write(p []byte) (int, error) {
+	w.startup.observe(p)
 	line := strings.TrimSpace(string(p))
 	if w.secret != "" {
 		line = strings.ReplaceAll(line, w.secret, "[redacted]")

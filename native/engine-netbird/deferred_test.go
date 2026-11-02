@@ -244,7 +244,10 @@ func (*rejectedPeer) Start(context.Context) error {
 func (*rejectedPeer) Stop(context.Context) error { return embed.ErrClientNotStarted }
 func TestRejectedEnrollmentRequiresActionInsteadOfRetryingForever(t *testing.T) {
 	d := deferredFixture(t)
-	d.current.newClient = func(embed.Options) (peerClient, error) { return &rejectedPeer{}, nil }
+	d.current.newClient = func(opts embed.Options) (peerClient, error) {
+		opts.LogOutput.Write([]byte("failed registering peer: code = PermissionDenied account-private synthetic-key"))
+		return &rejectedPeer{}, nil
+	}
 	d.makePeer = func() (*Outbound, error) { t.Error("authorization rejection retried"); return nil, net.ErrClosed }
 	d.Start(adapter.StartStateStarted)
 	select {
@@ -255,6 +258,10 @@ func TestRejectedEnrollmentRequiresActionInsteadOfRetryingForever(t *testing.T) 
 	state := d.state.Load().(moduleState)
 	if state.Phase != "NeedsAction" || state.Reason != "enrollment_rejected" || !strings.Contains(state.Failure, "PermissionDenied") {
 		t.Fatal("missing actionable diagnostic")
+	}
+	raw := DeferredStatus()
+	if !strings.Contains(raw, `"startup_codes":["grpc_permission_denied","management_registration_failed"]`) || strings.Contains(raw, "account-private") || strings.Contains(raw, "synthetic-key") {
+		t.Fatal("disabled logger lost cause codes or exposed SDK text")
 	}
 	d.Close()
 }

@@ -1496,7 +1496,9 @@
       "text": "Каналы: lifecycle, network, selector, DNS, routing, protocol, NetBird, provisioning, telemetry, crash. Уровни error/warn/info/debug/trace, структурированный JSONL с correlation ID. Ограниченные info события доступны даже при выключенных подробных core логах.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/managed-overlay.md#startup-failure-diagnosis",
+        "native/engine-netbird/startup_trace_test.go"
       ],
       "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
       "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
@@ -1516,7 +1518,9 @@
       "text": "Редактируются не только известные значения секретов, но и потенциально секретные поля path, serviceName, headers, query, userinfo, subscription URL и вложенный JSON. Очистка выполняется при записи и перед экспортом. Неизвестный сторонний raw log не считается безопасным автоматически. Для удалённой отправки предпочтителен allowlist структурированных полей; неизвестный free-text/raw third-party вывод автоматически не загружается. Sanitization - проверяемый барьер с тестовыми секретами, а не обещание анонимности любого сырого текста.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/managed-overlay.md#startup-failure-diagnosis",
+        "native/engine-netbird/startup_trace_test.go"
       ],
       "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
       "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."

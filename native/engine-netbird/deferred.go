@@ -38,6 +38,7 @@ type Deferred struct {
 	report         atomic.Value
 	diagnostics    atomic.Value
 	failure        atomic.Value
+	startupCodes   atomic.Value
 	options        OutboundOptions
 	startupTimeout time.Duration
 	cleanupTimeout time.Duration
@@ -80,6 +81,7 @@ func NewDeferredOutbound(ctx context.Context, router adapter.Router, logger log.
 	d.report.Store(`{"active":false,"peers":[]}`)
 	d.diagnostics.Store(`{"state":"unavailable","results":[]}`)
 	d.failure.Store("")
+	d.startupCodes.Store([]string(nil))
 	deferredPeer.Lock()
 	deferredPeer.current = d
 	deferredPeer.Unlock()
@@ -262,6 +264,7 @@ func (d *Deferred) run() {
 			return
 		}
 		d.failure.Store(redactStartupFailure(err, d.options.SetupKey))
+		d.startupCodes.Store(peer.startup.snapshot())
 		if stopBounded(peer, d.cleanupTimeout) != nil {
 			d.set("NeedsAction", "cleanup_unconfirmed", retry)
 			return
@@ -364,9 +367,19 @@ func DeferredStatus() string {
 	}
 	result := struct {
 		moduleState
-		PeerState   json.RawMessage `json:"peer_state"`
-		Diagnostics json.RawMessage `json:"diagnostics"`
-	}{peer.state.Load().(moduleState), json.RawMessage(peer.report.Load().(string)), json.RawMessage(peer.diagnostics.Load().(string))}
+		PeerState    json.RawMessage `json:"peer_state"`
+		Diagnostics  json.RawMessage `json:"diagnostics"`
+		StartupCodes []string        `json:"startup_codes,omitempty"`
+	}{peer.state.Load().(moduleState), json.RawMessage(peer.report.Load().(string)), json.RawMessage(peer.diagnostics.Load().(string)), peer.startupCodes.Load().([]string)}
+	peer.mu.RLock()
+	current := peer.current
+	peer.mu.RUnlock()
+	if current != nil {
+		// Only our bounded collector lock; never call an SDK recorder here.
+		if codes := current.startup.snapshot(); len(codes) > 0 {
+			result.StartupCodes = codes
+		}
+	}
 	data, err := json.Marshal(result)
 	if err != nil || len(data) > 65536 {
 		return `{"active":true,"phase":"Unknown","reason":"diagnostics_unavailable"}`

@@ -217,3 +217,23 @@ Those transitions now prepare only local cached authority; network retry stays
 in synchronization and explicit retry. The regression explicitly checks one
 initial failed request across begin/commit and exactly one successful retry.
 No timeout, assertion or credential verification was relaxed.
+
+## Startup failure diagnosis
+
+The optional module now preserves at most16 distinct startup cause codes even
+when engine logging is disabled and the SDK recorder is not yet available.
+Codes distinguish DNS, TCP, TLS, gRPC and management-registration failures from
+the eventual cancellation/deadline returned by Start. They contain only fixed
+strings: SDK messages, endpoint/account identifiers and credentials are never
+retained by this collector. Input processing is bounded to8192 bytes per write;
+snapshots copy state under a local collector lock and never call the SDK.
+The last failed attempt remains observable during a retry that has no new codes.
+These are diagnostic observations, not registration receipts or route health.
+They cannot change authentication, retry limits, private-route blocking or Stop.
+
+Actions cover cause classification, disabled-logger delivery through the actual
+outbound writer and rejected enrollment, duplicate/unknown input, bounded work,
+snapshot isolation and concurrent writes/reads under the existing race gate.
+Real Cloud registration and subsequent Wi-Fi recovery remain unaccepted; an
+initial timed-out registration must not be declared an invalid-key root cause
+merely because a short-lived credential later expires.
