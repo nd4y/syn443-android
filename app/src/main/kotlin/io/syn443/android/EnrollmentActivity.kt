@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.core.net.toUri
 import com.google.zxing.*
 import com.google.zxing.common.HybridBinarizer
 import io.syn443.identity.BootstrapTrust
@@ -43,7 +44,7 @@ class EnrollmentActivity:ComponentActivity() {
         intent=Intent(this,EnrollmentActivity::class.java) // Do not retain a secret in the Activity intent.
         setContent {MaterialTheme(colorScheme=darkColorScheme()){Surface(Modifier.fillMaxSize()){EnrollmentScreen(incoming){browser->
             startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
-            if(browser!=null)startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(browser)).addCategory(Intent.CATEGORY_BROWSABLE))
+            if(browser!=null)startActivity(Intent(Intent.ACTION_VIEW,browser.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
             finish()
         }}}}
     }
@@ -78,7 +79,7 @@ internal object InvitationQr {
 }
 
 @Composable private fun EnrollmentScreen(initial:String,onStarted:(String?)->Unit) {
-    val context=LocalContext.current;val scope=rememberCoroutineScope();val endpoint=Uri.parse("content://io.syn443.control")
+    val context=LocalContext.current;val scope=rememberCoroutineScope();val endpoint="content://io.syn443.control".toUri()
     var link by remember {mutableStateOf(initial)};var message by remember {mutableStateOf("")}
     var ticket by remember {mutableStateOf("")};var preview by remember {mutableStateOf<JSONObject?>(null)}
     var busy by remember {mutableStateOf(false)};var rotation by remember {mutableStateOf("")};var showRotation by remember {mutableStateOf(false)}
