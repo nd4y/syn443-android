@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=173
+    minimum=174
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -56,7 +56,7 @@ if mode=="identity":
         "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
     assert ("io.syn443.android.HostProcessTest","rejectedForeignBindingCannotRetireTheCurrentDiagnosticSession") in {(c.get("classname"),c.get("name")) for c in cases}, "Required diagnostic binding ownership case missing"
-    assert {("io.syn443.android.LoginControllerTest",name) for name in {"managedControllerClaimsNamespaceBeforeFetchAndRestoresProtectedMaterialWithoutRefetch","managedControllerNativeReceiptErasesGrantAndRecoversKeylessWhileConsumptionIsOffline","managedControllerLogoutFencesALateCredentialAndKeepsNoRuntimeMaterial","managedControllerRejectsSignedWrongAddressAndRetriesTheSameReservedOperation","managedCredentialOutageKeepsBasePolicyAndRetriesSameOperationBeforeEnrollment"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed controller integration cases missing"
+    assert {("io.syn443.android.LoginControllerTest",name) for name in {"managedControllerClaimsNamespaceBeforeFetchAndRestoresProtectedMaterialWithoutRefetch","managedControllerNativeReceiptErasesGrantAndRecoversKeylessWhileConsumptionIsOffline","managedControllerLogoutFencesALateCredentialAndKeepsNoRuntimeMaterial","managedControllerRejectsSignedWrongAddressAndRetriesTheSameReservedOperation","managedCredentialOutageKeepsBasePolicyAndRetriesSameOperationBeforeEnrollment","managedGrantFailureNeverUsesAKeyAndAuthenticationDenialWithdrawsBaseAuthority"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed controller integration cases missing"
     assert ("io.syn443.android.LoginControllerTest","activePendingIdentityAndFreshCandidateNeverConsumeEachOthersGrant") in {(c.get("classname"),c.get("name")) for c in cases}, "Required active/candidate same-identity fence missing"
     login_overlay_required={'persistedOverlayClaimsSurviveRestartAndRetireBeforeDeviceKey','unreadableOwnedOverlayKeepsLogoutPendingUntilTheSameCleanupCanResume'}
     assert {("io.syn443.android.LoginControllerTest",name) for name in login_overlay_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required controller SDK retirement cases missing"

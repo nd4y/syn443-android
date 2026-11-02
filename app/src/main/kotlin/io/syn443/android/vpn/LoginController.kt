@@ -552,7 +552,8 @@ class LoginController private constructor(private val context:android.app.Applic
                 if(network && record.phase==OverlayPhase.ERASED)
                     consumeOverlay(overlayProvisioner(s,p,binding,hash,protocol,scope))
             } catch(e:AuthException) {
-                if(e.reason !in setOf(AuthFailure.TRANSPORT,AuthFailure.THROTTLED,AuthFailure.UNAVAILABLE))throw e
+                if(e.reason !in setOf(AuthFailure.TRANSPORT,AuthFailure.THROTTLED,AuthFailure.UNAVAILABLE,
+                    AuthFailure.INVALID_REPLY,AuthFailure.PENDING,AuthFailure.CONFLICT))throw e
             } catch(e:LoginStorageException) {if(e.reason==LoginStorageFailure.STALE)throw e
             } catch(_:IllegalArgumentException) { // Invalid/missing material remains unavailable, never an operator fallback.
             } finally {secret?.close()}

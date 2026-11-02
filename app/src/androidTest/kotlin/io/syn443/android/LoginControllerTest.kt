@@ -62,6 +62,7 @@ class LoginControllerTest {
         @Volatile var managedTag="home"
         @Volatile var badOverlayGrant=false
         @Volatile var dropOverlayFetch=false
+        @Volatile var overlayFetchStatus=200
         @Volatile var holdOverlayFetch=false
         @Volatile var dropOverlayConsume=false
         var beforeOverlayFetch:(()->Unit)?=null
@@ -90,7 +91,8 @@ class LoginControllerTest {
             }
             check(operation.getValue("reference").jsonPrimitive.content==b.reference && operation.getValue("version").jsonPrimitive.long==b.version)
             beforeOverlayFetch?.invoke();overlayFetchBodies+=request.toString(Charsets.UTF_8);overlayFetchEntered.countDown()
-            if(dropOverlayFetch)throw java.io.IOException("synthetic overlay credential endpoint outage")
+            if(dropOverlayFetch)throw DeliveryException(DeliveryFailure.TRANSPORT)
+            if(overlayFetchStatus!=200)return reply(status=overlayFetchStatus)
             if(holdOverlayFetch)check(releaseOverlayFetch.await(10,TimeUnit.SECONDS))
             val a=b.address
             val payload=buildJsonObject {
@@ -803,6 +805,27 @@ class LoginControllerTest {
         val ready=org.json.JSONObject(f.controller.renderAssigned(raw,File(context.noBackupFilesDir,f.namespace))).getJSONArray("outbounds").getJSONObject(0)
         assertEquals(f.server.overlaySetupValue,ready.getString("setup_key"));assertFalse(ready.has("credential_pending"))
         assertEquals(2,f.server.overlayFetchBodies.size);assertEquals(1,f.server.overlayFetchBodies.toSet().size)
+    }
+
+    @Test fun managedGrantFailureNeverUsesAKeyAndAuthenticationDenialWithdrawsBaseAuthority() {
+        for(code in listOf(202,400,409,429,503,401,403))fixture{f->
+            f.server.policyReady=true;f.server.managedOverlayPolicy=true;f.server.overlayFetchStatus=code
+            f.controller.callback(f.begin());f.idle()
+            val login=f.journal.snapshot()
+            if(code==401 || code==403) {
+                assertFalse(f.controller.allowsConnect())
+                assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("runtimeAuthorized"))
+                assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+            } else {
+                val candidate=checkNotNull(f.controller.assignedRuntime.read(login).candidate)
+                assertEquals("waiting",f.controller.overlayLaunchMode(candidate.payload.contentHash))
+                assertFalse(f.controller.overlayHasSetup(candidate.payload.contentHash))
+                val outbound=org.json.JSONObject(f.controller.renderAssigned(candidate.engineConfig,File(context.noBackupFilesDir,f.namespace))).getJSONArray("outbounds").getJSONObject(0)
+                assertTrue(outbound.getBoolean("credential_pending"));assertFalse(outbound.has("setup_key"))
+                assertEquals(OverlayPhase.RESERVED,OverlayVault(context,login.overlayNamespaces.single(),{true},{0},f.namespace).snapshot()!!.phase)
+            }
+            assertEquals(1,f.server.overlayFetchBodies.size);assertTrue(f.server.overlayConsumeBodies.isEmpty())
+        }
     }
 
     @Test fun activePendingIdentityAndFreshCandidateNeverConsumeEachOthersGrant()=fixture{f->

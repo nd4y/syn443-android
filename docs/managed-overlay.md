@@ -159,3 +159,14 @@ wrong-address grant test now asserts that its key is never used and that only
 this closed placeholder is available, while a retry retains the original grant
 operation. Native tests additionally assert no SDK/storage effects and closed
 TCP/UDP, rather than treating successful base-policy preparation as overlay health.
+
+The initial waiting implementation at1652ab4 failed all three Android matrices:
+API35 has134 connected cases with three failures and no skips. Its verified
+artifact and job stack show that INVALID_REPLY escaped optional grant handling,
+and the storage test incorrectly assumed its pre-reserved fixture ledger was
+absent. The correction retains the ledger unchanged, handles rejected/pending/
+conflicting credential replies through the closed placeholder, uses the actual
+transport-exception type in its outage fixture, and adds202/400/409/429/503 vs
+401/403 cases. Cancellation/authentication denial still withdraw authority; none
+of these replies permits using a setup value. Exact corrected Actions acceptance
+is pending.
