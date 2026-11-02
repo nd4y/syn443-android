@@ -16,7 +16,7 @@ elif mode=="recovery":
     minimum=15
 elif mode=="policy":
     paths=list((root/"core/policy/build/test-results/test").glob("TEST-*.xml"))
-    minimum=15
+    minimum=16
 elif mode=="observability":
     paths=list((root/"core/observability/build/test-results/test").glob("TEST-*.xml"))
     minimum=10
@@ -38,6 +38,8 @@ for path in paths:
         assert not any(case.find(k) is not None for k in ("skipped","failure","error")),(path,case.attrib)
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
+if mode=="policy":
+    assert ("io.syn443.policy.PolicyTest","signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences") in {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="identity":
     assert ("io.syn443.identity.OverlayEnrollmentTest","newCapabilityAdvertisementPreservesExactLegacyEnrollmentAndInvitationRetries") in {(c.get("classname"),c.get("name")) for c in cases}, "Required capability migration case missing"
     login_overlay_required={'namespaceClaimSurvivesRefreshAndCancelUntilActualErasureCompletes','namespaceClaimsRejectUnsafePathsUnboundedSetsAndUnprovisionedAuthority','recoveryMetadataBeforeManagedOverlaysRetainsEmptyOwnershipClaims'}

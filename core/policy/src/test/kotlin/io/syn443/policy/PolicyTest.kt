@@ -10,6 +10,23 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class PolicyTest {
+    @Test fun signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences() {
+        fun digest(text:String)=enc(java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()))
+        val thumb=digest("synthetic-device-key")
+        val config="""{"outbounds":[{"type":"netbird","tag":"home","management_url":"https://overlay.example.invalid","managed":{"overlayId":"home","resourceId":"resource","networkId":"tenant","identityEpoch":1,"setupReference":"${digest("synthetic-reference")}","setupVersion":1}}],"route":{"final":"home"}}"""
+        val p=payload().copy(schemaVersion=2,keyThumbprint=thumb,
+            requiredCapabilities=payload().requiredCapabilities+listOf("policy.keybound.v2","overlay.credentials.v1"),
+            engineConfigB64=enc(config.toByteArray()),contentHash=Policy.hash(config))
+        val raw=sign(p)
+        val verified=Policy.verifyBound(raw,roots,"device-example",thumb,now)
+        assertEquals(config,verified.engineConfig);assertEquals(p.contentHash,verified.payload.contentHash)
+        invalid{Policy.verifyBound(raw,roots,"device-example",digest("other-device-key"),now)}
+        invalid{Policy.verifyBound(raw,roots,"other-device",thumb,now)}
+        invalid{Policy.verifyBound(raw,emptyMap(),"device-example",thumb,now)}
+        invalid{Policy.verifyBound(raw,roots,"device-example",thumb,p.offlineUntilMs)}
+        invalid{Policy.verifyBound(sign(p.copy(requiredCapabilities=p.requiredCapabilities+"overlay.future")),roots,"device-example",thumb,now)}
+        invalid{Policy.verifyBound(sign(p.copy(requiredCapabilities=p.requiredCapabilities+"overlay.credentials.v1")),roots,"device-example",thumb,now)}
+    }
     @Test fun runningManagedHealthUsesEveryRequiredSignedHTTPSTargetWithoutDefaultFallback() {
         val checks=listOf(Check("first","https_204","https://health.example.org/generate_204"),
             Check("second","https_204","https://alternate.example.org/204"),

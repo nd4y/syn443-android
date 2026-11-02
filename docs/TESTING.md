@@ -135,3 +135,11 @@ prepare the same keyless identity. An explicit controller case checks no second
 fetch/consumption while the active proof is pending, and immediate candidate
 preparation after that proof. Launch credential expiry and active policy expiry
 are checked separately.
+
+The first full managed controller source7a87a2b compiled and passed identity95,
+but all three emulator APIs rejected its new signed policy before grant dispatch:
+the low-level Kotlin Policy.capabilities still lacked overlay.credentials.v1.
+The fix adds only that independently protected module discriminator and a required
+real ES256 signature/key/device/expiry/unknown-feature/duplicate-capability JVM
+case (policy minimum16). It does not relax signature, namespace, runtime material
+or activation guards. Exact corrected Actions acceptance remains pending.

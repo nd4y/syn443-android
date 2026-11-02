@@ -131,3 +131,12 @@ prepare the same keyless identity. An explicit controller case checks no second
 fetch/consumption while the active proof is pending, and immediate candidate
 preparation after that proof. Launch credential expiry and active policy expiry
 are checked separately.
+
+The first complete controller run7a87a2b passed native/JVM95/APK but failed all
+three emulator matrices before grant dispatch: the lower-level Kotlin signed-policy
+capability set had not yet admitted overlay.credentials.v1. The addressed wire
+schema and Go verifier already allowed it. A focused signed-policy regression now
+requires successful module admission while keeping wrong key/device/signature,
+expiry, unknown features and duplicate capabilities rejected. The five original
+controller cases remain mandatory and unchanged; the corrected exact matrix is
+still pending.

@@ -120,7 +120,7 @@ object Policy {
         return if (ownerReady) Preparation.CHECK_BASELINE else Preparation.WAIT
     }
     val json = Canonical.json
-    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless")
+    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1")
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     fun decode64(value: String): ByteArray {
         require(value.matches(Regex("[A-Za-z0-9_-]+")))

@@ -1,6 +1,7 @@
 package netbird
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -125,7 +126,33 @@ func TestManagedPinnedSDKConstructorPersistsKeysWithoutEnrollment(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := embed.New(embed.Options{SetupKey: "synthetic-offline-setup", ManagementURL: "https://mesh.example.invalid", ConfigPath: filepath.Join(dir, "config.json"), StatePath: filepath.Join(dir, "state.json"), BlockInbound: true, DisableIPv6: true})
+	setup := "synthetic-offline-setup"
+	checkGrantAbsent := func() {
+		t.Helper()
+		err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if !entry.Type().IsRegular() {
+				t.Fatal("unexpected SDK state entry")
+			}
+			data, e := os.ReadFile(path)
+			if e != nil {
+				return e
+			}
+			if len(data) > 65536 || bytes.Contains(data, []byte(setup)) || bytes.Contains(data, []byte(base64.StdEncoding.EncodeToString([]byte(setup)))) {
+				t.Fatal("offline SDK state retained setup material or exceeded its bound")
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal("SDK state inspection failed", err)
+		}
+	}
+	client, err := embed.New(embed.Options{SetupKey: setup, ManagementURL: "https://mesh.example.invalid", ConfigPath: filepath.Join(dir, "config.json"), StatePath: filepath.Join(dir, "state.json"), BlockInbound: true, DisableIPv6: true})
 	if err != nil {
 		t.Fatal("pinned SDK offline constructor", err)
 	}
@@ -136,6 +163,7 @@ func TestManagedPinnedSDKConstructorPersistsKeysWithoutEnrollment(t *testing.T) 
 	if err != nil {
 		t.Fatal("pinned SDK config incompatible with ownership fence", err)
 	}
+	checkGrantAbsent()
 	reopened, err := prepareManagedIdentity(dir, namespace)
 	if err != nil || reopened.expected != evidence {
 		t.Fatal("pinned SDK durable identity cannot resume", err)
@@ -152,6 +180,7 @@ func TestManagedPinnedSDKConstructorPersistsKeysWithoutEnrollment(t *testing.T) 
 	if again, err := reopened.seal(); err != nil || again != evidence {
 		t.Fatal("pinned SDK reopen rotated private keys", err)
 	}
+	checkGrantAbsent()
 }
 
 func TestManagedIdentityNeverAdoptsOrRegeneratesEstablishedState(t *testing.T) {
