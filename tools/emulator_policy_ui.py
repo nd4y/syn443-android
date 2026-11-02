@@ -91,7 +91,10 @@ def open_policy():
     assert dimensions,'Disposable emulator dimensions unavailable'
     width,height=map(int,dimensions[-1])
     adb('shell','input','swipe',str(width//2),str(height*9//10),str(width//2),str(height//3),'300')
-    adb('shell','am','start','-W','-a','android.settings.VPN_SETTINGS','-f','0x10008000')
+    # Restrict resolution to the platform Settings package. An unqualified
+    # settings action may display the framework resolver instead of the owned
+    # VPN row; that dialog is deliberately never clicked by this driver.
+    adb('shell','am','start','-W','-a','android.settings.VPN_SETTINGS','-p','com.android.settings','-f','0x10008000')
     end=time.monotonic()+20
     root=None
     while time.monotonic()<end:

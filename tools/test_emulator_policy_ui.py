@@ -35,7 +35,7 @@ class OwnedVpnSettingsTest(unittest.TestCase):
             return b''
         with patch.object(ui,'adb',side_effect=adb),patch.object(ui,'tree',return_value=root),patch.object(ui,'tap')as tap:
             ui.open_policy();tap.assert_called_once_with(gear)
-        self.assertIn(('shell','am','start','-W','-a','android.settings.VPN_SETTINGS','-f','0x10008000'),calls)
+        self.assertIn(('shell','am','start','-W','-a','android.settings.VPN_SETTINGS','-p','com.android.settings','-f','0x10008000'),calls)
         with patch.object(ui,'adb',return_value=b'physical-phone'),patch.object(ui,'tree')as tree:
             with self.assertRaises(AssertionError):ui.open_policy()
             tree.assert_not_called()
@@ -45,5 +45,11 @@ class OwnedVpnSettingsTest(unittest.TestCase):
         with patch.object(ui,'adb',side_effect=adb),patch.object(ui,'tree',return_value=root),patch.object(ui,'pin_keys',return_value={'1':object()}),patch.object(ui,'tap')as tap:
             with self.assertRaisesRegex(AssertionError,'Protected emulator keyguard'):ui.open_policy()
             tap.assert_not_called()
+
+    def test_framework_resolver_is_never_tapped_or_treated_as_owned_settings(self):
+        root=ET.Element('hierarchy')
+        node(root,package='android',resource_id='android:id/title',text='SYN443',bounds='[0,0][100,100]')
+        node(root,package='android',resource_id='android:id/button1',text='Always',bounds='[0,100][100,200]')
+        self.assertIsNone(ui.profile_settings(root))
 
 if __name__=='__main__':unittest.main()
