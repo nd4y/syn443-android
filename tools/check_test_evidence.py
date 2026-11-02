@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=144
+    minimum=150
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=21
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=80
+    minimum=88
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -39,6 +39,8 @@ for path in paths:
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="identity":
+    overlay_required={('io.syn443.identity.OverlayEnrollmentTest', 'pendingAuthorityCannotSwitchAccountKeyDeviceEpochReferenceOrGeneration'), ('io.syn443.identity.OverlayAssignmentsTest', 'unmanagedInlineSecretPathUnknownFieldsAndDuplicateIdentityAreRejected'), ('io.syn443.identity.OverlayAssignmentsTest', 'assignedIdentityDerivesOnlyFromLocalScopeAndSignedMetadata'), ('io.syn443.identity.OverlayEnrollmentTest', 'cancellationWithdrawsEveryPhaseAndCannotBeReactivated'), ('io.syn443.identity.OverlayEnrollmentTest', 'durableFlowRetainsOperationAndErasesBeforeAcknowledgment'), ('io.syn443.identity.OverlayEnrollmentTest', 'boundedOperationsAndCorruptJournalAreRejected'), ('io.syn443.identity.AuthProtocolTest', 'overlayCannotAcceptUnsignedSecretCrossScopeOrFalseConsumption'), ('io.syn443.identity.AuthProtocolTest', 'addressedOverlayDeliveryBindsProofBodySessionAndIndependentEnvelope')}
+    assert overlay_required <= {(c.get("classname"),c.get("name")) for c in cases}, "Required addressed overlay state/protocol cases missing"
     assert {"manualClaimConfirmationAndCompletionConvergeOnNormalBoundSession",
         "sameProtectedPendingCanResumeAndThenUseExistingLoginPolicyLifecycle",
         "stateSubstitutionClockRollbackAndNumericCoercionFailClosed",
@@ -46,6 +48,8 @@ if mode=="identity":
         "transportCancellationAndServerErrorsRemainDistinct",
         "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
+    overlay_vault_required={'perGrantKeyCiphertextAndDurableOperationSurviveProcessObjectsThenEraseBeforeAck', 'aLateCredentialCannotBeCachedOrBorrowedAfterTheTrustedUpperDeadline', 'missingKeyTamperingUnknownJournalAndOrphanCipherNeverResetEnrollment', 'cancellationRejectsLateAndQueuedCryptoAndWaitsForConfirmedOwnerRelease', 'interruptedCacheCommitRetainsReservedOperationAndCannotCrossStorageArea', 'mainThreadCannotEncryptDecryptOrMutateEnrollmentButMayPersistCancellation'}
+    assert {("io.syn443.android.OverlayVaultTest",name) for name in overlay_vault_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required overlay Keystore/retirement cases missing"
     route_activation_required={"assignedActivationWaitsForCandidateRoutesAndIgnoresOptionalFailure",
         "assignedFinishRechecksLocalProofAfterEncryptedPreparation",
         "assignedActivationCannotReusePriorScopeOrIncompleteRouteProof",

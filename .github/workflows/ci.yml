@@ -37,6 +37,7 @@ jobs:
       - run: python3 tools/check_contracts.py
       - run: python3 -m unittest discover -s tools -p 'test_*.py'
       - run: bash -n tools/run_emulator_tests.sh tools/prepare_android_tools.sh
+      - run: python3 -m unittest discover -s tools -p test_emulator_policy_ui.py
   native:
     needs: public-data
     runs-on: ubuntu-24.04
