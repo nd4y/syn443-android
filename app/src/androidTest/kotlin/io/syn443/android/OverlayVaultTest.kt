@@ -253,7 +253,8 @@ class OverlayVaultTest {
             assertThrows(IllegalArgumentException::class.java){EngineConfig.renderManaged(raw+" ",root,material)}
             assertThrows(IllegalArgumentException::class.java){EngineConfig.render(raw,root)}
             assertThrows(IllegalArgumentException::class.java){EngineConfig.validateAssigned(raw)}
-            assertTrue(material.available());f.upper.set(now+60_000);assertFalse(material.available())
+            assertTrue(material.available());f.upper.set(now+60_000);assertFalse(material.available());assertTrue(material.authorized())
+            f.upper.set(now+120_000);assertFalse(material.authorized());f.upper.set(now+60_000)
             assertThrows(IllegalStateException::class.java){EngineConfig.renderManaged(raw,root,material)}
             f.upper.set(now);f.authorized.set(false);assertFalse(material.available())
             f.authorized.set(true);material.close();assertFalse(material.available())

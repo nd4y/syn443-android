@@ -122,4 +122,21 @@ class OverlayEnrollmentTest {
             invalid{OverlayEnrollments.requireAuthorized(retired,b,2)}
         }
     }
+
+    @Test fun newCapabilityAdvertisementPreservesExactLegacyEnrollmentAndInvitationRetries() {
+        val key=java.security.KeyPairGenerator.getInstance("EC").apply{initialize(java.security.spec.ECGenParameterSpec("secp256r1"))}.generateKeyPair().public as java.security.interfaces.ECPublicKey
+        val enroll=IdentityOperation.enroll(key);val claim=InvitationOperation.claim(Identity.random(),key)
+        val expected=kotlinx.serialization.json.JsonArray(IdentityOperation.supportedCapabilities.map{ kotlinx.serialization.json.JsonPrimitive(it) })
+        assertEquals(expected,Identity.objectJSON(enroll.body).getValue("capabilities"))
+        assertEquals(expected,Identity.objectJSON(claim.body).getValue("capabilities"))
+        assertTrue(IdentityOperation.supportedCapabilities.containsAll(IdentityOperation.requiredCapabilities))
+        assertTrue("overlay.credentials.v1" in IdentityOperation.supportedCapabilities)
+        val old=kotlinx.serialization.json.JsonArray(IdentityOperation.requiredCapabilities.map{ kotlinx.serialization.json.JsonPrimitive(it) })
+        val oldEnrollBody=Canonical.encode(kotlinx.serialization.json.JsonObject(Identity.objectJSON(enroll.body)+("capabilities" to old)))
+        val oldClaimBody=Canonical.encode(kotlinx.serialization.json.JsonObject(Identity.objectJSON(claim.body)+("capabilities" to old)))
+        val oldEnroll=IdentityOperation(enroll.path,oldEnrollBody);val oldClaim=InvitationOperation(claim.path,oldClaimBody)
+        assertEquals(oldEnroll,Canonical.json.decodeFromString<IdentityOperation>(Canonical.json.encodeToString(oldEnroll)))
+        assertEquals(oldClaim,Canonical.json.decodeFromString<InvitationOperation>(Canonical.json.encodeToString(oldClaim)))
+        assertEquals(oldEnrollBody,oldEnroll.body);assertEquals(oldClaimBody,oldClaim.body)
+    }
 }

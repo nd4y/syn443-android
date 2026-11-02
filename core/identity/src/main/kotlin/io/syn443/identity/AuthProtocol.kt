@@ -75,8 +75,11 @@ data class PolicyReply(val envelope:String,val time:TrustedTime) {
     }
     companion object {
         val requiredCapabilities=listOf("engine-config.v1","tun.lease.v1","policy.keybound.v2")
+        // The base remains valid for old immutable retry bodies. New installs
+        // advertise implemented optional modules without rewriting old requests.
+        val supportedCapabilities=requiredCapabilities+"overlay.credentials.v1"
         fun enroll(key:ECPublicKey)=IdentityOperation("/v1/devices/enroll",Canonical.encode(buildJsonObject {
-            put("requestId",Identity.random());put("key",Identity.jwk(key));put("capabilities",JsonArray(requiredCapabilities.map(::JsonPrimitive)))
+            put("requestId",Identity.random());put("key",Identity.jwk(key));put("capabilities",JsonArray(supportedCapabilities.map(::JsonPrimitive)))
         }))
         fun cleanup(thumbprints:List<String>)=IdentityOperation("/v1/identity/devices/revoke",Canonical.encode(buildJsonObject {
             put("requestId",Identity.random());put("thumbprints",JsonArray(thumbprints.map(::JsonPrimitive)))

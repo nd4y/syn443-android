@@ -5,6 +5,7 @@ interface IPlatform {
     byte[] exchangeDNS(in byte[] query, String token);
     String physicalInterfaces(String token);
     oneway void overlayState(String token, String state);
+    oneway void overlayIdentity(String token, String proof);
     oneway void routeState(String token, String state);
     oneway void event(String token, int kind);
 }

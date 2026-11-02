@@ -5,6 +5,8 @@ import io.syn443.policy.Policy
 import java.io.File
 import org.json.JSONObject
 
+internal class OverlayLaunchPending:IllegalArgumentException("overlay_credentials_pending")
+
 /** RAM-only launch material prepared by the identity worker. It never changes
  * the hash or disk copy of the signed configuration. The callbacks are bounded
  * volatile admission/clock reads, not network, Keystore or controller locks. */
@@ -19,14 +21,19 @@ internal class OverlayRuntimeMaterial(val binding:OverlayCredentialBinding,val c
         secret?.let{require(it.namespace==namespace && it.reference==binding.reference && it.version==binding.version && it.securityEpoch==binding.securityEpoch)}
     }
     fun available():Boolean=runCatching{requireCurrent();true}.getOrDefault(false)
-    internal fun requireCurrent() {
+    fun authorized():Boolean=runCatching{requireAuthorized();true}.getOrDefault(false)
+    private fun requireAuthorized() {
         check(!closed && admitted()){"overlay_material_unavailable"}
         val time=window();check(time.lowerMs>0 && time.upperMs>=time.lowerMs)
         val upper=time.upperMs
-        check(upper<binding.offlineUntilMs && (secret==null || upper<secret.expiresMs)){"overlay_material_unavailable"}
+        check(upper<binding.offlineUntilMs){"overlay_material_unavailable"}
     }
-    internal fun localize(outbound:JSONObject,stateRoot:File) {
-        requireCurrent()
+    internal fun requireCurrent() {
+        requireAuthorized()
+        check(secret==null || window().upperMs<secret.expiresMs){"overlay_material_unavailable"}
+    }
+    internal fun validateOutbound(outbound:JSONObject) {
+        requireAuthorized()
         require(outbound.getString("type")=="netbird" && !outbound.has("setup_key") &&
             !outbound.has("state_directory") && !outbound.has("managed_namespace"))
         require(ManagedOverlay.managementOrigin(outbound.getString("management_url"))==ManagedOverlay.managementOrigin(binding.address.managementURL))
@@ -38,6 +45,10 @@ internal class OverlayRuntimeMaterial(val binding:OverlayCredentialBinding,val c
         require(metadata.getString("overlayId")==address.overlayId && metadata.getString("resourceId")==address.resourceId &&
             metadata.getString("networkId")==address.networkId && metadata.getLong("identityEpoch")==address.identityEpoch &&
             metadata.getString("setupReference")==binding.reference && metadata.getLong("setupVersion")==binding.version)
+    }
+    internal fun localize(outbound:JSONObject,stateRoot:File) {
+        requireCurrent()
+        validateOutbound(outbound)
         outbound.remove("managed")
         outbound.put("managed_namespace",namespace)
         // The authenticated namespace, never an imported path, selects storage.

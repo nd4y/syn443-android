@@ -44,10 +44,18 @@ object EngineConfig {
         RouteSnapshot.validate(value)
     }
     /** Overlay state must acquire an account namespace before managed enrollment advertises it. */
-    fun validateAssigned(raw:String) {
+    fun validateAssigned(raw:String) = validateAssigned(raw,null)
+    internal fun validateAssigned(raw:String,material:OverlayRuntimeMaterial?) {
         validate(raw)
         val outbounds=JSONObject(raw).getJSONArray("outbounds")
-        require((0 until outbounds.length()).none {outbounds.getJSONObject(it).getString("type")=="netbird"})
+        for(i in 0 until outbounds.length()) {
+            val item=outbounds.getJSONObject(i)
+            if(item.getString("type")=="netbird") {
+                val prepared=requireNotNull(material){"overlay_material_unavailable"}
+                require(io.syn443.policy.Policy.hash(raw)==prepared.configHash)
+                prepared.validateOutbound(item)
+            }else require(!item.has("managed") && !item.has("managed_namespace"))
+        }
     }
     fun render(raw: String?, stateRoot: java.io.File): String = renderInternal(raw,stateRoot,null)
     internal fun renderManaged(raw:String,stateRoot:java.io.File,material:OverlayRuntimeMaterial):String {

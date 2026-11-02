@@ -56,9 +56,10 @@ NetBird direct mode attempts P2P before relay fallback; VLESS mode has a dedicat
 detour with no hidden direct fallback. Direct home access was physically checked;
 that is not restricted-LTE acceptance or managed overlay enrollment acceptance.
 
-Signed assigned configurations containing route_checks or unsupported managed
-overlay credentials remain rejected until their activation/retirement protocols
-enforce the same safety constraints. This limitation is not silently bypassed.
+The completion branch adds signed route-check activation and the managed overlay
+vault/controller/private-host protocol; see managed-overlay.md for exact accepted
+components and still-pending integration/device evidence. Inline overlay secrets
+or paths remain rejected. A source implementation is not milestone acceptance.
 Multiple Remnawave resources, x-ui/3x-ui and Tailscale/ZeroTier remain extension
 contracts by design, not implemented version1.0 requirements.
 

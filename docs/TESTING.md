@@ -117,3 +117,21 @@ keyless offline preparation, stale/cancelled proof rejection, local namespace/pa
 bounds, unchanged signed config/hash, coerced metadata and closed/expired material.
 They use synthetic keys and do not claim actual native registration proof or the
 controller/host process handoff. Those integration tests remain required.
+
+Managed controller/host handoff adds five required Android cases (minimum171)
+and one legacy capability migration JVM case (minimum95). Tests use actual bound
+signatures, LoginJournal/OverlayVault and Keystore to prove namespace claim before
+fetch, encrypted restart without refetch, private proof session fencing, erasure
+before consumption, lost ACK/keyless offline recovery, late fetch logout and
+signed wrong-address rejection with exact-operation retry. Native proof input is
+injected only in these isolated controller cases; actual Cloud registration and
+one-time process retirement after candidate commit require separate acceptance.
+
+The active and candidate configuration can share an SDK namespace while naming
+different pending grants. A current native owner finishes registration first;
+without an owner the candidate is prepared first. Other pending references cannot
+alternately discard one another. After durable registration both configurations
+prepare the same keyless identity. An explicit controller case checks no second
+fetch/consumption while the active proof is pending, and immediate candidate
+preparation after that proof. Launch credential expiry and active policy expiry
+are checked separately.

@@ -750,8 +750,14 @@
         "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/OverlayVault.kt",
         "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt",
-        "app/src/androidTest/kotlin/io/syn443/android/OverlayVaultTest.kt"
-      ]
+        "app/src/androidTest/kotlin/io/syn443/android/OverlayVaultTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayProvisioner.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlayRuntimeMaterial.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/EngineHostService.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt"
+      ],
+      "implementationScope": "Namespace, addressed protected grants, SDK ownership/retirement and controller-private proof/RAM materialization code; current exact integration acceptance pending.",
+      "remainingScope": "Full issuer/configuration authority, existing-device capability upgrade, actual managed Cloud enrollment/keyless host rotation and final physical acceptance."
     },
     {
       "id": "OVL-07",

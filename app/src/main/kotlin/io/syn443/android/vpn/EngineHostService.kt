@@ -27,6 +27,19 @@ class EngineHostService : Service() {
     private var lock: FileLock? = null
     private data class NetworkUpdate(val session: String, val name: String, val index: Int)
     @Volatile private var latestNetwork: NetworkUpdate? = null
+    private val proofRunning=java.util.concurrent.atomic.AtomicBoolean()
+    private var managedProofEnabled=false
+    private fun sampleIdentity(session:String) {
+        if(!managedProofEnabled)return
+        val runtime=engine ?: return
+        if(!proofRunning.compareAndSet(false,true))return
+        // SDK snapshot code can block. One disposable worker per isolated host
+        // keeps it off the lease/Stop/control loop; host retirement bounds it.
+        Thread({try {
+            val proof=runtime.netBirdIdentityProof()
+            if(proof.length in 3..512 && token==session && engine===runtime)callback?.overlayIdentity(session,proof)
+        }catch(_:Exception){}finally{proofRunning.set(false)}},"native-overlay-proof").apply{isDaemon=true;start()}
+    }
     private val applyNetwork = Runnable {
         latestNetwork?.let { if (it.session == token) engine?.updateNetwork(it.name, it.index) }
     }
@@ -41,6 +54,11 @@ class EngineHostService : Service() {
             }
             worker.post {
                 try {
+                    val outbounds=org.json.JSONObject(config).getJSONArray("outbounds")
+                    managedProofEnabled=(0 until outbounds.length()).any {
+                        val outbound=outbounds.getJSONObject(it)
+                        outbound.optString("managed_namespace").isNotEmpty() && outbound.optString("setup_key").isNotEmpty()
+                    }
                     lockFile = RandomAccessFile(File(noBackupFilesDir, "engine-owner.lock"), "rw")
                     lock = lockFile!!.channel.tryLock() ?: error("identity already owned")
                     tun = fd
@@ -82,6 +100,7 @@ class EngineHostService : Service() {
                 callback?.event(session, PULSE)
                 engine?.netBirdStatus()?.let { callback?.overlayState(session, it) }
                 engine?.routeCheckStatus()?.let { callback?.routeState(session, it) }
+                sampleIdentity(session)
             } }
         }
         override fun networkChanged(session: String, name: String, index: Int) {

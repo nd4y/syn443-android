@@ -36,7 +36,7 @@ object Assignments {
             require(it.payload.notBeforeMs<=window.lowerMs)
             // Enrollment currently advertises these implemented capabilities. Extra native
             // modules must acquire a managed credential namespace before being advertised.
-            require(IdentityOperation.requiredCapabilities.containsAll(it.payload.requiredCapabilities))
+            require(IdentityOperation.supportedCapabilities.containsAll(it.payload.requiredCapabilities))
             require(it.payload.operation=="configure")
         }
     }

@@ -45,7 +45,8 @@ class TunnelService : VpnService() {
     private var policyFetchRunning = false
     private var forcePolicyFetch = false
     private var lastPolicyCheck = -10_000L
-    private var runningConfigHash = ""
+    @Volatile private var runningConfigHash = ""
+    private var runningHasSetup=false
     @Volatile private var destroyed = false
     private val dnsCallbacks = Executors.newFixedThreadPool(2)
     private val dnsAdmission = java.util.concurrent.Semaphore(2)
@@ -59,14 +60,14 @@ class TunnelService : VpnService() {
     private var hostPid = 0
     private var pidIdentity: String? = null
     private var tun: ParcelFileDescriptor? = null
-    private var ready = false
+    @Volatile private var ready = false
     private var lastPulse = 0L
     private var startAt = 0L
     private var stableSince = 0L
     private var successes = 0
     private var healthJob: PolicyChecks? = null
     private var retryHeavy = false
-    private var retiring = false
+    @Volatile private var retiring = false
     @Volatile private var boundGeneration = -1L
     private var lastProbe = 0L
     private var internetHealthy = false
@@ -269,8 +270,9 @@ class TunnelService : VpnService() {
             val raw = try { store.config() } catch (_: Exception) {
                 blackhole(); phase("BlockedByPolicy", "policy_lease_time_or_scope_invalid", cp.generation); return
             }
-            val rendered = EngineConfig.render(raw, noBackupFilesDir)
+            val rendered = policies.render(raw, noBackupFilesDir)
             runningConfigHash = raw?.let { Policy.hash(it) }.orEmpty()
+            runningHasSetup=policies.overlayHasSetup(runningConfigHash)
             RouteSnapshot.configure(raw,runningConfigHash)
             pendingLeaseDeadline = policies.leaseDeadline(runningConfigHash)
             // An expired/invalid config cannot spend the budget while waiting for a replacement.
@@ -289,6 +291,7 @@ class TunnelService : VpnService() {
             token = UUID.randomUUID().toString()
             stableSince = 0; successes = 0; lastProbe = 0
             boundGeneration = cp.generation
+            LoginController.get(this).overlayStarting(checkNotNull(token),runningConfigHash)
             pendingConfig = rendered
             startAt = SystemClock.uptimeMillis(); lastPulse = startAt
             val reservation = fence.reserveStart(startAt)
@@ -300,7 +303,8 @@ class TunnelService : VpnService() {
             binding = bindService(Intent(this, EngineHostService::class.java), newConnection, Context.BIND_AUTO_CREATE)
             bindingAt = SystemClock.uptimeMillis()
             if (!binding) failed("native_bind_failed") else phase("Connecting", "native_start", cp.generation)
-        } catch (_: IllegalArgumentException) { phase("NeedsAction", "configuration_invalid", cp.generation) }
+        } catch (_: OverlayLaunchPending) { phase("Recovering","overlay_credentials_pending",cp.generation) }
+        catch (_: IllegalArgumentException) { phase("NeedsAction", "configuration_invalid", cp.generation) }
         catch (_: Exception) { failed("start_failed", cp.generation) }
     }
     private var pendingConfig = ""
@@ -325,6 +329,15 @@ class TunnelService : VpnService() {
             if (session == token && Recovery.current(store.checkpoint(), boundGeneration) && !retiring)
                 runCatching { OverlaySnapshot.update(raw) }
         } }
+        override fun overlayIdentity(session:String,raw:String) {
+            if(raw.length !in 3..512)return
+            handler.post {
+            if(session!=token || !ready || retiring || destroyed || !Recovery.current(store.checkpoint(),boundGeneration))return@post
+            val generation=boundGeneration;val hash=runningConfigHash
+            LoginController.get(this@TunnelService).overlayIdentity(session,hash,raw) {
+                session==token && generation==boundGeneration && hash==runningConfigHash && ready && !retiring && !destroyed
+            }
+        }}
         override fun routeState(session:String,raw:String) {handler.post {
             if(session!=token || retiring || !ready || !Recovery.current(store.checkpoint(),boundGeneration))return@post
             val scope=routeScope() ?: return@post
@@ -410,6 +423,7 @@ class TunnelService : VpnService() {
                     if (deadline != null) {
                         appliedLeaseDeadline = deadline
                         checkNotNull(host).start(checkNotNull(tun), pendingConfig, checkNotNull(token), iface, index, deadline, platform)
+                        pendingConfig="" // The controller never retains a serialized setup-key copy after dispatch.
                         authorized = true
                     }
                 }
@@ -465,6 +479,7 @@ class TunnelService : VpnService() {
     private fun completeRetirement() {
         if (binding && hostPid == 0 && SystemClock.uptimeMillis() - retirementAt < 3_000) return
         if (verifiedPid() || !ownerReleased()) return
+        token?.let{LoginController.get(this).overlayStopped(it)}
         if (binding) connection?.let { runCatching { unbindService(it) } }
         hostToken?.let { fence.confirmedExit(it, true, SystemClock.uptimeMillis()) }
         hostToken = null
@@ -572,6 +587,11 @@ class TunnelService : VpnService() {
             val deadline = runCatching { policies.leaseDeadline(runningConfigHash) }.getOrDefault(1L)
             if (deadline == 1L) {
                 terminateOwned(); retire(false); phase("BlockedByPolicy", "policy_lease_time_or_scope_invalid")
+            } else if(runningHasSetup && policies.read().journal.phase!="applying" && policies.overlayNeedsRotation(runningConfigHash)) {
+                // Registration is durable and the local grant is erased. Wait
+                // for activation commit, then retire SDK/Go String copies once
+                // and restart from the same owned keys without a setup key.
+                runningHasSetup=false;retire(false);phase("Recovering","overlay_key_cleanup")
             } else if (appliedLeaseDeadline > 0 && SystemClock.elapsedRealtime() >= appliedLeaseDeadline) {
                 // A TUN whose native reader expired is never resurrected by a lease renewal.
                 retire(true)

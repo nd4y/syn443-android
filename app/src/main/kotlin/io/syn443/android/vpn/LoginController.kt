@@ -39,7 +39,7 @@ class LoginController private constructor(private val context:android.app.Applic
     private var invitePreview:InvitePreview?=null
     @Volatile private var invitePair=""
     @Volatile private var inviteState=""
-    internal val assignedRuntime=AssignedPolicyRuntime(::boot,::elapsed)
+    internal val assignedRuntime=AssignedPolicyRuntime(::boot,::elapsed){overlayMaterials[it]}
     private val commands=Any()
     @Volatile private var commandEpoch=0L
     @Volatile private var workerEpoch= -1L
@@ -55,6 +55,17 @@ class LoginController private constructor(private val context:android.app.Applic
     @Volatile private var error=""
     @Volatile private var browser:Pair<Long,String>?=null
     @Volatile private var cached:Pair<LoginIntent,LoginPayload>?=null
+    private data class OverlayAuthority(val epoch:Long,val generation:Long,val time:TrustedTime,
+        val bindings:Map<String,OverlayCredentialBinding>)
+    @Volatile private var overlayAuthority:OverlayAuthority?=null
+    @Volatile private var overlayMaterials:Map<String,OverlayRuntimeMaterial> = emptyMap()
+    private data class OverlayOwner(val session:String,val hash:String)
+    @Volatile private var overlayOwner:OverlayOwner?=null
+    internal fun overlayStarting(session:String,hash:String) {
+        require(session.length in 16..128)
+        if(overlayMaterials[hash]?.authorized()==true)overlayOwner=OverlayOwner(session,hash)
+    }
+    internal fun overlayStopped(session:String) {if(overlayOwner?.session==session)overlayOwner=null}
     @Volatile private var lastAssignmentFetch= -300_000L
     private var provisioningRetry=ProvisioningRetry()
     private data class ChatTicket(val id:String,val generation:Long,val expires:Long,var state:String="pending",var body:String="",var reason:String="")
@@ -427,17 +438,166 @@ class LoginController private constructor(private val context:android.app.Applic
         val receipt=Assignments.receipt(next,s,p,boot(),elapsed())
         val target=if(s.phase==LoginPhase.POLICY_CACHED && s.policyHash==receipt)s
             else LoginRecovery.policyCached(s,s.generation,receipt,s.protectedHash)
-        persistAssignment(s,p,next,target)
+        val accepted=persistAssignment(s,p,next,target)
+        prepareOverlays(accepted,p,next,protocol,scope)
     }
-    private fun persistAssignment(s:LoginIntent,p:LoginPayload,next:AssignmentState,target:LoginIntent=s,canCommit:()->Boolean={true}) {
+    private fun persistAssignment(s:LoginIntent,p:LoginPayload,next:AssignmentState,target:LoginIntent=s,canCommit:()->Boolean={true}):LoginIntent {
         val runtime=assignedRuntime.prepare(target,p,next)
+        var accepted=target
         journal.prepareAssignment(s,next).use {prepared->state().serialized {synchronized(commands) {
             current(s);if(!canCommit())throw LoginStorageException(LoginStorageFailure.STALE)
             journal.commitAssignment(s,prepared)
-            val accepted=if(target==s)s else commit(s,target)
+            accepted=if(target==s)s else commit(s,target)
             cached=accepted to p;assignedRuntime.publish(runtime)
         }}}
         policyChanged()
+        return accepted
+    }
+    private fun clearOverlays() {
+        overlayAuthority=null
+        overlayOwner=null
+        val previous=overlayMaterials;overlayMaterials=emptyMap()
+        previous.values.forEach{it.close()}
+    }
+    private fun overlayAdmitted(binding:OverlayCredentialBinding,hash:String,generation:Long):Boolean {
+        val authority=overlayAuthority ?: return false
+        return authority.epoch==commandEpoch && authority.generation==generation &&
+            cancelledGeneration!=generation && authority.bindings[hash]==binding
+    }
+    private fun overlayWindow(hash:String,generation:Long):TimeWindow {
+        val authority=checkNotNull(overlayAuthority)
+        check(authority.epoch==commandEpoch && authority.generation==generation && hash in authority.bindings)
+        // A process cannot survive reboot. The worker admitted this anchor using
+        // actual BOOT_COUNT; native/Binder reads need only its immutable boot.
+        return authority.time.window(authority.time.boot,elapsed())
+    }
+    private fun overlayVault(binding:OverlayCredentialBinding,hash:String,generation:Long)=OverlayVault(context,
+        ManagedOverlay.namespace(binding.address),{record->overlayAdmitted(binding,hash,generation) &&
+            runCatching{OverlayEnrollments.requireIdentity(record,binding,generation)}.isSuccess},
+        {overlayWindow(hash,generation).upperMs},if(namespace=="device-login-v1")"managed-overlay-v1" else namespace)
+    private fun overlayProvisioner(s:LoginIntent,p:LoginPayload,binding:OverlayCredentialBinding,hash:String,
+        protocol:AuthProtocol?=null,scope:IdentityScope?=null,network:Boolean=true):ManagedOverlayProvisioner {
+        fun delivery(operation:OverlayOperation,consume:Boolean):OverlayDeliveryReply {
+            if(!network)throw AuthException(AuthFailure.TRANSPORT)
+            current(s)
+            fun request(api:AuthProtocol,child:IdentityScope)=api.overlay(operation,consume,binding,checkNotNull(p.session),child)
+            return if(protocol!=null)request(protocol,checkNotNull(scope))
+                else withProtocol(s,p.bootstrap){api,child->request(api,child)}
+        }
+        return ManagedOverlayProvisioner(overlayVault(binding,hash,s.generation),binding,s.generation,p.bootstrap.roots,
+            {overlayAdmitted(binding,hash,s.generation)},{overlayWindow(hash,s.generation)},
+            {checkNotNull(delivery(it,false).envelope)},{delivery(it,true);Unit})
+    }
+    private fun consumeOverlay(provisioner:ManagedOverlayProvisioner) {
+        runCatching{provisioner.acknowledge()}.exceptionOrNull()?.let {e->
+            if(e is AuthException && e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))throw e
+            if(e is LoginStorageException && e.reason==LoginStorageFailure.STALE)throw e
+        }
+    }
+    /** Persist namespace ownership before any grant/SDK effect. Preparation can
+     * recover a cached/keyless identity offline; a missing grant does not invent
+     * authority or displace an independently usable active configuration. */
+    private fun prepareOverlays(initial:LoginIntent,p:LoginPayload,assignment:AssignmentState,
+        protocol:AuthProtocol?=null,scope:IdentityScope?=null,network:Boolean=true) {
+        current(initial)
+        val versions=listOfNotNull(
+            runCatching{Assignments.authorized(assignment,initial,p,boot(),elapsed(),true)}.getOrNull(),
+            runCatching{Assignments.authorized(assignment,initial,p,boot(),elapsed())}.getOrNull()).distinctBy{it.payload.contentHash}
+        val bindings=versions.mapNotNull {v->OverlayAssignments.resolve(v,p.bootstrap.serviceId,initial.ownerTag,initial.deviceId,initial.thumbprint)?.let{v.payload.contentHash to it}}.toMap()
+        var s=initial
+        for(owned in bindings.values.map{ManagedOverlay.namespace(it.address)}.distinct()) {
+            if(owned !in s.overlayNamespaces) {
+                val next=LoginRecovery.claimOverlay(s,s.generation,owned)
+                s=commit(s,next);synchronized(commands){current(s);cached=s to p}
+            }
+        }
+        synchronized(commands) {
+            current(s);overlayAuthority=OverlayAuthority(commandEpoch,s.generation,checkNotNull(assignment.time),bindings.toMap())
+            val keep=overlayMaterials.filter{(hash,material)->bindings[hash]==material.binding && material.authorized() &&
+                (material.available() || overlayOwner?.hash==hash)}
+            val removed=overlayMaterials.filterKeys{it !in keep};overlayMaterials=keep
+            removed.values.forEach{it.close()}
+        }
+        // An active and a candidate config can name the same SDK identity with
+        // different grants. Never alternately discard each other's pending key.
+        // Let its current native owner finish registration; otherwise prepare
+        // the candidate (versions are ordered candidate, active). Once confirmed,
+        // both configs can independently prepare the same keyless SDK identity.
+        val selected=bindings.entries.groupBy{ManagedOverlay.namespace(it.value.address)}.values.flatMap{group->
+            val first=group.first();val record=overlayVault(first.value,first.key,s.generation).snapshot()
+            if(record?.phase in setOf(OverlayPhase.REGISTERED,OverlayPhase.ERASING,OverlayPhase.ERASED,OverlayPhase.ACKNOWLEDGED))group.map{it.key}
+            else {
+                val preferred=group.firstOrNull{it.key==overlayOwner?.hash} ?: first
+                group.filter{it.value.reference==preferred.value.reference && it.value.version==preferred.value.version &&
+                    it.value.securityEpoch==preferred.value.securityEpoch}.map{it.key}
+            }
+        }.toSet()
+        for((hash,binding) in bindings) {
+            if(hash !in selected)continue
+            if(overlayMaterials[hash]?.let{it.available() || it.authorized() && overlayOwner?.hash==hash}==true) {
+                if(network && overlayVault(binding,hash,s.generation).snapshot()?.phase==OverlayPhase.ERASED)
+                    consumeOverlay(overlayProvisioner(s,p,binding,hash,protocol,scope))
+                continue
+            }
+            var secret:OverlaySetupSecret?=null
+            try {
+                secret=overlayProvisioner(s,p,binding,hash,protocol,scope,network).prepare()
+                val record=checkNotNull(overlayVault(binding,hash,s.generation).snapshot())
+                val material=OverlayRuntimeMaterial(binding,hash,s.generation,if(secret==null)record.identityEvidence else "",secret,
+                    {overlayAdmitted(binding,hash,s.generation)},{overlayWindow(hash,s.generation)})
+                try {synchronized(commands) {
+                    current(s);material.requireCurrent()
+                    overlayMaterials=(overlayMaterials+(hash to material)).toMap();secret=null
+                }}catch(e:Exception){material.close();throw e}
+                if(network && record.phase==OverlayPhase.ERASED)
+                    consumeOverlay(overlayProvisioner(s,p,binding,hash,protocol,scope))
+            } catch(e:AuthException) {
+                if(e.reason !in setOf(AuthFailure.TRANSPORT,AuthFailure.THROTTLED,AuthFailure.UNAVAILABLE))throw e
+            } catch(e:LoginStorageException) {if(e.reason==LoginStorageFailure.STALE)throw e
+            } catch(_:IllegalArgumentException) { // Invalid/missing material remains unavailable, never an operator fallback.
+            } finally {secret?.close()}
+        }
+        val prepared=assignedRuntime.prepare(s,p,assignment)
+        synchronized(commands){current(s);assignedRuntime.publish(prepared)}
+        policyChanged()
+    }
+    internal fun renderAssigned(raw:String,stateRoot:File):String {
+        val material=overlayMaterials[io.syn443.policy.Policy.hash(raw)]
+        if(material==null) {
+            val outbounds=JSONObject(raw).getJSONArray("outbounds")
+            if((0 until outbounds.length()).any{outbounds.getJSONObject(it).optString("type")=="netbird"})throw OverlayLaunchPending()
+            return EngineConfig.render(raw,stateRoot)
+        }
+        if(!material.available())throw OverlayLaunchPending()
+        return try{EngineConfig.renderManaged(raw,stateRoot,material)}catch(_:IllegalStateException){throw OverlayLaunchPending()}
+    }
+    internal fun overlayHasSetup(hash:String)=overlayMaterials[hash]?.identityEvidence?.isEmpty()==true
+    internal fun overlayNeedsRotation(hash:String)=overlayMaterials[hash]?.let{it.identityEvidence.isNotEmpty() && it.available()}==true
+    /** Private Binder input only. The service supplies a RAM-only host/config/
+     * recovery fence; it is checked before and after durable registration. */
+    internal fun overlayIdentity(session:String,hash:String,raw:String,stillCurrent:()->Boolean):Boolean {
+        if(raw.length !in 1..512 || !stillCurrent())return false
+        val expected=OverlayOwner(session,hash)
+        fun owned()=overlayOwner==expected && stillCurrent()
+        return submitIfIdle(admit={owned() && overlayMaterials[hash]?.authorized()==true}) {
+            val s=journal.snapshot();current(s);val p=payload(s)
+            val binding=checkNotNull(overlayAuthority?.bindings?.get(hash))
+            require(overlayAdmitted(binding,hash,s.generation) && owned())
+            val proof=Identity.objectJSON(raw);require(proof.keys==setOf("namespace","identityEvidence"))
+            fun text(key:String)=proof.getValue(key).let{require(it is kotlinx.serialization.json.JsonPrimitive && it.isString);it.content}
+            val provisioner=overlayProvisioner(s,p,binding,hash)
+            val registered=provisioner.registered(text("namespace"),text("identityEvidence"),::owned)
+            val material=OverlayRuntimeMaterial(binding,hash,s.generation,registered.identityEvidence,null,
+                {overlayAdmitted(binding,hash,s.generation)},{overlayWindow(hash,s.generation)})
+            synchronized(commands) {
+                current(s);require(owned());material.requireCurrent()
+                val old=overlayMaterials[hash];overlayMaterials=(overlayMaterials+(hash to material)).toMap();old?.close()
+            }
+            prepareOverlays(s,p,checkNotNull(journal.readAssignment(s)),network=false)
+            // No network error can recreate erased setup material. The durable
+            // ERASED operation retries independently on later preparation.
+            consumeOverlay(provisioner)
+        }
     }
     internal fun assignmentTicket():AssignedPolicyRuntime.Ticket = assignedRead {assignedRuntime.ticket(it)}
     /** Commands persist on the identity worker. The native caller observes the resulting view;
@@ -451,7 +611,9 @@ class LoginController private constructor(private val context:android.app.Applic
         val p=payload(s);val before=checkNotNull(journal.readAssignment(s))
         require(before.journal.activationGeneration==ticket.activation)
         if(!canCommit())throw LoginStorageException(LoginStorageFailure.STALE)
-        persistAssignment(s,p,change(before,s,p),canCommit=canCommit)
+        val after=change(before,s,p)
+        val accepted=persistAssignment(s,p,after,canCommit=canCommit)
+        prepareOverlays(accepted,p,after)
     }
     internal fun beginAssignment(ticket:AssignedPolicyRuntime.Ticket,baseline:List<Boolean>):Boolean {
         val values=baseline.toList();require(values.size in 1..8)
@@ -521,9 +683,10 @@ class LoginController private constructor(private val context:android.app.Applic
         if(fetch)fetchAssignment(s,p,protocol,scope)
     }
     private fun reauthenticate(s:LoginIntent) {synchronized(commands) {
-        assignedRuntime.clear();commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null;policyChanged()
+        clearOverlays();assignedRuntime.clear();commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null;policyChanged()
     }}
-    private fun resumeWorker(s:LoginIntent) {
+    private fun resumeWorker(initial:LoginIntent) {
+        var s=initial
         if(s.phase==LoginPhase.PROVISIONING)lastAssignmentFetch=elapsed()
         val p=payload(s)
         if(s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING)) {
@@ -531,8 +694,10 @@ class LoginController private constructor(private val context:android.app.Applic
             if(assignment!=null) {
                 if(assignment.journal.phase=="applying" && !assignedRuntime.contains(s,assignment)) {
                     assignment=Assignments.abort(assignment,s,p,"interrupted_activation")
-                    persistAssignment(s,p,assignment)
+                    s=persistAssignment(s,p,assignment)
+                    prepareOverlays(s,p,assignment,network=false);s=journal.snapshot();current(s)
                 } else {
+                    prepareOverlays(s,p,assignment,network=false);s=journal.snapshot();current(s)
                     val prepared=assignedRuntime.prepare(s,p,assignment)
                     synchronized(commands) {current(s);assignedRuntime.publish(prepared)}
                     policyChanged()
@@ -558,7 +723,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }}
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
-        commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;assignedRuntime.clear();discardQueued();policyChanged()
+        commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {
@@ -648,6 +813,6 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     internal fun shutdownTest() {
         require(testExchange!=null && namespace.startsWith("test-") && io.syn443.android.BuildConfig.DEBUG)
-        check(pendingCommands.get()==0);worker.shutdownNow();http.close()
+        check(pendingCommands.get()==0);clearOverlays();worker.shutdownNow();http.close()
     }
 }

@@ -58,6 +58,52 @@ class LoginControllerTest {
         @Volatile var policyReady=false
         @Volatile var foreignPolicyKey=false
         @Volatile var overlayPolicy=false
+        @Volatile var managedOverlayPolicy=false
+        @Volatile var managedTag="home"
+        @Volatile var badOverlayGrant=false
+        @Volatile var holdOverlayFetch=false
+        @Volatile var dropOverlayConsume=false
+        var beforeOverlayFetch:(()->Unit)?=null
+        val overlayFetchEntered=CountDownLatch(1);val releaseOverlayFetch=CountDownLatch(1)
+        var overlayReference=Identity.random()
+        val overlaySetupValue=UUID.randomUUID().toString()
+        val overlayFetchBodies=mutableListOf<String>();val overlayConsumeBodies=mutableListOf<String>()
+        fun overlayBinding(thumb:String)=OverlayCredentialBinding(OverlayAddress(bootstrap.serviceId,LoginRecovery.ownerTag(bootstrap,"synthetic-owner"),sessions.getValue(thumb).deviceId,
+            "home","netbird","fixture-resource","fixture-network",1,"https://overlay.example.invalid"),thumb,overlayReference,1,0,now()+3_600_000)
+        private fun managedEngine(thumb:String):String {
+            val b=overlayBinding(thumb);val a=b.address
+            return org.json.JSONObject().put("outbounds",org.json.JSONArray().put(org.json.JSONObject().put("type","netbird").put("tag",managedTag)
+                .put("management_url",a.managementURL).put("managed",org.json.JSONObject().put("overlayId",a.overlayId).put("resourceId",a.resourceId)
+                    .put("networkId",a.networkId).put("identityEpoch",a.identityEpoch).put("setupReference",b.reference).put("setupVersion",b.version))))
+                .put("route",org.json.JSONObject().put("final",managedTag)).toString()
+        }
+        private fun overlayReply(thumb:String,request:ByteArray,consume:Boolean):Reply {
+            val session=sessions.getValue(thumb);val b=overlayBinding(thumb)
+            val operation=Identity.objectJSON(request.toString(Charsets.UTF_8))
+            check(operation.keys==setOf("operationId","namespace","reference","version"))
+            check(operation.getValue("namespace").jsonPrimitive.content==ManagedOverlay.namespace(b.address))
+            if(consume) {
+                overlayConsumeBodies+=request.toString(Charsets.UTF_8)
+                if(dropOverlayConsume)throw java.io.IOException("synthetic lost overlay consumption ACK")
+                return reply(text="""{"consumed":true}""")
+            }
+            check(operation.getValue("reference").jsonPrimitive.content==b.reference && operation.getValue("version").jsonPrimitive.long==b.version)
+            beforeOverlayFetch?.invoke();overlayFetchBodies+=request.toString(Charsets.UTF_8);overlayFetchEntered.countDown()
+            if(holdOverlayFetch)check(releaseOverlayFetch.await(10,TimeUnit.SECONDS))
+            val a=b.address
+            val payload=buildJsonObject {
+                put("schemaVersion",1);put("audience","syn443-overlay-credential")
+                putJsonObject("address") {
+                    put("serviceId",a.serviceId);put("ownerTag",a.ownerTag);put("deviceId",session.deviceId);put("overlayId",a.overlayId)
+                    put("provider",a.provider);put("resourceId",a.resourceId);put("networkId",a.networkId);put("identityEpoch",a.identityEpoch);put("managementURL",a.managementURL)
+                }
+                put("keyThumbprint",if(badOverlayGrant)Identity.random() else thumb);put("reference",b.reference);put("version",b.version);put("securityEpoch",b.securityEpoch)
+                put("kind","netbird.setup-key");put("issuedAtMs",now());put("notBeforeMs",now());put("expiresMs",now()+300_000);put("value",overlaySetupValue)
+            }
+            val input=Identity.encode("""{"alg":"ES256","kid":"root","typ":"syn443-overlay-credential+jws"}""".toByteArray())+"."+Identity.encode(Canonical.encode(payload).toByteArray())
+            val envelope=input+"."+Identity.encode(Identity.derToRaw(Signature.getInstance("SHA256withECDSA").run {initSign(root.private);update(input.toByteArray());sign()}))
+            return reply(text=Canonical.encode(buildJsonObject{put("consumed",false);put("envelope",envelope)}))
+        }
         @Volatile var policyRevision=1L
         @Volatile var engineTag="direct"
         @Volatile var policyStatus=200
@@ -118,6 +164,10 @@ class LoginControllerTest {
                 put("kid","test");put("kty","RSA");put("alg","RS256");put("use","sig");put("n",Identity.encode(bytes));put("e","AQAB")
             })}}))
             val thumb=checkedProof(method,url,headers,body)
+            if(java.net.URI(url).path.startsWith("/v1/device/overlay/")) {
+                check(headers.getValue("Authorization")=="DPoP "+sessions.getValue(thumb).accessToken)
+                return overlayReply(thumb,checkNotNull(body),url.endsWith("/consume"))
+            }
             if(java.net.URI(url).path.startsWith("/v1/chat/")) {
                 check(headers.getValue("Authorization")=="DPoP "+sessions.getValue(thumb).accessToken)
                 return reply(chatStatus,"""{"admin":false}""")
@@ -159,10 +209,10 @@ class LoginControllerTest {
                 if(!policyReady)return reply(202,"""{"code":"provisioning_pending"}""")
                 val session=sessions.getValue(thumb);check(headers.getValue("Authorization")=="DPoP "+session.accessToken)
                 val envelope=policies.getOrPut(thumb+foreignPolicyKey+policyRevision) {
-                    val engine=if(overlayPolicy)"""{"outbounds":[{"type":"netbird","tag":"overlay","management_url":"https://overlay.example.invalid"}],"route":{"final":"overlay"}}"""
+                    val engine=if(managedOverlayPolicy)managedEngine(thumb) else if(overlayPolicy)"""{"outbounds":[{"type":"netbird","tag":"overlay","management_url":"https://overlay.example.invalid"}],"route":{"final":"overlay"}}"""
                         else """{"outbounds":[{"type":"direct","tag":"$engineTag"}],"route":{"final":"$engineTag"}}"""
                     val payload=Payload(2,policyRevision,0,0,session.deviceId,"syn443-device",now(),now(),now()+30_000,now()+3_600_000,
-                        IdentityOperation.requiredCapabilities,"m1-local-v1",Identity.encode(engine.toByteArray()),Policy.hash(engine),
+                        IdentityOperation.requiredCapabilities+(if(managedOverlayPolicy)listOf("overlay.credentials.v1") else emptyList()),"m1-local-v1",Identity.encode(engine.toByteArray()),Policy.hash(engine),
                         Gate(30,false,listOf(Check("internet","https_204","https://health.example.org/generate_204"))),
                         keyThumbprint=if(foreignPolicyKey)Identity.random() else thumb)
                     val input=Identity.encode("""{"alg":"ES256","kid":"root","typ":"syn443-policy+jws"}""".toByteArray())+"."+
@@ -202,7 +252,7 @@ class LoginControllerTest {
         }
         fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue);controller.recover();idle()}
         fun cleanup() {
-            server.release.countDown();server.releaseRevoke.countDown();controller.cancel();idle();check(journal.snapshot().phase==LoginPhase.SIGNED_OUT)
+            server.release.countDown();server.releaseRevoke.countDown();server.releaseOverlayFetch.countDown();controller.cancel();idle();check(journal.snapshot().phase==LoginPhase.SIGNED_OUT)
             controller.shutdownTest();check(File(context.noBackupFilesDir,"login/$namespace").deleteRecursively())
             val bootstrap=File(context.noBackupFilesDir,"$namespace-bootstrap.json")
             android.util.AtomicFile(bootstrap).delete()
@@ -649,5 +699,104 @@ class LoginControllerTest {
         assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
         assertEquals(1,f.journal.snapshot().tombstones.size)
         assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/protected.bin").exists())
+    }
+
+    @Test fun managedControllerClaimsNamespaceBeforeFetchAndRestoresProtectedMaterialWithoutRefetch()=fixture{f->
+        f.server.policyReady=true;f.server.managedOverlayPolicy=true
+        f.server.beforeOverlayFetch={
+            val login=f.journal.snapshot();val binding=f.server.overlayBinding(login.thumbprint)
+            assertEquals(listOf(ManagedOverlay.namespace(binding.address)),login.overlayNamespaces)
+            assertEquals(LoginPhase.POLICY_CACHED,login.phase)
+        }
+        f.controller.callback(f.begin());f.idle()
+        val login=f.journal.snapshot();val view=f.controller.assignedRuntime.read(login)
+        assertTrue(f.controller.status().getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+        assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("runtimeAuthorized"))
+        val raw=view.candidate!!.engineConfig;assertFalse(raw.contains(f.server.overlaySetupValue))
+        val rendered=org.json.JSONObject(f.controller.renderAssigned(raw,File(context.noBackupFilesDir,f.namespace)))
+        val outbound=rendered.getJSONArray("outbounds").getJSONObject(0)
+        assertEquals(f.server.overlaySetupValue,outbound.getString("setup_key"));assertFalse(outbound.has("managed"))
+        assertEquals(ManagedOverlayStorage(context,f.namespace).directory(login.overlayNamespaces.single()).absolutePath,outbound.getString("state_directory"))
+        assertEquals(1,f.server.overlayFetchBodies.size)
+        f.restart();assertEquals(login.overlayNamespaces,f.journal.snapshot().overlayNamespaces)
+        assertTrue(f.controller.status().getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+        assertEquals(1,f.server.overlayFetchBodies.size)
+        assertThrows(IllegalArgumentException::class.java){f.controller.renderAssigned(raw+" ",context.noBackupFilesDir)}
+    }
+    @Test fun managedControllerNativeReceiptErasesGrantAndRecoversKeylessWhileConsumptionIsOffline()=fixture{f->
+        f.server.policyReady=true;f.server.managedOverlayPolicy=true;f.server.dropOverlayConsume=true
+        f.controller.callback(f.begin());f.idle()
+        assertTrue(f.controller.beginAssignment(f.controller.assignmentTicket(),listOf(false)));f.idle()
+        val applying=f.controller.assignmentTicket();val login=f.journal.snapshot()
+        val raw=f.controller.assignedRuntime.config(login);val hash=Policy.hash(raw);val owned=login.overlayNamespaces.single()
+        val session=UUID.randomUUID().toString();f.controller.overlayStarting(session,hash)
+        val evidence=Identity.random();val proof=org.json.JSONObject().put("namespace",owned).put("identityEvidence",evidence).toString()
+        assertFalse(f.controller.overlayIdentity(UUID.randomUUID().toString(),hash,proof){true})
+        assertFalse(f.controller.overlayIdentity(session,hash,proof){false})
+        assertTrue(f.controller.overlayIdentity(session,hash,proof){true});f.idle()
+        val vault=OverlayVault(context,owned,{true},{0},f.namespace)
+        assertEquals(OverlayPhase.ERASED,vault.snapshot()!!.phase);assertEquals(evidence,vault.snapshot()!!.identityEvidence)
+        assertFalse(f.controller.overlayHasSetup(hash));assertTrue(f.controller.overlayNeedsRotation(hash))
+        val keyless=org.json.JSONObject(f.controller.renderAssigned(raw,File(context.noBackupFilesDir,f.namespace))).getJSONArray("outbounds").getJSONObject(0)
+        assertFalse(keyless.has("setup_key"));assertEquals(owned,keyless.getString("managed_namespace"))
+        assertTrue(f.controller.finishAssignment(applying,listOf(true),true));f.idle()
+        assertNotNull(f.journal.readAssignment(f.journal.snapshot())!!.journal.active)
+        f.server.dropOverlayConsume=false;f.controller.retry(f.journal.snapshot().generation);f.idle()
+        assertEquals(OverlayPhase.ACKNOWLEDGED,vault.snapshot()!!.phase)
+        assertTrue(f.server.overlayConsumeBodies.isNotEmpty());assertEquals(1,f.server.overlayConsumeBodies.toSet().size)
+        assertEquals(1,f.server.overlayFetchBodies.size)
+        f.server.policyStatus=503;f.restart()
+        assertEquals(owned,f.journal.snapshot().overlayNamespaces.single())
+        assertEquals(raw,f.controller.assignedRuntime.config(f.journal.snapshot()))
+        assertFalse(org.json.JSONObject(f.controller.renderAssigned(raw,File(context.noBackupFilesDir,f.namespace))).getJSONArray("outbounds").getJSONObject(0).has("setup_key"))
+        assertEquals(1,f.server.overlayFetchBodies.size)
+    }
+    @Test fun managedControllerLogoutFencesALateCredentialAndKeepsNoRuntimeMaterial()=fixture{f->
+        f.server.policyReady=true;f.server.managedOverlayPolicy=true;f.server.holdOverlayFetch=true
+        f.controller.callback(f.begin());assertTrue(f.server.overlayFetchEntered.await(12,TimeUnit.SECONDS))
+        val login=f.journal.snapshot();assertEquals(1,login.overlayNamespaces.size)
+        f.controller.cancel();f.server.releaseOverlayFetch.countDown();f.idle()
+        assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+        assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("runtimeAuthorized"))
+        assertTrue(f.server.overlayConsumeBodies.isEmpty())
+        assertNull(OverlayVault(context,login.overlayNamespaces.single(),{false},{Long.MAX_VALUE},f.namespace).snapshot())
+        assertFalse(f.controller.overlayIdentity(UUID.randomUUID().toString(),"0".repeat(64),"{}"){true})
+    }
+    @Test fun managedControllerRejectsSignedWrongAddressAndRetriesTheSameReservedOperation()=fixture{f->
+        f.server.policyReady=true;f.server.managedOverlayPolicy=true;f.server.badOverlayGrant=true
+        f.controller.callback(f.begin());f.idle()
+        val login=f.journal.snapshot();val owned=login.overlayNamespaces.single()
+        val vault=OverlayVault(context,owned,{true},{0},f.namespace);val pending=vault.snapshot()!!
+        assertEquals(OverlayPhase.RESERVED,pending.phase)
+        assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+        f.server.badOverlayGrant=false;f.controller.retry(login.generation);f.idle()
+        assertEquals(pending.operation,vault.snapshot()!!.operation);assertEquals(OverlayPhase.ENROLLING,vault.snapshot()!!.phase)
+        assertEquals(2,f.server.overlayFetchBodies.size);assertEquals(1,f.server.overlayFetchBodies.toSet().size)
+        val raw=f.controller.assignedRuntime.read(f.journal.snapshot()).candidate!!.engineConfig
+        f.controller.cancel();f.idle()
+        assertThrows(IllegalArgumentException::class.java){f.controller.renderAssigned(raw,context.noBackupFilesDir)}
+        assertTrue(f.server.overlayConsumeBodies.isEmpty())
+    }
+
+    @Test fun activePendingIdentityAndFreshCandidateNeverConsumeEachOthersGrant()=fixture{f->
+        f.server.policyReady=true;f.server.managedOverlayPolicy=true
+        f.controller.callback(f.begin());f.idle()
+        assertTrue(f.controller.beginAssignment(f.controller.assignmentTicket(),listOf(false)));f.idle()
+        assertTrue(f.controller.finishAssignment(f.controller.assignmentTicket(),listOf(true),true));f.idle()
+        val login=f.journal.snapshot();val old=f.controller.assignedRuntime.config(login);val oldHash=Policy.hash(old)
+        val session=UUID.randomUUID().toString();f.controller.overlayStarting(session,oldHash)
+        f.server.overlayReference=Identity.random();f.server.policyRevision=2;f.server.managedTag="renamed-home"
+        f.controller.retry(login.generation);f.idle()
+        assertEquals(1,f.server.overlayFetchBodies.size);assertTrue(f.server.overlayConsumeBodies.isEmpty())
+        assertEquals(old,f.controller.assignedRuntime.config(f.journal.snapshot()))
+        assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+        val proof=org.json.JSONObject().put("namespace",login.overlayNamespaces.single()).put("identityEvidence",Identity.random()).toString()
+        assertTrue(f.controller.overlayIdentity(session,oldHash,proof){true});f.idle()
+        assertTrue(f.controller.status().getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+        val candidate=f.controller.assignedRuntime.read(f.journal.snapshot()).candidate!!
+        assertNotEquals(oldHash,candidate.payload.contentHash);assertFalse(f.controller.overlayHasSetup(candidate.payload.contentHash))
+        assertEquals(1,f.server.overlayFetchBodies.size)
+        val outbound=org.json.JSONObject(f.controller.renderAssigned(candidate.engineConfig,File(context.noBackupFilesDir,f.namespace))).getJSONArray("outbounds").getJSONObject(0)
+        assertFalse(outbound.has("setup_key"));assertEquals(login.overlayNamespaces.single(),outbound.getString("managed_namespace"))
     }
 }

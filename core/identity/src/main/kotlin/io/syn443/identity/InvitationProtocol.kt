@@ -25,7 +25,8 @@ private fun inviteOpaque(raw:String)=raw.matches(Regex("[A-Za-z0-9_-]{43}")) && 
                 val key=value.getValue("key").jsonObject
                 require(key.keys==setOf("crv","kty","x","y") && key.getValue("crv").inviteText()=="P-256" && key.getValue("kty").inviteText()=="EC")
                 require(inviteOpaque(key.getValue("x").inviteText()) && inviteOpaque(key.getValue("y").inviteText()))
-                require(value.getValue("capabilities")==JsonArray(IdentityOperation.requiredCapabilities.map(::JsonPrimitive)))
+                require(listOf(IdentityOperation.requiredCapabilities,IdentityOperation.supportedCapabilities).any{
+                    value.getValue("capabilities")==JsonArray(it.map(::JsonPrimitive))})
             }
             "/v1/invitations/status","/v1/invitations/complete","/v1/invitations/abandon" ->
                 require(value.keys==setOf("requestId","id") && inviteOpaque(value.getValue("id").inviteText()))
@@ -35,7 +36,7 @@ private fun inviteOpaque(raw:String)=raw.matches(Regex("[A-Za-z0-9_-]{43}")) && 
     companion object {
         fun claim(code:String,key:ECPublicKey)=InvitationOperation("/v1/invitations/claim",Canonical.encode(buildJsonObject {
             put("requestId",Identity.random());put("code",code);put("key",Identity.jwk(key))
-            put("capabilities",JsonArray(IdentityOperation.requiredCapabilities.map(::JsonPrimitive)))
+            put("capabilities",JsonArray(IdentityOperation.supportedCapabilities.map(::JsonPrimitive)))
         }))
         fun mutation(action:String,id:String)=InvitationOperation("/v1/invitations/$action",Canonical.encode(buildJsonObject {
             put("requestId",Identity.random());put("id",id)
