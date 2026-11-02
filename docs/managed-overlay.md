@@ -23,3 +23,13 @@ network/config changes and never substitute an operator identity. Logout/revoke
 must withdraw permits first, wait for confirmed native owner release, then retire
 only the owned managed identity; a permitted rollback retains the old identity.
 These remaining paths require independent API/native/physical tests.
+
+The Android cryptographic consumer verifies the separate credential signature,
+closed canonical payload and every addressed field before exposing a setup value.
+It uses both conservative clock bounds: not-before must be reached by the lower
+bound, and expiry/offline lease must remain valid beyond the upper bound. A
+borrowed byte buffer is zeroed on success/failure; closing the owner never waits
+for a blocked borrower. Immutable JSON/crypto strings remain subject to JVM GC.
+The core does not fetch or persist a secret and does not enable assigned NetBird;
+protected delivery/cache, acknowledgment and native retirement remain pending.
+The shared overlay-credential schema is byte-identical in both repositories.
