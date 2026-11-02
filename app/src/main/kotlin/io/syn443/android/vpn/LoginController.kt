@@ -24,17 +24,17 @@ import javax.net.ssl.TrustManagerFactory
 /** Controller-process pilot. One bounded worker; intent writes never wait for Keystore/network. */
 class LoginController private constructor(private val context:android.app.Application,
     private val namespace:String="device-login-v1",private val testExchange:IdentityExchange?=null,
-    private val testBeforeQueue:(()->Unit)?=null) {
+    private val testBeforeQueue:(()->Unit)?=null,private val testTrustAnchor:TrustAnchor?=null) {
     companion object {
         @Volatile private var instance:LoginController?=null
         @Synchronized fun get(context:Context):LoginController = instance ?: LoginController(context.applicationContext as android.app.Application).also {instance=it}
-        internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange,beforeQueue:(()->Unit)?=null):LoginController {
+        internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange,beforeQueue:(()->Unit)?=null,anchor:TrustAnchor?=null):LoginController {
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") && namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
-            return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue)
+            return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue,anchor)
         }
     }
     private val journal=LoginJournal(context,namespace)
-    private val bootstrapTrust=BootstrapTrustStore(context,if(namespace=="device-login-v1")"installation-trust-v1" else "$namespace-trust")
+    private val bootstrapTrust=BootstrapTrustStore(context,if(namespace=="device-login-v1")"installation-trust-v1" else "$namespace-trust",testTrustAnchor)
     private data class InvitePreview(val id:String,val raw:String,val until:Long,var result:JSONObject?=null)
     private var invitePreview:InvitePreview?=null
     @Volatile private var invitePair=""
@@ -367,7 +367,7 @@ class LoginController private constructor(private val context:android.app.Applic
                 pending=next
             }
             var time=pending.time
-            if(time==null || runCatching {time!!.window(boot(),elapsed())}.isFailure) {
+            if(time==null || runCatching {time.window(boot(),elapsed())}.isFailure) {
                 time=protocol.time(scope,time);save(pending.copy(time=time))
             }
             val now=checkNotNull(time)
@@ -389,7 +389,7 @@ class LoginController private constructor(private val context:android.app.Applic
             synchronized(commands){current(next);invitePair="";inviteState=""}
             registered=next to session
         } finally {scope.cancel();synchronized(commands){if(activeScope===scope)activeScope=null}}
-        registered?.let {(next,payload)->withProtocol(next,payload.bootstrap){protocol,child->fetchAssignment(next,payload,protocol,child)}}
+        registered.let {(next,payload)->withProtocol(next,payload.bootstrap){protocol,child->fetchAssignment(next,payload,protocol,child)}}
     }
     private fun provision(initial:LoginIntent,p:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
         var s=initial;val user=checkNotNull(p.user)

@@ -38,6 +38,13 @@ for path in paths:
         assert not any(case.find(k) is not None for k in ("skipped","failure","error")),(path,case.attrib)
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
+if mode=="identity":
+    assert {"manualClaimConfirmationAndCompletionConvergeOnNormalBoundSession",
+        "sameProtectedPendingCanResumeAndThenUseExistingLoginPolicyLifecycle",
+        "stateSubstitutionClockRollbackAndNumericCoercionFailClosed",
+        "malformedOperationsStatesAndWrongKeyNeverReachNetwork",
+        "transportCancellationAndServerErrorsRemainDistinct",
+        "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
     route_activation_required={"assignedActivationWaitsForCandidateRoutesAndIgnoresOptionalFailure",
         "assignedFinishRechecksLocalProofAfterEncryptedPreparation",
@@ -97,6 +104,10 @@ if mode=="emulator":
                  "androidDnsLiteralNeverStartsPlatformQuery", "androidDnsCallbacksKeepFailuresDistinctAndCancelQuery",
                  "androidDnsDeadlineCancelsQueryAndRejectsLateSuccess", "androidDnsCancellationReleasesWorkersForNextPolicyCheck"}
     required |= identity_required | chat_required | route_activation_required
+    required |= {"qrImageReturnsOnlyASyntacticallyBoundedInvitation",
+        "floorsPersistAcrossRecreationAndCorruptionNeverResetsToInstallationRoot",
+        "manualInvitationStaysLocalUntilConfirmationAndThenUsesOrdinarySession",
+        "cancelledClaimCannotCompleteOrResurrectItsRetiredKey"}
     required |= {"browserReservationAndCancellationPreserveVpnAndDeleteTheKey",
         "controllerRestartResumesSameBrowserGenerationWithoutANewKey",
         "exactErrorCallbackIsSingleUseAndNeverConnectsVpn"}

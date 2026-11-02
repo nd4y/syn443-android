@@ -2,6 +2,7 @@ package io.syn443.identity
 
 import io.syn443.policy.Canonical
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 import java.security.KeyPairGenerator
@@ -68,4 +69,14 @@ class LoginPayloadTest {
         invalid {LoginPayload.decode(raw.replace("\"generation\":1","\"generation\":\"1\""),browser)}
         invalid {LoginPayload.decode(raw.dropLast(1)+",\"extra\":1}",browser)}
     }
+    @Test fun previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding() {
+        for((payload,intent) in listOf(LoginPayload(bootstrap,pending=pending) to browser,
+            LoginPayload(bootstrap,user=user) to authenticated,LoginPayload(bootstrap,session=session) to registered)) {
+            val before=JsonObject(Identity.objectJSON(payload.encode())-"invitation")
+            val decoded=LoginPayload.decode(Canonical.encode(before),intent)
+            assertEquals(payload.encode(),decoded.encode())
+            invalid {LoginPayload.decode(Canonical.encode(before),intent.copy(authority=Identity.random()))}
+        }
+    }
+
 }

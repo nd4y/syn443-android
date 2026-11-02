@@ -34,10 +34,10 @@ class BootstrapTrustStoreTest {
         val namespace="test-trust-"+UUID.randomUUID().toString().replace("-","").take(20)
         val root=pair();val online=pair();val anchor=TrustAnchor("test-root",Base64.getEncoder().encodeToString(root.public.encoded),1)
         val now=System.currentTimeMillis()/1000
-        fun link(revision:Long):String {
-            val value=ServiceDescriptor(1,"syn443-client-bootstrap",1,revision,"service-a","https://id.example.invalid/realms/test","syn443-android","https://api.example.invalid",
+        fun link(revision:Long,signer:KeyPair=root,trust:TrustAnchor=anchor):String {
+            val value=ServiceDescriptor(1,"syn443-client-bootstrap",trust.epoch,revision,"service-a","https://id.example.invalid/realms/test","syn443-android","https://api.example.invalid",
                 mapOf("online" to Base64.getEncoder().encodeToString(online.public.encoded)),now,now,now+3600)
-            val manifest=signed(root,anchor.id,Canonical.json.encodeToJsonElement(value),"syn443-bootstrap+jws")
+            val manifest=signed(signer,trust.id,Canonical.json.encodeToJsonElement(value),"syn443-bootstrap+jws")
             fun url(s:String)=URLEncoder.encode(s,"UTF-8")
             return "syn443://enroll/v1?service=service-a&origin="+url(value.apiOrigin)+"&code="+Identity.random()+"&bootstrap="+url(manifest)
         }
@@ -51,10 +51,18 @@ class BootstrapTrustStoreTest {
                 val reopened=BootstrapTrustStore(context,namespace,anchor)
                 try {reopened.preview(first);fail("bootstrap rollback accepted")}catch(_:IllegalArgumentException){}
                 assertEquals(2L,reopened.accept(second).floor.revision)
+                val next=pair();val nextAnchor=TrustAnchor("test-root-next",Base64.getEncoder().encodeToString(next.public.encoded),2)
+                val transition=RootTransition(1,"syn443-root-transition",anchor.id,nextAnchor.id,nextAnchor.spki,2,now,now,now+3600)
+                val payload=Canonical.json.encodeToJsonElement(transition)
+                val rotation=RootRotation(signed(root,anchor.id,payload,"syn443-root-transition+jws"),signed(next,nextAnchor.id,payload,"syn443-root-transition+jws"))
+                reopened.rotate(Canonical.json.encodeToString(rotation))
+                val third=link(3,next,nextAnchor)
+                assertEquals(3L,BootstrapTrustStore(context,namespace,anchor).accept(third).floor.revision)
+                try {reopened.preview(link(4));fail("retired installation root accepted")}catch(_:IllegalArgumentException){}
                 val file=File(context.noBackupFilesDir,"$namespace.bin")
                 val raw=file.readBytes();assertFalse(raw.toString(Charsets.ISO_8859_1).contains("api.example.invalid"))
                 file.writeBytes(raw.copyOf().apply {this[lastIndex]=(this[lastIndex].toInt() xor 1).toByte()})
-                try {BootstrapTrustStore(context,namespace,anchor).preview(second);fail("corruption reset trust")}catch(_:Exception){}
+                try {BootstrapTrustStore(context,namespace,anchor).preview(third);fail("corruption reset trust")}catch(_:Exception){}
             }.get(20,TimeUnit.SECONDS)
         }finally{executor.shutdownNow();File(context.noBackupFilesDir,"$namespace.bin").delete()}
     }

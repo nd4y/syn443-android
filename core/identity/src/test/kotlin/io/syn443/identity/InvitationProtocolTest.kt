@@ -71,6 +71,7 @@ class InvitationProtocolTest {
         val completing=LoginRecovery.invitationProgress(prepared,prepared.generation,f.state.ownerTag,true,Identity.random())
         val payload=LoginPayload(f.bootstrap,invitation=pending)
         assertEquals(payload,LoginPayload.decode(payload.encode(),completing))
+        assertFalse(LoginRecovery.cancel(prepared,prepared.generation).tombstones.any())
         assertEquals(LoginResume.RETRY_INVITATION,LoginRecovery.resume(completing,true,true,2,1000))
         val reply=f.client.complete(pending.completion!!,pending.reply!!,f.time,IdentityScope())
         val registered=LoginRecovery.invited(completing,completing.generation,reply,Identity.random())

@@ -17,6 +17,7 @@ private fun inviteOpaque(raw:String)=raw.matches(Regex("[A-Za-z0-9_-]{43}")) && 
     init {
         require(body.toByteArray(Charsets.UTF_8).size<=8192)
         val value=Identity.objectJSON(body)
+        require("requestId" in value)
         require(value.getValue("requestId").inviteText().matches(Regex("[A-Za-z0-9_-]{24,128}")))
         when(path) {
             "/v1/invitations/claim" -> {

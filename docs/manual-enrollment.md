@@ -42,9 +42,15 @@ uncompleted reservations without widening the publisher's general session rights
 JVM tests cover protocol/key/body/time/owner/session binding, substitution,
 clock/reboot behavior, pending/error/cancel mapping and shared login transitions.
 New critical classes join the unchanged90% per-class identity line gate. Emulator
-tests cover QR decoding and durable bootstrap floors/corruption. Exact new Actions
+tests cover QR decoding, durable bootstrap floors/dual-root rotation/corruption,
+and the actual controller/Keystore/journal with cryptographically checked
+synthetic invitation/session replies, including cancellation during a held claim. Exact new Actions
 results and physical Xperia USB/Wi-Fi enrollment/UI/recovery acceptance are pending.
 This implementation is not evidence that all M2/M3 requirements are complete.
 
 QR decoding uses the exact ZXing core3.5.4 artifact from Maven Central
 (https://repo.maven.apache.org/maven2/com/google/zxing/core/3.5.4/).
+
+The closed invitation-openapi.json contract is byte-identical to control plane.
+Required test-name checks and independent JaCoCo class inventory prevent missing
+invitation tests/classes from silently passing the unchanged coverage gates.
