@@ -172,6 +172,10 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 			return errManagedIdentity
 		}
 	}
+	hostname, err := peerHostname(o.options.StateDirectory, o.options.ManagedNamespace, o.options.Hostname)
+	if err != nil {
+		return err
+	}
 	u := newUnderlay(o.ctx, vlessGroupDialer{manager: o.manager, tag: o.options.Detour})
 	o.mu.Lock()
 	if o.closed {
@@ -190,7 +194,7 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	o.releaseProcess = releaseProcess
 	o.mu.Unlock()
 	opts := embed.Options{
-		DeviceName:     o.options.Hostname,
+		DeviceName:     hostname,
 		ManagementURL:  o.options.ManagementURL,
 		SetupKey:       o.options.SetupKey,
 		ConfigPath:     filepath.Join(o.options.StateDirectory, "config.json"),

@@ -244,7 +244,9 @@
         "tools/enrollment_fixture.py",
         "tools/test_enrollment_fixture.py",
         "tools/run_enrolled_vpn.py",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/managed-overlay.md#stable-default-peer-hostname",
+        "native/engine-netbird/hostname_test.go"
       ]
     },
     {
@@ -501,7 +503,10 @@
       "id": "CFG-02",
       "text": "Системные разрешения, приватный ключ идентичности NetBird, ключ устройства, счётчики, кэши и живые результаты проверок являются локальным состоянием, а не переносимым конфигом. Панель задаёт политику их использования и показывает соответствие, но не выдаёт разрешение Android от имени пользователя.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/managed-overlay.md#stable-default-peer-hostname",
+        "native/engine-netbird/hostname_test.go"
+      ]
     },
     {
       "id": "CFG-03",
@@ -1498,7 +1503,9 @@
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/managed-overlay.md#startup-failure-diagnosis",
-        "native/engine-netbird/startup_trace_test.go"
+        "native/engine-netbird/startup_trace_test.go",
+        "docs/managed-overlay.md#stable-default-peer-hostname",
+        "native/engine-netbird/hostname_test.go"
       ],
       "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
       "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."

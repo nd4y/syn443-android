@@ -237,3 +237,26 @@ snapshot isolation and concurrent writes/reads under the existing race gate.
 Real Cloud registration and subsequent Wi-Fi recovery remain unaccepted; an
 initial timed-out registration must not be declared an invalid-key root cause
 merely because a short-lived credential later expires.
+
+## Stable default peer hostname
+
+An omitted hostname previously reached embed as an explicit empty DeviceName.
+The pinned SDK's context lookup preserves that empty value, while management's
+DNS-label validator rejects it. The adapter now supplies a stable opaque label:
+managed identities derive it from the authenticated namespace; unmanaged states
+persist a random local label in an atomic0600 metadata file under the held SDK
+directory lock. Explicit names are preserved. No OS hostname, hardware serial or
+setup credential participates. Config changes, direct/VLESS selection, restart
+and network changes do not rotate the managed default name or either SDK key.
+
+Malformed, linked or oversized local name metadata fails before SDK/network
+effects and requires action without spending network retry attempts. No SDK
+config is replaced to repair metadata. Actions exercise the real pinned
+management DNS-label validator, actual outbound-to-SDK options, stable/reopened
+and distinct identities, explicit overrides, local file modes, key-file
+preservation and unsafe metadata. Startup codes cover every non-OK gRPC status
+and the empty/invalid-hostname and unavailable-management cases. Actual Cloud
+registration and subsequent Wi-Fi recovery remain pending acceptance.
+
+Upstream source: [SDK context lookup](https://github.com/netbirdio/netbird/blob/cf017119711184a0661062a0c8ac2043e4e8d411/client/system/info.go#L168),
+[management DNS-label validation](https://github.com/netbirdio/netbird/blob/cf017119711184a0661062a0c8ac2043e4e8d411/dns/dns.go#L103).

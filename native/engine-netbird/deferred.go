@@ -275,6 +275,10 @@ func (d *Deferred) run() {
 		if d.ctx.Err() != nil {
 			return
 		}
+		if errors.Is(err, errPeerHostname) {
+			d.set("NeedsAction", "identity_metadata_unavailable", retry)
+			return
+		}
 		if d.options.RecoverExisting && errors.Is(err, errManagedIdentity) {
 			d.set("NeedsAction", "identity_unavailable", retry)
 			return

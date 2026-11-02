@@ -33,8 +33,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 32
-        versionName = "0.9.4-overlay-diagnostics"
+        versionCode = 33
+        versionName = "0.9.5-overlay-hostname"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }
