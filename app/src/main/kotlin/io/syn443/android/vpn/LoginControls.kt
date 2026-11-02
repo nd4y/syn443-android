@@ -68,7 +68,7 @@ import org.json.JSONObject
             "POLICY_CACHED"->if(status.optJSONObject("assignedPolicy")?.let {it.optBoolean("candidateValidated") || it.optBoolean("runtimeAuthorized")}==true)
                 "Конфигурация получена и проверена. Можно включить VPN." else "Ожидаем действующую конфигурацию."
             "REFRESHING"->"Обновление защищённой сессии"
-            "NEEDS_REAUTH"->"Нужен повторный вход. Завершите текущую сессию и войдите снова."
+            "NEEDS_REAUTH"->if(status.optString("method")=="invite")"Проверьте доступ у администратора. Завершите привязку и запросите новое приглашение." else "Нужен повторный вход. Завершите текущую сессию и войдите снова."
             "RETIRING"->"Завершение сессии и удаление локальных ключей"
             else->"Данные входа недоступны. VPN заблокирован до восстановления."
         },Modifier.testTag("auth-phase"))

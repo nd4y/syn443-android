@@ -63,6 +63,7 @@ class ControlProvider : ContentProvider() {
                 }
                 "auth-invite-result" -> {require(caller==Process.myUid());return Bundle().apply {putString("json",LoginController.get(context).invitationPreview(requireNotNull(arg)).toString())}}
                 "auth-invite-start" -> {require(caller==Process.myUid());LoginController.get(context).startInvitation(requireNotNull(arg))}
+                "auth-service-start" -> {require(caller==Process.myUid());LoginController.get(context).startInvitation(requireNotNull(arg),false)}
                 "auth-trust-rotation" -> {require(caller==Process.myUid());LoginController.get(context).rotateBootstrap(requireNotNull(arg))}
                 "auth-status" -> return Bundle().apply {putBoolean("ok",true);putString("json",LoginController.get(context).status().toString())}
                 "auth-bootstrap-file" -> {

@@ -54,3 +54,14 @@ QR decoding uses the exact ZXing core3.5.4 artifact from Maven Central
 The closed invitation-openapi.json contract is byte-identical to control plane.
 Required test-name checks and independent JaCoCo class inventory prevent missing
 invitation tests/classes from silently passing the unchanged coverage gates.
+
+The verified service screen also offers Keycloak login. This installs only the
+signed service metadata and prepares the existing OIDC/PKCE flow; it never claims
+or consumes the invitation code. Expired or changed manual approvals produce an
+explicit needs-action state instead of unlimited background retries.
+
+For owned USB fixtures only, debug builds can retain an already operator-installed
+loopback TLS CA when every signed service/issuer/client/origin/policy-key field
+matches that existing bootstrap. The URI never supplies this CA, non-loopback
+services cannot inherit it and release builds ignore the override. This reuses
+the existing debug operator mechanism without changing device trust settings.

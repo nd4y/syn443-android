@@ -50,6 +50,7 @@ class InvitationControllerTest {
         val device=Identity.random();val access=Identity.random();val refresh=Identity.random()
         val paths=CopyOnWriteArrayList<String>()
         @Volatile var approved=false
+        @Volatile var publicationError=""
         @Volatile var holdClaim=false
         @Volatile var completed=false
         val entered=CountDownLatch(1);val release=CountDownLatch(1)
@@ -82,7 +83,7 @@ class InvitationControllerTest {
             return when(path){
                 "/v1/invitations/claim"->{
                     if(holdClaim){holdClaim=false;entered.countDown();check(release.await(10,TimeUnit.SECONDS))}
-                    reply(text=Canonical.json.encodeToString(state))
+                    reply(text=Canonical.json.encodeToString(state.copy(error=publicationError)))
                 }
                 "/v1/invitations/status"->reply(text=Canonical.json.encodeToString(if(approved)state.copy(version=4,state="ready",deviceId=device)else state))
                 "/v1/invitations/complete"->{
@@ -132,4 +133,18 @@ class InvitationControllerTest {
         assertEquals(LoginPhase.SIGNED_OUT,journal.snapshot().phase);assertFalse(server.completed)
         assertTrue("/v1/invitations/abandon" in server.paths);assertThrows(IllegalStateException::class.java){DeviceKey.open(pending.keyAlias)}
     }
+    @Test fun signedServiceCanPrepareKeycloakWithoutClaimingTheInvitation()=fixture {server,controller,journal,_->
+        val id=UUID.randomUUID().toString().replace("-","");assertTrue(controller.previewInvitation(id,server.link));until{!controller.status().getBoolean("busy")}
+        controller.startInvitation(id,false);until{!controller.status().getBoolean("busy")}
+        val state=journal.snapshot();assertEquals(LoginPhase.BROWSER,state.phase);assertEquals("oidc",state.method)
+        assertTrue(controller.browserUrl(state.generation).startsWith("https://id.example.invalid/realms/test/protocol/openid-connect/auth?"))
+        assertTrue(server.paths.isEmpty());assertFalse(server.completed)
+    }
+
+    @Test fun expiredManualApprovalRequiresActionInsteadOfPollingForever()=fixture {server,controller,journal,_->
+        val id=UUID.randomUUID().toString().replace("-","");assertTrue(controller.previewInvitation(id,server.link));until{!controller.status().getBoolean("busy")}
+        server.publicationError="reauthentication_required";controller.startInvitation(id);until{!controller.status().getBoolean("busy")}
+        val state=journal.snapshot();assertEquals(LoginPhase.NEEDS_REAUTH,state.phase);assertFalse(controller.pollProvisioning(state.generation));assertFalse(server.completed)
+    }
+
 }

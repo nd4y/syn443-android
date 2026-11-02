@@ -53,6 +53,7 @@ class InvitationProtocolTest {
     private fun invalid(block:()->Unit){try {block();fail("invalid invitation accepted")}catch(_:IllegalArgumentException){}catch(_:IllegalStateException){}}
     @Test fun manualClaimConfirmationAndCompletionConvergeOnNormalBoundSession(){
         val f=Fixture();val scope=IdentityScope();val time=f.client.time(scope)
+        assertEquals(f.operation,Canonical.json.decodeFromString<InvitationOperation>(Canonical.json.encodeToString(f.operation)))
         val claimed=f.client.claim(f.operation,time,scope)
         val status=InvitationOperation.mutation("status",claimed.state.id)
         val ready=f.client.status(status,claimed,time,scope)

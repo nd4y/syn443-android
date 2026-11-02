@@ -28,3 +28,6 @@ tasks.jacocoTestCoverageVerification {
     } }
 }
 tasks.check { dependsOn(tasks.jacocoTestReport, tasks.jacocoTestCoverageVerification) }
+
+// Keep evidence available even when the unchanged coverage gate rejects a build.
+tasks.jacocoTestCoverageVerification { mustRunAfter(tasks.jacocoTestReport) }

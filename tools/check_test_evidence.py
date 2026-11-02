@@ -107,7 +107,9 @@ if mode=="emulator":
     required |= {"qrImageReturnsOnlyASyntacticallyBoundedInvitation",
         "floorsPersistAcrossRecreationAndCorruptionNeverResetsToInstallationRoot",
         "manualInvitationStaysLocalUntilConfirmationAndThenUsesOrdinarySession",
-        "cancelledClaimCannotCompleteOrResurrectItsRetiredKey"}
+        "cancelledClaimCannotCompleteOrResurrectItsRetiredKey",
+        "signedServiceCanPrepareKeycloakWithoutClaimingTheInvitation",
+        "expiredManualApprovalRequiresActionInsteadOfPollingForever"}
     required |= {"browserReservationAndCancellationPreserveVpnAndDeleteTheKey",
         "controllerRestartResumesSameBrowserGenerationWithoutANewKey",
         "exactErrorCallbackIsSingleUseAndNeverConnectsVpn"}

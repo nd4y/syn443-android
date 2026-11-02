@@ -187,7 +187,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }.getOrDefault(false)
     fun status():JSONObject = runCatching {
         val s=journal.snapshot()
-        JSONObject().put("phase",s.phase.name).put("generation",s.generation).put("configured",configured)
+        JSONObject().put("phase",s.phase.name).put("method",s.method).put("generation",s.generation).put("configured",configured)
             .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
             .put("inviteState",if(s.phase==LoginPhase.INVITING)inviteState else "").put("pairCode",if(s.phase==LoginPhase.INVITING)invitePair else "")
@@ -208,19 +208,27 @@ class LoginController private constructor(private val context:android.app.Applic
         if(preview?.id!=id || preview.until<elapsed())JSONObject().put("state","gone")
         else preview.result?.let {JSONObject(it.toString()).put("state","verified")}?:JSONObject().put("state",if(pendingCommands.get()>0)"pending" else "rejected")
     }
-    fun startInvitation(id:String) {
+    fun startInvitation(id:String,manual:Boolean=true) {
         val entry=synchronized(commands) {
             val preview=checkNotNull(invitePreview);require(preview.id==id && preview.until>=elapsed() && preview.result!=null)
             require(journal.snapshot().phase==LoginPhase.SIGNED_OUT && pendingCommands.get()==0)
             commandEpoch++;invitePreview=null;preview
         }
         submit {
-            val verified=bootstrapTrust.accept(entry.raw);val b=verified.bootstrap();val alias=DeviceKey.newAlias()
+            val verified=bootstrapTrust.accept(entry.raw);val standard=verified.bootstrap()
+            // Only an explicit operator-installed debug loopback CA can supplement
+            // a matching signed service. An incoming link never supplies TLS roots.
+            val b=if(io.syn443.android.BuildConfig.DEBUG && URI(standard.apiOrigin).host=="127.0.0.1") {
+                val existing=runCatching {bootstrap()}.getOrNull()
+                if(existing!=null && existing.copy(tlsCaDer="")==standard)standard.copy(tlsCaDer=existing.tlsCaDer)else standard
+            }else standard
+            val alias=DeviceKey.newAlias()
             val reserved=state().serialized {synchronized(commands){
                 check(workerEpoch==commandEpoch);noVpn();require(!ManagedPolicyStore.get(context).managed())
                 val before=journal.snapshot();require(before.phase==LoginPhase.SIGNED_OUT)
-                writeBootstrap(b);commit(before,LoginRecovery.reserve(before,before.generation,b,alias,"invite"))
+                writeBootstrap(b);commit(before,LoginRecovery.reserve(before,before.generation,b,alias,if(manual)"invite" else "oidc"))
             }}
+            if(!manual){prepareBrowser(reserved,b);return@submit}
             workingAlias=alias
             val key=checkNotNull(DeviceKey.createIfCurrent(alias){workerEpoch==commandEpoch && cancelledGeneration!=reserved.generation && journal.isCurrent(reserved)})
             val pending=InvitationPending(InvitationOperation.claim(verified.code,key.publicKey))
@@ -380,6 +388,8 @@ class LoginController private constructor(private val context:android.app.Applic
             }
             val reply=checkNotNull(pending.reply)
             synchronized(commands){current(state);invitePair=reply.state.pairCode;inviteState=reply.state.state}
+            if(reply.state.error in setOf("authorization_changed","reauthentication_required"))throw AuthException(AuthFailure.REAUTHENTICATE)
+            if(reply.state.error=="unsupported_capabilities")throw AuthException(AuthFailure.ACCESS_DENIED)
             if(reply.state.state in setOf("expired","revoked"))throw AuthException(AuthFailure.ACCESS_DENIED)
             if(reply.state.state !in setOf("ready","completed"))throw AuthException(AuthFailure.PENDING)
             if(pending.completion==null)save(pending.copy(completion=InvitationOperation.mutation("complete",reply.state.id)))

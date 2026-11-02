@@ -10,6 +10,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -36,8 +38,10 @@ class EnrollmentActivity:ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         val incoming=intent.dataString?.takeIf {it.length<=BootstrapTrust.MAX_LINK}.orEmpty()
         intent=Intent(this,EnrollmentActivity::class.java) // Do not retain a secret in the Activity intent.
-        setContent {MaterialTheme(colorScheme=darkColorScheme()){Surface(Modifier.fillMaxSize()){EnrollmentScreen(incoming){
-            startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));finish()
+        setContent {MaterialTheme(colorScheme=darkColorScheme()){Surface(Modifier.fillMaxSize()){EnrollmentScreen(incoming){browser->
+            startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+            if(browser!=null)startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(browser)).addCategory(Intent.CATEGORY_BROWSABLE))
+            finish()
         }}}}
     }
 }
@@ -70,7 +74,7 @@ internal object InvitationQr {
     }
 }
 
-@Composable private fun EnrollmentScreen(initial:String,onStarted:()->Unit) {
+@Composable private fun EnrollmentScreen(initial:String,onStarted:(String?)->Unit) {
     val context=LocalContext.current;val scope=rememberCoroutineScope();val endpoint=Uri.parse("content://io.syn443.control")
     var link by remember {mutableStateOf(initial)};var message by remember {mutableStateOf("")}
     var ticket by remember {mutableStateOf("")};var preview by remember {mutableStateOf<JSONObject?>(null)}
@@ -99,9 +103,9 @@ internal object InvitationQr {
     }
     Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         Text("Привязка SYN443",style=MaterialTheme.typography.headlineMedium)
-        Text("Приглашение привязывает это устройство без входа через Keycloak. Администратор отдельно подтвердит его ключ.")
+        Text("Проверьте сервис, затем выберите вход через Keycloak или ручную привязку с подтверждением администратора.")
         OutlinedTextField(value=link,onValueChange={if(it.length<=BootstrapTrust.MAX_LINK){link=it;preview=null}},label={Text("Ссылка syn443://")},
-            visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth().testTag("invite-link"),enabled=!busy,maxLines=3)
+            visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,autoCorrectEnabled=false),modifier=Modifier.fillMaxWidth().testTag("invite-link"),enabled=!busy,maxLines=3)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             Button(enabled=!busy,onClick={runCatching {image.launch("image/*")}.onFailure {message="Не удалось открыть выбор изображения."}},modifier=Modifier.testTag("invite-image")){Text("QR из фото")}
             Button(enabled=!busy,onClick={runCatching {camera.launch(FileProvider.getUriForFile(context,"io.syn443.android.enrollment.files",cameraFile))}.onFailure {message="Приложение камеры недоступно."}},modifier=Modifier.testTag("invite-camera")){Text("Камера")}
@@ -119,9 +123,23 @@ internal object InvitationQr {
             Button(enabled=!busy,onClick={scope.launch {
                 busy=true
                 val result=runCatching {command("auth-invite-start",ticket)}.getOrNull()
-                if(result?.getBoolean("ok")==true){link="";onStarted()}else {busy=false;message="Не удалось начать привязку. Проверьте, что VPN остановлен."}
+                if(result?.getBoolean("ok")==true){link="";onStarted(null)}else {busy=false;message="Не удалось начать привязку. Проверьте, что VPN остановлен."}
             }},modifier=Modifier.testTag("invite-confirm")){Text("Привязать это устройство")}
         }
+        if(preview!=null)OutlinedButton(enabled=!busy,onClick={scope.launch {
+            busy=true
+            try {
+                check(command("auth-service-start",ticket)?.getBoolean("ok")==true)
+                var browser:String?=null
+                withTimeout(15_000){while(browser==null){
+                    val status=JSONObject(command("auth-status")?.getString("json")?:"{}")
+                    if(status.optBoolean("browserReady"))browser=command("auth-browser",status.optLong("generation",-1).toString())?.getString("url")
+                    else if(!status.optBoolean("busy"))error("browser preparation failed")
+                    if(browser==null)delay(100)
+                }}
+                link="";onStarted(checkNotNull(browser))
+            }catch(_:Exception){busy=false;message="Не удалось открыть вход. Проверьте статус сессии на главном экране."}
+        }},modifier=Modifier.testTag("service-keycloak")){Text("Войти в сервис через Keycloak")}
         if(message.isNotEmpty())Text(message,Modifier.testTag("invite-message"))
         TextButton(onClick={showRotation=!showRotation}){Text("Смена корня доверия")}
         if(showRotation){
