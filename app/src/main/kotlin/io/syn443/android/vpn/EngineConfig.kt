@@ -49,14 +49,27 @@ object EngineConfig {
         val outbounds=JSONObject(raw).getJSONArray("outbounds")
         require((0 until outbounds.length()).none {outbounds.getJSONObject(it).getString("type")=="netbird"})
     }
-    fun render(raw: String?, stateRoot: java.io.File): String {
+    fun render(raw: String?, stateRoot: java.io.File): String = renderInternal(raw,stateRoot,null)
+    internal fun renderManaged(raw:String,stateRoot:java.io.File,material:OverlayRuntimeMaterial):String {
+        require(io.syn443.policy.Policy.hash(raw)==material.configHash);material.requireCurrent()
+        return renderInternal(raw,stateRoot,material).also{material.requireCurrent()}
+    }
+    private fun renderInternal(raw:String?,stateRoot:java.io.File,material:OverlayRuntimeMaterial?):String {
         val value = if (raw == null) JSONObject("""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}""") else JSONObject(raw).also { validate(raw) }
         value.remove("route_checks") // Client metadata is not a sing-box option.
         value.put("log", JSONObject().put("disabled", true))
         val outbounds = value.getJSONArray("outbounds")
+        var managedApplied=false
         for (i in 0 until outbounds.length()) {
             val item = outbounds.getJSONObject(i)
-            if (item.getString("type") != "netbird") continue
+            if (item.getString("type") != "netbird") {require(!item.has("managed") && !item.has("managed_namespace"));continue}
+            if(material!=null) {
+                require(!managedApplied);managedApplied=true
+                material.localize(item,stateRoot)
+                if(!item.has("connection_mode"))item.put("connection_mode","direct")
+                continue
+            }
+            require(!item.has("managed") && !item.has("managed_namespace"))
             // Stable across route/config edits, isolated from arbitrary imported paths.
             val identity = item.getString("tag") + "\u0000" + item.getString("management_url")
             val hash = java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray(Charsets.UTF_8))
@@ -64,6 +77,7 @@ object EngineConfig {
             item.put("state_directory", java.io.File(stateRoot, "netbird/$hash").absolutePath)
             if (!item.has("connection_mode")) item.put("connection_mode", "direct")
         }
+        require(material==null || managedApplied)
         value.put("inbounds", JSONArray().put(JSONObject().put("type", "tun").put("tag", "tun")
             .put("address", JSONArray().put("192.0.2.1/30").put("fd00:443::1/126"))
             .put("mtu", 1400).put("auto_route", false).put("stack", "gvisor")))

@@ -21,7 +21,7 @@ import kotlinx.serialization.json.*
 }
 internal fun overlayDigest(value:String)=value.length==43 && runCatching {Policy.decode64(value).size==32}.getOrDefault(false)
 
-enum class OverlayPhase { RESERVED, CACHED, ENROLLING, REGISTERED, ERASING, ERASED, ACKNOWLEDGED, RETIRING, RETIRED }
+enum class OverlayPhase { RESERVED, CACHED, ENROLLING, REGISTERED, ERASING, ERASED, ACKNOWLEDGED, DISCARDING, DISCARDED, RETIRING, RETIRED }
 
 /** No setup bytes, key paths or SDK private identity enter this durable ledger.
  * A reserved operation precedes any request; ENROLLING precedes native effects.
@@ -52,6 +52,7 @@ object OverlayEnrollments {
             OverlayPhase.CACHED,OverlayPhase.ENROLLING -> require(overlayDigest(value.protectedHash) && value.credentialUntilMs>0 && value.identityEvidence.isEmpty())
             OverlayPhase.REGISTERED,OverlayPhase.ERASING -> require(overlayDigest(value.protectedHash) && value.credentialUntilMs>0 && overlayDigest(value.identityEvidence))
             OverlayPhase.ERASED,OverlayPhase.ACKNOWLEDGED -> require(value.protectedHash.isEmpty() && value.credentialUntilMs==0L && overlayDigest(value.identityEvidence))
+            OverlayPhase.DISCARDING,OverlayPhase.DISCARDED -> require(value.protectedHash.isEmpty() && value.credentialUntilMs==0L && value.identityEvidence.isEmpty())
             OverlayPhase.RETIRING,OverlayPhase.RETIRED -> require(value.protectedHash.isEmpty() && value.credentialUntilMs==0L)
         }
     }
@@ -63,11 +64,17 @@ object OverlayEnrollments {
     /** A completed SDK identity survives a refreshed setup reference/security epoch;
      * a pending enrollment cannot silently switch its operation or enroll twice. */
     fun requireAuthorized(value:OverlayEnrollment,binding:OverlayCredentialBinding,generation:Long) {
-        validate(value);require(value.loginGeneration==generation && value.identityTag==identity(binding))
+        requireIdentity(value,binding,generation)
         require(value.phase !in setOf(OverlayPhase.RETIRING,OverlayPhase.RETIRED))
         if(value.phase in setOf(OverlayPhase.RESERVED,OverlayPhase.CACHED,OverlayPhase.ENROLLING)) {
             require(value.bindingTag==permissionTag(binding));value.operation.requireBound(binding)
         }
+    }
+    /** Cleanup of an old grant uses current identity authority, never its expired
+     * credential. This cannot authorize borrowing that grant for a new binding. */
+    fun requireIdentity(value:OverlayEnrollment,binding:OverlayCredentialBinding,generation:Long) {
+        validate(value);require(value.loginGeneration==generation && value.identityTag==identity(binding))
+        require(value.operation.namespace==ManagedOverlay.namespace(binding.address))
     }
     private fun next(value:OverlayEnrollment,phase:OverlayPhase)=value.copy(revision=Math.addExact(value.revision,1),phase=phase)
     fun cached(value:OverlayEnrollment,protectedHash:String,untilMs:Long):OverlayEnrollment {
@@ -93,6 +100,21 @@ object OverlayEnrollments {
     fun acknowledged(value:OverlayEnrollment):OverlayEnrollment {
         validate(value);require(value.phase in setOf(OverlayPhase.ERASED,OverlayPhase.ACKNOWLEDGED))
         return next(value,OverlayPhase.ACKNOWLEDGED).also(::validate)
+    }
+    fun discarding(value:OverlayEnrollment):OverlayEnrollment {
+        validate(value);require(value.phase in setOf(OverlayPhase.RESERVED,OverlayPhase.CACHED,OverlayPhase.ENROLLING,OverlayPhase.DISCARDING))
+        return next(value,OverlayPhase.DISCARDING).copy(protectedHash="",credentialUntilMs=0).also(::validate)
+    }
+    fun discarded(value:OverlayEnrollment):OverlayEnrollment {
+        validate(value);require(value.phase==OverlayPhase.DISCARDING)
+        return next(value,OverlayPhase.DISCARDED).also(::validate)
+    }
+    /** Caller has verified local key/cipher erasure and acknowledged the old
+     * operation on the server. SDK identity is deliberately outside this flow. */
+    fun replaceDiscarded(value:OverlayEnrollment,binding:OverlayCredentialBinding,generation:Long):OverlayEnrollment {
+        requireIdentity(value,binding,generation);require(value.phase==OverlayPhase.DISCARDED)
+        require(value.operation.reference!=binding.reference || value.operation.version!=binding.version)
+        return reserve(binding,generation).copy(revision=Math.addExact(value.revision,1)).also(::validate)
     }
     /** The controller persists this fence first, then cancels work and waits for
      * confirmed native release before touching owned SDK files or keys. */

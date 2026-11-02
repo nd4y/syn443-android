@@ -102,3 +102,18 @@ a stale/foreign unbind cannot kill the current debug session. Existing10-second
 bind and5-second response limits, actual worker hang/death/rebound and foreign
 message rejection remain. No rerun/skip or production-supervisor shortcut is used.
 The new case is mandatory by exact method name; minimum160 Android outcomes.
+
+Grant renewal requires two identity JVM cases and one actual Keystore Android
+case (minimum94 identity,166 outcomes per API). They check durable old-operation
+retention, exact same-identity replacement, new addressed reference, denial before
+erasure/server acknowledgment, revoked local admission, stale operations, expiry,
+main-thread rejection and byte-preserved SDK files. Confirmed registration never
+uses grant renewal to silently enroll again. Compiled acceptance is pending.
+
+Five additional Android cases require the real vault-to-provisioner flow and
+RAM-only config localization: stable operation before fetch, independent signature,
+no repeated fetch after restart, erasure before consumption, lost ACK retry,
+keyless offline preparation, stale/cancelled proof rejection, local namespace/path
+bounds, unchanged signed config/hash, coerced metadata and closed/expired material.
+They use synthetic keys and do not claim actual native registration proof or the
+controller/host process handoff. Those integration tests remain required.

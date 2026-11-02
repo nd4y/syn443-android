@@ -135,3 +135,29 @@ service, device or key. Fetch continues requiring an exact current reference/ver
 and independently verified unexpired credential; consumption never returns a
 secret. The server counterpart passed all8 jobs at5ab9cb4fc9bc90f367ef3a0d58e2f9373f2f9534,
 Actions41409513759. The new client case awaits its next exact Actions acceptance.
+
+Pending grant replacement has durable DISCARDING/DISCARDED states. Local erasure
+removes only the old grant Keystore alias and ciphertext, preserves SDK state,
+and retains the old operation through server acknowledgment. Only a different
+signed reference/version for the same namespace/device key/login generation can
+then reserve a new operation; confirmed registration cannot enter this flow.
+Crash recovery can repeat erasure or acknowledgment without adopting SDK keys or
+registering a known identity again. Full controller materialization remains open.
+
+The worker ManagedOverlayProvisioner now composes stable reservation, addressed
+fetch, signature-checked protected cache, ENROLLING-before-native, registration
+receipt, local key/cipher erasure and independent consumption. Preparation can
+reuse a completed SDK identity while consumption is offline; pending renewal
+retries the old acknowledgment before fetching the new reference. Its caller must
+persist the login namespace claim and fence the native proof by session/config.
+
+OverlayRuntimeMaterial holds the optional setup value only in RAM, checks current
+admission and conservative credential/policy deadlines, and localizes only the
+exact signed config hash and closed metadata. Managed paths derive from the local
+app root and authenticated namespace. The saved signed config/hash is unchanged;
+inline setup keys, paths, foreign metadata and numeric coercion are rejected.
+Completed identities render without setup keys. JVM/platform crypto and serialized
+native JSON string copies remain GC-managed; retiring their process is still a
+required controller integration step. No managed capability is advertised yet.
+Seven new actual Android cases and two JVM cases are required in Actions; final
+LoginController/host proof handoff and actual managed Cloud acceptance remain open.

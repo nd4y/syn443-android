@@ -74,9 +74,13 @@ internal class OverlayVault(context:Context,private val namespace:String,
     private fun current(expected:OverlayEnrollment,authorize:Boolean=true) {
         if(snapshotLocked()!=expected || authorize && !isAuthorized(expected))throw LoginStorageException(LoginStorageFailure.STALE)
     }
-    private fun commitLocked(expected:OverlayEnrollment,next:OverlayEnrollment,authorize:Boolean=true):OverlayEnrollment {
+    private fun commitLocked(expected:OverlayEnrollment,next:OverlayEnrollment,authorize:Boolean=true,replacement:Boolean=false):OverlayEnrollment {
         current(expected,authorize);OverlayEnrollments.validate(next)
-        require(next.revision==expected.revision+1 && next.operation==expected.operation && next.identityTag==expected.identityTag && next.bindingTag==expected.bindingTag && next.loginGeneration==expected.loginGeneration)
+        require(next.revision==expected.revision+1 && next.identityTag==expected.identityTag && next.loginGeneration==expected.loginGeneration)
+        if(replacement)require(expected.phase==OverlayPhase.DISCARDED && next.phase==OverlayPhase.RESERVED &&
+            next.operation.namespace==expected.operation.namespace && next.operation.operationId!=expected.operation.operationId &&
+            (next.operation.reference!=expected.operation.reference || next.operation.version!=expected.operation.version))
+        else require(next.operation==expected.operation && next.bindingTag==expected.bindingTag)
         val raw=Canonical.json.encodeToString(next).toByteArray(Charsets.UTF_8);require(raw.size<=8192)
         write(ledger,raw);if(snapshotLocked()!=next)throw LoginStorageException(LoginStorageFailure.CORRUPT)
         return next
@@ -159,6 +163,19 @@ internal class OverlayVault(context:Context,private val namespace:String,
         synchronized(filesLock){current(erasing);eraseCipher();commitLocked(erasing,OverlayEnrollments.erased(erasing))}
     }
     fun acknowledged(expected:OverlayEnrollment)=guarded{worker();synchronized(filesLock){commitLocked(expected,OverlayEnrollments.acknowledged(expected))}}
+    /** Retire only an unconfirmed setup grant. Never remove or recreate SDK keys.
+     * DISCARDING is durable before key deletion, including after a lost response. */
+    fun discardUnregistered(expected:OverlayEnrollment):OverlayEnrollment=guarded{
+        worker();val discarding=synchronized(filesLock){commitLocked(expected,OverlayEnrollments.discarding(expected))}
+        eraseKey(discarding)
+        synchronized(filesLock){current(discarding);eraseCipher();commitLocked(discarding,OverlayEnrollments.discarded(discarding))}
+    }
+    fun replaceDiscarded(expected:OverlayEnrollment,binding:OverlayCredentialBinding,generation:Long,serverConsumed:Boolean):OverlayEnrollment=guarded{
+        worker();require(serverConsumed)
+        synchronized(filesLock){current(expected);check(!exists(cipherFile))}
+        synchronized(keysLock){check(!KeyStore.getInstance("AndroidKeyStore").apply{load(null)}.containsAlias(alias(expected)))}
+        synchronized(filesLock){commitLocked(expected,OverlayEnrollments.replaceDiscarded(expected,binding,generation),replacement=true)}
+    }
     /** Bounded public cancellation fence only. It never waits for Keystore/SDK. */
     fun retiring(expected:OverlayEnrollment)=guarded{synchronized(filesLock){commitLocked(expected,OverlayEnrollments.retiring(expected),false)}}
     /** retireOwnedIdentity must hold/confirm native ownership release and erase

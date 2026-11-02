@@ -78,4 +78,48 @@ class OverlayEnrollmentTest {
         }
         assertNull(runCatching {Canonical.json.decodeFromString<OverlayEnrollment>("{}")}.getOrNull())
     }
+    @Test fun grantReplacementKeepsIdentityButRequiresErasureAndANewAddressedReference() {
+        val b=binding();val initial=OverlayEnrollments.reserve(b,4)
+        val cached=OverlayEnrollments.cached(initial,digest("cipher"),100)
+        val refreshed=b.copy(reference=digest("fresh-ref"),version=2,securityEpoch=1)
+        for(pending in listOf(initial,cached,OverlayEnrollments.enrolling(cached))) {
+            invalid{OverlayEnrollments.requireAuthorized(pending,refreshed,4)}
+            OverlayEnrollments.requireIdentity(pending,refreshed,4)
+            val discarding=OverlayEnrollments.discarding(pending)
+            val retry=OverlayEnrollments.discarding(discarding)
+            val discarded=OverlayEnrollments.discarded(retry)
+            for(s in listOf(discarding,retry,discarded)) {
+                assertEquals(initial.operation,s.operation);OverlayEnrollments.requireAuthorized(s,refreshed,4)
+                assertEquals("",s.protectedHash);assertEquals(0L,s.credentialUntilMs);assertEquals("",s.identityEvidence)
+                assertEquals(s,Canonical.json.decodeFromString<OverlayEnrollment>(Canonical.json.encodeToString(s)))
+            }
+            val replaced=OverlayEnrollments.replaceDiscarded(discarded,refreshed,4)
+            assertEquals(initial.identityTag,replaced.identityTag);assertEquals(OverlayPhase.RESERVED,replaced.phase)
+            assertEquals(discarded.revision+1,replaced.revision);assertNotEquals(initial.operation,replaced.operation)
+            OverlayEnrollments.requireAuthorized(replaced,refreshed,4)
+            invalid{OverlayEnrollments.requireAuthorized(replaced,b,4)}
+            invalid{OverlayEnrollments.replaceDiscarded(discarded,b,4)}
+            invalid{OverlayEnrollments.replaceDiscarded(discarding,refreshed,4)}
+            invalid{OverlayEnrollments.discarded(pending)}
+            invalid{OverlayEnrollments.replaceDiscarded(discarded,refreshed,5)}
+            invalid{OverlayEnrollments.replaceDiscarded(discarded,refreshed.copy(keyThumbprint=digest("other-key")),4)}
+            invalid{OverlayEnrollments.replaceDiscarded(discarded,refreshed.copy(address=b.address.copy(identityEpoch=2)),4)}
+        }
+    }
+    @Test fun confirmedIdentityCannotDiscardItsGrantToSilentlyRegisterAgain() {
+        val b=binding();val s=OverlayEnrollments.reserve(b,2)
+        val registered=OverlayEnrollments.registered(OverlayEnrollments.enrolling(OverlayEnrollments.cached(s,digest("cipher"),100)),digest("native"))
+        val erasing=OverlayEnrollments.erasing(registered);val erased=OverlayEnrollments.erased(erasing)
+        for(value in listOf(registered,erasing,erased,OverlayEnrollments.acknowledged(erased),OverlayEnrollments.retiring(s),OverlayEnrollments.retired(OverlayEnrollments.retiring(s)))) {
+            invalid{OverlayEnrollments.discarding(value)}
+            invalid{OverlayEnrollments.replaceDiscarded(value,b.copy(version=2),2)}
+        }
+        for(phase in listOf(OverlayPhase.DISCARDING,OverlayPhase.DISCARDED)) {
+            invalid{OverlayEnrollments.validate(s.copy(phase=phase,identityEvidence=digest("native")))}
+            invalid{OverlayEnrollments.validate(s.copy(phase=phase,protectedHash=digest("unexpected")))}
+            val cleanup=s.copy(phase=phase)
+            val retired=OverlayEnrollments.retired(OverlayEnrollments.retiring(cleanup));OverlayEnrollments.validate(retired)
+            invalid{OverlayEnrollments.requireAuthorized(retired,b,2)}
+        }
+    }
 }
