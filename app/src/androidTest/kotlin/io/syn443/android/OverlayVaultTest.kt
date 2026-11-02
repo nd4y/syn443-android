@@ -236,6 +236,25 @@ class OverlayVaultTest {
         return org.json.JSONObject().put("outbounds",org.json.JSONArray().put(org.json.JSONObject().put("type","netbird").put("tag","home")
             .put("management_url",a.managementURL).put("managed",metadata))).put("route",org.json.JSONObject().put("final","home")).toString()
     }
+    @Test fun waitingMaterialKeepsSignedMetadataAndNeverCreatesCredentialOrSDKStorage()=fixture{f->
+        val raw=managedConfig(f.binding);val root=File(context.noBackupFilesDir,f.area)
+        val material=OverlayRuntimeMaterial(f.binding,io.syn443.policy.Policy.hash(raw),4,"",null,
+            {f.authorized.get()},{TimeWindow(now,f.upper.get())},waiting=true)
+        material.use {
+            assertTrue(it.available());assertEquals("waiting",it.launchMode)
+            EngineConfig.validateAssigned(raw,it)
+            val outbound=org.json.JSONObject(EngineConfig.renderManaged(raw,root,it)).getJSONArray("outbounds").getJSONObject(0)
+            assertTrue(outbound.getBoolean("credential_pending"));assertFalse(outbound.has("setup_key"));assertFalse(outbound.has("managed"))
+            assertEquals(f.namespace,outbound.getString("managed_namespace"))
+            assertFalse(File(outbound.getString("state_directory")).exists())
+            assertNull(f.vault.snapshot())
+            assertThrows(IllegalArgumentException::class.java){EngineConfig.validate(org.json.JSONObject(raw).also{v->v.getJSONArray("outbounds").getJSONObject(0).put("credential_pending",true)}.toString())}
+            f.upper.set(f.binding.offlineUntilMs);assertFalse(it.available());f.upper.set(now)
+            f.authorized.set(false);assertFalse(it.authorized())
+        }
+        assertFalse(material.available())
+        assertThrows(IllegalArgumentException::class.java){OverlayRuntimeMaterial(f.binding,io.syn443.policy.Policy.hash(raw),4,Identity.random(),null,{true},{TimeWindow(now,now)},waiting=true)}
+    }
     @Test fun runtimeMaterialRendersOnlyItsSignedConfigAndLocallyDerivedOwnedDirectory()=fixture{f->
         val raw=managedConfig(f.binding);val hash=io.syn443.policy.Policy.hash(raw)
         val enrolling=f.vault.enrolling(f.cached())

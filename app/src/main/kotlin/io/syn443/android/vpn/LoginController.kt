@@ -527,14 +527,14 @@ class LoginController private constructor(private val context:android.app.Applic
             val first=group.first();val record=overlayVault(first.value,first.key,s.generation).snapshot()
             if(record?.phase in setOf(OverlayPhase.REGISTERED,OverlayPhase.ERASING,OverlayPhase.ERASED,OverlayPhase.ACKNOWLEDGED))group.map{it.key}
             else {
-                val preferred=group.firstOrNull{it.key==overlayOwner?.hash} ?: first
+                val preferred=group.firstOrNull{it.key==overlayOwner?.hash && overlayMaterials[it.key]?.launchMode=="enrolling"} ?: first
                 group.filter{it.value.reference==preferred.value.reference && it.value.version==preferred.value.version &&
                     it.value.securityEpoch==preferred.value.securityEpoch}.map{it.key}
             }
         }.toSet()
         for((hash,binding) in bindings) {
             if(hash !in selected)continue
-            if(overlayMaterials[hash]?.let{it.available() || it.authorized() && overlayOwner?.hash==hash}==true) {
+            if(overlayMaterials[hash]?.let{!it.waiting && (it.available() || it.authorized() && overlayOwner?.hash==hash)}==true) {
                 if(network && overlayVault(binding,hash,s.generation).snapshot()?.phase==OverlayPhase.ERASED)
                     consumeOverlay(overlayProvisioner(s,p,binding,hash,protocol,scope))
                 continue
@@ -547,7 +547,7 @@ class LoginController private constructor(private val context:android.app.Applic
                     {overlayAdmitted(binding,hash,s.generation)},{overlayWindow(hash,s.generation)})
                 try {synchronized(commands) {
                     current(s);material.requireCurrent()
-                    overlayMaterials=(overlayMaterials+(hash to material)).toMap();secret=null
+                    val old=overlayMaterials[hash];overlayMaterials=(overlayMaterials+(hash to material)).toMap();old?.close();secret=null
                 }}catch(e:Exception){material.close();throw e}
                 if(network && record.phase==OverlayPhase.ERASED)
                     consumeOverlay(overlayProvisioner(s,p,binding,hash,protocol,scope))
@@ -556,6 +556,17 @@ class LoginController private constructor(private val context:android.app.Applic
             } catch(e:LoginStorageException) {if(e.reason==LoginStorageFailure.STALE)throw e
             } catch(_:IllegalArgumentException) { // Invalid/missing material remains unavailable, never an operator fallback.
             } finally {secret?.close()}
+            // A missing optional setup grant must not remove a valid base
+            // policy. Native receives a local-only closed overlay placeholder:
+            // no SDK constructor, filesystem work or private-route fallback.
+            if(overlayMaterials[hash]?.let{!it.waiting && it.available()}!=true) {
+                val waiting=OverlayRuntimeMaterial(binding,hash,s.generation,"",null,
+                    {overlayAdmitted(binding,hash,s.generation)},{overlayWindow(hash,s.generation)},waiting=true)
+                try {synchronized(commands) {
+                    current(s);waiting.requireCurrent()
+                    val old=overlayMaterials[hash];overlayMaterials=(overlayMaterials+(hash to waiting)).toMap();old?.close()
+                }}catch(e:Exception){waiting.close();throw e}
+            }
         }
         val prepared=assignedRuntime.prepare(s,p,assignment)
         synchronized(commands){current(s);assignedRuntime.publish(prepared)}
@@ -571,7 +582,8 @@ class LoginController private constructor(private val context:android.app.Applic
         if(!material.available())throw OverlayLaunchPending()
         return try{EngineConfig.renderManaged(raw,stateRoot,material)}catch(_:IllegalStateException){throw OverlayLaunchPending()}
     }
-    internal fun overlayHasSetup(hash:String)=overlayMaterials[hash]?.identityEvidence?.isEmpty()==true
+    internal fun overlayHasSetup(hash:String)=overlayMaterials[hash]?.launchMode=="enrolling"
+    internal fun overlayLaunchMode(hash:String)=overlayMaterials[hash]?.takeIf{it.available()}?.launchMode.orEmpty()
     internal fun overlayNeedsRotation(hash:String)=overlayMaterials[hash]?.let{it.identityEvidence.isNotEmpty() && it.available()}==true
     /** Private Binder input only. The service supplies a RAM-only host/config/
      * recovery fence; it is checked before and after durable registration. */

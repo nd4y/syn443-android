@@ -140,3 +140,22 @@ requires successful module admission while keeping wrong key/device/signature,
 expiry, unknown features and duplicate capabilities rejected. The five original
 controller cases remain mandatory and unchanged; the corrected exact matrix is
 still pending.
+
+## Optional credential outage (implementation, Actions acceptance pending)
+
+A valid signed policy can retain its base routes when an addressed NetBird setup
+grant is missing, unavailable or rejected. Its locally rendered NetBird outbound
+is a fail-closed credential-waiting placeholder. It performs no SDK construction,
+identity-directory creation, registration, retry-budget consumption or private
+route fallback. The grant operation and signed configuration hash stay unchanged.
+The controller retries credential delivery; after successful preparation the
+service retires the waiting host once and starts the same policy with the new
+material. Required activation checks still decide whether that policy can commit.
+
+The waiting flag cannot be imported or supplied in a signed configuration; only
+the identity worker derives it from an authorized managed namespace. Expired
+policy leases, logout and lost scope still withdraw all launch authority. The
+wrong-address grant test now asserts that its key is never used and that only
+this closed placeholder is available, while a retry retains the original grant
+operation. Native tests additionally assert no SDK/storage effects and closed
+TCP/UDP, rather than treating successful base-policy preparation as overlay health.

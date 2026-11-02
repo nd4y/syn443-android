@@ -14,4 +14,7 @@ type OutboundOptions struct {
 	// Local materialization only. A setup-key reference or ordinary imported
 	// profile cannot grant ownership of a managed SDK namespace.
 	ManagedNamespace string `json:"managed_namespace,omitempty"`
+	// Local-only fail-closed placeholder. It cannot start the SDK or touch
+	// identity storage while addressed credentials are unavailable.
+	CredentialPending bool `json:"credential_pending,omitempty"`
 }

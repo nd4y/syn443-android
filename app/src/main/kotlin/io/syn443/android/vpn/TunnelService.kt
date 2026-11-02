@@ -47,6 +47,7 @@ class TunnelService : VpnService() {
     private var lastPolicyCheck = -10_000L
     @Volatile private var runningConfigHash = ""
     private var runningHasSetup=false
+    private var runningOverlayMode=""
     @Volatile private var destroyed = false
     private val dnsCallbacks = Executors.newFixedThreadPool(2)
     private val dnsAdmission = java.util.concurrent.Semaphore(2)
@@ -273,6 +274,7 @@ class TunnelService : VpnService() {
             val rendered = policies.render(raw, noBackupFilesDir)
             runningConfigHash = raw?.let { Policy.hash(it) }.orEmpty()
             runningHasSetup=policies.overlayHasSetup(runningConfigHash)
+            runningOverlayMode=policies.overlayLaunchMode(runningConfigHash)
             RouteSnapshot.configure(raw,runningConfigHash)
             pendingLeaseDeadline = policies.leaseDeadline(runningConfigHash)
             // An expired/invalid config cannot spend the budget while waiting for a replacement.
@@ -587,11 +589,13 @@ class TunnelService : VpnService() {
             val deadline = runCatching { policies.leaseDeadline(runningConfigHash) }.getOrDefault(1L)
             if (deadline == 1L) {
                 terminateOwned(); retire(false); phase("BlockedByPolicy", "policy_lease_time_or_scope_invalid")
-            } else if(runningHasSetup && policies.read().journal.phase!="applying" && policies.overlayNeedsRotation(runningConfigHash)) {
+            } else if(policies.read().journal.phase!="applying" &&
+                (runningHasSetup && policies.overlayNeedsRotation(runningConfigHash) ||
+                    runningOverlayMode=="waiting" && policies.overlayLaunchMode(runningConfigHash) in setOf("enrolling","keyless"))) {
                 // Registration is durable and the local grant is erased. Wait
                 // for activation commit, then retire SDK/Go String copies once
                 // and restart from the same owned keys without a setup key.
-                runningHasSetup=false;retire(false);phase("Recovering","overlay_key_cleanup")
+                runningHasSetup=false;runningOverlayMode="";retire(false);phase("Recovering","overlay_material_changed")
             } else if (appliedLeaseDeadline > 0 && SystemClock.elapsedRealtime() >= appliedLeaseDeadline) {
                 // A TUN whose native reader expired is never resurrected by a lease renewal.
                 retire(true)

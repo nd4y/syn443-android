@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,6 +59,64 @@ func TestOptionalEnrollmentDoesNotHoldGlobalStartAndPrivateDialFailsClosed(t *te
 	}
 	if time.Since(stopped) > time.Second || peer.stops.Load() != 1 {
 		t.Fatal("startup cancellation did not clean up")
+	}
+}
+
+func TestManagedCredentialWaitingNeverStartsSDKTouchesStorageOrEscapesPrivateRoute(t *testing.T) {
+	dir, namespace := managedTestDirectory(t)
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	ctx := service.ContextWithDefaultRegistry(context.Background())
+	service.MustRegister[adapter.OutboundManager](ctx, fakeManager{})
+	opts := OutboundOptions{ConnectionMode: "direct", ManagementURL: "https://overlay.example.invalid", StateDirectory: dir, ManagedNamespace: namespace, CredentialPending: true}
+	value, err := NewDeferredOutbound(ctx, nil, logger.NOP(), "overlay", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := value.(*Deferred)
+	defer d.Close()
+	var constructors atomic.Int32
+	d.current.newClient = func(embed.Options) (peerClient, error) {
+		constructors.Add(1)
+		return nil, errors.New("SDK forbidden while credentials pending")
+	}
+	if err = d.current.Start(adapter.StartStateStarted); err == nil {
+		t.Fatal("direct startup bypassed waiting")
+	}
+	if err = d.Start(adapter.StartStateStarted); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for d.state.Load().(moduleState).Reason != "credentials_pending" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if state := d.state.Load().(moduleState); state.Phase != "Recovering" || state.Reason != "credentials_pending" || state.Retry.Attempt != 0 {
+		t.Fatal("waiting state/retry budget")
+	}
+	if conn, err := d.DialContext(context.Background(), "tcp", M.ParseSocksaddr("198.51.100.7:443")); err == nil || conn != nil {
+		t.Fatal("private TCP escaped waiting")
+	}
+	if packet, err := d.ListenPacket(context.Background(), M.ParseSocksaddr("198.51.100.7:443")); err == nil || packet != nil {
+		t.Fatal("private UDP escaped waiting")
+	}
+	d.InterfaceUpdated()
+	if constructors.Load() != 0 {
+		t.Fatal("SDK created while waiting")
+	}
+	if _, err = os.Lstat(dir); !os.IsNotExist(err) {
+		t.Fatal("waiting touched SDK namespace")
+	}
+	if err = d.Close(); err != nil {
+		t.Fatal("waiting Stop blocked", err)
+	}
+	for _, invalid := range []OutboundOptions{
+		{ConnectionMode: "direct", ManagementURL: opts.ManagementURL, StateDirectory: dir, CredentialPending: true},
+		{ConnectionMode: "direct", ManagementURL: opts.ManagementURL, StateDirectory: dir, ManagedNamespace: namespace, SetupKey: "synthetic-key", CredentialPending: true},
+	} {
+		if _, err := NewDeferredOutbound(ctx, nil, logger.NOP(), "overlay", invalid); err == nil {
+			t.Fatal("unmanaged/key-bearing waiting state accepted")
+		}
 	}
 }
 

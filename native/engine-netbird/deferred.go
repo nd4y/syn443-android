@@ -142,6 +142,11 @@ func stopBounded(peer *Outbound, timeout time.Duration) error {
 func (d *Deferred) run() {
 	defer close(d.done)
 	retry := retryState{}
+	if d.options.CredentialPending {
+		d.set("Recovering", "credentials_pending", retry)
+		<-d.ctx.Done()
+		return
+	}
 	if err := os.MkdirAll(d.options.StateDirectory, 0700); err != nil {
 		d.set("NeedsAction", "state_unavailable", retry)
 		return

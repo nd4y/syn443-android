@@ -39,6 +39,7 @@ internal class RuntimePolicies(private val context:Context,
     fun leaseDeadline(hash:String):Long = if(login.ownsPolicy())login.assignedRead {login.assignedRuntime.leaseDeadline(it,hash)} else legacy.leaseDeadline(hash)
     fun render(raw:String?,root:java.io.File):String = if(login.ownsPolicy())login.renderAssigned(checkNotNull(raw),root) else EngineConfig.render(raw,root)
     fun overlayHasSetup(hash:String)=login.ownsPolicy() && login.overlayHasSetup(hash)
+    fun overlayLaunchMode(hash:String)=if(login.ownsPolicy())login.overlayLaunchMode(hash) else ""
     fun overlayNeedsRotation(hash:String)=login.ownsPolicy() && login.overlayNeedsRotation(hash)
     fun allowed(raw:String?,d:Snapshot=read()):Verified? {
         if(!d.enrolled)return if(login.ownsPolicy())null else legacy.allowed(raw,checkNotNull(d.legacy))

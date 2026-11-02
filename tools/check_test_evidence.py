@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=171
+    minimum=173
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -56,7 +56,7 @@ if mode=="identity":
         "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
     assert ("io.syn443.android.HostProcessTest","rejectedForeignBindingCannotRetireTheCurrentDiagnosticSession") in {(c.get("classname"),c.get("name")) for c in cases}, "Required diagnostic binding ownership case missing"
-    assert {("io.syn443.android.LoginControllerTest",name) for name in {"managedControllerClaimsNamespaceBeforeFetchAndRestoresProtectedMaterialWithoutRefetch","managedControllerNativeReceiptErasesGrantAndRecoversKeylessWhileConsumptionIsOffline","managedControllerLogoutFencesALateCredentialAndKeepsNoRuntimeMaterial","managedControllerRejectsSignedWrongAddressAndRetriesTheSameReservedOperation"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed controller integration cases missing"
+    assert {("io.syn443.android.LoginControllerTest",name) for name in {"managedControllerClaimsNamespaceBeforeFetchAndRestoresProtectedMaterialWithoutRefetch","managedControllerNativeReceiptErasesGrantAndRecoversKeylessWhileConsumptionIsOffline","managedControllerLogoutFencesALateCredentialAndKeepsNoRuntimeMaterial","managedControllerRejectsSignedWrongAddressAndRetriesTheSameReservedOperation","managedCredentialOutageKeepsBasePolicyAndRetriesSameOperationBeforeEnrollment"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed controller integration cases missing"
     assert ("io.syn443.android.LoginControllerTest","activePendingIdentityAndFreshCandidateNeverConsumeEachOthersGrant") in {(c.get("classname"),c.get("name")) for c in cases}, "Required active/candidate same-identity fence missing"
     login_overlay_required={'persistedOverlayClaimsSurviveRestartAndRetireBeforeDeviceKey','unreadableOwnedOverlayKeepsLogoutPendingUntilTheSameCleanupCanResume'}
     assert {("io.syn443.android.LoginControllerTest",name) for name in login_overlay_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required controller SDK retirement cases missing"
@@ -64,7 +64,7 @@ if mode=="emulator":
     assert {("io.syn443.android.ManagedOverlayStorageTest",name) for name in overlay_storage_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required owned SDK retirement cases missing"
     assert ("io.syn443.android.OverlayVaultTest","expiredPendingGrantCanBeReplacedOnlyAfterErasureAndServerAckWithoutTouchingSdkIdentity") in {(c.get("classname"),c.get("name")) for c in cases}, "Required grant erasure/replacement case missing"
     assert {("io.syn443.android.OverlayVaultTest",name) for name in {"managedProvisionerPersistsBeforeFetchAndErasesBeforeIndependentConsumption","managedProvisionerRenewalRetriesLostAckAndNeverResetsSdkKeys","managedProvisionerRejectsLateFetchAndNativeProofAfterCancellation"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed provisioning orchestration cases missing"
-    assert {("io.syn443.android.OverlayVaultTest",name) for name in {"runtimeMaterialRendersOnlyItsSignedConfigAndLocallyDerivedOwnedDirectory","keylessMaterialCannotAdoptInlineKeysPathsOtherNamespacesOrCoercedMetadata"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required RAM material localization cases missing"
+    assert {("io.syn443.android.OverlayVaultTest",name) for name in {"runtimeMaterialRendersOnlyItsSignedConfigAndLocallyDerivedOwnedDirectory","keylessMaterialCannotAdoptInlineKeysPathsOtherNamespacesOrCoercedMetadata","waitingMaterialKeepsSignedMetadataAndNeverCreatesCredentialOrSDKStorage"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required RAM material localization cases missing"
     overlay_vault_required={'perGrantKeyCiphertextAndDurableOperationSurviveProcessObjectsThenEraseBeforeAck', 'aLateCredentialCannotBeCachedOrBorrowedAfterTheTrustedUpperDeadline', 'missingKeyTamperingUnknownJournalAndOrphanCipherNeverResetEnrollment', 'cancellationRejectsLateAndQueuedCryptoAndWaitsForConfirmedOwnerRelease', 'interruptedCacheCommitRetainsReservedOperationAndCannotCrossStorageArea', 'mainThreadCannotEncryptDecryptOrMutateEnrollmentButMayPersistCancellation', 'retiredMetadataIsRemovedOnlyAfterConfirmedCredentialAndSdkErasure'}
     assert {("io.syn443.android.OverlayVaultTest",name) for name in overlay_vault_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required overlay Keystore/retirement cases missing"
     route_activation_required={"assignedActivationWaitsForCandidateRoutesAndIgnoresOptionalFailure",

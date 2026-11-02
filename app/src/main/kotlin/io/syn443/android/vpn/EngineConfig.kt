@@ -32,6 +32,7 @@ object EngineConfig {
         var overlays = 0
         for (i in 0 until outbounds.length()) {
             val item = outbounds.getJSONObject(i)
+            require(!item.has("credential_pending")) { "local overlay state cannot be imported" }
             require(item.getString("type") in supported)
             require(item.getString("tag").toByteArray(Charsets.UTF_8).size in 1..256 && tags.add(item.getString("tag")))
             if (item.getString("type") == "netbird") {
