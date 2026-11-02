@@ -21,7 +21,7 @@
                 <data android:scheme="syn443" android:host="enroll" android:path="/v1" />
             </intent-filter>
         </activity>
-        <provider android:name="androidx.core.content.FileProvider" android:authorities="io.syn443.android.enrollment.files" android:exported="false" android:grantUriPermissions="true">
+        <provider android:name=".EnrollmentFileProvider" android:authorities="io.syn443.android.enrollment.files" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/enrollment_camera_paths" />
         </provider>
         <activity android:name=".chat.SupportActivity" android:exported="false" />

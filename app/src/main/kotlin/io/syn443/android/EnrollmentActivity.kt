@@ -30,6 +30,9 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
+// Separate provider identity keeps camera paths independent of debug chat fixtures.
+class EnrollmentFileProvider:FileProvider()
+
 /** Incoming content is preview-only. No key/code leaves this device before the
  * explicit binding confirmation and installation-root verification. */
 class EnrollmentActivity:ComponentActivity() {
