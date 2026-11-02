@@ -31,3 +31,27 @@ verification substitutes for a passed fixture. These are loopback protocol tests
 not actual-provider or physical Wi-Fi/LTE acceptance. Reality, broader XHTTP mode
 combinations, full meaningful chain/selector matrix and affected exact APK checks
 remain separate open M3 gates until their own evidence is recorded.
+
+## Transport concurrency defects found by the new wire tests
+
+At e0cbccb3ef6176698b74d8be6d8495d99c9b42c8,
+[Actions41387421463](https://github.com/nd4y/syn443-android/actions/runs/41387421463),
+ordinary wire traffic passed, including real SOCKS UDP and rejection of its
+unsupported HTTP entry. The mandatory race run exposed three library races:
+late gRPC setup versus first Read, duplicated/concurrent XHTTP request-body buffer
+release, and XHTTP upload-queue Close versus Read/heap state.
+
+The pinned source patch now publishes gRPC setup through immutable channels,
+serializes stream read/write framing, lets Close wake a pending reader and cancels
+its own HTTP request. A late response is closed once; write buffers are released.
+MultiBufferContainer uses a per-container lock for its nonblocking memory methods.
+The upload queue serializes state/heap access and reader consumers, but never holds
+its state lock during blocking receives or body Read/Close. Closing a sequence gap
+wakes readers and retires the accepted body once.
+
+Additional bounded regression files cover setup/read/close races, frame integrity,
+request-body duplicate release, queue reorder/gap behavior and a blocking body.
+Actions now run the complete three affected upstream packages under race detector
+in addition to the actual outbound wire checks. The source patch hash remains
+pinned. Exact acceptance of this fix is pending; it is not proof about the cause
+of a historical phone hang. The new APK version is30/0.9.2-transport-lifecycle.
