@@ -68,6 +68,8 @@ class LoginController private constructor(private val context:android.app.Applic
     internal fun overlayStopped(session:String) {if(overlayOwner?.session==session)overlayOwner=null}
     @Volatile private var lastAssignmentFetch= -300_000L
     private var provisioningRetry=ProvisioningRetry()
+    @Volatile private var lastOverlayFetch=0L
+    private var overlayRetry=ProvisioningRetry()
     private data class ChatTicket(val id:String,val generation:Long,val expires:Long,var state:String="pending",var body:String="",var reason:String="")
     private var chatTicket:ChatTicket?=null
     /** Private UI mailbox: at most one bounded operation; no content enters public status. */
@@ -454,6 +456,7 @@ class LoginController private constructor(private val context:android.app.Applic
         return accepted
     }
     private fun clearOverlays() {
+        lastOverlayFetch=0L;overlayRetry=ProvisioningRetry()
         overlayAuthority=null
         overlayOwner=null
         val previous=overlayMaterials;overlayMaterials=emptyMap()
@@ -480,6 +483,7 @@ class LoginController private constructor(private val context:android.app.Applic
         fun delivery(operation:OverlayOperation,consume:Boolean):OverlayDeliveryReply {
             if(!network)throw AuthException(AuthFailure.TRANSPORT)
             current(s)
+            if(!consume)lastOverlayFetch=elapsed()
             fun request(api:AuthProtocol,child:IdentityScope)=api.overlay(operation,consume,binding,checkNotNull(p.session),child)
             val delivered=if(protocol!=null)request(protocol,checkNotNull(scope))
                 else withProtocol(s,p.bootstrap){api,child->request(api,child)}
@@ -696,10 +700,38 @@ class LoginController private constructor(private val context:android.app.Applic
             val policy=checkNotNull(assignedRuntime.allowed(s,raw))
             (policy.payload.refreshAfterMs-checkNotNull(view.state.time).window(boot(),elapsed()).upperMs).coerceIn(30_000,300_000)
         }.getOrDefault(30_000L)
-        if(elapsed()-lastAssignmentFetch<interval)return false
+        if(elapsed()-lastAssignmentFetch<interval)return !force && refreshOverlayCredential()
         if(runCatching {assignedRuntime.read(s).state.journal.phase=="applying"}.getOrDefault(false))return false
         return submitIfIdle(onAdmission={lastAssignmentFetch=elapsed()}) {
             current(s);resumeWorker(s)
+        }
+    }
+    /** Supervisor calls this only with desired On and an eligible physical
+     * network. Reuse the bounded generation/backoff admission; no new timer,
+     * policy fetch, native restart budget or foreground-service side effect. */
+    private fun refreshOverlayCredential():Boolean {
+        lateinit var expected:LoginIntent
+        var admitted:ProvisioningRetry?=null
+        return submitIfIdle(admit={
+            val s=journal.snapshot()
+            val waiting=overlayMaterials.values.any{it.waiting && it.available()}
+            if(s.phase!=LoginPhase.POLICY_CACHED || !waiting ||
+                runCatching{assignedRuntime.read(s).state.journal.phase=="applying"}.getOrDefault(true))false
+            else {
+                expected=s
+                admitted=overlayRetry.admit(s.generation,elapsed(),lastOverlayFetch)
+                admitted!=null
+            }
+        },onAdmission={overlayRetry=checkNotNull(admitted);lastOverlayFetch=elapsed()}) {
+            current(expected)
+            val original=payload(expected)
+            withProtocol(expected,original.bootstrap){protocol,scope->
+                // Refresh an expiring session before delivery. Read the new
+                // protected payload after rotation, without fetching policy.
+                resumeSession(expected,original,protocol,scope,fetch=false)
+                val s=journal.snapshot();current(s)
+                prepareOverlays(s,payload(s),checkNotNull(journal.readAssignment(s)),protocol,scope)
+            }
         }
     }
     private fun resumeSession(initial:LoginIntent,original:LoginPayload,protocol:AuthProtocol,scope:IdentityScope,fetch:Boolean=true) {

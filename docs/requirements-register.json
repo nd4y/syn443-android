@@ -648,7 +648,8 @@
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "core/identity/src/main/kotlin/io/syn443/identity/OverlayEnrollment.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayProvisioner.kt",
-        "native/engine-netbird/managed_state_test.go"
+        "native/engine-netbird/managed_state_test.go",
+        "docs/overlay-credential-retry.md"
       ],
       "implementationScope": "Addressed managed overlay delivery, Keystore grant erasure and strict native sealed-key ownership. New expiry-to-keyless-reconciliation and local activation retry fixes have pending Actions acceptance.",
       "remainingScope": "Managed issuer/resource integration, provider peer reconciliation, complete UI and exact physical Cloud/keyless-recovery acceptance remain open."
@@ -683,7 +684,8 @@
       "text": "Ключ идентичности создаётся и хранится локально, не попадает в телеметрию, бандлы и обычный экспорт. Смена direct/VLESS сохраняет peer ID. Ключи и peer отзываются отдельно при удалении устройства.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/overlay-credential-retry.md"
       ],
       "implementationScope": "Direct-first SDK/strict VLESS detour, local identity and bounded roster/probes.",
       "remainingScope": "Managed peer credentials/retirement, DNS conflicts and full cellular matrix."
@@ -693,7 +695,8 @@
       "text": "Отдельно показываются management, signal, relay, peers, выбранный upstream, ICE/P2P состояние, последнее рукопожатие, объём трафика и доступность назначенных ресурсов. Все разрешённые peers можно проверить ограниченным заданием; отсутствие ICMP не равно «peer выключен».",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/overlay-credential-retry.md"
       ],
       "implementationScope": "Direct-first SDK/strict VLESS detour, local identity and bounded roster/probes.",
       "remainingScope": "Managed peer credentials/retirement, DNS conflicts and full cellular matrix."

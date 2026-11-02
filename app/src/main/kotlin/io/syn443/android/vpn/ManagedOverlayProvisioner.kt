@@ -30,7 +30,13 @@ internal class ManagedOverlayProvisioner(private val vault:OverlayVault,
         var value=vault.snapshot() ?: vault.reserve(binding,generation)
         current(value)
         if(value.phase==OverlayPhase.RECONCILING_ERASING || value.phase==OverlayPhase.ENROLLING &&
-            value.operation.reference==binding.reference && value.operation.version==binding.version && value.credentialUntilMs<=window().upperMs) {
+            value.operation.reference==binding.reference && value.operation.version==binding.version &&
+            (value.credentialUntilMs<=window().upperMs ||
+                runCatching{OverlayEnrollments.requireAuthorized(value,binding,generation)}.isFailure)) {
+            // The same SDK identity may already have registered before a root/
+            // security-epoch update. Do not discard it or re-fetch the old key
+            // under the new authority; erase the setup value and probe sealed
+            // existing SDK keys, requiring current private native proof.
             value=vault.reconcileExisting(value);current(value)
         }
         if(value.phase==OverlayPhase.RECONCILING && value.operation.reference==binding.reference && value.operation.version==binding.version)return null

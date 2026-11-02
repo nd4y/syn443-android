@@ -212,6 +212,27 @@ class OverlayVaultTest {
         assertEquals(OverlayPhase.ERASED,proven.phase);assertEquals(old.operation,proven.operation)
         assertEquals(OverlayPhase.ACKNOWLEDGED,p.acknowledge().phase);assertEquals(1,consumes);assertEquals(0,fetches)
     }
+    @Test fun changedSecurityEpochProbesSameIdentityWithoutBorrowingGrantOrAcknowledgingBeforeNativeProof()=fixture{f->
+        val old=f.vault.enrolling(f.cached());var fetches=0;var consumes=0
+        val rotated=f.binding.copy(securityEpoch=1)
+        fun provisioner(binding:OverlayCredentialBinding)=ManagedOverlayProvisioner(f.vault,binding,4,f.roots,
+            {f.authorized.get()},{TimeWindow(f.upper.get(),f.upper.get())},
+            {fetches++;error("changed authority must not re-fetch the old grant")},{op->assertEquals(old.operation,op);consumes++})
+        assertThrows(IllegalArgumentException::class.java){provisioner(rotated.copy(keyThumbprint=Identity.random())).prepare()}
+        assertEquals(old,f.vault.snapshot());assertTrue(f.store().containsAlias(f.alias))
+        val p=provisioner(rotated)
+        assertNull(p.prepare());val probe=f.vault.snapshot()!!
+        assertEquals(OverlayPhase.RECONCILING,probe.phase);assertEquals(old.operation,probe.operation)
+        assertEquals("",probe.identityEvidence);assertEquals(0,fetches);assertEquals(0,consumes)
+        assertFalse(f.store().containsAlias(f.alias));assertFalse(File(f.directory,"credential.bin").exists())
+        assertNull(p.prepare());assertEquals(probe,f.reopen().snapshot())
+        assertThrows(IllegalStateException::class.java){p.registered(f.namespace,Identity.random()){false}}
+        assertEquals(probe,f.vault.snapshot())
+        assertEquals(OverlayPhase.ERASED,p.registered(f.namespace,Identity.random()){true}.phase)
+        assertEquals(OverlayPhase.ACKNOWLEDGED,p.acknowledge().phase)
+        assertEquals(0,fetches);assertEquals(1,consumes)
+    }
+
     @Test fun interruptedRecoveryErasureFinishesWithoutBorrowingTheOldCiphertext()=fixture{f->
         val old=f.vault.enrolling(f.cached())
         val erasing=OverlayEnrollments.reconcilingErasure(old)

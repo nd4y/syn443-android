@@ -816,6 +816,27 @@ class LoginControllerTest {
         f.restart();assertEquals("enrolling",f.controller.overlayLaunchMode(hash));assertEquals(2,f.server.overlayFetchBodies.size)
     }
 
+    @Test fun periodicManagedCredentialRetryUsesSameOperationWithoutFetchingPolicyOrBypassingBackoff()=fixture{f->
+        f.server.policyReady=true;f.server.managedOverlayPolicy=true;f.server.dropOverlayFetch=true
+        f.controller.callback(f.begin());f.idle()
+        val login=f.journal.snapshot();val owned=login.overlayNamespaces.single()
+        val operation=OverlayVault(context,owned,{true},{0},f.namespace).snapshot()!!.operation
+        val raw=f.controller.assignedRuntime.read(login).candidate!!.engineConfig;val hash=Policy.hash(raw)
+        assertTrue(f.controller.beginAssignment(f.controller.assignmentTicket(),listOf(false)));f.idle()
+        assertTrue(f.controller.finishAssignment(f.controller.assignmentTicket(),listOf(true),true));f.idle()
+        val policyFetches=f.server.paths.count{it.endsWith("/device/policy")}
+        assertEquals(1,f.server.overlayFetchBodies.size)
+        f.server.dropOverlayFetch=false
+        until{f.controller.refreshAssignment(false)};f.idle()
+        assertEquals("enrolling",f.controller.overlayLaunchMode(hash))
+        assertEquals(operation,OverlayVault(context,owned,{true},{0},f.namespace).snapshot()!!.operation)
+        assertEquals(2,f.server.overlayFetchBodies.size);assertEquals(1,f.server.overlayFetchBodies.toSet().size)
+        assertEquals(policyFetches,f.server.paths.count{it.endsWith("/device/policy")})
+        assertFalse(f.controller.refreshAssignment(false));f.idle();assertEquals(2,f.server.overlayFetchBodies.size)
+        f.controller.cancel();f.idle()
+        assertFalse(f.controller.refreshAssignment(false));assertEquals(2,f.server.overlayFetchBodies.size)
+    }
+
     @Test fun managedGrantFailureNeverUsesAKeyAndAuthenticationDenialWithdrawsBaseAuthority() {
         for(code in listOf(202,400,409,429,503,401,403))fixture{f->
             f.server.policyReady=true;f.server.managedOverlayPolicy=true;f.server.overlayFetchStatus=code
