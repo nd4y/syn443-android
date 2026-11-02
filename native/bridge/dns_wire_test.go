@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,7 +38,7 @@ func dnsWire(t *testing.T, transport string) (map[string]any, *atomic.Int32) {
 	t.Helper()
 	certificate, _, keyPair := wireTLS(t)
 	calls := &atomic.Int32{}
-	options := map[string]any{"type": transport, "tag": "resolver", "server": "127.0.0.1", "detour": "direct"}
+	options := map[string]any{"type": transport, "tag": "resolver", "server": "127.0.0.1"}
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{keyPair}, MinVersion: tls.VersionTLS13}
 	if transport != "udp" && transport != "tcp" {
 		options["tls"] = map[string]any{"enabled": true, "server_name": "wire.example.invalid", "certificate": []string{certificate}}
@@ -257,6 +258,38 @@ func TestRegisteredDNSTransportsActualQuestionAnswerAndTLSBoundary(t *testing.T)
 						t.Fatal("DNS answer mismatch")
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestDNSOverHTTPEntryUsesExactProxyAndCannotEscapeAuthenticationFailure(t *testing.T) {
+	for _, denied := range []bool{false, true} {
+		t.Run(strconv.FormatBool(denied), func(t *testing.T) {
+			server, calls := dnsWire(t, "tls")
+			endpoint := net.JoinHostPort("127.0.0.1", strconv.Itoa(server["server_port"].(int)))
+			entry := httpWire(t, endpoint, "fixture-user", "fixture-pass")
+			node := entry.node("http", "entry")
+			node["username"] = "fixture-user"
+			node["password"] = "fixture-pass"
+			if denied {
+				node["password"] = "wrong-pass"
+			}
+			server["detour"] = "entry"
+			_, ctx := wireNetworkBox(t, nil, []map[string]any{{"type": "direct", "tag": "direct"}, node}, map[string]any{"dns": map[string]any{"servers": []any{server}, "final": "resolver"}})
+			query := new(mdns.Msg)
+			query.SetQuestion("probe.example.invalid.", mdns.TypeA)
+			deadline, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			reply, err := service.FromContext[adapter.DNSRouter](ctx).Exchange(deadline, query, adapter.DNSQueryOptions{DisableCache: true})
+			if denied {
+				if err == nil || calls.Load() != 0 || entry.calls.Load() < 1 {
+					t.Fatal("failed DNS entry bypassed its authentication")
+				}
+				return
+			}
+			if err != nil || reply == nil || len(reply.Answer) != 1 || calls.Load() != 1 || entry.calls.Load() != 1 {
+				t.Fatal("DNS did not use the complete configured proxy path", err)
 			}
 		})
 	}
