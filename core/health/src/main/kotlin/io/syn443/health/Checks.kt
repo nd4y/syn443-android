@@ -27,6 +27,10 @@ class ProbeScope {
         check(socket.compareAndSet(null, value))
         if (cancelled.get()) socket.getAndSet(null)?.let { runCatching { it.close() } }
     }
+    /** Retire one failed connection before attaching its bounded alternative. */
+    fun release(value: Socket) {
+        if(socket.compareAndSet(value,null))runCatching {value.close()}
+    }
     fun cancel() {
         synchronized(this) { cancelled.set(true) }
         socket.getAndSet(null)?.let { runCatching { it.close() } }

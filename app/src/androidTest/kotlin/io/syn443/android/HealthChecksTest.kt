@@ -64,6 +64,19 @@ class HealthChecksTest {
             assertTrue(checkNotNull(signal).isCanceled)
         }
     }
+    @Test fun androidDnsRetainsBoundedDistinctAddressesForFallbackAndStillCancelsQuery() {
+        val first=InetAddress.getByAddress(ByteArray(16).apply {this[15]=1})
+        val other=InetAddress.getByAddress(byteArrayOf(127,0,0,1))
+        lateinit var signal:CancellationSignal
+        val resolver=AndroidProbeResolver(query={_,cancel,callback->
+            signal=cancel;callback.onAnswer(listOf(first,first,other),0)
+        })
+        assertEquals(listOf(first,other),resolver.resolveAll("host.example.org"));assertTrue(signal.isCanceled)
+        val answers=(1..20).map {InetAddress.getByAddress(byteArrayOf(198.toByte(),51,100,it.toByte()))}
+        val bounded=AndroidProbeResolver(query={_,_,callback->callback.onAnswer(answers,0)})
+        assertEquals(answers.take(16),bounded.resolveAll("host.example.org"))
+        assertEquals(listOf(other),resolver.resolveAll("127.0.0.1"))
+    }
     @Test fun androidDnsDeadlineCancelsQueryAndRejectsLateSuccess() {
         lateinit var callback: AndroidProbeResolver.Answer
         lateinit var signal: CancellationSignal

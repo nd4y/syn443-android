@@ -33,8 +33,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 38
-        versionName = "0.9.10-policy-lease-renewal"
+        versionCode = 39
+        versionName = "0.9.11-health-address-fallback"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }

@@ -40,6 +40,16 @@ for path in paths:
 assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="policy":
     assert ("io.syn443.policy.PolicyTest","signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences") in {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
+if mode=="health":
+    required={('io.syn443.health.AddressFallbackTest',name) for name in {
+        'unavailableFirstFamilyFallsBackWithoutExtraWorkersOrLeakedSockets',
+        'connectionFailureTriesOnlyFourDistinctAddressesAndKeepsFailureAttribution',
+        'emptyDnsResultDoesNotAllocateSocketAndRemainsDnsFailure',
+        'cancellationClosesCurrentAttemptAndCannotStartAnAlternative',
+        'releasingAnOldOrForeignSocketCannotDetachTheCurrentAttempt',
+        'unexpectedConnectionFailureClosesOnlyItsSocketAndNeverStartsAnAlternative'}}
+    required.add(('io.syn443.health.TlsTest','certificateFailureDoesNotTryAnotherAddressOrWeakenTrust'))
+    assert required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required bounded address fallback cases missing'
 if mode=="identity":
     renewal_required={('io.syn443.identity.AssignmentsTest',name) for name in {
         'identicalExecutionRenewsDurablyWithoutCandidateActivationOrLossOfFailureHistory',
@@ -77,6 +87,7 @@ if mode=="identity":
         "transportCancellationAndServerErrorsRemainDistinct",
         "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
+    assert ('io.syn443.android.HealthChecksTest','androidDnsRetainsBoundedDistinctAddressesForFallbackAndStillCancelsQuery') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android DNS fallback case missing'
     assert ('io.syn443.android.LoginControllerTest','assignedLeaseRenewalPersistsWithoutNewActivationAndRetainsDeviceIdentityAcrossRestart') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required durable Android lease renewal case missing'
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'legacyCapabilityApprovalSurvivesRestartWithoutChangingAssignedPolicyOrDeviceIdentity',
