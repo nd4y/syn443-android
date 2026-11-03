@@ -56,8 +56,28 @@ object Assignments {
         if(reply.envelope==j.desired || reply.envelope==j.active || reply.envelope==j.candidate)
             return state.copy(time=reply.time)
         require(j.phase!="applying") // Finish/retire an activation before admitting another candidate.
+        if(leaseRenewal(state,login,payload,verified))return state.copy(time=reply.time,journal=j.copy(
+            desired=reply.envelope,active=reply.envelope,
+            lastGood=if(j.lastGood==j.active)reply.envelope else j.lastGood,
+            maxRevision=verified.payload.revision))
         val base=if(j.phase=="prepared")j.copy(phase="rejected",candidate=null) else j
         return AssignmentState(expected,Policy.stage(base,verified),reply.time)
+    }
+    /** Renew only an already activated execution. A new signed lease supplies all current
+     * authority; the old signature is checked at its own start solely to identify historical
+     * execution, never to authorize an expired reader. Epoch/floor/config/gate changes stage
+     * normally. Quarantine, activation generation and rollback evidence remain untouched. */
+    private fun leaseRenewal(state:AssignmentState,login:LoginIntent,payload:LoginPayload,next:Verified):Boolean {
+        val j=state.journal;val raw=j.active
+        if(j.phase !in setOf("committed","degraded","rolled_back") || raw==null || j.candidate!=null ||
+            state.applyDeadlineElapsed!=0L || state.applyBoot!=-1 || next.payload.revision<=j.maxRevision ||
+            next.payload.securityEpoch!=j.epoch || next.payload.revocationFloor!=j.floor ||
+            j.phase=="rolled_back" && raw!=j.lastGood)return false
+        val oldPayload=Policy.json.decodeFromString<io.syn443.policy.Payload>(Policy.utf8(Policy.decode64(raw.split('.')[1])))
+        val old=Policy.verifyBound(raw,payload.bootstrap.roots,login.deviceId,login.thumbprint,oldPayload.notBeforeMs)
+        val p=old.payload;val n=next.payload
+        return old.engineConfig==next.engineConfig && p.copy(revision=n.revision,issuedAtMs=n.issuedAtMs,
+            notBeforeMs=n.notBeforeMs,refreshAfterMs=n.refreshAfterMs,offlineUntilMs=n.offlineUntilMs)==n
     }
     /** Repeating this after a crash completes a same-generation journal/intent handoff. */
     fun receipt(state:AssignmentState,login:LoginIntent,payload:LoginPayload,boot:Int,elapsed:Long):String {

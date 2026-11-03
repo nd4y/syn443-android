@@ -41,6 +41,13 @@ assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="policy":
     assert ("io.syn443.policy.PolicyTest","signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences") in {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="identity":
+    renewal_required={('io.syn443.identity.AssignmentsTest',name) for name in {
+        'identicalExecutionRenewsDurablyWithoutCandidateActivationOrLossOfFailureHistory',
+        'freshSignedLeaseCanAuthorizeKnownExpiredExecutionButNeverReviveItsExpiredReader',
+        'renewalOfAuthorizedRollbackKeepsFailedCandidateQuarantinedAndOtherFallbackLeaseUnextended',
+        'renewalDoesNotBypassChangedAuthorityCapabilitiesGateOrPendingActivation',
+        'shorterRenewedLeaseTightensDeadlineAndNeverMakesAnUnrelatedActiveSnapshotGood'}}
+    assert renewal_required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required lease renewal cases missing'
     capability_required={('io.syn443.identity.CapabilityNegotiationTest',name) for name in {
         'canonicalAvailabilityAndOperationAreStableWithoutMutatingAnOldRequest',
         'malformedUnknownAndInconsistentHistoryCannotBecomeAvailability',
@@ -70,6 +77,7 @@ if mode=="identity":
         "transportCancellationAndServerErrorsRemainDistinct",
         "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
+    assert ('io.syn443.android.LoginControllerTest','assignedLeaseRenewalPersistsWithoutNewActivationAndRetainsDeviceIdentityAcrossRestart') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required durable Android lease renewal case missing'
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'legacyCapabilityApprovalSurvivesRestartWithoutChangingAssignedPolicyOrDeviceIdentity',
         'lostCapabilityAckAndUnavailableEndpointKeepCurrentAssignmentAndStopStillWins',

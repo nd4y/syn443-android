@@ -142,19 +142,99 @@ class AssignmentsTest {
         val good=Assignments.finish(Assignments.begin(prepared,current,payload,listOf(false),1,1000),current,payload,listOf(true),true,1,1000)
         val old=Assignments.permit(good,current,payload,1,1000)
         val renewed=receive(good,policy(2).copy(offlineUntilMs=now+7_200_000),current);val newer=acknowledged(renewed)
-        val applying=Assignments.begin(renewed,newer,payload,listOf(true),1,1000)
-        val next=Assignments.permit(applying,newer,payload,1,1000)
-        assertSame(next,old.renew(next,newer,applying,1,2000))
-        invalid {old.renew(next,newer,applying,1,old.deadlineElapsed)}
-        invalid {old.renew(next,newer,applying,2,1000)}
+        assertEquals("committed",renewed.journal.phase)
+        val next=Assignments.permit(renewed,newer,payload,1,1000)
+        assertSame(next,old.renew(next,newer,renewed,1,2000))
+        invalid {old.renew(next,newer,renewed,1,old.deadlineElapsed)}
+        invalid {old.renew(next,newer,renewed,2,1000)}
         val otherEngine=engine.replace("direct","alternate")
         val changed=receive(good,policy(2).copy(engineConfigB64=Identity.encode(otherEngine.toByteArray()),contentHash=Policy.hash(otherEngine)),current)
         val otherLogin=acknowledged(changed);val otherApplying=Assignments.begin(changed,otherLogin,payload,listOf(true),1,1000)
         invalid {old.renew(Assignments.permit(otherApplying,otherLogin,payload,1,1000),otherLogin,otherApplying,1,2000)}
         // A separately verified owner still cannot replace a live native lease in place.
-        val foreignState=applying.copy(identity=applying.identity!!.copy(loginGeneration=2))
+        val foreignState=renewed.copy(identity=renewed.identity!!.copy(loginGeneration=2))
         val foreignLogin=newer.copy(generation=2)
         invalid {old.renew(Assignments.permit(foreignState,foreignLogin,payload,1,1000),foreignLogin,foreignState,1,2000)}
+    }
+    private fun committed():AssignmentState {
+        val first=receive();val current=acknowledged(first)
+        return Assignments.finish(Assignments.begin(first,current,payload,listOf(false),1,1000),current,payload,listOf(true),true,1,1000)
+    }
+    @Test fun identicalExecutionRenewsDurablyWithoutCandidateActivationOrLossOfFailureHistory() {
+        val good=committed().let {it.copy(journal=it.journal.copy(failedRevisions=listOf(9),failedSnapshots=listOf("quarantine")))}
+        val current=acknowledged(good);val renewed=receive(good,policy(10).copy(offlineUntilMs=now+7_200_000),current)
+        assertEquals(good.journal.activationGeneration,renewed.journal.activationGeneration)
+        assertEquals("committed",renewed.journal.phase);assertNull(renewed.journal.candidate)
+        assertEquals(renewed.journal.desired,renewed.journal.active);assertEquals(renewed.journal.active,renewed.journal.lastGood)
+        assertEquals(good.journal.failedRevisions,renewed.journal.failedRevisions)
+        assertEquals(good.journal.failedSnapshots,renewed.journal.failedSnapshots)
+        assertEquals(good.journal.reason,renewed.journal.reason);assertEquals(10L,renewed.journal.maxRevision)
+        invalid {Assignments.permit(renewed,current,payload,1,1000)} // New durable receipt is mandatory.
+        val restored=Policy.json.decodeFromString<AssignmentState>(Policy.json.encodeToString(renewed))
+        val next=acknowledged(restored)
+        assertEquals(engine,Assignments.permit(restored,next,payload,1,1000).authorized(next,restored,1,1000).engineConfig)
+        assertEquals(renewed,Assignments.receive(renewed,next,payload,PolicyReply(checkNotNull(renewed.journal.desired),time),1,1000))
+    }
+    @Test fun freshSignedLeaseCanAuthorizeKnownExpiredExecutionButNeverReviveItsExpiredReader() {
+        val good=committed();val current=acknowledged(good)
+        val old=Assignments.permit(good,current,payload,1,1000)
+        val elapsed=3_602_000L;val refreshedTime=TrustedTime(1,elapsed,now+3_601_000,now+3_602_000)
+        val fresh=policy(2).copy(issuedAtMs=now+3_600_000,notBeforeMs=now+3_600_000,
+            refreshAfterMs=now+3_630_000,offlineUntilMs=now+7_200_000)
+        invalid {Assignments.authorized(good,current,payload,1,elapsed)}
+        val renewed=Assignments.receive(good,current,payload,PolicyReply(signed(fresh),refreshedTime),1,elapsed)
+        assertEquals("committed",renewed.journal.phase);assertEquals(good.journal.activationGeneration,renewed.journal.activationGeneration)
+        val next=LoginRecovery.policyCached(current,1,Assignments.receipt(renewed,current,payload,1,elapsed),current.protectedHash)
+        val permit=Assignments.permit(renewed,next,payload,1,elapsed)
+        assertEquals(engine,permit.authorized(next,renewed,1,elapsed).engineConfig)
+        invalid {old.renew(permit,next,renewed,1,elapsed)}
+        invalid {Assignments.receive(good,current,payload,PolicyReply(signed(policy(3)),refreshedTime),1,elapsed)}
+    }
+    @Test fun renewalOfAuthorizedRollbackKeepsFailedCandidateQuarantinedAndOtherFallbackLeaseUnextended() {
+        val good=committed();val current=acknowledged(good)
+        val bad=policy(2).copy(activation=policy().activation.copy(timeoutSeconds=31))
+        val prepared=receive(good,bad,current);val next=acknowledged(prepared)
+        val rolled=Assignments.abort(Assignments.begin(prepared,next,payload,listOf(true),1,1000),next,payload,"native_activation_failed")
+        val renewed=receive(rolled,policy(3),next)
+        assertEquals("rolled_back",renewed.journal.phase);assertEquals("native_activation_failed",renewed.journal.reason)
+        assertEquals(rolled.journal.activationGeneration,renewed.journal.activationGeneration)
+        assertEquals(rolled.journal.failedSnapshots,renewed.journal.failedSnapshots)
+        assertEquals(rolled.journal.failedRevisions,renewed.journal.failedRevisions)
+        assertEquals(renewed.journal.active,renewed.journal.lastGood)
+        invalid {receive(renewed,bad.copy(revision=4),acknowledged(renewed))}
+        val degraded=good.copy(journal=good.journal.copy(phase="degraded",lastGood="unrelated-fallback",reason="baseline_also_unavailable"))
+        val refreshed=receive(degraded,policy(2),current)
+        assertEquals("degraded",refreshed.journal.phase);assertEquals("unrelated-fallback",refreshed.journal.lastGood)
+        assertEquals(degraded.journal.reason,refreshed.journal.reason)
+    }
+    @Test fun renewalDoesNotBypassChangedAuthorityCapabilitiesGateOrPendingActivation() {
+        val good=committed();val current=acknowledged(good)
+        val changes=listOf(policy(2).copy(securityEpoch=1),policy(2).copy(revocationFloor=1),
+            policy(2).copy(requiredCapabilities=IdentityOperation.supportedCapabilities),
+            policy(2).copy(activation=policy().activation.copy(timeoutSeconds=31)),
+            policy(2).copy(engineConfigB64=Identity.encode(engine.replace("direct","alternate").toByteArray()),contentHash=Policy.hash(engine.replace("direct","alternate"))))
+        changes.forEach {p->val staged=receive(good,p,current);assertEquals("prepared",staged.journal.phase)
+            assertEquals(good.journal.activationGeneration+1,staged.journal.activationGeneration);assertEquals(good.journal.active,staged.journal.active)}
+        val pending=receive(good,changes.last(),current)
+        assertEquals("prepared",receive(pending,policy(3),acknowledged(pending)).journal.phase)
+        val applying=Assignments.begin(pending,acknowledged(pending),payload,listOf(true),1,1000)
+        invalid {receive(applying,policy(3),acknowledged(pending))}
+        val inconsistent=listOf(good.copy(applyBoot=1),good.copy(applyDeadlineElapsed=2000),
+            good.copy(journal=good.journal.copy(candidate=good.journal.active)),
+            good.copy(journal=good.journal.copy(phase="rolled_back",lastGood=null)),
+            good.copy(journal=good.journal.copy(phase="rejected")))
+        inconsistent.forEach {assertEquals("prepared",receive(it,policy(2),current).journal.phase)}
+        invalid {receive(good,policy(),current)} // A differently signed replay cannot renew.
+        val corrupt=good.copy(journal=good.journal.copy(active=good.journal.active!!.dropLast(1)+"!"))
+        invalid {receive(corrupt,policy(2),current)}
+    }
+    @Test fun shorterRenewedLeaseTightensDeadlineAndNeverMakesAnUnrelatedActiveSnapshotGood() {
+        val good=committed();val current=acknowledged(good)
+        val renewed=receive(good,policy(2).copy(offlineUntilMs=now+60_000),current);val next=acknowledged(renewed)
+        assertEquals(60_000L,Assignments.permit(renewed,next,payload,1,1000).deadlineElapsed)
+        val staged=receive(good,policy(3).copy(securityEpoch=1),current)
+        val lifted=staged.copy(journal=staged.journal.copy(phase="committed",candidate=null))
+        assertEquals("prepared",receive(lifted,policy(4).copy(securityEpoch=1),acknowledged(lifted)).journal.phase)
     }
     @Test fun lateChecksAndRebootCannotCommitAnExpiredActivation() {
         val first=receive();val current=acknowledged(first)

@@ -632,6 +632,31 @@ class LoginControllerTest {
         assertEquals("committed",f.journal.readAssignment(f.journal.snapshot())!!.journal.phase)
         assertTrue(f.controller.allowsConnect())
     }
+    @Test fun assignedLeaseRenewalPersistsWithoutNewActivationAndRetainsDeviceIdentityAcrossRestart() = fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val ticket=f.controller.assignmentTicket()
+        assertTrue(f.controller.beginAssignment(ticket,listOf(false)));f.idle()
+        assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()
+        val before=f.journal.snapshot();val previous=checkNotNull(f.journal.readAssignment(before))
+        val config=f.controller.assignedRuntime.config(before)
+        f.server.policyRevision=2;f.controller.retry(before.generation);f.idle()
+        val after=f.journal.snapshot();val renewed=checkNotNull(f.journal.readAssignment(after))
+        assertEquals(before.generation,after.generation);assertEquals(before.deviceId,after.deviceId)
+        assertEquals(before.thumbprint,after.thumbprint);assertEquals(before.keyAlias,after.keyAlias)
+        assertNotEquals(before.policyHash,after.policyHash)
+        assertEquals("committed",renewed.journal.phase);assertNull(renewed.journal.candidate)
+        assertEquals(previous.journal.activationGeneration,renewed.journal.activationGeneration)
+        assertEquals(2L,renewed.journal.maxRevision);assertEquals(config,f.controller.assignedRuntime.config(after))
+        assertTrue(f.controller.status().getJSONObject("assignedPolicy").getBoolean("runtimeAuthorized"))
+        assertFalse(f.controller.status().getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+        // A queued result from the old envelope cannot mutate the renewed journal.
+        assertTrue(f.controller.finishAssignment(ticket,listOf(false),false));f.idle()
+        assertEquals(renewed.journal,f.journal.readAssignment(f.journal.snapshot())!!.journal)
+        f.restart();val restored=f.journal.snapshot()
+        assertEquals(after.deviceId,restored.deviceId);assertEquals(after.thumbprint,restored.thumbprint)
+        assertEquals(renewed.journal,f.journal.readAssignment(restored)!!.journal)
+        assertEquals(config,f.controller.assignedRuntime.config(restored));assertTrue(f.controller.allowsConnect())
+    }
     @Test fun assignedFailedReplacementRollsBackAndRejectsStaleActivationResults() = fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
         val first=f.controller.assignmentTicket()
