@@ -8,6 +8,8 @@ import io.syn443.identity.*
 import io.syn443.policy.Canonical
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONObject
 import java.io.File
 import java.net.URI
