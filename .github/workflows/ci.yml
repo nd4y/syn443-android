@@ -38,6 +38,7 @@ jobs:
       - run: python3 -m unittest discover -s tools -p 'test_*.py'
       - run: bash -n tools/run_emulator_tests.sh tools/prepare_android_tools.sh
       - run: python3 -m unittest discover -s tools -p test_emulator_policy_ui.py
+      - run: python3 -m unittest discover -s tools -p test_emulator_heap.py
   native:
     needs: public-data
     runs-on: ubuntu-24.04
@@ -183,6 +184,12 @@ jobs:
       matrix:
         api: [29, 35, '37.0']
         include:
+          - api: 29
+            profile: pixel_2
+            ram: 2048M
+            heap: 256M
+            cores: 2
+            disk: 8G
           - api: '37.0'
             profile: pixel_2
             ram: 4096M
@@ -245,6 +252,7 @@ jobs:
           disable-animations: true
           profile: ${{ matrix.profile || '' }}
           ram-size: ${{ matrix.ram || '' }}
+          heap-size: ${{ matrix.heap || '256M' }}
           cores: ${{ matrix.cores || 2 }}
           disk-size: ${{ matrix.disk || '8G' }}
           emulator-boot-timeout: 900

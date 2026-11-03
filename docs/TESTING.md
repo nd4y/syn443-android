@@ -22,6 +22,14 @@ All automatable implemented behavior must run on pull requests and main in GitHu
 - Later: Postgres migrations/transaction races, job retries, provider fixtures, browser UI/API E2E, fault/load/security checks as components arrive.
 
 Physical-only release gates: real restricted LTE, RF handover, vendor power management, measured idle energy, external-provider availability and long endurance.
+
+Disposable AVDs use an explicit256MiB Java heap; API29 also selects the Pixel2
+hardware profile and2048MiB RAM. The generic old16MiB heap caused system_server
+to die in ConfigUpdateInstallReceiver during an automatic system update, before
+the instrumentation suite could complete. A hardware/serial-gated preflight now
+checks the actual maximum and growth limit before installing the app. This does
+not change application limits, omit media/OS cases or substitute for physical
+memory/battery acceptance. An interrupted run remains failed.
 CI must list these as pending rather than skip them and report success.
 Resource observations add ten JVM cases with a 90% line-coverage gate and two Android cases for the real proc source/cache/intent invariants and manual UI. See [measurement semantics and limits](resource-observation.md).
 Coverage applies to implemented code; line coverage alone is not behavioral coverage.
