@@ -86,7 +86,7 @@ import io.syn443.identity.Identity
             if(command("auth-cancel")?.getBoolean("ok")!=true)message="Завершение не подтверждено. Повторите попытку."
         }},modifier=Modifier.testTag("auth-cancel")) {Text("Завершить сессию")}
         if(status.optInt("cleanupPending")>0)Text("Очистка регистрации на сервере продолжится после нового входа в тот же аккаунт.")
-        if(status.optBoolean("adminPanelAvailable"))Button(enabled=!status.optBoolean("busy"),onClick={scope.launch {
+        if(status.optBoolean("controlPanelAvailable"))Button(enabled=!status.optBoolean("busy"),onClick={scope.launch {
             val reply=command("auth-admin-panel",generation.toString())
             val url=reply?.getString("url")
             if(reply?.getBoolean("ok")==true && url!=null && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))runCatching {

@@ -289,17 +289,17 @@ class LoginControllerTest {
         val generation=f.journal.snapshot().generation
         assertEquals("https://control.example.invalid",f.controller.adminPanelUrl(generation))
         assertNull(f.controller.adminPanelUrl(generation+1))
-        assertTrue(f.controller.status().getBoolean("adminPanelAvailable"))
+        assertTrue(f.controller.status().getBoolean("controlPanelAvailable"))
         f.restart()
         assertEquals("https://control.example.invalid",f.controller.adminPanelUrl(generation))
         f.controller.cancel()
         assertNull(f.controller.adminPanelUrl(generation));f.idle()
-        assertFalse(f.controller.status().optBoolean("adminPanelAvailable"))
+        assertFalse(f.controller.status().optBoolean("controlPanelAvailable"))
     }
     @Test fun legacyBootstrapDoesNotInventAnAdministrationAddress()=fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
         assertNull(f.controller.adminPanelUrl(f.journal.snapshot().generation))
-        assertFalse(f.controller.status().getBoolean("adminPanelAvailable"))
+        assertFalse(f.controller.status().getBoolean("controlPanelAvailable"))
     }
     @Test fun pendingPollFencesStaleGenerationAndCannotReviveLogout() {
         val pause=AtomicBoolean();val entered=CountDownLatch(1);val release=CountDownLatch(1)

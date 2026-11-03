@@ -203,7 +203,7 @@ class LoginController private constructor(private val context:android.app.Applic
         JSONObject().put("phase",s.phase.name).put("method",s.method).put("generation",s.generation).put("configured",configured)
             .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
-            .put("adminPanelAvailable",adminPanelUrl(s.generation)!=null)
+            .put("controlPanelAvailable",adminPanelUrl(s.generation)!=null)
             .put("inviteState",if(s.phase==LoginPhase.INVITING)inviteState else "").put("pairCode",if(s.phase==LoginPhase.INVITING)invitePair else "")
             .put("cleanupPending",s.tombstones.size).put("assignedPolicy",assignedRuntime.status(s))
     }.getOrElse {JSONObject().put("phase","BLOCKED").put("reason","LOGIN_STORE_UNAVAILABLE")
