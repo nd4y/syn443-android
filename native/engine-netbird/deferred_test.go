@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -176,9 +177,12 @@ func (p *stuckPeer) Start(context.Context) error {
 func (p *stuckPeer) Stop(context.Context) error { return embed.ErrClientNotStarted }
 func TestUnconfirmedCleanupCannotCreateASecondIdentityOwner(t *testing.T) {
 	d := deferredFixture(t)
-	d.startupTimeout = 40 * time.Millisecond
 	d.cleanupTimeout = 40 * time.Millisecond
 	peer := &stuckPeer{entered: make(chan struct{}), release: make(chan struct{})}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(peer.release) }) }
+	defer release()
+	defer d.cancel()
 	d.current.newClient = func(embed.Options) (peerClient, error) { return peer, nil }
 	d.makePeer = func() (*Outbound, error) {
 		t.Error("replacement constructed before cleanup proof")
@@ -190,6 +194,10 @@ func TestUnconfirmedCleanupCannotCreateASecondIdentityOwner(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("startup did not begin")
 	}
+	// Exercise uncertain cleanup only after the uncooperative dependency has
+	// actually entered. A tiny startup timeout could expire during filesystem
+	// preparation and never reach the behavior this test intends to verify.
+	d.cancel()
 	select {
 	case <-d.done:
 	case <-time.After(time.Second):
@@ -198,7 +206,15 @@ func TestUnconfirmedCleanupCannotCreateASecondIdentityOwner(t *testing.T) {
 	if state := d.state.Load().(moduleState); state.Phase != "NeedsAction" || state.Reason != "cleanup_unconfirmed" {
 		t.Fatal("missing uncertain cleanup state")
 	}
-	close(peer.release)
+	if unlocked, err := acquireIdentity(d.options.StateDirectory); err == nil {
+		unlocked()
+		t.Fatal("uncertain teardown released identity ownership")
+	}
+	if unlocked, err := acquirePeerProcess(); err == nil {
+		unlocked()
+		t.Fatal("uncertain teardown released process ownership")
+	}
+	release()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		release, err := acquireIdentity(d.options.StateDirectory)
