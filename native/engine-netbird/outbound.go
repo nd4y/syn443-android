@@ -30,27 +30,29 @@ func RegisterOutbound(registry *outbound.Registry) {
 
 type Outbound struct {
 	outbound.Adapter
-	ctx              context.Context
-	logger           log.ContextLogger
-	options          OutboundOptions
-	manager          adapter.OutboundManager
-	diagMu           sync.Mutex
-	job              DiagnosticJob
-	diagCancel       context.CancelFunc
-	diagEpoch        uint64
-	notifyPending    atomic.Bool
-	mu               sync.RWMutex
-	client           peerClient
-	newClient        func(embed.Options) (peerClient, error)
-	underlay         *trackedUnderlay
-	closed           bool
-	ready            bool
-	startDone        chan struct{}
-	startCancel      context.CancelFunc
-	releaseIdentity  func()
-	releaseProcess   func()
-	identityEvidence string
-	startup          startupTrace
+	ctx        context.Context
+	logger     log.ContextLogger
+	options    OutboundOptions
+	manager    adapter.OutboundManager
+	diagMu     sync.Mutex
+	job        DiagnosticJob
+	diagCancel context.CancelFunc
+	diagEpoch  uint64
+	// Local hard limit; tests may shorten it. Not a remotely configurable option.
+	diagnosticSnapshotTimeout time.Duration
+	notifyPending             atomic.Bool
+	mu                        sync.RWMutex
+	client                    peerClient
+	newClient                 func(embed.Options) (peerClient, error)
+	underlay                  *trackedUnderlay
+	closed                    bool
+	ready                     bool
+	startDone                 chan struct{}
+	startCancel               context.CancelFunc
+	releaseIdentity           func()
+	releaseProcess            func()
+	identityEvidence          string
+	startup                   startupTrace
 }
 
 type peerClient interface {

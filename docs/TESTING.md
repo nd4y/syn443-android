@@ -1,4 +1,16 @@
 # Testing and release gates
+
+Capability negotiation adds ten required JVM cases (identity minimum107), a
+separately checked90% negotiation-core line gate and four required controller
+cases on each API29/35/37 (emulator minimum183). See
+[scope and lifecycle](capability-negotiation.md). Pending/transport outcomes must
+retain the current assignment; old unknown enrollment bodies stay immutable.
+
+The [NetBird diagnostic lifecycle](netbird-diagnostic-lifecycle.md) adds five
+native/race cases for an SDK-independent local cache, bounded roster preparation,
+no replacement of blocked workers, cancellation and late-result fencing. All
+builds and application tests run in Actions. Source-level regression coverage
+does not close the failed physical peer-health observation.
 All automatable implemented behavior must run on pull requests and main in GitHub Actions.
 - Documents: source hashes, 292 unique requirements, 98 unique sequential scenarios, traceability/evidence integrity.
 - Contracts: strict schema validation, shared fixtures, unsupported fields/versions and bounded numeric inputs.

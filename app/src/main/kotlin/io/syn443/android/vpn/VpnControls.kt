@@ -155,6 +155,7 @@ fun VpnControls(consentGeneration: Long = -1) {
             val diagnostics = overlay.optJSONObject("diagnostics")
             if (diagnostics != null) {
                 val diagnosticState = when (diagnostics.optString("state")) {
+                    "preparing" -> "Получение списка пиров"
                     "no_peers" -> "Нет пиров для проверки. После подключения список может ещё обновляться."
                     "running" -> "Выполняется"
                     "completed" -> "Завершена"

@@ -223,6 +223,9 @@ func (d *Deferred) run() {
 		if err == nil {
 			d.failure.Store("")
 			d.set("Started", "client_started", retry)
+			// Diagnostic progress is local, bounded state. A stalled SDK roster
+			// read must not hide a completed/cancelled job from the UI.
+			go d.sampleDiagnostics(peer, 5*time.Second)
 			// One sampler only. If recorder access stalls, cache age reveals stale
 			// diagnostics; neither the native host heartbeat nor other routes block.
 			go func() {
@@ -232,7 +235,6 @@ func (d *Deferred) run() {
 				for {
 					report := RuntimeStatus()
 					d.report.Store(report)
-					d.diagnostics.Store(RuntimeDiagnostics())
 					var snapshot struct {
 						Management bool `json:"management_connected"`
 						Signal     bool `json:"signal_connected"`
@@ -361,7 +363,31 @@ func (d *Deferred) Close() error {
 	}
 }
 
-// Cached diagnostics only; no SDK locks/network calls on the host control loop.
+// This source reads only the exact owner's local job state, never an SDK.
+type localDiagnosticSource interface{ diagnosticsSnapshot() string }
+
+func (d *Deferred) sampleDiagnostics(peer localDiagnosticSource, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if d.ctx.Err() != nil {
+			return
+		}
+		local := peer.diagnosticsSnapshot()
+		// Stop may have arrived while waiting for the short local job lock.
+		if d.ctx.Err() != nil {
+			return
+		}
+		d.diagnostics.Store(local)
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// Host reads only atomics. No recorder, local job lock or JSON producer runs here.
 func DeferredStatus() string {
 	deferredPeer.RLock()
 	peer := deferredPeer.current

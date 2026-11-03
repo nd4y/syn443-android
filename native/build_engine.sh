@@ -39,9 +39,11 @@ export GOBIND="$(go env GOPATH)/bin/gobind"
 go mod tidy
 go get github.com/sagernet/gomobile/bind@v0.1.12
 gofmt -w ./*.go
-go test -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbird
+go test -json -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbird | tee "$work/native-tests.jsonl"
+python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-tests.jsonl"
 if [ "${SYN443_RACE:-0}" = 1 ]; then
-    go test -race -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbird
+    go test -json -race -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbird | tee "$work/native-race-tests.jsonl"
+    python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-race-tests.jsonl"
     go test -race -count=1 -timeout=90s -tags=with_gvisor,with_utls,with_quic \
       github.com/sagernet/sing-box/transport/v2raygrpclite \
       github.com/sagernet/sing-box/transport/v2rayxhttp \

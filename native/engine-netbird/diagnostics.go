@@ -116,6 +116,12 @@ func RuntimeDiagnostics() string {
 	if o == nil {
 		return `{"state":"unavailable","results":[]}`
 	}
+	return o.diagnosticsSnapshot()
+}
+
+// Local job state only. It must remain independent of the SDK recorder and
+// belong to this exact outbound, even while another owner is being retired.
+func (o *Outbound) diagnosticsSnapshot() string {
 	o.diagMu.Lock()
 	defer o.diagMu.Unlock()
 	return marshal(o.job)
@@ -149,20 +155,55 @@ func StartDiagnostics() string {
 		o.diagMu.Unlock()
 		return `{"state":"unavailable","results":[]}`
 	}
-	if o.job.State == "running" {
+	if o.job.State == "running" || o.job.State == "preparing" {
 		result := marshal(o.job)
 		o.diagMu.Unlock()
 		return result
 	}
 	epoch := o.diagEpoch
+	started := time.Now()
+	limit := o.diagnosticSnapshotTimeout
+	if limit <= 0 || limit > 10*time.Second {
+		limit = 10 * time.Second
+	}
+	snapshotContext, snapshotCancel := context.WithTimeout(o.ctx, limit)
+	o.diagCancel = snapshotCancel
+	o.job = DiagnosticJob{State: "preparing", Started: started, Results: []ProbeResult{}}
 	o.diagMu.Unlock()
+	stopSnapshotWatch := context.AfterFunc(snapshotContext, func() {
+		o.diagMu.Lock()
+		defer o.diagMu.Unlock()
+		if o.job.State == "preparing" && o.job.Started.Equal(started) {
+			o.job.State = "cancelled"
+			if errors.Is(snapshotContext.Err(), context.DeadlineExceeded) {
+				o.job.State = "unavailable"
+			}
+			o.job.Finished = time.Now()
+		}
+	})
 	// The SDK recorder may block. Never hold the lock also used by network
-	// updates, teardown or cached diagnostics across an SDK call.
+	// updates, teardown or cached diagnostics across an SDK call. Admission
+	// remains occupied until this single worker actually returns; the timer only
+	// publishes local unavailability and never spawns a replacement SDK reader.
 	peers := p.ConnectionSnapshot().Peers
+	stopSnapshotWatch()
 	o.diagMu.Lock()
+	snapshotError := snapshotContext.Err()
+	late := time.Since(started) >= limit
+	snapshotCancel()
 	if epoch != o.diagEpoch {
 		o.diagMu.Unlock()
 		return `{"state":"stale","results":[]}`
+	}
+	if snapshotError != nil || late {
+		o.job.State = "cancelled"
+		if errors.Is(snapshotError, context.DeadlineExceeded) || snapshotError == nil && late {
+			o.job.State = "unavailable"
+		}
+		o.job.Finished = time.Now()
+		result := marshal(o.job)
+		o.diagMu.Unlock()
+		return result
 	}
 	if o.job.State == "running" {
 		result := marshal(o.job)

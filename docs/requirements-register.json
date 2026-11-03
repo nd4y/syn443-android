@@ -780,7 +780,9 @@
       "id": "OVL-07",
       "text": "Общий UI/health API показывает provider, сеть, управление, data plane, маршруты и фактический путь в пределах capabilities. В 1.0 данные отдаёт только NetBird; planned provider возвращает not_implemented и не получает ложный Connected. Контракт проверяется синтетическими моделями без реальных подключений будущих систем.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/netbird-diagnostic-lifecycle.md"
+      ]
     },
     {
       "id": "MODE-01",
