@@ -11,6 +11,18 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class LoginPayloadTest {
+    @Test fun confirmedCapabilitiesAreProtectedCanonicalAndAbsentFromLegacyBytes() {
+        val legacy=LoginPayload(bootstrap,session=session)
+        assertFalse(Identity.objectJSON(legacy.encode()).containsKey("advertisedCapabilities"))
+        assertNull(LoginPayload.decode(legacy.encode(),registered).advertisedCapabilities)
+        val declared=CapabilityNegotiation.canonical(IdentityOperation.supportedCapabilities)
+        val next=legacy.copy(advertisedCapabilities=declared)
+        assertEquals(declared,LoginPayload.decode(next.encode(),registered).advertisedCapabilities)
+        invalid {next.copy(advertisedCapabilities=declared.reversed()).encode()}
+        invalid {next.copy(advertisedCapabilities=declared+"unknown.v1").encode()}
+        invalid {LoginPayload(bootstrap,user=user,advertisedCapabilities=declared).encode()}
+        invalid {LoginPayload.decode(Canonical.encode(JsonObject(Identity.objectJSON(legacy.encode())+("advertisedCapabilities" to JsonNull))),registered)}
+    }
     private val key=KeyPairGenerator.getInstance("EC").apply {initialize(ECGenParameterSpec("secp256r1"))}.generateKeyPair()
     private val bootstrap=Bootstrap("test","https://id.example.invalid/realms/test","test","https://api.example.invalid",
         mapOf("root" to Base64.getEncoder().encodeToString(key.public.encoded)))

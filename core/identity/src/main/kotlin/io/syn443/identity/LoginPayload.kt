@@ -3,12 +3,16 @@ package io.syn443.identity
 import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 
 /** Protected worker-only cache. A policy envelope belongs in the separate activation journal. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class LoginPayload(val bootstrap:Bootstrap,val pending:Pending?=null,
-    val user:UserCredential?=null,val session:SessionReply?=null,val invitation:InvitationPending?=null) {
+    val user:UserCredential?=null,val session:SessionReply?=null,val invitation:InvitationPending?=null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val advertisedCapabilities:List<String>?=null) {
     override fun toString()="LoginPayload([redacted])"
     fun encode():String {
         validate()
@@ -17,6 +21,9 @@ import kotlinx.serialization.json.*
     private fun opaque(s:String)=s.matches(Regex("[A-Za-z0-9_-]{43}")) && runCatching {Policy.decode64(s).size==32}.getOrDefault(false)
     private fun validate() {
         bootstrap.validate();require(listOf(pending,user,session,invitation).count {it!=null}==1)
+        advertisedCapabilities?.let {
+            require(session!=null && it==CapabilityNegotiation.canonical(it) && IdentityOperation.supportedCapabilities.containsAll(it))
+        }
         val authority=Identity.bootstrapAuthority(bootstrap)
         pending?.let {
             require(it.generation>=0 && it.bootCount>=0 && it.startedElapsedMs>=0 && listOf(it.state,it.nonce,it.verifier,it.thumbprint).all(::opaque))

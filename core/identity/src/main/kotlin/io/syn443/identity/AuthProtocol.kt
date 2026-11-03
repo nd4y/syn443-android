@@ -51,6 +51,10 @@ data class PolicyReply(val envelope:String,val time:TrustedTime) {
 /** Immutable request must be persisted before dispatch; retries retain the exact body and ID. */
 @Serializable data class IdentityOperation(val path:String,val body:String) {
     override fun toString()="IdentityOperation([redacted])"
+    fun enrollmentCapabilities():List<String> {
+        require(path=="/v1/devices/enroll")
+        return Identity.objectJSON(body).getValue("capabilities").jsonArray.map {it.text()}
+    }
     init {
         require(path in setOf("/v1/devices/enroll","/v1/identity/devices/revoke","/v1/device/session/refresh","/v1/device/revoke"))
         require(body.toByteArray(Charsets.UTF_8).size<=8192)
@@ -161,7 +165,8 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     private fun challenge(reply:Reply):String = requireNotNull(reply.single("dpop-nonce")).also {
         require(it.length in 1..256 && it.all {c->c.code in 33..126})
     }
-    private data class Delivered(val reply:Reply,val time:TrustedTime)
+    private data class Delivered(val reply:Reply,val time:TrustedTime,val nonce:String)
+    private class CapabilityApprovalRequired:Exception()
     private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int=if(body==null)524_288 else 65_536):Delivered {
         require(token.length in 24..16_384 && token.all {it.code in 33..126})
         val url=bootstrap.apiOrigin+path;val method=if(body==null)"GET" else "POST";val bytes=body?.toByteArray(Charsets.UTF_8)
@@ -177,15 +182,53 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
             }
             if(reply.status==409 && json(reply)["code"]?.text()=="reauthentication_required")
                 throw AuthException(AuthFailure.REAUTHENTICATE)
+            if(path=="/v1/devices/enroll" && reply.status==409 && json(reply)["code"]?.text()=="capabilities_update_required")
+                throw CapabilityApprovalRequired()
             status(reply,if(path.endsWith("/revoke"))204 else 200)
-            return Delivered(reply,observed(reply,start,floor))
+            return Delivered(reply,observed(reply,start,floor),currentNonce)
         }
         throw AuthException(AuthFailure.REAUTHENTICATE)
     }
     fun enroll(op:IdentityOperation,user:UserCredential,scope:IdentityScope):SessionReply=checked {
         require(op.path=="/v1/devices/enroll" && user.keyThumbprint==thumbprint && user.authority==authority && Identity.objectJSON(op.body).getValue("key")==Identity.jwk(key.publicKey))
-        val result=api(op.path,op.body,user.accessToken,"",user.time,scope)
+        val result=try {api(op.path,op.body,user.accessToken,"",user.time,scope)} catch(_:CapabilityApprovalRequired) {
+            val path="/v1/devices/capabilities"
+            val snapshot=api(path,null,user.accessToken,"",user.time,scope,8192)
+            val before=CapabilityNegotiation.snapshot(Policy.utf8(snapshot.reply.body))
+            val wanted=op.enrollmentCapabilities()
+            val operation=CapabilityNegotiation.operation("oidc/$authority/$thumbprint/"+Identity.hash(op.body.toByteArray(Charsets.UTF_8)),before,wanted)
+            if(operation!=null) {
+                val queued=api(path,operation.body,user.accessToken,snapshot.nonce,snapshot.time,scope,8192)
+                when(CapabilityNegotiation.response(Policy.utf8(queued.reply.body),operation)) {
+                    CapabilityRequestState.QUEUED->throw AuthException(AuthFailure.PENDING)
+                    CapabilityRequestState.REJECTED->throw AuthException(AuthFailure.CONFLICT)
+                    CapabilityRequestState.APPROVED->Unit
+                }
+            }
+            // A successful independent approval never replaces this original
+            // durable enrollment operation or accepts a device session itself.
+            api(op.path,op.body,user.accessToken,"",user.time,scope)
+        }
         SessionReply(session(result),result.time,authority,thumbprint)
+    }
+    fun negotiateCapabilities(current:SessionReply,implemented:List<String>,scope:IdentityScope):List<String> = checked {
+        bound(current)
+        if(current.time.window(boot(),elapsed()).upperMs>=current.session.accessUntilMs)throw AuthException(AuthFailure.REAUTHENTICATE)
+        val path="/v1/device/capabilities"
+        val observed=api(path,null,current.session.accessToken,current.session.nonce,current.time,scope,8192)
+        val before=CapabilityNegotiation.snapshot(Policy.utf8(observed.reply.body))
+        val operation=CapabilityNegotiation.operation("device/$authority/$thumbprint/${current.session.deviceId}/${current.session.generation}",before,implemented)
+            ?:return@checked before.capabilities
+        val reply=api(path,operation.body,current.session.accessToken,observed.nonce,observed.time,scope,8192)
+        when(CapabilityNegotiation.response(Policy.utf8(reply.reply.body),operation)) {
+            CapabilityRequestState.QUEUED->throw AuthException(AuthFailure.PENDING)
+            CapabilityRequestState.REJECTED->throw AuthException(AuthFailure.CONFLICT)
+            CapabilityRequestState.APPROVED->Unit
+        }
+        val confirmed=api(path,null,current.session.accessToken,reply.nonce,reply.time,scope,8192)
+        val after=CapabilityNegotiation.snapshot(Policy.utf8(confirmed.reply.body))
+        require(after.capabilities==CapabilityNegotiation.canonical(implemented))
+        after.capabilities
     }
     fun cleanup(op:IdentityOperation,user:UserCredential,scope:IdentityScope):TrustedTime=checked {
         require(op.path=="/v1/identity/devices/revoke" && user.keyThumbprint==thumbprint && user.authority==authority)

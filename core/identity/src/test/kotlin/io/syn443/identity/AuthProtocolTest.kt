@@ -18,6 +18,95 @@ import java.util.Base64
 import java.util.Locale
 
 class AuthProtocolTest {
+    private fun capabilitySnapshot(caps:List<String>,version:Long)=Canonical.encode(buildJsonObject {
+        put("version",version);put("hash",CapabilityNegotiation.hash(caps));put("capabilities",JsonArray(caps.map(::JsonPrimitive)))
+        put("authorityHash",Identity.hash("capability-fixture-authority".toByteArray()))
+    })
+    private fun capabilityReply(body:ByteArray,state:String,version:Long=0,error:String?=null)=Canonical.encode(buildJsonObject {
+        val input=Identity.objectJSON(body.toString(Charsets.UTF_8))
+        put("requestId",input.getValue("requestId"));put("state",state);put("version",version)
+        put("hash",if(state=="approved")CapabilityNegotiation.hash(input.getValue("capabilities").jsonArray.map {it.jsonPrimitive.content}) else "")
+        if(error!=null)put("error",error)
+    })
+    @Test fun deviceCapabilitiesReusePendingBytesAndRecoverAnUnknownApprovalAck() {
+        val f=Fixture();val scope=IdentityScope();val base=IdentityOperation.requiredCapabilities;val wanted=IdentityOperation.supportedCapabilities
+        var caps=base;var version=0L;var posts=0;val bodies=mutableListOf<String>()
+        f.handler={method,url,headers,body,_,maximum->
+            assertEquals(b.apiOrigin+"/v1/device/capabilities",url);assertEquals(8192,maximum)
+            val proof=Identity.objectJSON(Policy.utf8(Policy.decode64(headers.getValue("DPoP").split('.')[1])))
+            assertEquals(session().nonce,proof.getValue("nonce").jsonPrimitive.content)
+            assertEquals("DPoP "+session().accessToken,headers.getValue("Authorization"))
+            if(method=="GET")json(text=capabilitySnapshot(caps,version)) else {
+                val raw=checkNotNull(body);assertEquals(Identity.hash(raw),proof.getValue("req_hash").jsonPrimitive.content)
+                bodies+=raw.toString(Charsets.UTF_8);posts++
+                if(posts==1)json(text=capabilityReply(raw,"queued")) else {
+                    caps=wanted;version=1
+                    throw DeliveryException(DeliveryFailure.TRANSPORT)
+                }
+            }
+        }
+        error(AuthFailure.PENDING){f.client.negotiateCapabilities(f.current(),wanted,scope)}
+        error(AuthFailure.TRANSPORT){f.client.negotiateCapabilities(f.current(),wanted,scope)}
+        assertEquals(2,posts);assertEquals(bodies[0],bodies[1])
+        assertEquals(wanted.sorted(),f.client.negotiateCapabilities(f.current(),wanted,scope));assertEquals(2,posts)
+    }
+    @Test fun independentlyApprovedCapabilitiesAreConfirmedBeforeBecomingProtectedMetadata() {
+        val f=Fixture();var approved=false;var posts=0
+        f.handler={method,_,_,body,_,_->
+            if(method=="GET")json(text=capabilitySnapshot(if(approved)IdentityOperation.supportedCapabilities else IdentityOperation.requiredCapabilities,if(approved)1 else 0))
+            else {approved=true;posts++;json(text=capabilityReply(checkNotNull(body),"approved",1))}
+        }
+        assertEquals(IdentityOperation.supportedCapabilities.sorted(),f.client.negotiateCapabilities(f.current(),IdentityOperation.supportedCapabilities,IdentityScope()))
+        assertEquals(1,posts)
+        approved=false
+        f.handler={method,_,_,body,_,_->if(method=="GET")json(text=capabilitySnapshot(IdentityOperation.requiredCapabilities,0))
+            else json(text=capabilityReply(checkNotNull(body),"approved",1))}
+        error(AuthFailure.INVALID_REPLY){f.client.negotiateCapabilities(f.current(),IdentityOperation.supportedCapabilities,IdentityScope())}
+    }
+    @Test fun oidcCapabilityApprovalRetainsTheOriginalDurableEnrollmentOperation() {
+        val f=Fixture();val op=IdentityOperation.enroll(pub);val enrolls=mutableListOf<String>();val upgrades=mutableListOf<String>()
+        var approved=false;var queued=true
+        f.handler={method,url,_,body,_,_->when {
+            url.endsWith("/devices/enroll")->{enrolls+=checkNotNull(body).toString(Charsets.UTF_8)
+                if(!approved)json(409,"""{"code":"capabilities_update_required"}""") else json(text=sessionWire())}
+            method=="GET"->json(text=capabilitySnapshot(IdentityOperation.requiredCapabilities,0))
+            else->{val raw=checkNotNull(body);upgrades+=raw.toString(Charsets.UTF_8)
+                if(queued) {queued=false;json(text=capabilityReply(raw,"queued"))}
+                else {approved=true;json(text=capabilityReply(raw,"approved",1))}}
+        }}
+        error(AuthFailure.PENDING){f.client.enroll(op,f.user(),IdentityScope())}
+        assertEquals(session().deviceId,f.client.enroll(op,f.user(),IdentityScope()).session.deviceId)
+        assertEquals(3,enrolls.size);assertTrue(enrolls.all {it==op.body});assertEquals(upgrades[0],upgrades[1])
+        var enrollment=0
+        f.handler={_,url,_,_,_,_->if(url.endsWith("/devices/enroll")) {
+            enrollment++;if(enrollment==1)json(409,"""{"code":"capabilities_update_required"}""") else json(text=sessionWire())
+        } else json(text=capabilitySnapshot(IdentityOperation.supportedCapabilities,1))}
+        assertEquals(session().deviceId,f.client.enroll(op,f.user(),IdentityScope()).session.deviceId)
+        assertEquals(2,enrollment)
+    }
+    @Test fun capabilityErrorsUnknownModulesCancellationAndMalformedApprovalDoNotGrantAccess() {
+        val f=Fixture();val wanted=IdentityOperation.supportedCapabilities
+        for((status,reason) in listOf(403 to AuthFailure.ACCESS_DENIED,503 to AuthFailure.UNAVAILABLE,404 to AuthFailure.INVALID_REPLY)) {
+            f.handler={_,_,_,_,_,_->json(status)}
+            error(reason){f.client.negotiateCapabilities(f.current(),wanted,IdentityScope())}
+        }
+        f.handler={method,_,_,body,_,_->if(method=="GET")json(text=capabilitySnapshot(IdentityOperation.requiredCapabilities,0))
+            else json(text=capabilityReply(checkNotNull(body),"rejected",error="capability_conflict"))}
+        error(AuthFailure.CONFLICT){f.client.negotiateCapabilities(f.current(),wanted,IdentityScope())}
+        val op=IdentityOperation.enroll(pub)
+        val baseHandler=f.handler
+        f.handler={method,url,headers,body,scope,maximum->if(url.endsWith("/devices/enroll"))json(409,"""{"code":"capabilities_update_required"}""")
+            else baseHandler(method,url,headers,body,scope,maximum)}
+        error(AuthFailure.CONFLICT){f.client.enroll(op,f.user(),IdentityScope())}
+        f.handler={_,_,_,_,_,_->json(text=capabilitySnapshot(wanted+"future.unsupported.v1",1))}
+        error(AuthFailure.INVALID_REPLY){f.client.negotiateCapabilities(f.current(),wanted,IdentityScope())}
+        f.handler={method,_,_,body,_,_->if(method=="GET")json(text=capabilitySnapshot(IdentityOperation.requiredCapabilities,0))
+            else json(text=capabilityReply(checkNotNull(body),"approved",2))}
+        error(AuthFailure.INVALID_REPLY){f.client.negotiateCapabilities(f.current(),wanted,IdentityScope())}
+        val cancelled=IdentityScope().also {it.cancel()}
+        error(AuthFailure.CANCELLED){f.client.negotiateCapabilities(f.current(),wanted,cancelled)}
+        error(AuthFailure.REAUTHENTICATE){f.client.negotiateCapabilities(f.current(session().copy(accessUntilMs=now)),wanted,IdentityScope())}
+    }
     private fun overlayBinding()=OverlayCredentialBinding(OverlayAddress(b.serviceId,Identity.hash("owner".toByteArray()),session().deviceId,"home","netbird","resource","tenant",1,"https://overlay.example.invalid"),Identity.thumbprint(pub),Identity.hash("reference".toByteArray()),1,0,now+120_000)
     private fun overlayEnvelope(binding:OverlayCredentialBinding):String {
         val a=binding.address

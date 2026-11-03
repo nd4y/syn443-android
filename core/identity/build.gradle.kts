@@ -19,7 +19,7 @@ tasks.jacocoTestCoverageVerification {
             "io.syn443.identity.TrustedTime", "io.syn443.identity.TrustedTime.Companion",
             "io.syn443.identity.IdentityOperation", "io.syn443.identity.IdentityOperation.Companion",
             "io.syn443.identity.LoginRecovery", "io.syn443.identity.LoginIntent", "io.syn443.identity.RegistrationTombstone",
-            "io.syn443.identity.LoginPayload", "io.syn443.identity.LoginPayload.Companion",
+            "io.syn443.identity.LoginPayload", "io.syn443.identity.LoginPayload.Companion", "io.syn443.identity.CapabilityNegotiation",
             "io.syn443.identity.Assignments", "io.syn443.identity.AssignmentIdentity", "io.syn443.identity.AssignmentState", "io.syn443.identity.AssignmentPermit", "io.syn443.identity.ProvisioningRetry",
             "io.syn443.identity.BootstrapTrust", "io.syn443.identity.AuthenticatedInvite",
             "io.syn443.identity.InvitationProtocol", "io.syn443.identity.InvitationOperation", "io.syn443.identity.InvitationOperation.Companion",

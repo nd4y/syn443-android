@@ -209,7 +209,8 @@
         "tools/enrollment_fixture.py",
         "tools/test_enrollment_fixture.py",
         "tools/run_enrolled_vpn.py",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/capability-negotiation.md"
       ]
     },
     {
@@ -561,7 +562,8 @@
         "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
         "core/recovery/src/main/kotlin/io/syn443/recovery/RouteEvidence.kt",
-        "tools/run_enrolled_vpn.py"
+        "tools/run_enrolled_vpn.py",
+        "docs/capability-negotiation.md"
       ],
       "implementationScope": "Signed route-profile activation pilot requires fresh candidate-scoped native outbound proof, independently of global HTTPS; final worker storage fence, bounded retries and required-route rollback. Optional routes remain independent.",
       "remainingScope": "Full requirement remains open, including complete dependency graph/compiler, overlay account namespaces and all network/energy/operational scenarios. Exact device and CI evidence must be read separately."
@@ -606,7 +608,8 @@
       "status": "partial",
       "evidence": [
         "docs/managed-policy.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/capability-negotiation.md"
       ]
     },
     {

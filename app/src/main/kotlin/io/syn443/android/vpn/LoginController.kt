@@ -415,7 +415,8 @@ class LoginController private constructor(private val context:android.app.Applic
             if(reply.state.state !in setOf("ready","completed"))throw AuthException(AuthFailure.PENDING)
             if(pending.completion==null)save(pending.copy(completion=InvitationOperation.mutation("complete",reply.state.id)))
             val completed=protocol.complete(checkNotNull(pending.completion),reply,checkNotNull(pending.time),scope)
-            val session=LoginPayload(original.bootstrap,session=completed.session);val before=state
+            val declared=Identity.objectJSON(pending.claim.body).getValue("capabilities").jsonArray.map {it.jsonPrimitive.content}
+            val session=LoginPayload(original.bootstrap,session=completed.session,advertisedCapabilities=CapabilityNegotiation.canonical(declared));val before=state
             val next=protect(before,session){hash->LoginRecovery.invited(before,before.generation,completed,hash)}
             synchronized(commands){current(next);invitePair="";inviteState=""}
             registered=next to session
@@ -435,8 +436,16 @@ class LoginController private constructor(private val context:android.app.Applic
         val public=DeviceKey.open(s.keyAlias).publicKey
         val next=LoginRecovery.beginEnrollment(s,s.generation,public,boot(),elapsed())
         if(next!=s)s=commit(s,next)
-        val reply=protocol.enroll(checkNotNull(s.operation),user,scope)
-        val sessionPayload=LoginPayload(p.bootstrap,session=reply)
+        var operation=checkNotNull(s.operation)
+        var reply=protocol.enroll(operation,user,scope)
+        if(operation.enrollmentCapabilities().toSet()!=IdentityOperation.supportedCapabilities.toSet()) {
+            // This call returned its ACK. A new persisted operation can safely
+            // declare current modules without rewriting an unknown old request.
+            s=commit(s,LoginRecovery.renewEnrollmentAfterAck(s,s.generation,operation.body,reply,public,boot(),elapsed()))
+            operation=checkNotNull(s.operation)
+            reply=protocol.enroll(operation,user,scope)
+        }
+        val sessionPayload=LoginPayload(p.bootstrap,session=reply,advertisedCapabilities=CapabilityNegotiation.canonical(operation.enrollmentCapabilities()))
         val registered=protect(s,sessionPayload) {hash->LoginRecovery.enrolled(s,s.generation,reply,hash)}
         fetchAssignment(registered,sessionPayload,protocol,scope)
     }
@@ -689,7 +698,7 @@ class LoginController private constructor(private val context:android.app.Applic
         var next:ProvisioningRetry?=null
         return submitIfIdle(admit={
             val s=journal.snapshot()
-            if(s.generation!=expectedGeneration || s.phase !in setOf(LoginPhase.PROVISIONING,LoginPhase.INVITING) ||
+            if(s.generation!=expectedGeneration || s.phase !in setOf(LoginPhase.PROVISIONING,LoginPhase.INVITING,LoginPhase.ENROLLING) ||
                 error !in setOf("PENDING","TRANSPORT","THROTTLED","UNAVAILABLE"))false
             else {
                 expected=s
@@ -754,10 +763,23 @@ class LoginController private constructor(private val context:android.app.Applic
             if(reanchor)session=session.copy(time=protocol.discover(scope).time)
             val operation=checkNotNull(s.operation)
             val reply=protocol.refresh(operation,session,scope)
-            val refreshed=LoginPayload(p.bootstrap,session=reply)
+            val refreshed=p.copy(session=reply)
             val previous=s
             s=protect(previous,refreshed) {hash->LoginRecovery.refreshed(previous,previous.generation,operation.body,reply,hash)}
             p=refreshed
+        }
+        if(p.advertisedCapabilities!=CapabilityNegotiation.canonical(IdentityOperation.supportedCapabilities)) {
+            val declared=protocol.negotiateCapabilities(checkNotNull(p.session),IdentityOperation.supportedCapabilities,scope)
+            val recorded=p.copy(advertisedCapabilities=declared)
+            val previous=s
+            s=protect(previous,recorded) {hash->LoginRecovery.capabilitiesRecorded(previous,previous.generation,hash)}
+            p=recorded
+            // A metadata-only write keeps an existing lease/activation ticket.
+            // Rebuild its immutable view without starting or stopping an engine.
+            journal.readAssignment(s)?.let {assignment->
+                val prepared=assignedRuntime.prepare(s,p,assignment)
+                synchronized(commands) {current(s);assignedRuntime.publish(prepared)}
+            }
         }
         if(fetch)fetchAssignment(s,p,protocol,scope)
     }
@@ -766,7 +788,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }}
     private fun resumeWorker(initial:LoginIntent) {
         var s=initial
-        if(s.phase==LoginPhase.PROVISIONING)lastAssignmentFetch=elapsed()
+        if(s.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.ENROLLING))lastAssignmentFetch=elapsed()
         val p=payload(s)
         if(s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING)) {
             var assignment=journal.readAssignment(s)

@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=179
+    minimum=183
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=21
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=97
+    minimum=107
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -41,6 +41,20 @@ assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="policy":
     assert ("io.syn443.policy.PolicyTest","signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences") in {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="identity":
+    capability_required={('io.syn443.identity.CapabilityNegotiationTest',name) for name in {
+        'canonicalAvailabilityAndOperationAreStableWithoutMutatingAnOldRequest',
+        'malformedUnknownAndInconsistentHistoryCannotBecomeAvailability',
+        'pendingAndApprovedRepliesAreBoundToExactOperationAndExpectedHead'}}
+    capability_required.update({('io.syn443.identity.AuthProtocolTest',name) for name in {
+        'deviceCapabilitiesReusePendingBytesAndRecoverAnUnknownApprovalAck',
+        'independentlyApprovedCapabilitiesAreConfirmedBeforeBecomingProtectedMetadata',
+        'oidcCapabilityApprovalRetainsTheOriginalDurableEnrollmentOperation',
+        'capabilityErrorsUnknownModulesCancellationAndMalformedApprovalDoNotGrantAccess'}})
+    capability_required.update({('io.syn443.identity.LoginRecoveryTest',name) for name in {
+        'recordedCapabilitiesPreserveActivationGenerationSessionAndOverlayClaims',
+        'legacyEnrollmentCanBeSupersededOnlyAfterItsBoundAcknowledgement'}})
+    capability_required.add(('io.syn443.identity.LoginPayloadTest','confirmedCapabilitiesAreProtectedCanonicalAndAbsentFromLegacyBytes'))
+    assert capability_required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required capability negotiation cases missing'
     assert ("io.syn443.identity.OverlayEnrollmentTest","newCapabilityAdvertisementPreservesExactLegacyEnrollmentAndInvitationRetries") in {(c.get("classname"),c.get("name")) for c in cases}, "Required capability migration case missing"
     assert {("io.syn443.identity.OverlayEnrollmentTest",name) for name in {"interruptedRegistrationErasesSetupBeforeKeylessProbeAndNeedsNativeProof","keylessProbeCannotBorrowAnotherIdentityOrInventFreshEnrollment"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required keyless reconciliation ledger cases missing"
     login_overlay_required={'namespaceClaimSurvivesRefreshAndCancelUntilActualErasureCompletes','namespaceClaimsRejectUnsafePathsUnboundedSetsAndUnprovisionedAuthority','recoveryMetadataBeforeManagedOverlaysRetainsEmptyOwnershipClaims'}
@@ -56,6 +70,11 @@ if mode=="identity":
         "transportCancellationAndServerErrorsRemainDistinct",
         "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
+    assert {('io.syn443.android.LoginControllerTest',name) for name in {
+        'legacyCapabilityApprovalSurvivesRestartWithoutChangingAssignedPolicyOrDeviceIdentity',
+        'lostCapabilityAckAndUnavailableEndpointKeepCurrentAssignmentAndStopStillWins',
+        'oldEnrollmentAckCreatesANewPersistedRequestAndPendingApprovalCanPoll',
+        'confirmedCapabilitiesSurviveRefreshAndCannotBecomePublicStatusMetadata'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required capability lifecycle cases missing'
     assert ("io.syn443.android.OverlayVaultTest","changedSecurityEpochProbesSameIdentityWithoutBorrowingGrantOrAcknowledgingBeforeNativeProof") in {(c.get("classname"),c.get("name")) for c in cases}, "Required changed-authority keyless recovery case missing"
     assert ("io.syn443.android.LoginControllerTest","periodicManagedCredentialRetryUsesSameOperationWithoutFetchingPolicyOrBypassingBackoff") in {(c.get("classname"),c.get("name")) for c in cases}, "Required independent overlay retry case missing"
     assert ("io.syn443.android.HostProcessTest","rejectedForeignBindingCannotRetireTheCurrentDiagnosticSession") in {(c.get("classname"),c.get("name")) for c in cases}, "Required diagnostic binding ownership case missing"

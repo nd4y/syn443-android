@@ -40,7 +40,7 @@ import io.syn443.identity.Identity
         if(visible)while(true) {
             val result=command("auth-status")
             status=runCatching {JSONObject(result?.getString("json")?:"{}")} .getOrDefault(JSONObject())
-            if(status.optString("phase") in setOf("PROVISIONING","INVITING") && !status.optBoolean("busy") &&
+            if(status.optString("phase") in setOf("PROVISIONING","INVITING","ENROLLING") && !status.optBoolean("busy") &&
                 lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                 command("auth-poll",status.optLong("generation",-1).toString())
             }

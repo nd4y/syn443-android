@@ -53,6 +53,13 @@ class LoginControllerTest {
             mapOf("root" to Base64.getEncoder().encodeToString(root.public.encoded)),controlPanelOrigin=controlPanelOrigin)
         @Volatile var authorization=""
         @Volatile var dropEnrollment=false
+        @Volatile var holdCapabilities=false
+        @Volatile var dropCapabilityAck=false
+        @Volatile var requireCapabilityApproval=false
+        @Volatile var capabilityStatus=200
+        val capabilityBodies=mutableListOf<String>()
+        val capabilities=mutableMapOf<String,List<String>>()
+        val capabilityVersions=mutableMapOf<String,Long>()
         @Volatile var holdEnrollment=false
         @Volatile var holdRevoke=false
         @Volatile var policyReady=false
@@ -172,6 +179,27 @@ class LoginControllerTest {
                 put("kid","test");put("kty","RSA");put("alg","RS256");put("use","sig");put("n",Identity.encode(bytes));put("e","AQAB")
             })}}))
             val thumb=checkedProof(method,url,headers,body)
+            if(java.net.URI(url).path in setOf("/v1/device/capabilities","/v1/devices/capabilities")) {
+                if(url.endsWith("/device/capabilities"))check(headers.getValue("Authorization")=="DPoP "+sessions.getValue(thumb).accessToken)
+                if(capabilityStatus!=200)return reply(capabilityStatus)
+                val before=capabilities.getValue(thumb)
+                if(method=="GET")return reply(text=Canonical.encode(buildJsonObject {
+                    put("version",capabilityVersions[thumb]?:0);put("hash",CapabilityNegotiation.hash(before))
+                    put("capabilities",JsonArray(before.map(::JsonPrimitive)));put("authorityHash",Identity.hash("fixture capability scope".toByteArray()))
+                }))
+                val raw=checkNotNull(body).toString(Charsets.UTF_8);capabilityBodies+=raw
+                val input=Identity.objectJSON(raw);val wanted=input.getValue("capabilities").jsonArray.map {it.jsonPrimitive.content}
+                if(!holdCapabilities && before.toSet()!=wanted.toSet()) {
+                    check(input.getValue("previousHash").jsonPrimitive.content==CapabilityNegotiation.hash(before))
+                    capabilities[thumb]=wanted;capabilityVersions[thumb]=(capabilityVersions[thumb]?:0)+1
+                }
+                if(dropCapabilityAck && !holdCapabilities) {dropCapabilityAck=false;throw DeliveryException(DeliveryFailure.TRANSPORT)}
+                return reply(text=Canonical.encode(buildJsonObject {
+                    put("requestId",input.getValue("requestId"));put("state",if(holdCapabilities)"queued" else "approved")
+                    put("version",if(holdCapabilities)0 else capabilityVersions.getValue(thumb))
+                    put("hash",if(holdCapabilities)"" else CapabilityNegotiation.hash(wanted))
+                }))
+            }
             if(java.net.URI(url).path.startsWith("/v1/device/overlay/")) {
                 check(headers.getValue("Authorization")=="DPoP "+sessions.getValue(thumb).accessToken)
                 return overlayReply(thumb,checkNotNull(body),url.endsWith("/consume"))
@@ -189,8 +217,12 @@ class LoginControllerTest {
             if(url.endsWith("/devices/enroll")) {
                 val text=checkNotNull(body).toString(Charsets.UTF_8);enrollBodies.add(text)
                 check(Identity.hash(Canonical.encode(Identity.objectJSON(text).getValue("key")).toByteArray())==thumb)
+                val declared=Identity.objectJSON(text).getValue("capabilities").jsonArray.map {it.jsonPrimitive.content}
+                if(requireCapabilityApproval && capabilities[thumb]?.toSet()?.let{it!=declared.toSet()}==true)
+                    return reply(409,"""{"code":"capabilities_update_required"}""")
                 val response=receipts.getOrPut(text) {
                     activeKeys.add(thumb)
+                    capabilities[thumb]=declared
                     val session=DeviceSession(Identity.random(),Identity.random(),Identity.random(),now()+(if(shortAccess)10_000 else 590_000),now()+86_000_000,0,Identity.random())
                     sessions[thumb]=session;Canonical.json.encodeToString(session)
                 }
@@ -259,6 +291,14 @@ class LoginControllerTest {
             return Identity.callback+"?"+Identity.form(mapOf("state" to state,"iss" to server.bootstrap.issuer,"code" to "synthetic-code"))
         }
         fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue);controller.recover();idle()}
+        fun legacyCache() {
+            idle();controller.shutdownTest()
+            val s=journal.snapshot();val p=LoginPayload.decode(journal.readProtected(s),s).copy(advertisedCapabilities=null)
+            journal.prepare(s,p.encode()).use {prepared->journal.commit(s,LoginRecovery.capabilitiesRecorded(s,s.generation,prepared.hash),prepared)}
+            server.capabilities[s.thumbprint]=IdentityOperation.requiredCapabilities
+            server.capabilityVersions.remove(s.thumbprint)
+            controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue)
+        }
         fun cleanup() {
             server.release.countDown();server.releaseRevoke.countDown();server.releaseOverlayFetch.countDown();controller.cancel();idle();check(journal.snapshot().phase==LoginPhase.SIGNED_OUT)
             controller.shutdownTest();check(File(context.noBackupFilesDir,"login/$namespace").deleteRecursively())
@@ -282,6 +322,60 @@ class LoginControllerTest {
             block(f)
         } catch(e:Throwable) {failure=e;throw e}
         finally {try {f.cleanup()} catch(e:Throwable) {if(failure==null)throw e else failure.addSuppressed(e)}}
+    }
+    @Test fun legacyCapabilityApprovalSurvivesRestartWithoutChangingAssignedPolicyOrDeviceIdentity()=fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle();val first=f.journal.snapshot()
+        val assignment=checkNotNull(f.journal.readAssignment(first));f.legacyCache()
+        f.server.holdCapabilities=true;f.controller.recover();f.idle()
+        val pending=f.journal.snapshot();assertEquals("PENDING",f.controller.status().getString("reason"))
+        assertEquals(first.policyHash,pending.policyHash);assertEquals(assignment,f.journal.readAssignment(pending))
+        assertEquals(1,f.server.capabilityBodies.size);assertFalse(f.controller.pollProvisioning(pending.generation+1))
+        f.server.holdCapabilities=false;f.restart();val after=f.journal.snapshot()
+        assertEquals(LoginPhase.POLICY_CACHED,after.phase);assertEquals(first.policyHash,after.policyHash)
+        assertEquals(first.deviceId,after.deviceId);assertEquals(first.keyAlias,after.keyAlias);assertEquals(first.generation,after.generation)
+        assertEquals(f.server.capabilityBodies[0],f.server.capabilityBodies[1]);assertEquals(1,f.server.enrollBodies.size)
+        val p=LoginPayload.decode(f.journal.readProtected(after),after)
+        assertEquals(IdentityOperation.supportedCapabilities.sorted(),p.advertisedCapabilities)
+        val posts=f.server.capabilityBodies.size;f.restart();assertEquals(posts,f.server.capabilityBodies.size)
+    }
+    @Test fun lostCapabilityAckAndUnavailableEndpointKeepCurrentAssignmentAndStopStillWins()=fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle();val first=f.journal.snapshot();f.legacyCache()
+        f.server.capabilityStatus=503;f.controller.recover();f.idle()
+        assertEquals("UNAVAILABLE",f.controller.status().getString("reason"));assertEquals(first.policyHash,f.journal.snapshot().policyHash)
+        f.server.capabilityStatus=200;f.server.dropCapabilityAck=true;f.restart()
+        assertEquals("TRANSPORT",f.controller.status().getString("reason"));assertEquals(1,f.server.capabilityBodies.size)
+        f.restart();val after=f.journal.snapshot();assertEquals(first.policyHash,after.policyHash)
+        assertEquals(1,f.server.capabilityBodies.size);assertEquals(first.deviceId,after.deviceId)
+        val generation=after.generation;f.controller.cancel();f.idle()
+        assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase);assertFalse(f.controller.pollProvisioning(generation))
+    }
+    @Test fun oldEnrollmentAckCreatesANewPersistedRequestAndPendingApprovalCanPoll()=fixture {f->
+        f.server.dropEnrollment=true;f.controller.callback(f.begin());f.idle();f.controller.shutdownTest()
+        val s=f.journal.snapshot();assertEquals(LoginPhase.ENROLLING,s.phase)
+        val oldOp=IdentityOperation(s.operation!!.path,Canonical.encode(JsonObject(Identity.objectJSON(s.operation!!.body)+
+            ("capabilities" to JsonArray(IdentityOperation.requiredCapabilities.map(::JsonPrimitive))))))
+        f.journal.commit(s,s.copy(revision=s.revision+1,operation=oldOp))
+        f.server.receipts.clear();f.server.enrollBodies.clear();f.server.capabilities.remove(s.thumbprint);f.server.capabilityVersions.remove(s.thumbprint)
+        f.server.requireCapabilityApproval=true;f.server.holdCapabilities=true
+        f.controller=LoginController.isolatedForTest(context,f.namespace,f.server)
+        f.controller.recover();f.idle();val pending=f.journal.snapshot()
+        assertEquals(LoginPhase.ENROLLING,pending.phase);assertEquals("PENDING",f.controller.status().getString("reason"))
+        assertEquals(oldOp.body,f.server.enrollBodies[0]);assertNotEquals(oldOp.body,pending.operation!!.body)
+        assertEquals(pending.operation!!.body,f.server.enrollBodies[1]);assertEquals(s.keyAlias,pending.keyAlias)
+        assertFalse(f.controller.pollProvisioning(pending.generation+1))
+        f.server.holdCapabilities=false
+        until {f.controller.pollProvisioning(pending.generation)};f.idle()
+        val after=f.journal.snapshot();assertEquals(LoginPhase.PROVISIONING,after.phase)
+        assertEquals(s.generation,after.generation);assertEquals(s.keyAlias,after.keyAlias)
+        assertEquals(2,f.server.capabilityBodies.size);assertEquals(f.server.capabilityBodies[0],f.server.capabilityBodies[1])
+        assertTrue(f.server.enrollBodies.drop(1).all{it==pending.operation!!.body})
+    }
+    @Test fun confirmedCapabilitiesSurviveRefreshAndCannotBecomePublicStatusMetadata()=fixture {f->
+        f.server.policyReady=true;f.server.shortAccess=true;f.controller.callback(f.begin());f.idle();f.restart()
+        val s=f.journal.snapshot();val p=LoginPayload.decode(f.journal.readProtected(s),s)
+        assertEquals(1L,s.sessionGeneration);assertEquals(IdentityOperation.supportedCapabilities.sorted(),p.advertisedCapabilities)
+        assertTrue(f.server.capabilityBodies.isEmpty())
+        val status=f.controller.status().toString();assertFalse(status.contains("advertisedCapabilities"));assertFalse(status.contains("overlay.credentials.v1"))
     }
     @Test fun administrationEntryUsesTrustedMetadataAndCannotOutliveItsLoginGeneration()=fixture(controlPanelOrigin="https://control.example.invalid") {f->
         assertNull(f.controller.adminPanelUrl(f.journal.snapshot().generation))

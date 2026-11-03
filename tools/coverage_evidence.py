@@ -5,7 +5,7 @@ IDENTITY_CLASSES = {'io.syn443.identity.' + name for name in (
     'Identity', 'Bootstrap', 'Pending', 'BoundedHttp', 'BoundedHttpKt', 'BoundedHttp.Scope',
     'AuthProtocol', 'IdentityScope', 'TrustedTime', 'TrustedTime.Companion',
     'IdentityOperation', 'IdentityOperation.Companion',
-    'LoginRecovery', 'LoginIntent', 'RegistrationTombstone', 'LoginPayload', 'LoginPayload.Companion',
+    'LoginRecovery', 'LoginIntent', 'RegistrationTombstone', 'LoginPayload', 'LoginPayload.Companion', 'CapabilityNegotiation',
     'Assignments', 'AssignmentIdentity', 'AssignmentState', 'AssignmentPermit', 'ProvisioningRetry', 'BootstrapTrust', 'AuthenticatedInvite',
     'InvitationProtocol', 'InvitationOperation', 'InvitationOperation.Companion', 'InvitationState', 'InvitationPending', 'ManagedOverlay', 'OverlayAddress', 'OverlayCredentials', 'OverlayCredentialBinding', 'OverlaySetupSecret', 'OverlayOperation', 'OverlayEnrollment', 'OverlayEnrollments', 'OverlayAssignments')}
 

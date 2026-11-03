@@ -4,6 +4,8 @@ import io.syn443.policy.Policy
 import io.syn443.policy.Canonical
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.*
 import org.junit.Test
 import java.security.KeyPairGenerator
@@ -12,6 +14,33 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class LoginRecoveryTest {
+    @Test fun recordedCapabilitiesPreserveActivationGenerationSessionAndOverlayClaims() {
+        val f=Flow();val s=LoginRecovery.claimOverlay(f.cached(),f.generation,"managed-netbird/"+h())
+        val hash=h();val next=LoginRecovery.capabilitiesRecorded(s,f.generation,hash)
+        assertEquals(s.copy(revision=s.revision+1,protectedHash=hash),next)
+        assertEquals(next,LoginRecovery.decode(LoginRecovery.encode(next)))
+        assertEquals(LoginPhase.PROVISIONING,LoginRecovery.capabilitiesRecorded(f.registered(),f.generation,h()).phase)
+        invalid {LoginRecovery.capabilitiesRecorded(s,f.generation-1,h())}
+        invalid {LoginRecovery.capabilitiesRecorded(s,f.generation,"")}
+        invalid {LoginRecovery.capabilitiesRecorded(f.enrolling(),f.generation,h())}
+    }
+    @Test fun legacyEnrollmentCanBeSupersededOnlyAfterItsBoundAcknowledgement() {
+        val f=Flow();val current=f.enrolling()
+        val oldOp=IdentityOperation(current.operation!!.path,Canonical.encode(JsonObject(Identity.objectJSON(current.operation!!.body)+
+            ("capabilities" to JsonArray(IdentityOperation.requiredCapabilities.map(::JsonPrimitive))))))
+        val old=current.copy(operation=oldOp)
+        val reply=f.reply()
+        val next=LoginRecovery.renewEnrollmentAfterAck(old,f.generation,oldOp.body,reply,f.key,2,2000)
+        assertNotEquals(oldOp.body,next.operation!!.body)
+        assertEquals(IdentityOperation.supportedCapabilities,next.operation!!.enrollmentCapabilities())
+        assertEquals(old,next.copy(revision=old.revision,operation=oldOp,operationBoot=old.operationBoot,operationElapsedMs=old.operationElapsedMs))
+        assertEquals(oldOp.body,old.operation!!.body)
+        invalid {LoginRecovery.renewEnrollmentAfterAck(old,f.generation-1,oldOp.body,reply,f.key,2,2000)}
+        invalid {LoginRecovery.renewEnrollmentAfterAck(old,f.generation,"{}",reply,f.key,2,2000)}
+        invalid {LoginRecovery.renewEnrollmentAfterAck(old,f.generation,oldOp.body,reply.copy(keyThumbprint=h()),f.key,2,2000)}
+        invalid {LoginRecovery.renewEnrollmentAfterAck(old,f.generation,oldOp.body,reply.copy(session=reply.session.copy(generation=1)),f.key,2,2000)}
+        invalid {LoginRecovery.renewEnrollmentAfterAck(current,f.generation,current.operation!!.body,reply,f.key,2,2000)}
+    }
     @Test fun namespaceClaimSurvivesRefreshAndCancelUntilActualErasureCompletes() {
         val f=Flow();val initial=f.cached();val first="managed-netbird/"+h();val second="managed-netbird/"+h()
         val claimed=LoginRecovery.claimOverlay(initial,f.generation,first)

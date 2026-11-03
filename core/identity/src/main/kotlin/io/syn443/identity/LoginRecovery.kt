@@ -168,6 +168,21 @@ object LoginRecovery {
         return revised(withoutOperation(s).copy(phase=LoginPhase.PROVISIONING,protectedHash=protectedHash,
             deviceId=reply.session.deviceId,sessionGeneration=reply.session.generation))
     }
+    /** Only an acknowledged old operation may be superseded. Persist this new
+     * current-version request before dispatch; unknown old ACKs keep their bytes. */
+    fun renewEnrollmentAfterAck(s:LoginIntent,generation:Long,body:String,reply:SessionReply,key:ECPublicKey,boot:Int,elapsed:Long):LoginIntent {
+        current(s,generation)
+        require(s.phase==LoginPhase.ENROLLING && s.operation?.body==body && Identity.thumbprint(key)==s.thumbprint &&
+            reply.authority==s.authority && reply.keyThumbprint==s.thumbprint && reply.session.generation==0L)
+        val old=checkNotNull(s.operation).enrollmentCapabilities()
+        require(old.toSet()!=IdentityOperation.supportedCapabilities.toSet() && IdentityOperation.supportedCapabilities.containsAll(old))
+        return revised(operation(s,IdentityOperation.enroll(key),boot,elapsed,LoginPhase.ENROLLING))
+    }
+    /** Encrypted availability metadata cannot change identity, activation or intent. */
+    fun capabilitiesRecorded(s:LoginIntent,generation:Long,protectedHash:String):LoginIntent {
+        current(s,generation);require(s.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED))
+        return revised(s.copy(protectedHash=protectedHash))
+    }
     fun policyCached(s:LoginIntent,generation:Long,policyHash:String,protectedHash:String):LoginIntent {
         current(s,generation);require(s.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED))
         return revised(s.copy(phase=LoginPhase.POLICY_CACHED,policyHash=policyHash,protectedHash=protectedHash))
