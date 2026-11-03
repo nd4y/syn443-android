@@ -457,6 +457,7 @@ class TunnelService : VpnService() {
         }
     }.getOrDefault(false)
     private fun retire(heavy: Boolean) {
+        PolicyChecks.invalidate()
         policyJob?.cancel()
         healthJob?.cancel(); healthJob = null
         OverlaySnapshot.clear()
@@ -717,6 +718,7 @@ class TunnelService : VpnService() {
             handler.post {
                 if (policyJob === job) policyJob = null
                 if (destroyed || retiring || !ready || !Recovery.current(store.checkpoint(), generation) || currentEpoch != epoch || session != token || activation != policies.read().journal.activationGeneration) return@post
+                PolicyChecks.record(batch,generation,currentEpoch,activation)
                 if (!batch.complete) {
                     store.event(store.read().optString("phase"), "policy_checks_" + checkNotNull(batch.incompleteOutcome).name.lowercase(java.util.Locale.ROOT), epoch)
                     return@post

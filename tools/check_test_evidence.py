@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=183
+    minimum=186
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -22,7 +22,7 @@ elif mode=="observability":
     minimum=10
 elif mode=="health":
     paths=list((root/"core/health/build/test-results/test").glob("TEST-*.xml"))
-    minimum=21
+    minimum=23
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
     minimum=107
@@ -41,6 +41,9 @@ assert len(cases)>=minimum,(mode,len(cases),minimum)
 if mode=="policy":
     assert ("io.syn443.policy.PolicyTest","signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences") in {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="health":
+    assert {('io.syn443.health.ChecksTest',name) for name in {
+        'positionalDiagnosticsKeepEachFailureSeparateFromLaterSuccessOrMismatch',
+        'checksNeverStartedDoNotInheritAStageOrNetworkFailure'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required per-check diagnostic cases missing'
     required={('io.syn443.health.AddressFallbackTest',name) for name in {
         'unavailableFirstFamilyFallsBackWithoutExtraWorkersOrLeakedSockets',
         'connectionFailureTriesOnlyFourDistinctAddressesAndKeepsFailureAttribution',
@@ -93,6 +96,10 @@ if mode=="identity":
         "transportCancellationAndServerErrorsRemainDistinct",
         "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
+    assert {('io.syn443.android.PolicyCheckSnapshotTest',name) for name in {
+        'diagnosticsArePositionalBoundedAndReturnedAsIndependentCopies',
+        'changedOwnerIntentNetworkActivationOrStoppedVpnCannotRelabelEvidenceAsCurrent',
+        'staleOrBackwardClockKeepsHistoryWithoutClaimingCurrentHealth'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required fenced policy diagnostic cases missing'
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'logoutAfterAccessExpiryRotatesOnlyInRamRevokesAndErasesTheProtectedSession',
         'lostLogoutRefreshKeepsRecoveryTombstoneWithoutRestoringSecretsOrRetryingEnrollment'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android expired-session retirement cases missing'

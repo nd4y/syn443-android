@@ -23,6 +23,42 @@ class ChecksTest {
             assertThrows(IllegalStateException::class.java) { batch.values() }
         }
     }
+    @Test fun positionalDiagnosticsKeepEachFailureSeparateFromLaterSuccessOrMismatch() {
+        ProbePool().use { pool ->
+            var index = 0
+            val job = CheckJob(pool, Probe { _, scope ->
+                when (index++) {
+                    0 -> { scope.enter(Stage.RESOLVE); throw java.net.UnknownHostException("private-target") }
+                    1 -> { scope.enter(Stage.RESPONSE); true }
+                    else -> { scope.enter(Stage.RESPONSE); false }
+                }
+            })
+            val batch = job.run(listOf(check, check, check))
+            assertEquals(listOf(false, true, false), batch.values())
+            assertEquals(listOf(
+                CheckObservation(Outcome.FAIL, Failure.DNS, Stage.RESOLVE),
+                CheckObservation(Outcome.PASS, null, Stage.RESPONSE),
+                CheckObservation(Outcome.FAIL, null, Stage.RESPONSE)), batch.observations)
+            assertFalse(batch.toString().contains("private-target"))
+            assertFalse(batch.toString().contains(check.target))
+            // Existing aggregate attribution still retains the last exception.
+            assertEquals(Failure.DNS, job.failure)
+            assertThrows(IllegalArgumentException::class.java) {
+                Batch(listOf(Outcome.PASS), listOf(CheckObservation(Outcome.FAIL)))
+            }
+        }
+    }
+    @Test fun checksNeverStartedDoNotInheritAStageOrNetworkFailure() {
+        ProbePool().use { pool ->
+            val cancelled = CheckJob(pool, Probe { _, _ -> error("must_not_run") })
+            cancelled.cancel()
+            assertEquals(List(8) { CheckObservation(Outcome.CANCELLED) }, cancelled.run(List(8) { check }).observations)
+            val clock = AtomicLong()
+            val deadline = CheckJob(pool, Probe { _, scope -> scope.enter(Stage.RESPONSE); clock.set(300); true }, { clock.get() }, 100, 200)
+            assertEquals(listOf(CheckObservation(Outcome.DEADLINE, null, Stage.RESPONSE), CheckObservation(Outcome.DEADLINE)),
+                deadline.run(listOf(check, check)).observations)
+        }
+    }
     @Test fun cancellationBeforeStartDoesNotCallProbe() {
         ProbePool().use { pool ->
             val job = CheckJob(pool, Probe { _, _ -> error("must_not_run") }); job.cancel()

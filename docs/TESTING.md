@@ -1,5 +1,10 @@
 # Testing and release gates
 
+[Activation diagnostics](policy-check-diagnostics.md) adds two mandatory health
+JVM cases (minimum23) and three mandatory Android cases per API (minimum186).
+These tests and builds run only in Actions. Exact-source CI and physical
+acceptance remain pending until their recorded results are verified.
+
 Capability negotiation adds ten required JVM cases (identity minimum107), a
 separately checked90% negotiation-core line gate and four required controller
 cases on each API29/35/37 (emulator minimum183). See

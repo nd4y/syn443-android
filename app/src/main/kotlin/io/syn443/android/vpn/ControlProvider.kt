@@ -219,6 +219,8 @@ class ControlProvider : ContentProvider() {
                 LifecycleAccess.engineStatus(context,result)
                 val os=LifecycleAccess.policy(context)
                 result.put("netbird", OverlaySnapshot.read()).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",os)
+                result.put("policyChecks",PolicyChecks.view(result.optLong("generation"),result.optLong("networkEpoch"),
+                    result.getJSONObject("policy").optLong("activationGeneration"),result.optBoolean("engineActive")))
                 // Legacy fields must not expose the old persisted sample as current.
                 for(key in listOf("alwaysOn","lockdown"))result.put(key,if(os.optBoolean("known"))os.getBoolean(key) else org.json.JSONObject.NULL)
             }
