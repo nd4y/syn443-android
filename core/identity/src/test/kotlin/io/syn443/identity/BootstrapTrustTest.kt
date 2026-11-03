@@ -13,6 +13,23 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class BootstrapTrustTest {
+    @Test fun administrationOriginIsRootAuthenticatedAndAbsentInLegacyAuthorityBytes() {
+        val old=descriptor()
+        assertFalse(Canonical.parse(Canonical.json.encodeToString(old)).jsonObject.containsKey("controlPanelOrigin"))
+        val configured=old.copy(controlPanelOrigin="https://control.example.invalid")
+        val raw=manifest(configured)
+        val decoded=BootstrapTrust.descriptor(raw,anchor,ServiceFloor(),now).first
+        assertEquals(configured.controlPanelOrigin,decoded.controlPanelOrigin)
+        val accepted=AuthenticatedInvite(decoded,ServiceFloor(),"synthetic").bootstrap()
+        assertEquals(configured.controlPanelOrigin,accepted.controlPanelOrigin)
+        val legacy=accepted.copy(controlPanelOrigin="")
+        assertFalse(Canonical.parse(Canonical.json.encodeToString(legacy)).jsonObject.containsKey("controlPanelOrigin"))
+        assertNotEquals(Identity.bootstrapAuthority(legacy),Identity.bootstrapAuthority(accepted))
+        for(bad in listOf("http://control.example.invalid","https://control.example.invalid/","https://control.example.invalid/path","https://user@control.example.invalid","https://control.example.invalid?token=synthetic","https://control.example.invalid#fragment","https://CONTROL.example.invalid","https://control.example.invalid:443","https://control.example.invalid:0443","https://control.example.invalid.")) {
+            fail {BootstrapTrust.descriptor(manifest(old.copy(controlPanelOrigin=bad)),anchor,ServiceFloor(),now)}
+            fail {accepted.copy(controlPanelOrigin=bad).validate()}
+        }
+    }
     companion object {
         private const val now=1_800_000_000L
         private fun key()=KeyPairGenerator.getInstance("EC").apply {initialize(ECGenParameterSpec("secp256r1"))}.generateKeyPair()

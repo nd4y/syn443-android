@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import io.syn443.identity.Identity
 
 @Composable fun LoginControls() {
     val context=LocalContext.current;val scope=rememberCoroutineScope()
@@ -85,6 +86,14 @@ import org.json.JSONObject
             if(command("auth-cancel")?.getBoolean("ok")!=true)message="Завершение не подтверждено. Повторите попытку."
         }},modifier=Modifier.testTag("auth-cancel")) {Text("Завершить сессию")}
         if(status.optInt("cleanupPending")>0)Text("Очистка регистрации на сервере продолжится после нового входа в тот же аккаунт.")
+        if(status.optBoolean("adminPanelAvailable"))Button(enabled=!status.optBoolean("busy"),onClick={scope.launch {
+            val reply=command("auth-admin-panel",generation.toString())
+            val url=reply?.getString("url")
+            if(reply?.getBoolean("ok")==true && url!=null && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))runCatching {
+                Identity.controlOrigin(url)
+                context.startActivity(Intent(Intent.ACTION_VIEW,url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
+            }.onFailure {message="Не удалось открыть панель управления."}
+        }},modifier=Modifier.testTag("auth-admin-panel")) {Text("Панель управления")}
         if(message.isNotEmpty())Text(message)
     }
 }

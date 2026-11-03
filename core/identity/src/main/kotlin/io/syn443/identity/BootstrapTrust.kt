@@ -3,6 +3,8 @@ package io.syn443.identity
 import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
@@ -19,9 +21,11 @@ import java.util.Base64
     override fun toString()="TrustAnchor([redacted])"
 }
 @Serializable data class ServiceFloor(val serviceId:String="",val revision:Long=0,val hash:String="")
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ServiceDescriptor(val schemaVersion:Int,val audience:String,val rootEpoch:Long,val revision:Long,
     val serviceId:String,val issuer:String,val clientId:String,val apiOrigin:String,val roots:Map<String,String>,
-    val issuedAt:Long,val notBefore:Long,val expires:Long) {
+    val issuedAt:Long,val notBefore:Long,val expires:Long,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val controlPanelOrigin:String="") {
     override fun toString()="ServiceDescriptor([redacted])"
 }
 @Serializable data class RootTransition(val schemaVersion:Int,val audience:String,val from:String,val to:String,
@@ -33,7 +37,7 @@ data class InviteLink(val serviceId:String,val origin:String,val code:String,val
 class AuthenticatedInvite internal constructor(val descriptor:ServiceDescriptor,val floor:ServiceFloor,val code:String) {
     override fun toString()="AuthenticatedInvite([redacted])"
     fun bootstrap()=Bootstrap(descriptor.serviceId,descriptor.issuer,descriptor.clientId,descriptor.apiOrigin,
-        descriptor.roots.toMap()).also {it.validate()}
+        descriptor.roots.toMap(),controlPanelOrigin=descriptor.controlPanelOrigin).also {it.validate()}
 }
 
 /** Local authentication only. The QR supplies no new root and causes no network
@@ -70,6 +74,7 @@ object BootstrapTrust {
             descriptor.rootEpoch==anchor.epoch && descriptor.revision in 1..SAFE &&
             identifier.matches(descriptor.serviceId) && identifier.matches(descriptor.clientId))
         secureURL(descriptor.apiOrigin,false); secureURL(descriptor.issuer,true)
+        if(descriptor.controlPanelOrigin.isNotEmpty())Identity.controlOrigin(descriptor.controlPanelOrigin)
         require(descriptor.issuedAt>0 && descriptor.issuedAt<=now+30 && descriptor.notBefore>=descriptor.issuedAt &&
             descriptor.notBefore<=now && descriptor.expires>now && descriptor.expires-descriptor.issuedAt<=30*86400)
         require(descriptor.roots.size in 1..4)

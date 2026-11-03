@@ -3,6 +3,8 @@ package io.syn443.identity
 import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.io.ByteArrayOutputStream
@@ -22,8 +24,10 @@ import java.security.spec.RSAPublicKeySpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class Bootstrap(val serviceId: String, val issuer: String, val clientId: String,
-    val apiOrigin: String, val roots: Map<String, String>, val tlsCaDer: String = "") {
+    val apiOrigin: String, val roots: Map<String, String>, val tlsCaDer: String = "",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val controlPanelOrigin:String="") {
     override fun toString()="Bootstrap([redacted])"
     fun validate() {
         require(serviceId.matches(Regex("[a-zA-Z0-9_-]{1,64}")))
@@ -39,6 +43,7 @@ import java.util.Base64
         // Development CA is trusted only from the operator bootstrap, never from API responses.
         require(tlsCaDer.length <= 8192)
         if (tlsCaDer.isNotEmpty()) require(api.host == "127.0.0.1")
+        if(controlPanelOrigin.isNotEmpty())Identity.controlOrigin(controlPanelOrigin)
     }
 }
 @Serializable data class Pending(val generation: Long, val state: String, val nonce: String,
@@ -74,6 +79,9 @@ object Identity {
         require(u.scheme == "https" && !u.host.isNullOrEmpty() && u.rawUserInfo == null && u.rawQuery == null && u.rawFragment == null && (u.port == -1 || u.port in 1..65535))
         require(u.rawPath == u.path && !u.path.contains("//") && u.normalize() == u)
         return u
+    }
+    fun controlOrigin(raw:String):URI= https(raw).also {u->
+        require(u.path.isEmpty() && u.rawAuthority==u.rawAuthority.lowercase() && !u.host.endsWith('.') && !u.rawAuthority.endsWith(':') && u.port!=443)
     }
     fun objectJSON(raw: String): JsonObject {
         require(raw.toByteArray(Charsets.UTF_8).size in 1..65_536)

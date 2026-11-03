@@ -203,6 +203,7 @@ class LoginController private constructor(private val context:android.app.Applic
         JSONObject().put("phase",s.phase.name).put("method",s.method).put("generation",s.generation).put("configured",configured)
             .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
+            .put("adminPanelAvailable",adminPanelUrl(s.generation)!=null)
             .put("inviteState",if(s.phase==LoginPhase.INVITING)inviteState else "").put("pairCode",if(s.phase==LoginPhase.INVITING)invitePair else "")
             .put("cleanupPending",s.tombstones.size).put("assignedPolicy",assignedRuntime.status(s))
     }.getOrElse {JSONObject().put("phase","BLOCKED").put("reason","LOGIN_STORE_UNAVAILABLE")
@@ -321,6 +322,13 @@ class LoginController private constructor(private val context:android.app.Applic
     fun browserUrl(expectedGeneration:Long):String=synchronized(commands) {
         val s=journal.snapshot();require(s.generation==expectedGeneration && s.phase==LoginPhase.BROWSER)
         requireNotNull(browser).also {require(it.first==s.generation)}.second
+    }
+    /** Navigation metadata only; the browser obtains its own control-audience
+     * session and fresh MFA. No device/user credential enters the URL. */
+    fun adminPanelUrl(expectedGeneration:Long):String?=synchronized(commands) {
+        val s=journal.snapshot();val active=cached
+        if(s.generation!=expectedGeneration || s.phase !in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING) || active==null || active.first.generation!=s.generation || active.first.ownerTag!=s.ownerTag || active.first.deviceId!=s.deviceId)return@synchronized null
+        active.second.bootstrap.controlPanelOrigin.takeIf {it.isNotEmpty()}?.also {Identity.controlOrigin(it)}
     }
     fun callback(raw:String) {
         require(raw.length<=8192)

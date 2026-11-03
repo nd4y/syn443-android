@@ -82,6 +82,11 @@ class ControlProvider : ContentProvider() {
                     require(caller==Process.myUid())
                     return Bundle().apply {putBoolean("ok",true);putString("url",LoginController.get(context).browserUrl(requireNotNull(arg?.toLongOrNull())))}
                 }
+                "auth-admin-panel" -> {
+                    require(caller==Process.myUid())
+                    val url=LoginController.get(context).adminPanelUrl(requireNotNull(arg?.toLongOrNull()))
+                    return Bundle().apply {putBoolean("ok",url!=null);putString("url",url)}
+                }
                 "auth-callback" -> {
                     require(caller==Process.myUid());LoginController.get(context).callback(requireNotNull(arg))
                 }

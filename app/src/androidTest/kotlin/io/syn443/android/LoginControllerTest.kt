@@ -46,11 +46,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Actual Android controller/journal/Keystore with synthetic, cryptographically checked replies. */
 @RunWith(AndroidJUnit4::class)
 class LoginControllerTest {
-    private class Server:IdentityExchange {
+    private class Server(controlPanelOrigin:String=""):IdentityExchange {
         private val rsa=KeyPairGenerator.getInstance("RSA").apply {initialize(2048)}.generateKeyPair()
         private val root=KeyPairGenerator.getInstance("EC").apply {initialize(ECGenParameterSpec("secp256r1"))}.generateKeyPair()
         val bootstrap=Bootstrap("synthetic","https://id.example.invalid/realms/test","test","https://api.example.invalid",
-            mapOf("root" to Base64.getEncoder().encodeToString(root.public.encoded)))
+            mapOf("root" to Base64.getEncoder().encodeToString(root.public.encoded)),controlPanelOrigin=controlPanelOrigin)
         @Volatile var authorization=""
         @Volatile var dropEnrollment=false
         @Volatile var holdEnrollment=false
@@ -267,14 +267,14 @@ class LoginControllerTest {
             check(listOf(bootstrap,File(bootstrap.path+".bak"),File(bootstrap.path+".new")).none {it.exists()})
         }
     }
-    private fun fixture(beforeQueue:(()->Unit)?=null,block:(Fixture)->Unit) {
+    private fun fixture(beforeQueue:(()->Unit)?=null,controlPanelOrigin:String="",block:(Fixture)->Unit) {
         check(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
         context.contentResolver.call("content://io.syn443.control".toUri(),"disconnect",null,null)
         until {
             val raw=context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null)?.getString("json")
             raw!=null && org.json.JSONObject(raw).let {!it.optBoolean("desiredOn") && !it.optBoolean("engineActive")}
         }
-        val f=Fixture(beforeQueue=beforeQueue)
+        val f=Fixture(server=Server(controlPanelOrigin),beforeQueue=beforeQueue)
         var failure:Throwable?=null
         try {
             f.controller.configure(Canonical.json.encodeToString(f.server.bootstrap));f.idle()
@@ -282,6 +282,24 @@ class LoginControllerTest {
             block(f)
         } catch(e:Throwable) {failure=e;throw e}
         finally {try {f.cleanup()} catch(e:Throwable) {if(failure==null)throw e else failure.addSuppressed(e)}}
+    }
+    @Test fun administrationEntryUsesTrustedMetadataAndCannotOutliveItsLoginGeneration()=fixture(controlPanelOrigin="https://control.example.invalid") {f->
+        assertNull(f.controller.adminPanelUrl(f.journal.snapshot().generation))
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val generation=f.journal.snapshot().generation
+        assertEquals("https://control.example.invalid",f.controller.adminPanelUrl(generation))
+        assertNull(f.controller.adminPanelUrl(generation+1))
+        assertTrue(f.controller.status().getBoolean("adminPanelAvailable"))
+        f.restart()
+        assertEquals("https://control.example.invalid",f.controller.adminPanelUrl(generation))
+        f.controller.cancel()
+        assertNull(f.controller.adminPanelUrl(generation));f.idle()
+        assertFalse(f.controller.status().optBoolean("adminPanelAvailable"))
+    }
+    @Test fun legacyBootstrapDoesNotInventAnAdministrationAddress()=fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        assertNull(f.controller.adminPanelUrl(f.journal.snapshot().generation))
+        assertFalse(f.controller.status().getBoolean("adminPanelAvailable"))
     }
     @Test fun pendingPollFencesStaleGenerationAndCannotReviveLogout() {
         val pause=AtomicBoolean();val entered=CountDownLatch(1);val release=CountDownLatch(1)
