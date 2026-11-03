@@ -246,7 +246,13 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     }
     fun revoke(op:IdentityOperation,current:SessionReply,scope:IdentityScope):TrustedTime=checked {
         require(op.path=="/v1/device/revoke");bound(current)
-        api(op.path,op.body,current.session.accessToken,current.session.nonce,current.time,scope).time
+        // Logout can happen long after VPN Stop. A still-valid refresh lease
+        // permits one bounded RAM-only rotation before revocation. Retirement
+        // already erased protected storage; a lost response retains its owner
+        // tombstone instead of persisting or resurrecting new credentials.
+        val live=if(current.time.window(boot(),elapsed()).upperMs>=current.session.accessUntilMs)
+            refresh(IdentityOperation.refresh(),current,scope) else current
+        api(op.path,op.body,live.session.accessToken,live.session.nonce,live.time,scope).time
     }
     fun policy(current:SessionReply,scope:IdentityScope):PolicyReply=checked {
         bound(current)

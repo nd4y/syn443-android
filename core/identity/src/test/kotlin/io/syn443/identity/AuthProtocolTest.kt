@@ -400,6 +400,54 @@ class AuthProtocolTest {
         }
         f.elapsed+=86_000_001;error(AuthFailure.INVALID_REPLY) {f.client.refresh(refresh,previous,IdentityScope())}
     }
+    @Test fun expiredAccessLogoutRefreshesInRamAndRevokesOnlyTheSameDeviceWithCurrentProof() {
+        val f=Fixture();val previous=f.current();f.elapsed=601_000
+        val next=session(1).copy(accessUntilMs=now+1_190_000);val revoke=IdentityOperation.revoke()
+        f.handler={_,url,headers,body,_,_->
+            if(url.endsWith("/refresh")) {
+                assertEquals("DPoP "+previous.session.refreshToken,headers["Authorization"])
+                json(text=sessionWire(next),time=now+600_000)
+            } else {
+                assertTrue(url.endsWith("/revoke"));assertEquals(revoke.body,body!!.toString(Charsets.UTF_8))
+                assertEquals("DPoP "+next.accessToken,headers["Authorization"])
+                val proof=Identity.objectJSON(Policy.utf8(Policy.decode64(headers.getValue("DPoP").split('.')[1])))
+                assertEquals(next.nonce,proof.getValue("nonce").jsonPrimitive.content)
+                assertEquals(Identity.hash(next.accessToken.toByteArray()),proof.getValue("ath").jsonPrimitive.content)
+                json(204,"",time=now+600_000)
+            }
+        }
+        f.client.revoke(revoke,previous,IdentityScope())
+        assertEquals(listOf(b.apiOrigin+"/v1/device/session/refresh",b.apiOrigin+"/v1/device/revoke"),f.requests)
+        assertEquals(0L,previous.session.generation) // The caller's protected snapshot was not replaced.
+    }
+    @Test fun freshAccessLogoutDoesNotRotateAndExpiredRefreshOrBootCannotDispatch() {
+        val f=Fixture();f.client.revoke(IdentityOperation.revoke(),f.current(),IdentityScope())
+        assertEquals(listOf(b.apiOrigin+"/v1/device/revoke"),f.requests)
+        for(reboot in listOf(false,true)) {
+            val bad=Fixture();val previous=bad.current()
+            if(reboot)bad.boot++ else bad.elapsed=86_001_000
+            error(AuthFailure.INVALID_REPLY) {bad.client.revoke(IdentityOperation.revoke(),previous,IdentityScope())}
+            assertTrue(bad.requests.isEmpty())
+        }
+    }
+    @Test fun uncertainExpiredLogoutRefreshNeverReenrollsOrSendsAnOldRevocationCredential() {
+        val f=Fixture();val previous=f.current();f.elapsed=601_000
+        f.handler={_,url,_,_,_,_->assertTrue(url.endsWith("/refresh"));throw DeliveryException(DeliveryFailure.TRANSPORT)}
+        error(AuthFailure.TRANSPORT) {f.client.revoke(IdentityOperation.revoke(),previous,IdentityScope())}
+        assertEquals(listOf(b.apiOrigin+"/v1/device/session/refresh"),f.requests)
+    }
+    @Test fun substitutedOrCancelledLogoutRefreshCannotReachRevocation() {
+        for(cancel in listOf(false,true)) {
+            val f=Fixture();val previous=f.current();f.elapsed=601_000;val scope=IdentityScope()
+            f.handler={_,url,_,_,_,_->
+                assertTrue(url.endsWith("/refresh"))
+                if(cancel)scope.cancel()
+                json(text=sessionWire(session(1,device=if(cancel)previous.session.deviceId else Identity.random()).copy(accessUntilMs=now+1_190_000)),time=now+600_000)
+            }
+            error(if(cancel)AuthFailure.CANCELLED else AuthFailure.INVALID_REPLY) {f.client.revoke(IdentityOperation.revoke(),previous,scope)}
+            assertEquals(listOf(b.apiOrigin+"/v1/device/session/refresh"),f.requests)
+        }
+    }
     @Test fun ownerCleanupNeedsFreshMatchingIdentityAndNeverReturnsASession() {
         val f=Fixture();val op=IdentityOperation.cleanup(listOf(Identity.random()))
         f.handler={m,u,h,body,_,_->assertEquals("POST",m);assertTrue(u.endsWith("/identity/devices/revoke"));assertEquals(op.body,body!!.toString(Charsets.UTF_8));assertTrue(h["Authorization"]!!.startsWith("DPoP "));json(204,text="")}

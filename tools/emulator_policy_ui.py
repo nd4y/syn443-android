@@ -1,5 +1,6 @@
 """Ordinary Android Settings controls, for disposable emulator lifecycle tests."""
 import re
+import shlex
 import time
 import xml.etree.ElementTree as ET
 from run_vpn_process_faults import adb
@@ -82,6 +83,22 @@ def profile_settings(root):
     return None
 
 
+def settings_component(raw):
+    """Accept only platform-resolved Settings components, never a chooser app."""
+    if len(raw)>8192:return None
+    values=[]
+    for line in raw.decode('utf-8',errors='strict').splitlines():
+        line=line.strip()
+        if not re.fullmatch(r'[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+',line):continue
+        package,activity=line.split('/',1)
+        if package!='com.android.settings' or not (activity.startswith('.') or activity.startswith('com.android.settings.')):return None
+        values.append(line)
+    values=sorted(set(values))
+    if len(values)==1:return values[0]
+    vpn=[v for v in values if re.search(r'[.$]VpnSettingsActivity$',v)]
+    return vpn[0] if len(vpn)==1 else None
+
+
 def open_policy():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
     # Reboots can leave a nonsecure keyguard or a previously restored Settings
@@ -91,10 +108,15 @@ def open_policy():
     assert dimensions,'Disposable emulator dimensions unavailable'
     width,height=map(int,dimensions[-1])
     adb('shell','input','swipe',str(width//2),str(height*9//10),str(width//2),str(height//3),'300')
-    # Restrict resolution to the platform Settings package. An unqualified
-    # settings action may display the framework resolver instead of the owned
-    # VPN row; that dialog is deliberately never clicked by this driver.
-    adb('shell','am','start','-W','-a','android.settings.VPN_SETTINGS','-p','com.android.settings','-f','0x10008000')
+    # Resolve the actual platform component. A package-restricted implicit
+    # intent may still leave a framework window after a reboot. Launch the
+    # verified Settings component afresh, without clicking framework dialogs.
+    args=('shell','cmd','package')
+    component=settings_component(adb(*args,'resolve-activity','--brief','-a','android.settings.VPN_SETTINGS','-p','com.android.settings'))
+    if component is None:
+        component=settings_component(adb(*args,'query-activities','--brief','-a','android.settings.VPN_SETTINGS','-p','com.android.settings'))
+    assert component is not None,'Platform did not resolve an owned VPN Settings component'
+    adb('shell','am','start','-S','-W','-n',shlex.quote(component),'-f','0x10008000')
     end=time.monotonic()+20
     root=None
     while time.monotonic()<end:
@@ -106,7 +128,7 @@ def open_policy():
     # Structural data only: no arbitrary UI text, identifiers or auth content.
     nodes=[] if root is None else list(root.iter('node'))
     packages=sorted({n.get('package','') for n in nodes})[:8]
-    resources=sorted({n.get('resource-id','') for n in nodes if n.get('package') in ('com.android.settings','com.android.systemui')})[:32]
+    resources=sorted({n.get('resource-id','') for n in nodes if n.get('package') in ('android','com.android.settings','com.android.systemui')})[:32]
     owned=[{'id':n.get('resource-id',''),'bounds':n.get('bounds','')} for n in nodes if n.get('package')=='com.android.settings' and n.get('text')=='SYN443']
     gears=[{'bounds':n.get('bounds',''),'description':('expected' if n.get('content-desc')=='Settings for SYN443' else 'present' if n.get('content-desc') else 'empty')} for n in nodes if n.get('package')=='com.android.settings' and n.get('resource-id','').endswith('/settings_button')]
     print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears}),flush=True)

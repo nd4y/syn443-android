@@ -51,6 +51,12 @@ if mode=="health":
     required.add(('io.syn443.health.TlsTest','certificateFailureDoesNotTryAnotherAddressOrWeakenTrust'))
     assert required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required bounded address fallback cases missing'
 if mode=="identity":
+    logout_required={('io.syn443.identity.AuthProtocolTest',name) for name in {
+        'expiredAccessLogoutRefreshesInRamAndRevokesOnlyTheSameDeviceWithCurrentProof',
+        'freshAccessLogoutDoesNotRotateAndExpiredRefreshOrBootCannotDispatch',
+        'uncertainExpiredLogoutRefreshNeverReenrollsOrSendsAnOldRevocationCredential',
+        'substitutedOrCancelledLogoutRefreshCannotReachRevocation'}}
+    assert logout_required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required expired-access logout cases missing'
     renewal_required={('io.syn443.identity.AssignmentsTest',name) for name in {
         'identicalExecutionRenewsDurablyWithoutCandidateActivationOrLossOfFailureHistory',
         'freshSignedLeaseCanAuthorizeKnownExpiredExecutionButNeverReviveItsExpiredReader',
@@ -87,6 +93,9 @@ if mode=="identity":
         "transportCancellationAndServerErrorsRemainDistinct",
         "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
+    assert {('io.syn443.android.LoginControllerTest',name) for name in {
+        'logoutAfterAccessExpiryRotatesOnlyInRamRevokesAndErasesTheProtectedSession',
+        'lostLogoutRefreshKeepsRecoveryTombstoneWithoutRestoringSecretsOrRetryingEnrollment'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android expired-session retirement cases missing'
     assert ('io.syn443.android.HealthChecksTest','androidDnsRetainsBoundedDistinctAddressesForFallbackAndStillCancelsQuery') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android DNS fallback case missing'
     assert ('io.syn443.android.LoginControllerTest','assignedLeaseRenewalPersistsWithoutNewActivationAndRetainsDeviceIdentityAcrossRestart') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required durable Android lease renewal case missing'
     assert {('io.syn443.android.LoginControllerTest',name) for name in {

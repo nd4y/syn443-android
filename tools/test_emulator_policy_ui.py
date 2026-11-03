@@ -32,16 +32,17 @@ class OwnedVpnSettingsTest(unittest.TestCase):
             calls.append(args)
             if args[-1]=='ro.hardware':return b'ranchu\n'
             if args[-1]=='size':return b'Physical size: 1080x1920\n'
+            if args[1:3]==('cmd','package'):return b'com.android.settings/.Settings$VpnSettingsActivity\n'
             return b''
         with patch.object(ui,'adb',side_effect=adb),patch.object(ui,'tree',return_value=root),patch.object(ui,'tap')as tap:
             ui.open_policy();tap.assert_called_once_with(gear)
-        self.assertIn(('shell','am','start','-W','-a','android.settings.VPN_SETTINGS','-p','com.android.settings','-f','0x10008000'),calls)
+        self.assertIn(('shell','am','start','-S','-W','-n',"'com.android.settings/.Settings$VpnSettingsActivity'",'-f','0x10008000'),calls)
         with patch.object(ui,'adb',return_value=b'physical-phone'),patch.object(ui,'tree')as tree:
             with self.assertRaises(AssertionError):ui.open_policy()
             tree.assert_not_called()
     def test_protected_bouncer_is_never_filled_by_policy_navigation(self):
         root,_=self.row()
-        def adb(*args,**kwargs):return b'ranchu' if args[-1]=='ro.hardware' else b'1080x1920' if args[-1]=='size' else b''
+        def adb(*args,**kwargs):return b'ranchu' if args[-1]=='ro.hardware' else b'1080x1920' if args[-1]=='size' else b'com.android.settings/.Settings$VpnSettingsActivity' if args[1:3]==('cmd','package') else b''
         with patch.object(ui,'adb',side_effect=adb),patch.object(ui,'tree',return_value=root),patch.object(ui,'pin_keys',return_value={'1':object()}),patch.object(ui,'tap')as tap:
             with self.assertRaisesRegex(AssertionError,'Protected emulator keyguard'):ui.open_policy()
             tap.assert_not_called()
@@ -51,5 +52,26 @@ class OwnedVpnSettingsTest(unittest.TestCase):
         node(root,package='android',resource_id='android:id/title',text='SYN443',bounds='[0,0][100,100]')
         node(root,package='android',resource_id='android:id/button1',text='Always',bounds='[0,100][100,200]')
         self.assertIsNone(ui.profile_settings(root))
+    def test_component_resolution_rejects_foreign_classes_and_shell_text(self):
+        for value in [b'android/com.android.internal.app.ResolverActivity',b'com.android.settings/com.example.VpnSettingsActivity',b'com.android.settings/.Settings$VpnSettingsActivity;id',b'com.android.settings/.Settings$VpnSettingsActivity\nandroid/Resolver']:
+            self.assertIsNone(ui.settings_component(value))
+        self.assertIsNone(ui.settings_component(b'x'*8193))
+    def test_query_can_select_only_one_named_vpn_activity_from_owned_handlers(self):
+        owned=b'com.android.settings/.Settings$VpnSettingsActivity'
+        self.assertEqual(owned.decode(),ui.settings_component(b'priority=0\n'+owned))
+        self.assertEqual(owned.decode(),ui.settings_component(b'com.android.settings/.GenericSettings\n'+owned))
+        self.assertIsNone(ui.settings_component(b'com.android.settings/.One\ncom.android.settings/.Two'))
+    def test_ambiguous_framework_resolution_uses_owned_query_before_launch(self):
+        root,gear=self.row();calls=[]
+        def adb(*args,**kwargs):
+            calls.append(args)
+            if args[-1]=='ro.hardware':return b'goldfish'
+            if args[-1]=='size':return b'1080x1920'
+            if 'resolve-activity' in args:return b'android/com.android.internal.app.ResolverActivity'
+            if 'query-activities' in args:return b'com.android.settings/.Settings$VpnSettingsActivity'
+            return b''
+        with patch.object(ui,'adb',side_effect=adb),patch.object(ui,'tree',return_value=root),patch.object(ui,'tap')as tap:
+            ui.open_policy();tap.assert_called_once_with(gear)
+        self.assertTrue(any('query-activities' in x for x in calls))
 
 if __name__=='__main__':unittest.main()

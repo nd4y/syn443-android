@@ -632,6 +632,31 @@ class LoginControllerTest {
         assertEquals("committed",f.journal.readAssignment(f.journal.snapshot())!!.journal.phase)
         assertTrue(f.controller.allowsConnect())
     }
+    @Test fun logoutAfterAccessExpiryRotatesOnlyInRamRevokesAndErasesTheProtectedSession()=fixture {f->
+        f.server.policyReady=true;f.server.shortAccess=true;f.controller.callback(f.begin());f.idle()
+        val s=f.journal.snapshot();val p=LoginPayload.decode(f.journal.readProtected(s),s);val session=checkNotNull(p.session)
+        assertTrue(f.server.refreshBodies.isEmpty())
+        val now=SystemClock.elapsedRealtime();val until=now+session.session.accessUntilMs-session.time.window(session.time.boot,now).upperMs+200
+        while(SystemClock.elapsedRealtime()<until)Thread.sleep(50)
+        f.controller.cancel();f.idle()
+        val out=f.journal.snapshot();assertEquals(LoginPhase.SIGNED_OUT,out.phase)
+        assertEquals(1,f.server.refreshBodies.size);assertEquals(1,f.server.enrollBodies.size)
+        assertTrue(f.server.activeKeys.isEmpty());assertTrue(out.tombstones.isEmpty())
+        assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/protected.bin").exists())
+        assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/assignment.bin").exists())
+    }
+    @Test fun lostLogoutRefreshKeepsRecoveryTombstoneWithoutRestoringSecretsOrRetryingEnrollment()=fixture {f->
+        f.server.shortAccess=true;f.controller.callback(f.begin());f.idle()
+        val s=f.journal.snapshot();val p=LoginPayload.decode(f.journal.readProtected(s),s);val session=checkNotNull(p.session)
+        val now=SystemClock.elapsedRealtime();val until=now+session.session.accessUntilMs-session.time.window(session.time.boot,now).upperMs+200
+        while(SystemClock.elapsedRealtime()<until)Thread.sleep(50)
+        f.server.dropRefresh=true;f.controller.cancel();f.idle()
+        val out=f.journal.snapshot();assertEquals(LoginPhase.SIGNED_OUT,out.phase)
+        assertEquals(1,f.server.refreshBodies.size);assertEquals(1,f.server.enrollBodies.size)
+        assertEquals(setOf(s.thumbprint),f.server.activeKeys)
+        assertTrue(out.tombstones.any {it.ownerTag==s.ownerTag && it.thumbprint==s.thumbprint})
+        assertFalse(File(context.noBackupFilesDir,"login/${f.namespace}/protected.bin").exists())
+    }
     @Test fun assignedLeaseRenewalPersistsWithoutNewActivationAndRetainsDeviceIdentityAcrossRestart() = fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
         val ticket=f.controller.assignmentTicket()
