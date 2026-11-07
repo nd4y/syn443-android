@@ -318,7 +318,11 @@ class LoginControllerTest {
         var failure:Throwable?=null
         try {
             f.controller.configure(Canonical.json.encodeToString(f.server.bootstrap));f.idle()
-            check(f.controller.status().getBoolean("configured")) {"isolated bootstrap was not committed"}
+            val initialized = f.controller.status()
+            check(initialized.getBoolean("configured")) {
+                val reason = initialized.optString("reason").takeIf { it.matches(Regex("[A-Z_]{1,48}")) } ?: "UNCLASSIFIED"
+                "isolated bootstrap was not committed; reason=$reason busy=${initialized.optBoolean("busy")}"
+            }
             block(f)
         } catch(e:Throwable) {failure=e;throw e}
         finally {try {f.cleanup()} catch(e:Throwable) {if(failure==null)throw e else failure.addSuppressed(e)}}

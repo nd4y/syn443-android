@@ -144,10 +144,19 @@ class ChecksTest {
                 assertTrue(entered.await(2, TimeUnit.SECONDS))
                 assertEquals(2L,pool.counters().getValue("active"));assertEquals(2L,pool.counters().getValue("workers"))
                 val job = CheckJob(pool, Probe { _, _ -> error("queued probe must not execute") }, checkMillis = 100)
-                assertEquals(Outcome.UNAVAILABLE, job.run(listOf(check)).outcomes.single())
+                assertEquals(CheckObservation(Outcome.UNAVAILABLE, Failure.WORKER_START_TIMEOUT), job.run(listOf(check)).observations.single())
                 assertEquals(0L,pool.counters().getValue("queued"));assertEquals(0L,pool.counters().getValue("shutdown"))
                 assertNull(job.failure); assertNull(job.failureStage)
                 assertEquals(0, pool.executor.queue.size)
+                val occupying = pool.executor.submit(Runnable { error("queue occupant must not execute") })
+                try {
+                    val rejected = CheckJob(pool, Probe { _, _ -> error("rejected probe must not execute") })
+                    assertEquals(CheckObservation(Outcome.UNAVAILABLE, Failure.WORKER_REJECTED), rejected.run(listOf(check)).observations.single())
+                    assertNull(rejected.failure);assertNull(rejected.failureStage)
+                } finally {
+                    occupying.cancel(false)
+                    (occupying as? Runnable)?.let { pool.executor.remove(it) }
+                }
             } finally { release.countDown() }
         }
     }

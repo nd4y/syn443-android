@@ -7,7 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 enum class Outcome { PASS, FAIL, UNAVAILABLE, CANCELLED, DEADLINE }
-enum class Failure { DNS, TLS, EOF, TIMEOUT, TRANSPORT }
+enum class Failure { DNS, TLS, EOF, TIMEOUT, TRANSPORT, WORKER_REJECTED, WORKER_START_TIMEOUT }
 /** Fixed vocabulary only: never contains an endpoint, exception message or response bytes. */
 enum class Stage { QUEUED, RESOLVE, CONNECT, TLS, REQUEST, RESPONSE }
 /** Positional diagnostic only. No check identifier, target, exception or response is retained. */
@@ -25,6 +25,13 @@ class ProbeScope {
     private val socket = AtomicReference<Socket?>()
     @Volatile var stage: Stage = Stage.QUEUED
         private set
+    @Volatile internal var started = false
+        private set
+    /** Cancellation and the worker's first admission use the same lock. */
+    @Synchronized internal fun begin() {
+        requireActive()
+        started = true
+    }
     @Synchronized fun enter(value: Stage) { requireActive(); stage = value }
     fun attach(value: Socket) {
         check(socket.compareAndSet(null, value))
@@ -87,14 +94,13 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
     private fun execute(check: Check, waitMillis: Long, deadline: Long): CheckObservation {
         if (waitMillis <= 0) return CheckObservation(Outcome.DEADLINE)
         val checkDeadline = clockMillis() + waitMillis
-        val started = AtomicBoolean()
         val scope = ProbeScope(); active.set(scope)
         if (cancelled.get()) { scope.cancel(); active.compareAndSet(scope, null); return CheckObservation(Outcome.CANCELLED) }
         var checkFailure: Failure? = null
         fun failed(value: Failure) { checkFailure = value; failure = value; failureStage = scope.stage }
         var future: Future<Boolean>? = null
         val outcome = try {
-            future = pool.executor.submit<Boolean> { scope.requireActive(); started.set(true); probe.run(check, scope) }
+            future = pool.executor.submit<Boolean> { scope.begin(); probe.run(check, scope) }
             pending.set(future)
             if (cancelled.get()) { scope.cancel(); future.cancel(true) }
             val value = future.get(waitMillis, TimeUnit.MILLISECONDS)
@@ -105,15 +111,20 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
                 value -> Outcome.PASS
                 else -> Outcome.FAIL
             }
-        } catch (_: RejectedExecutionException) { Outcome.UNAVAILABLE
+        } catch (_: RejectedExecutionException) {
+            checkFailure = Failure.WORKER_REJECTED
+            Outcome.UNAVAILABLE
         } catch (_: CancellationException) { Outcome.CANCELLED
         } catch (_: InterruptedException) { Thread.currentThread().interrupt(); cancel(); Outcome.CANCELLED
         } catch (_: TimeoutException) {
             // Freeze progress before attribution: a cancelled resolver may return later.
             scope.cancel()
-            if (started.get() && !cancelled.get()) failed(Failure.TIMEOUT)
+            if (scope.started && !cancelled.get()) failed(Failure.TIMEOUT)
             if (cancelled.get()) Outcome.CANCELLED else if (clockMillis() >= deadline) Outcome.DEADLINE
-            else if (!started.get()) Outcome.UNAVAILABLE else Outcome.FAIL
+            else if (!scope.started) {
+                checkFailure = Failure.WORKER_START_TIMEOUT
+                Outcome.UNAVAILABLE
+            } else Outcome.FAIL
         } catch (error: ExecutionException) {
             failed(when (error.cause) {
                 is java.net.UnknownHostException -> Failure.DNS
@@ -128,6 +139,6 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
             (future as? Runnable)?.let { pool.executor.remove(it) }
             active.compareAndSet(scope, null); pending.compareAndSet(future, null)
         }
-        return CheckObservation(outcome, checkFailure, if (started.get()) scope.stage else null)
+        return CheckObservation(outcome, checkFailure, if (scope.started) scope.stage else null)
     }
 }
