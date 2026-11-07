@@ -115,6 +115,9 @@ class TunnelService : VpnService() {
             validatedManagedWifi=validatedPolicy!=null,meteredMaintenance=meteredMaintenance)
             ?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
     }
+    internal fun ownsReadyEngine(generation: Long): Boolean =
+        ready && !retiring && !destroyed && token != null && boundGeneration == generation
+
     private var registered = false
     private var foreground = false
     private var notificationText = ""

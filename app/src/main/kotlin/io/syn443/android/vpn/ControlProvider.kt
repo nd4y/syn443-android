@@ -212,16 +212,22 @@ class ControlProvider : ContentProvider() {
                 }
                 "fault-crash", "fault-hang", "fault-owner", "fault-java", "fault-native" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)
-                    require(method !in setOf("fault-java", "fault-native") || (store.checkpoint().desiredOn && store.read().optBoolean("engineActive")))
+                    val checkpoint = store.checkpoint()
+                    require(method !in setOf("fault-java", "fault-native") ||
+                        checkpoint.desiredOn && LifecycleAccess.ownsReadyEngine(checkpoint.generation))
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
                 }
                 "netbird-diagnose" -> {
                     require(store.checkpoint().desiredOn)
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
                 }
-                "routes-status" -> return Bundle().apply {putBoolean("ok",true);putString("json",RouteSnapshot.view(store.read()).toString())}
+                "routes-status" -> return Bundle().apply {
+                    putBoolean("ok",true)
+                    putString("json",RouteSnapshot.view(LifecycleAccess.engineStatus(context,store.read())).toString())
+                }
                 "routes-check", "routes-cancel" -> {
-                    require(store.checkpoint().desiredOn && store.read().optBoolean("engineActive"))
+                    val checkpoint = store.checkpoint()
+                    require(checkpoint.desiredOn && LifecycleAccess.ownsReadyEngine(checkpoint.generation))
                     require(arg==null || (method=="routes-check" && Regex("route-[1-9][0-9]?").matches(arg)))
                     require(method!="routes-check" || RouteSnapshot.accepts(arg))
                     context.startService(Intent(context,TunnelService::class.java).setAction(method).also {if(arg!=null)it.putExtra("routeId",arg)})
