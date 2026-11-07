@@ -139,6 +139,21 @@ class BootstrapTrustTest {
             fail {BootstrapTrust.unwrapAppLink(bad,host)}
         }
     }
+    @Test fun installationProfileIsBoundedAndHasNoImportedRotationHistory() {
+        val profile=InstallationProfile(1,anchor,manifest())
+        fun encode(value:InstallationProfile)=Identity.encode(Canonical.json.encodeToString(value).toByteArray())
+        val restored=BootstrapTrust.installationProfile(encode(profile))
+        assertEquals(profile,restored)
+        assertEquals(descriptor(),BootstrapTrust.descriptor(restored.service,restored.anchor,ServiceFloor(),now).first)
+        assertFalse(restored.toString().contains(profile.service))
+        for(invalid in listOf(profile.copy(schemaVersion=2),profile.copy(service=""),
+            profile.copy(anchor=anchor.copy(lastTransition=Identity.random())),
+            profile.copy(anchor=anchor.copy(spki="invalid")))) {
+            fail {BootstrapTrust.installationProfile(encode(invalid))}
+        }
+        fail {BootstrapTrust.installationProfile("x".repeat(12_001))}
+        fail {BootstrapTrust.installationProfile(encode(profile)+"=")}
+    }
     @Test fun sharedGoCertificatesMatchKotlinFloorsAndDualRootTransition() {
         val raw=requireNotNull(javaClass.classLoader.getResourceAsStream("bootstrap-wire-vectors.json")).use {it.readBytes().toString(Charsets.UTF_8)}
         val fixture=Canonical.parse(raw).jsonObject

@@ -41,3 +41,20 @@ bounded parser and installation-root verification as a direct link or QR. A
 valid incoming Intent fills the private preview field. Binding still requires
 the user's confirmation and the independent server approval. Browser fallback
 and Android domain association need a real deployed host for acceptance.
+
+## Managed first launch
+
+A manually dispatched Actions build can embed an explicitly public installation
+profile from the control plane's offline `enrollment-admin bootstrap-profile`
+command. Supply the base64url profile through the masked Actions input
+`SYN443_PUBLIC_INSTALLATION_PROFILE`. The input contains the public installation
+anchor and its signed service descriptor. The build checks the decoded public
+payload before compilation. No private root key is used by the Android build.
+
+On a fresh managed installation the normal Keycloak button uses the embedded
+descriptor after local signature, expiry and revision-floor validation. The
+same root also verifies invitations. The encrypted trust journal binds its
+rotation history to the original installed anchor. Existing enrolled sessions
+keep their protected authority. A damaged local override or trust journal
+fails closed. Configure and physically verify the real signed managed APK
+separately from generic Actions builds.

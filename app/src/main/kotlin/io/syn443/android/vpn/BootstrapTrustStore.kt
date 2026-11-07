@@ -19,7 +19,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 @Serializable private data class TrustRecord(val revision:Long=0,val anchor:TrustAnchor,
-    val floors:Map<String,ServiceFloor> = emptyMap(),val timeFloor:Long=0)
+    val floors:Map<String,ServiceFloor> = emptyMap(),val timeFloor:Long=0,val installationHash:String="")
 
 /** Controller worker only. Corruption is a blocked state, never a fresh install.
  * The installation asset is public and cannot be replaced by an incoming URI.
@@ -33,6 +33,10 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
         file=AtomicFile(File(context.noBackupFilesDir,"$namespace.bin"))
     }
     companion object {private val lock=Any();private const val alias="syn443-bootstrap-trust-v1"}
+    private val installationProfile by lazy {
+        io.syn443.android.BuildConfig.INSTALLATION_PROFILE.takeIf {testAnchor==null && it.isNotEmpty()}
+            ?.let(BootstrapTrust::installationProfile)
+    }
     private fun worker(){check(Looper.myLooper()!=Looper.getMainLooper() && !Thread.currentThread().name.startsWith("Binder:"))}
     private fun aad()="SYN443-BOOTSTRAP-TRUST-1\n$namespace".toByteArray(Charsets.US_ASCII)
     private fun key(create:Boolean):SecretKey {
@@ -49,11 +53,16 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
         while(count<bytes.size){val n=it.read(bytes,count,bytes.size-count);if(n<0)break;check(n>0);count+=n}
         require(count<=limit);bytes.copyOf(count).also {bytes.fill(0)}
     }
-    private fun installed()=testAnchor?:Canonical.json.decodeFromString<TrustAnchor>(Policy.utf8(bounded(context.assets.open("installation-trust.json"),4096)))
+    private fun installed()=testAnchor?:installationProfile?.anchor?:
+        Canonical.json.decodeFromString<TrustAnchor>(Policy.utf8(bounded(context.assets.open("installation-trust.json"),4096)))
+    private fun installationHash(anchor:TrustAnchor)=Identity.hash(
+        Canonical.encode(Canonical.parse(Canonical.json.encodeToString(anchor))).toByteArray(Charsets.UTF_8))
     private fun validate(record:TrustRecord,installation:TrustAnchor) {
         BootstrapTrust.validateAnchor(installation);BootstrapTrust.validateAnchor(record.anchor)
         require(record.revision in 0..9_007_199_254_740_991L && record.anchor.epoch>=installation.epoch && record.timeFloor>=0 && record.floors.size<=32)
         if(record.anchor.epoch==installation.epoch)require(record.anchor==installation)
+        if(record.installationHash.isNotEmpty())require(record.installationHash==installationHash(installation))
+        else if(installationProfile!=null)require(record.anchor==installation)
         record.floors.forEach {(id,floor)->require(id==floor.serviceId && id.matches(Regex("[A-Za-z0-9_-]{1,64}")) &&
             floor.revision in 1..9_007_199_254_740_991L && floor.hash.matches(Regex("[A-Za-z0-9_-]{43}")))}
     }
@@ -67,12 +76,15 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
         return try {Canonical.json.decodeFromString<TrustRecord>(Policy.utf8(plain)).also {validate(it,installation)}}finally{plain.fill(0)}
     }
     private fun write(record:TrustRecord) {
-        validate(record,installed());val plain=Canonical.encode(Canonical.parse(Canonical.json.encodeToString(record))).toByteArray(Charsets.UTF_8)
+        val installation=installed()
+        val bound=record.copy(installationHash=installationHash(installation))
+        validate(bound,installation)
+        val plain=Canonical.encode(Canonical.parse(Canonical.json.encodeToString(bound))).toByteArray(Charsets.UTF_8)
         require(plain.size<=65_000)
         val data=try {Cipher.getInstance("AES/GCM/NoPadding").run {init(Cipher.ENCRYPT_MODE,key(true));updateAAD(aad());byteArrayOf(1)+iv+doFinal(plain)}}finally{plain.fill(0)}
         val output=file.startWrite()
         try {output.write(data);file.finishWrite(output)}catch(e:Exception){file.failWrite(output);throw e}finally{data.fill(0)}
-        require(read()==record)
+        require(read()==bound)
     }
     fun preview(raw:String):AuthenticatedInvite {worker();return synchronized(lock){
         val state=read();val link=BootstrapTrust.parse(raw)
@@ -85,6 +97,24 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
         val next=state.copy(revision=Math.addExact(state.revision,1),floors=state.floors+(verified.floor.serviceId to verified.floor),timeFloor=maxOf(state.timeFloor,verified.descriptor.issuedAt))
         write(next);verified
     }}
+
+    fun defaultBootstrap():Bootstrap = acceptDefaultDescriptor(checkNotNull(installationProfile).service)
+
+    internal fun acceptDefaultDescriptor(raw:String):Bootstrap {
+        worker()
+        return synchronized(lock) {
+            val state=read()
+            val now=maxOf(System.currentTimeMillis()/1000,state.timeFloor)
+            val (descriptor,floor)=BootstrapTrust.descriptor(raw,state.anchor,ServiceFloor(),now)
+            val previous=state.floors[floor.serviceId]
+            require(if(previous==null) state.floors.size<32 else floor==previous || floor.revision>previous.revision)
+            val bootstrap=Bootstrap(descriptor.serviceId,descriptor.issuer,descriptor.clientId,descriptor.apiOrigin,
+                descriptor.roots.toMap(),controlPanelOrigin=descriptor.controlPanelOrigin).also {it.validate()}
+            if(floor!=previous)write(state.copy(revision=Math.addExact(state.revision,1),
+                floors=state.floors+(floor.serviceId to floor),timeFloor=maxOf(state.timeFloor,descriptor.issuedAt)))
+            bootstrap
+        }
+    }
     fun rotate(raw:String) {worker();require(raw.toByteArray(Charsets.UTF_8).size<=16_384);synchronized(lock){
         val state=read();val rotation=Canonical.json.decodeFromString<RootRotation>(Canonical.encode(Identity.objectJSON(raw)))
         val next=BootstrapTrust.advance(rotation,state.anchor,maxOf(System.currentTimeMillis()/1000,state.timeFloor))

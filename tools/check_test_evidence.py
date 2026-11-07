@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=23
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=110
+    minimum=111
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -56,6 +56,8 @@ if mode=="health":
 if mode=="identity":
     assert ('io.syn443.identity.BootstrapTrustTest','appLinkUnwrapsOnlyAnExactHttpsCarrierAndRetainsInstallationTrust') in {
         (c.get('classname'),c.get('name')) for c in cases}, 'Required HTTPS enrollment carrier case missing'
+    assert ('io.syn443.identity.BootstrapTrustTest','installationProfileIsBoundedAndHasNoImportedRotationHistory') in {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required installation profile case missing'
     assert {('io.syn443.identity.AssignmentsTest','activationReportPersistsOnlyFinalCurrentEnvelopeDecisions'),
         ('io.syn443.identity.AuthProtocolTest','activationReportBindsBodyToCurrentDeviceProofAndSupportsOlderServers')} <= {
         (c.get('classname'),c.get('name')) for c in cases}, 'Required activation reporting cases missing'

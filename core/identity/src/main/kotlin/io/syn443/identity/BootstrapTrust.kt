@@ -31,6 +31,9 @@ import java.util.Base64
 @Serializable data class RootTransition(val schemaVersion:Int,val audience:String,val from:String,val to:String,
     val spki:String,val epoch:Long,val issuedAt:Long,val notBefore:Long,val expires:Long)
 @Serializable data class RootRotation(val previous:String,val next:String)
+@Serializable data class InstallationProfile(val schemaVersion:Int,val anchor:TrustAnchor,val service:String) {
+    override fun toString()="InstallationProfile([redacted])"
+}
 data class InviteLink(val serviceId:String,val origin:String,val code:String,val manifest:String) {
     override fun toString()="InviteLink([redacted])"
 }
@@ -49,6 +52,15 @@ object BootstrapTrust {
     private const val SAFE=9_007_199_254_740_991L
     private val identifier=Regex("[A-Za-z0-9_-]{1,64}")
     private val digest=Regex("[A-Za-z0-9_-]{43}")
+
+    fun installationProfile(encoded:String):InstallationProfile {
+        require(encoded.length in 1..12_000)
+        val raw=Policy.utf8(Policy.decode64(encoded))
+        return Canonical.json.decodeFromString<InstallationProfile>(Canonical.encode(Canonical.parse(raw))).also {
+            require(it.schemaVersion==1 && it.anchor.lastTransition.isEmpty() && it.service.length in 1..MAX_MANIFEST)
+            validateAnchor(it.anchor)
+        }
+    }
     fun publicKey(raw:String):ECPublicKey {
         require(raw.length<=344)
         val der=Base64.getDecoder().decode(raw)

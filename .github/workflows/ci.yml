@@ -10,6 +10,7 @@ permissions:
   contents: read
 env:
   SYN443_ENROLLMENT_LINK_HOST: ${{ github.event_name == 'workflow_dispatch' && vars.SYN443_PUBLIC_ENROLLMENT_LINK_HOST || '' }}
+  SYN443_INSTALLATION_PROFILE: ${{ github.event_name == 'workflow_dispatch' && secrets.SYN443_PUBLIC_INSTALLATION_PROFILE || '' }}
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -24,6 +25,8 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - run: python3 -m unittest discover -s tools -p 'test_public_data.py'
+      - run: python3 -m unittest discover -s tools -p 'test_installation_profile.py'
+      - run: python3 tools/check_installation_profile.py
       - run: python3 tools/check_public_data.py --history
       - run: bash tools/scan_secrets.sh
   documents:

@@ -181,6 +181,9 @@ class LoginController private constructor(private val context:android.app.Applic
         dropped.forEach {(it as Command).complete()}
     }
     private fun bootstrap():Bootstrap {
+        val path=setup.baseFile
+        if(namespace=="device-login-v1" && !path.exists() && !File(path.path+".bak").exists() && !File(path.path+".new").exists())
+            return bootstrapTrust.defaultBootstrap()
         val raw=setup.openRead().use {stream->
             val buffer=ByteArray(16_385);var n=0
             while(n<buffer.size) {val count=stream.read(buffer,n,buffer.size-n);if(count<0)break;check(count>0);n+=count}

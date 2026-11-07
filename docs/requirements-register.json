@@ -184,6 +184,7 @@
       "evidence": [
         "docs/enrollment-pilot.md",
         "docs/identity-lifecycle.md",
+        "docs/bootstrap-trust.md#managed-first-launch",
         "core/identity/src/main/kotlin/io/syn443/identity/AuthProtocol.kt",
         "core/identity/src/main/kotlin/io/syn443/identity/TrustedTime.kt",
         "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt",
@@ -2090,14 +2091,23 @@
     {
       "id": "BOOT-12",
       "text": "Origin сервера допускается только из доверенного списка установки либо из bootstrap manifest с подписью уже доверенного ключа. Сам QR не становится новым корнем доверия. Обычная TLS-валидация обязательна; redirects с переносом кода на другой origin запрещены. До подтверждения пользователь видит сервис и факт привязки; deep link не выполняет произвольные команды или admin-публикации.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/bootstrap-trust.md#managed-first-launch",
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/BootstrapTrustStoreTest.kt",
+        "tools/test_installation_profile.py"
+      ]
     },
     {
       "id": "BOOT-13",
       "text": "Обработчик работает при закрытом приложении и при уже открытом экране, включая повторный Intent и ссылку из мессенджера. Парсер ограничивает размер, число полей, допустимые host/path/version и rejects повторяющиеся критические параметры. Новое приглашение поверх действующего аккаунта требует явного выбора и не уничтожает текущую идентичность автоматически.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md",
+        "app/src/androidTest/kotlin/io/syn443/android/EnrollmentAppLinkTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/InvitationControllerTest.kt"
+      ]
     },
     {
       "id": "BOOT-14",

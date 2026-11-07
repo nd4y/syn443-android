@@ -28,6 +28,10 @@ androidComponents.onVariants { variant ->
 }
 val enrollmentLinkHost = providers.environmentVariable("SYN443_ENROLLMENT_LINK_HOST").orElse("").get()
     .ifBlank { "links.example.invalid" }
+val installationProfile = providers.environmentVariable("SYN443_INSTALLATION_PROFILE").orElse("").get()
+require(installationProfile.length <= 12_000 && installationProfile.matches(Regex("[A-Za-z0-9_-]*"))) {
+    "SYN443_INSTALLATION_PROFILE must be a bounded base64url profile"
+}
 val dnsLabel = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 require(enrollmentLinkHost.length <= 253 && enrollmentLinkHost.matches(Regex("(?:$dnsLabel\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"))) {
     "SYN443_ENROLLMENT_LINK_HOST must be a lowercase public DNS hostname"
@@ -44,6 +48,7 @@ android {
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
         manifestPlaceholders["enrollmentLinkHost"] = enrollmentLinkHost
         buildConfigField("String", "ENROLLMENT_LINK_HOST", "\"$enrollmentLinkHost\"")
+        buildConfigField("String", "INSTALLATION_PROFILE", "\"$installationProfile\"")
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }
     compileOptions {
