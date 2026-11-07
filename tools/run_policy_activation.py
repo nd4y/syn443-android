@@ -39,7 +39,8 @@ def private_input(raw, method):
 def stage(envelope):
     return private_input(envelope, 'policy-stage-file')
 
-def probe_diagnostics():
+def probe_diagnostics(snapshot):
+    print('Policy activation checks: '+json.dumps(snapshot.get('policyChecks')),flush=True)
     try:print('Policy probe workers: '+json.dumps(call('health-workers')),flush=True)
     except Exception as error:print('Policy probe diagnostics unavailable: '+type(error).__name__,flush=True)
 
@@ -76,9 +77,12 @@ def main():
             pressure=[e for e in snapshot.get('events',[]) if e.get('intentGeneration')==snapshot['generation'] and e.get('code')=='policy_checks_unavailable']
             for event in pressure:
                 if event['at'] not in captured and len(captured)<2:
-                    captured.add(event['at']);probe_diagnostics()
+                    captured.add(event['at']);probe_diagnostics(snapshot)
             return snapshot.get('policy',{}).get('phase')=='committed' and snapshot['policy'].get('activeRevision')==1
-        await_condition(committed)
+        try:
+            await_condition(committed)
+        except AssertionError as error:
+            raise AssertionError('Initial managed policy did not activate before the scenario') from error
     scenarios = ['signedPolicyBootstrapsCurrentConfig', 'healthyChangedCandidateCommits', 'invalidPolicyAndImportCannotReplaceActive',
                  'failedNativeCandidateRollsBackAndCannotReplay', 'requiredRegressionRollsBack',
                  'baselineOutageCanCommitDegraded', 'stopFencesPendingPolicy',
@@ -95,9 +99,27 @@ def main():
                 original = pid(':engine'); active = call('status')['policy']['activeRevision']
                 if name.startswith('signed'):
                     if name.startswith('signedManagement'):
+                        local_revision = call('status')['configRevision']
                         stage(publisher.sign(config, revision=2, operation='release'))
                         await_condition(lambda: not call('status')['policy']['managed'] and call('status')['policy']['phase'] == 'released')
                         assert pid(':engine') == original and call('status')['desiredOn']
+                        stop()
+                        progress = proxy.progress
+                        call('connect')
+
+                        def released_online():
+                            snapshot = call('status')
+                            assert snapshot['phase'] != 'BlockedByPolicy'
+                            return snapshot['phase'] == 'Online' and snapshot['engineActive'] and any(
+                                event['code'] == 'required_https_ok' and event['intentGeneration'] == snapshot['generation']
+                                for event in snapshot['events'])
+
+                        await_condition(released_online)
+                        snapshot = call('status')
+                        assert pid(':engine') and proxy.progress > progress
+                        assert snapshot['configRevision'] == local_revision
+                        assert not snapshot['policy']['managed'] and snapshot['policy']['phase'] == 'released'
+                        assert snapshot['policy']['activeRevision'] == 2
                     else:
                         assert active == 1 and call('status')['policy']['lastKnownGoodRevision'] == 1
                 elif name.startswith('healthyChanged'):
@@ -196,7 +218,7 @@ def main():
                 # Status events contain only bounded internal reason codes and
                 # counters; never print raw engine config or provider logs.
                 print('Policy failure events: ' + json.dumps(snapshot.get('events', [])[-64:]), flush=True)
-                probe_diagnostics()
+                probe_diagnostics(snapshot)
                 ET.SubElement(case, 'failure', message='Managed policy scenario failed; see bounded job output')
                 raise
     finally:

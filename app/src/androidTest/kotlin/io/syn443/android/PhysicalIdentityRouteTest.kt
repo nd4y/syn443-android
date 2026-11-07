@@ -17,6 +17,17 @@ import java.net.Socket
 
 @RunWith(AndroidJUnit4::class)
 class PhysicalIdentityRouteTest {
+    @Test fun technicalTelemetryCannotUseMeteredWifiOrCellular() {
+        val source=Networks()
+        source.values=source.values.map {if(it.handle==1L)it.copy(unmetered=true)else it}
+        rejected {PhysicalIdentityRoute.capture(source,wifiOnly=true,unmeteredOnly=true)}
+        source.values=source.values.map {if(it.handle==2L)it.copy(unmetered=true)else it}
+        val route=PhysicalIdentityRoute.capture(source,wifiOnly=true,unmeteredOnly=true)
+        route.resolve("synthetic.example.invalid")
+        assertEquals(listOf("dns" to 2L),source.actions)
+        source.values=source.values.map {if(it.handle==2L)it.copy(unmetered=false)else it}
+        rejected {route.check()}
+    }
     private class Networks:PhysicalNetworks {
         var values=listOf(PhysicalSnapshot(1,true,true,false,"mobile"),PhysicalSnapshot(2,true,true,true,"wifi"),
             PhysicalSnapshot(3,false,true,true,"vpn"))
@@ -55,6 +66,16 @@ class PhysicalIdentityRouteTest {
         }
         val source=Networks();val route=PhysicalIdentityRoute.capture(source);source.changeOnResolve=true
         rejected {route.resolve("synthetic.example.invalid")};rejected {route.check()}
+        assertEquals(listOf("dns" to 2L),source.actions)
+    }
+    @Test fun subscriptionRouteRequiresValidatedWifiAndNeverUsesCellular() {
+        val source=Networks()
+        val wifi=PhysicalIdentityRoute.capture(source,wifiOnly=true)
+        wifi.resolve("subscription.example.invalid")
+        assertEquals(listOf("dns" to 2L),source.actions)
+        source.values=source.values.map {if(it.handle==2L)it.copy(validated=false) else it}
+        rejected {wifi.check()}
+        rejected {PhysicalIdentityRoute.capture(source,wifiOnly=true)}
         assertEquals(listOf("dns" to 2L),source.actions)
     }
     @Test fun physicalIdentityRejectsMissingDuplicateAndOversizedInventory() {

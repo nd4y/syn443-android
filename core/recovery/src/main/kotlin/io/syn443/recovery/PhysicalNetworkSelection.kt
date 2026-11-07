@@ -1,0 +1,39 @@
+package io.syn443.recovery
+
+enum class PhysicalTransport { WIFI, CELLULAR, OTHER }
+
+data class PhysicalCandidate(
+    val handle: Long,
+    val transport: PhysicalTransport,
+    val validated: Boolean,
+    val captive: Boolean,
+    val metered: Boolean,
+)
+
+/** Rank only physical Network capabilities. No home identity or LTE allowlist is inferred. */
+object PhysicalNetworkSelection {
+    const val MAX_CANDIDATES = 32
+
+    fun choose(candidates: List<PhysicalCandidate>, current: Long?, currentVpnVerified: Boolean): Long? {
+        require(candidates.size <= MAX_CANDIDATES)
+        return candidates.minWithOrNull(compareBy<PhysicalCandidate>(
+            {
+                when {
+                    it.captive -> 2
+                    it.validated || (it.handle == current && currentVpnVerified) -> 0
+                    else -> 1
+                }
+            },
+            {
+                when {
+                    it.transport == PhysicalTransport.WIFI -> 0
+                    !it.metered -> 1
+                    it.transport == PhysicalTransport.CELLULAR -> 2
+                    else -> 3
+                }
+            },
+            { it.handle != current },
+            { it.handle },
+        ))?.handle
+    }
+}

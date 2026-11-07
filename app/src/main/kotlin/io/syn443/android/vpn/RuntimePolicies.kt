@@ -29,7 +29,20 @@ internal class RuntimePolicies(private val context:Context,
         }}.getOrElse {Snapshot(true,true,Journal(phase="blocked",reason="assigned_policy_unavailable"))}
     }
     fun config(original:()->String?):String? = if(login.ownsPolicy())login.assignedRead {login.assignedRuntime.config(it)} else legacy.config(original())
+    fun internetChecks(hash:String,synthetic:Boolean=false):List<io.syn443.policy.Check> {
+        val d=read()
+        // Only the legacy operator path may measure an unsigned first baseline.
+        val baseline=!d.enrolled && d.journal.phase=="prepared" && d.journal.active==null
+        // Release retains the old envelope for revision history but drops its binding.
+        if(!d.managed || baseline)return io.syn443.policy.Policy.internetChecks(false,null,hash,synthetic)
+        val raw=if(d.journal.phase=="applying")d.journal.candidate else d.journal.active
+        return io.syn443.policy.Policy.internetChecks(true,allowed(raw,d),hash,synthetic)
+    }
     fun leaseDeadline(hash:String):Long = if(login.ownsPolicy())login.assignedRead {login.assignedRuntime.leaseDeadline(it,hash)} else legacy.leaseDeadline(hash)
+    fun render(raw:String?,root:java.io.File):String = if(login.ownsPolicy())login.renderAssigned(checkNotNull(raw),root) else EngineConfig.render(raw,root)
+    fun overlayHasSetup(hash:String)=login.ownsPolicy() && login.overlayHasSetup(hash)
+    fun overlayLaunchMode(hash:String)=if(login.ownsPolicy())login.overlayLaunchMode(hash) else ""
+    fun overlayNeedsRotation(hash:String)=login.ownsPolicy() && login.overlayNeedsRotation(hash)
     fun allowed(raw:String?,d:Snapshot=read()):Verified? {
         if(!d.enrolled)return if(login.ownsPolicy())null else legacy.allowed(raw,checkNotNull(d.legacy))
         return runCatching {login.assignedRead {s->

@@ -1,4 +1,24 @@
 # Testing and release gates
+
+[Managed activation reporting](activation-reporting.md) adds two mandatory
+identity JVM cases (minimum109) and one Android case per API (minimum187).
+
+[Activation diagnostics](policy-check-diagnostics.md) adds two mandatory health
+JVM cases (minimum23) and three mandatory Android cases per API (minimum186).
+These tests and builds run only in Actions. Exact-source CI and physical
+acceptance remain pending until their recorded results are verified.
+
+Capability negotiation adds ten required JVM cases (identity minimum107), a
+separately checked90% negotiation-core line gate and four required controller
+cases on each API29/35/37 (emulator minimum183). See
+[scope and lifecycle](capability-negotiation.md). Pending/transport outcomes must
+retain the current assignment; old unknown enrollment bodies stay immutable.
+
+The [NetBird diagnostic lifecycle](netbird-diagnostic-lifecycle.md) adds five
+native/race cases for an SDK-independent local cache, bounded roster preparation,
+no replacement of blocked workers, cancellation and late-result fencing. All
+builds and application tests run in Actions. Source-level regression coverage
+does not close the failed physical peer-health observation.
 All automatable implemented behavior must run on pull requests and main in GitHub Actions.
 - Documents: source hashes, 292 unique requirements, 98 unique sequential scenarios, traceability/evidence integrity.
 - Contracts: strict schema validation, shared fixtures, unsupported fields/versions and bounded numeric inputs.
@@ -10,6 +30,14 @@ All automatable implemented behavior must run on pull requests and main in GitHu
 - Later: Postgres migrations/transaction races, job retries, provider fixtures, browser UI/API E2E, fault/load/security checks as components arrive.
 
 Physical-only release gates: real restricted LTE, RF handover, vendor power management, measured idle energy, external-provider availability and long endurance.
+
+Disposable AVDs use an explicit256MiB Java heap; API29 also selects the Pixel2
+hardware profile and2048MiB RAM. The generic old16MiB heap caused system_server
+to die in ConfigUpdateInstallReceiver during an automatic system update, before
+the instrumentation suite could complete. A hardware/serial-gated preflight now
+checks the actual maximum and growth limit before installing the app. This does
+not change application limits, omit media/OS cases or substitute for physical
+memory/battery acceptance. An interrupted run remains failed.
 CI must list these as pending rather than skip them and report success.
 Resource observations add ten JVM cases with a 90% line-coverage gate and two Android cases for the real proc source/cache/intent invariants and manual UI. See [measurement semantics and limits](resource-observation.md).
 Coverage applies to implemented code; line coverage alone is not behavioral coverage.
@@ -78,3 +106,68 @@ Every API29/35/37 emulator requires138 passing outcomes, retaining the previous1
 Real package replacement, secure boot/unlock and ordinary Settings Always-on/
 lockdown are exercised on disposable emulators. Physical credentials are never
 changed to simulate locked boot. Xperia USB/Wi-Fi evidence remains separate.
+
+Managed ongoing HTTPS health now follows every required HTTPS target from the
+still-authorized signed policy for the actual running engine, including the
+applying candidate. A missing/expired/wrong-engine managed view has no public
+URL fallback. Pure checks cover multiple/optional/banner targets and bounds;
+the actual controller test covers candidate, active and withdrawn views.
+Unmanaged production and visibly synthetic emulator defaults stay explicit.
+Native loopback tests additionally exercise the registered HTTP CONNECT and SOCKS5
+clients, authenticated CONNECT, HTTP-over-SOCKS detour payloads, refused proxies
+and bad authentication with a target counter proving no direct fallback. These
+are not the complete VLESS/XHTTP/SSH/UDP interoperability matrix.
+
+Diagnostic bind ownership: run41405230512 passed native/JVM and API29/37 but
+API35 failed the existing wedgedWorkerCanBeTerminatedAndRebound at its10-second
+replacement-bind wait. All120 connected cases ran;119 passed, including the new
+namespace/vault/controller cleanup cases. Missing callback is the proven failure;
+its exact framework cause was not recorded. The new harness waits for both Binder
+death and the framework disconnect within the existing5-second total death bound,
+uses a session-specific bind action and reports null/dead binding callbacks.
+A real rejected-interface unbind regression requires an owned response afterward;
+a stale/foreign unbind cannot kill the current debug session. Existing10-second
+bind and5-second response limits, actual worker hang/death/rebound and foreign
+message rejection remain. No rerun/skip or production-supervisor shortcut is used.
+The new case is mandatory by exact method name; minimum160 Android outcomes.
+
+Grant renewal requires two identity JVM cases and one actual Keystore Android
+case (minimum94 identity,166 outcomes per API). They check durable old-operation
+retention, exact same-identity replacement, new addressed reference, denial before
+erasure/server acknowledgment, revoked local admission, stale operations, expiry,
+main-thread rejection and byte-preserved SDK files. Confirmed registration never
+uses grant renewal to silently enroll again. Compiled acceptance is pending.
+
+Five additional Android cases require the real vault-to-provisioner flow and
+RAM-only config localization: stable operation before fetch, independent signature,
+no repeated fetch after restart, erasure before consumption, lost ACK retry,
+keyless offline preparation, stale/cancelled proof rejection, local namespace/path
+bounds, unchanged signed config/hash, coerced metadata and closed/expired material.
+They use synthetic keys and do not claim actual native registration proof or the
+controller/host process handoff. Those integration tests remain required.
+
+Managed controller/host handoff adds five required Android cases (minimum171)
+and one legacy capability migration JVM case (minimum95). Tests use actual bound
+signatures, LoginJournal/OverlayVault and Keystore to prove namespace claim before
+fetch, encrypted restart without refetch, private proof session fencing, erasure
+before consumption, lost ACK/keyless offline recovery, late fetch logout and
+signed wrong-address rejection with exact-operation retry. Native proof input is
+injected only in these isolated controller cases; actual Cloud registration and
+one-time process retirement after candidate commit require separate acceptance.
+
+The active and candidate configuration can share an SDK namespace while naming
+different pending grants. A current native owner finishes registration first;
+without an owner the candidate is prepared first. Other pending references cannot
+alternately discard one another. After durable registration both configurations
+prepare the same keyless identity. An explicit controller case checks no second
+fetch/consumption while the active proof is pending, and immediate candidate
+preparation after that proof. Launch credential expiry and active policy expiry
+are checked separately.
+
+The first full managed controller source7a87a2b compiled and passed identity95,
+but all three emulator APIs rejected its new signed policy before grant dispatch:
+the low-level Kotlin Policy.capabilities still lacked overlay.credentials.v1.
+The fix adds only that independently protected module discriminator and a required
+real ES256 signature/key/device/expiry/unknown-feature/duplicate-capability JVM
+case (policy minimum16). It does not relax signature, namespace, runtime material
+or activation guards. Exact corrected Actions acceptance remains pending.

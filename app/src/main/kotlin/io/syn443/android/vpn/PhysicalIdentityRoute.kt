@@ -12,7 +12,7 @@ import java.net.InetAddress
 import java.net.Socket
 
 internal data class PhysicalSnapshot(val handle:Long,val eligible:Boolean,val validated:Boolean,
-    val wifi:Boolean,val signature:String) {
+    val wifi:Boolean,val signature:String,val unmetered:Boolean=false) {
     override fun toString()="PhysicalSnapshot([redacted])"
 }
 internal interface PhysicalNetworks {
@@ -28,13 +28,14 @@ internal class PhysicalIdentityRoute private constructor(private val source:Phys
         private fun inventory(source:PhysicalNetworks):List<PhysicalSnapshot> = source.snapshots().also {
             if(it.size>64 || it.any {s->s.handle<=0} || it.map {s->s.handle}.distinct().size!=it.size)unavailable()
         }
-        internal fun capture(source:PhysicalNetworks):PhysicalIdentityRoute {
-            val selected=inventory(source).filter {it.eligible}.sortedWith(
+        internal fun capture(source:PhysicalNetworks,wifiOnly:Boolean=false,unmeteredOnly:Boolean=false):PhysicalIdentityRoute {
+            val selected=inventory(source).filter {it.eligible && (!wifiOnly || it.wifi && it.validated) &&
+                (!unmeteredOnly || it.unmetered)}.sortedWith(
                 compareByDescending<PhysicalSnapshot> {it.validated}.thenByDescending {it.wifi}.thenBy {it.handle})
                 .firstOrNull()?:unavailable()
             return PhysicalIdentityRoute(source,selected).also {it.check()}
         }
-        fun capture(context:Context):HttpRoute {
+        fun capture(context:Context,wifiOnly:Boolean=false,unmeteredOnly:Boolean=false):HttpRoute {
             check(Looper.myLooper()!=Looper.getMainLooper())
             val manager=checkNotNull(context.getSystemService(ConnectivityManager::class.java))
             return capture(object:PhysicalNetworks {
@@ -49,11 +50,12 @@ internal class PhysicalIdentityRoute private constructor(private val source:Phys
                         !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
                     PhysicalSnapshot(network.networkHandle,eligible,
                         caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)==true,
-                        caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)==true,properties?.toString().orEmpty())
+                        caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)==true,properties?.toString().orEmpty(),
+                        caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)==true)
                 }
                 override fun resolve(handle:Long,host:String)=Network.fromNetworkHandle(handle).getAllByName(host).toList()
                 override fun bind(handle:Long,socket:Socket)=Network.fromNetworkHandle(handle).bindSocket(socket)
-            })
+            },wifiOnly,unmeteredOnly)
         }
     }
     override fun check() {if(inventory(source).singleOrNull {it.handle==selected.handle}!=selected)unavailable()}

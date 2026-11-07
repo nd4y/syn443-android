@@ -35,6 +35,7 @@ authorized baseline without quietly importing another user's credentials.
 | degraded | Policy explicitly permits a required target also unavailable on baseline; last-known-good is retained |
 | rolled_back | Native failure, regression or deadline; one return to an unexpired, nonrevoked last-known-good snapshot, never repeated candidate activation |
 | rejected | Invalid incoming bytes do not replace active state; only redacted code is recorded |
+| released | Signed release drops the operator binding and retains revision history. Subsequent local starts use local health checks. |
 
 The complete snapshot, raw signed bundles and delivery capability are encrypted
 under Android Keystore in no-backup storage. Process interruption while applying
@@ -46,6 +47,9 @@ Baseline and candidate use the same assigned HTTPS-204 and/or bounded TCP-banner
 checks through the TUN, at most eight per job. TLS verification and redirect refusal
 remain enabled. An HTTPS required check is mandatory. A failed endpoint alone is
 not proof of an engine failure. A degraded activation is explicitly visible.
+The managed activation emulator suite stops and reconnects after a signed release.
+It requires a fresh successful health check on the unchanged local configuration
+while the release revision remains in history.
 
 Offline lease is absolute, at most seven days from issuance. Same-boot time uses
 an elapsed-realtime anchor, not a mutable wall clock. Reboot requires a fresh

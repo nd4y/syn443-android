@@ -57,7 +57,22 @@ class ControlProvider : ContentProvider() {
                     return Bundle().apply {putString("json",LoginController.get(context).chatResult(requireNotNull(arg),requireNotNull(extras).getLong("generation",-1)).toString())}
                 }
                 "chat-cancel" -> {require(caller==Process.myUid());LoginController.get(context).chatCancel(requireNotNull(arg))}
+                "auth-invite-preview" -> {
+                    require(caller==Process.myUid())
+                    return Bundle().apply {putBoolean("admitted",LoginController.get(context).previewInvitation(requireNotNull(arg),requireNotNull(extras?.getString("link"))))}
+                }
+                "auth-invite-result" -> {require(caller==Process.myUid());return Bundle().apply {putString("json",LoginController.get(context).invitationPreview(requireNotNull(arg)).toString())}}
+                "auth-invite-start" -> {require(caller==Process.myUid());LoginController.get(context).startInvitation(requireNotNull(arg))}
+                "auth-service-start" -> {require(caller==Process.myUid());LoginController.get(context).startInvitation(requireNotNull(arg),false)}
+                "auth-trust-rotation" -> {require(caller==Process.myUid());LoginController.get(context).rotateBootstrap(requireNotNull(arg))}
                 "auth-status" -> return Bundle().apply {putBoolean("ok",true);putString("json",LoginController.get(context).status().toString())}
+                "auth-telemetry" -> {
+                    require(caller==Process.myUid())
+                    val parts=requireNotNull(arg).split(':',limit=3)
+                    require(parts.size==2)
+                    val changed=LoginController.get(context).chooseTechnicalTelemetry(parts[0].toLong(),parts[1].toBooleanStrict())
+                    return Bundle().apply {putBoolean("ok",changed)}
+                }
                 "auth-bootstrap-file" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller==2000)
                     val file=java.io.File(context.noBackupFilesDir,"operator-identity.json")
@@ -73,6 +88,18 @@ class ControlProvider : ContentProvider() {
                 "auth-browser" -> {
                     require(caller==Process.myUid())
                     return Bundle().apply {putBoolean("ok",true);putString("url",LoginController.get(context).browserUrl(requireNotNull(arg?.toLongOrNull())))}
+                }
+                "auth-admin-panel" -> {
+                    require(caller==Process.myUid())
+                    val url=LoginController.get(context).adminPanelUrl(requireNotNull(arg?.toLongOrNull()))
+                    return Bundle().apply {putBoolean("ok",url!=null);putString("url",url)}
+                }
+                "auth-admin-poll" -> {
+                    require(caller==Process.myUid())
+                    return Bundle().apply {
+                        putBoolean("ok",true)
+                        putBoolean("admitted",LoginController.get(context).pollAdminPanel(requireNotNull(arg?.toLongOrNull())))
+                    }
                 }
                 "auth-callback" -> {
                     require(caller==Process.myUid());LoginController.get(context).callback(requireNotNull(arg))
@@ -117,6 +144,36 @@ class ControlProvider : ContentProvider() {
                 "policy-refresh" -> {
                     require(RuntimePolicies(context).managed())
                     if (store.checkpoint().desiredOn) requestReconcile(context, store, method)
+                }
+                "config-plan-file", "config-apply-file" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller==2000)
+                    val fields=requireNotNull(arg).split(':')
+                    require(fields.size==3 && (fields[0]=="none" || fields[0].matches(Regex("[0-9a-f]{64}"))) &&
+                        fields[1].matches(Regex("[0-9a-f]{64}")) && fields[2].matches(Regex("[0-9a-f]{32}")))
+                    val file=java.io.File(context.noBackupFilesDir,"operator-local-config-${fields[2]}.json")
+                    val raw=try {
+                        require(file.length() in 1..262_144)
+                        val bytes=ByteArray(262_145)
+                        try {
+                            var size=0
+                            file.inputStream().use {input->
+                                while(size<bytes.size) {
+                                    val count=input.read(bytes,size,bytes.size-size)
+                                    if(count<0)break
+                                    require(count>0);size+=count
+                                }
+                            }
+                            require(size in 1..262_144)
+                            val frame=bytes.copyOf(size)
+                            try {io.syn443.policy.Policy.utf8(frame)} finally {frame.fill(0)}
+                        }finally {bytes.fill(0)}
+                    }finally {check(!file.exists() || file.delete())}
+                    val plan=store.serialized {
+                        val checked=store.localConfig(raw,fields[0],fields[1],method=="config-apply-file")
+                        if(checked.getBoolean("written"))RouteSnapshot.configure(raw,fields[1])
+                        checked
+                    }
+                    return Bundle().apply {putBoolean("ok",true);putString("json",plan.toString())}
                 }
                 "import", "import-file" -> {
                     require(!store.checkpoint().desiredOn) { "stop before importing" }
@@ -204,8 +261,11 @@ class ControlProvider : ContentProvider() {
             val result = store.read()
             if (method == "status") {
                 LifecycleAccess.engineStatus(context,result)
+                result.put("localConfigControl",io.syn443.android.BuildConfig.DEBUG)
                 val os=LifecycleAccess.policy(context)
                 result.put("netbird", OverlaySnapshot.read()).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",os)
+                result.put("policyChecks",PolicyChecks.view(result.optLong("generation"),result.optLong("networkEpoch"),
+                    result.getJSONObject("policy").optLong("activationGeneration"),result.optBoolean("engineActive")))
                 // Legacy fields must not expose the old persisted sample as current.
                 for(key in listOf("alwaysOn","lockdown"))result.put(key,if(os.optBoolean("known"))os.getBoolean(key) else org.json.JSONObject.NULL)
             }

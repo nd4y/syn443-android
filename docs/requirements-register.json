@@ -41,8 +41,10 @@
     {
       "id": "ARC-05",
       "text": "Разрешённый граф конечен и объявлен шаблонами ingress/transit/egress с cardinality/edge constraints. Reference limit: до4096 различных цепочек на intent, четыре proxy hops, до64 resident frontier states плюс компактный cursor; каталог500профилей не означает500 в каждой позиции четырёх hops. Preview вычисляет/оценивает верхнюю границу, превышение отклоняется с предложением сузить шаблон. Нельзя незаметно обрезать хвост и затем заявить полный coverage. Порядок enumeration и продолжение детерминированы; на малом конечном fixture полнота обхода проверяется.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ARC-06",
@@ -156,7 +158,13 @@
         "app/src/debug/kotlin/io/syn443/android/HostProbeService.kt",
         "app/src/androidTest/kotlin/io/syn443/android/HostProcessTest.kt",
         "docs/process-probe.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/managed-overlay.md",
+        "native/engine-netbird/managed_state.go",
+        "native/engine-netbird/managed_state_test.go",
+        "native/engine-netbird/managed_proof.go",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayStorage.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedOverlayStorageTest.kt"
       ],
       "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests.",
       "remainingScope": "Complete capabilities/version/SBOM/release/update and physical acceptance."
@@ -178,6 +186,7 @@
       "evidence": [
         "docs/enrollment-pilot.md",
         "docs/identity-lifecycle.md",
+        "docs/bootstrap-trust.md#managed-first-launch",
         "core/identity/src/main/kotlin/io/syn443/identity/AuthProtocol.kt",
         "core/identity/src/main/kotlin/io/syn443/identity/TrustedTime.kt",
         "core/identity/src/test/kotlin/io/syn443/identity/AuthProtocolTest.kt",
@@ -203,7 +212,8 @@
         "tools/enrollment_fixture.py",
         "tools/test_enrollment_fixture.py",
         "tools/run_enrolled_vpn.py",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/capability-negotiation.md"
       ]
     },
     {
@@ -238,7 +248,9 @@
         "tools/enrollment_fixture.py",
         "tools/test_enrollment_fixture.py",
         "tools/run_enrolled_vpn.py",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/managed-overlay.md#stable-default-peer-hostname",
+        "native/engine-netbird/hostname_test.go"
       ]
     },
     {
@@ -263,7 +275,18 @@
       "evidence": [
         "docs/enrollment-pilot.md",
         "docs/identity-lifecycle.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/managed-overlay.md",
+        "native/engine-netbird/managed_state.go",
+        "native/engine-netbird/managed_state_test.go",
+        "native/engine-netbird/managed_proof.go",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayStorage.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedOverlayStorageTest.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlayVault.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/OverlayVaultTest.kt"
       ]
     },
     {
@@ -272,7 +295,14 @@
       "status": "partial",
       "evidence": [
         "docs/provisioning-retry.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/bootstrap-trust.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/BootstrapTrust.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt",
+        "docs/manual-enrollment.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/InvitationProtocol.kt",
+        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt",
+        "docs/manual-enrollment-acceptance.md"
       ]
     },
     {
@@ -322,7 +352,11 @@
         "tools/enrollment_fixture.py",
         "tools/test_enrollment_fixture.py",
         "tools/run_enrolled_vpn.py",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/manual-enrollment.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/InvitationProtocol.kt",
+        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt",
+        "docs/manual-enrollment-acceptance.md"
       ]
     },
     {
@@ -352,8 +386,10 @@
     {
       "id": "SUB-04",
       "text": "Способы загрузки: сервером; самим устройством для подписок с привязкой к устройству/IP; ручной импорт администратором. Выбор фиксируется на источнике. Нельзя обходить лимит устройств подменой HWID или выдавать серверную загрузку за работу пользовательского устройства. Собственные ссылки пользователя, если добавление разрешено, по умолчанию доступны только ему.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/device-subscriptions.md"
+      ]
     },
     {
       "id": "SUB-05",
@@ -473,7 +509,10 @@
       "id": "CFG-02",
       "text": "Системные разрешения, приватный ключ идентичности NetBird, ключ устройства, счётчики, кэши и живые результаты проверок являются локальным состоянием, а не переносимым конфигом. Панель задаёт политику их использования и показывает соответствие, но не выдаёт разрешение Android от имени пользователя.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/managed-overlay.md#stable-default-peer-hostname",
+        "native/engine-netbird/hostname_test.go"
+      ]
     },
     {
       "id": "CFG-03",
@@ -511,7 +550,10 @@
       "status": "partial",
       "evidence": [
         "docs/managed-policy.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/bootstrap-trust.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/BootstrapTrust.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt"
       ]
     },
     {
@@ -525,7 +567,8 @@
         "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
         "core/recovery/src/main/kotlin/io/syn443/recovery/RouteEvidence.kt",
-        "tools/run_enrolled_vpn.py"
+        "tools/run_enrolled_vpn.py",
+        "docs/capability-negotiation.md"
       ],
       "implementationScope": "Signed route-profile activation pilot requires fresh candidate-scoped native outbound proof, independently of global HTTPS; final worker storage fence, bounded retries and required-route rollback. Optional routes remain independent.",
       "remainingScope": "Full requirement remains open, including complete dependency graph/compiler, overlay account namespaces and all network/energy/operational scenarios. Exact device and CI evidence must be read separately."
@@ -545,6 +588,7 @@
       "status": "partial",
       "evidence": [
         "docs/managed-policy.md",
+        "tools/run_policy_activation.py",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/assigned-route-activation.md",
         "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",
@@ -570,7 +614,8 @@
       "status": "partial",
       "evidence": [
         "docs/managed-policy.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/capability-negotiation.md"
       ]
     },
     {
@@ -614,20 +659,27 @@
       "text": "В обычной сети используются прямые management/signal и P2P пути. Relay разрешён только после неудачи прямого соединения или потери пути; начальный direct ICE timeout - 8 секунд, настраиваемый в проверяемом диапазоне. После relay сохраняются ограниченные попытки вернуться к P2P. Такое предпочтение соответствует модели NetBird. [Как работает NetBird](https://docs.netbird.io/about-netbird/how-netbird-works).",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "core/identity/src/main/kotlin/io/syn443/identity/OverlayEnrollment.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayProvisioner.kt",
+        "native/engine-netbird/managed_state_test.go",
+        "docs/overlay-credential-retry.md"
       ],
-      "implementationScope": "Direct-first SDK/strict VLESS detour, local identity and bounded roster/probes.",
-      "remainingScope": "Managed peer credentials/retirement, DNS conflicts and full cellular matrix."
+      "implementationScope": "Addressed managed overlay delivery, Keystore grant erasure and strict native sealed-key ownership. New expiry-to-keyless-reconciliation and local activation retry fixes have pending Actions acceptance.",
+      "remainingScope": "Managed issuer/resource integration, provider peer reconciliation, complete UI and exact physical Cloud/keyless-recovery acceptance remain open."
     },
     {
       "id": "NB-02",
       "text": "В ограниченной сети при разрешённой автоматике включается отдельный проверенный вариант NetBird через VLESS. Внешние соединения этого варианта должны идти через выбранный VLESS путь без скрытого direct bootstrap; неподдержанные UDP-пути не обходят прокси. В UI явно различаются direct/through VLESS и P2P/relay. Это разные свойства соединения.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "core/identity/src/main/kotlin/io/syn443/identity/OverlayEnrollment.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayProvisioner.kt",
+        "native/engine-netbird/managed_state_test.go"
       ],
-      "implementationScope": "Direct-first SDK/strict VLESS detour, local identity and bounded roster/probes.",
-      "remainingScope": "Managed peer credentials/retirement, DNS conflicts and full cellular matrix."
+      "implementationScope": "Addressed managed overlay delivery, Keystore grant erasure and strict native sealed-key ownership. New expiry-to-keyless-reconciliation and local activation retry fixes have pending Actions acceptance.",
+      "remainingScope": "Managed issuer/resource integration, provider peer reconciliation, complete UI and exact physical Cloud/keyless-recovery acceptance remain open."
     },
     {
       "id": "NB-03",
@@ -646,7 +698,8 @@
       "text": "Ключ идентичности создаётся и хранится локально, не попадает в телеметрию, бандлы и обычный экспорт. Смена direct/VLESS сохраняет peer ID. Ключи и peer отзываются отдельно при удалении устройства.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/overlay-credential-retry.md"
       ],
       "implementationScope": "Direct-first SDK/strict VLESS detour, local identity and bounded roster/probes.",
       "remainingScope": "Managed peer credentials/retirement, DNS conflicts and full cellular matrix."
@@ -656,7 +709,8 @@
       "text": "Отдельно показываются management, signal, relay, peers, выбранный upstream, ICE/P2P состояние, последнее рукопожатие, объём трафика и доступность назначенных ресурсов. Все разрешённые peers можно проверить ограниченным заданием; отсутствие ICMP не равно «peer выключен».",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/overlay-credential-retry.md"
       ],
       "implementationScope": "Direct-first SDK/strict VLESS detour, local identity and bounded roster/probes.",
       "remainingScope": "Managed peer credentials/retirement, DNS conflicts and full cellular matrix."
@@ -704,20 +758,47 @@
     {
       "id": "OVL-06",
       "text": "Идентичности, токены, state directory и секреты разделяются по overlayId/provider/resource. Публикация политики не конвертирует идентичность одной сети в другую. Реализация 1.0 не объединяет автоматически peers, DNS-зоны или маршруты нескольких overlay-провайдеров.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-overlay.md",
+        "contracts/v1/overlay-namespace-vectors.json",
+        "core/identity/src/main/kotlin/io/syn443/identity/ManagedOverlay.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/ManagedOverlayTest.kt",
+        "native/engine-netbird/managed_state.go",
+        "native/engine-netbird/managed_state_test.go",
+        "native/engine-netbird/managed_proof.go",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayStorage.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedOverlayStorageTest.kt",
+        "core/identity/src/main/kotlin/io/syn443/identity/LoginRecovery.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlayVault.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/OverlayVaultTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedOverlayProvisioner.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlayRuntimeMaterial.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/EngineHostService.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt"
+      ],
+      "implementationScope": "Namespace, addressed protected grants, SDK ownership/retirement and controller-private proof/RAM materialization code; current exact integration acceptance pending.",
+      "remainingScope": "Full issuer/configuration authority, existing-device capability upgrade, actual managed Cloud enrollment/keyless host rotation and final physical acceptance."
     },
     {
       "id": "OVL-07",
       "text": "Общий UI/health API показывает provider, сеть, управление, data plane, маршруты и фактический путь в пределах capabilities. В 1.0 данные отдаёт только NetBird; planned provider возвращает not_implemented и не получает ложный Connected. Контракт проверяется синтетическими моделями без реальных подключений будущих систем.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/netbird-diagnostic-lifecycle.md"
+      ]
     },
     {
       "id": "MODE-01",
       "text": "Вид транспортной сети и её пригодность - отдельные признаки. LTE/5G не означает наличие белых списков. Ошибка одного сайта не является достаточным основанием для смены режима.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md#physical-network-preference"
+      ],
+      "implementationScope": "Local physical candidate ranking separates platform validation and captive state from the transport.",
+      "remainingScope": "Evidence-backed service modes, independent reachability checks and physical cross-mode acceptance."
     },
     {
       "id": "MODE-02",
@@ -740,8 +821,12 @@
     {
       "id": "MODE-05",
       "text": "В сети с одновременными Wi-Fi/LTE кандидат привязывается к конкретной физической Android Network. Измерения и выбранный путь не смешиваются между сетями. Неизвестные транспорты, например Ethernet, получают отдельное состояние unknown и безопасную политику обычной сети.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md#physical-network-preference"
+      ],
+      "implementationScope": "Physical network handles, selected-owner stickiness and existing network epoch fences.",
+      "remainingScope": "Full unknown-transport policy, actual multi-transport handover and per-mode routing."
     },
     {
       "id": "AUTO-01",
@@ -930,32 +1015,42 @@
     {
       "id": "ALG-10",
       "text": "Генерация цепочек лениво следует разрешённым шаблонам и ограничениям длины/типов, исключает циклы, повторные бесполезные hops и запрещённые переходы. Несовместимый UDP либо недоступный DNS bootstrap не обходятся скрытым direct. План может комбинировать назначенные профили из разных разрешённых источников.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ALG-11",
       "text": "Поиск ограничен временем шага, числом кандидатов/соединений, трафиком, памятью и параллелизмом. Сначала last-known-good, затем доступные простые пути и обоснованные цепочки; при неудаче фронтир расширяется. Поиск не создаёт декартово произведение всех профилей и hops в памяти. Ограничение полного допустимого пространства, шаблонов и фронтира задаётся ARC-05, а общая конкуренция всех jobs - ARC-06.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ALG-12",
       "text": "Неисследованные кандидаты не считаются неработающими. Фронтир/coverage сохраняются на последующие шаги с ограниченным сроком; ротация исключает вечную проверку только первых профилей. При изменении графа/сети проверяются совместимость состояния и актуальность результатов.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ALG-13",
       "text": "Память о полезных путях учитывает контекст и позволяет быстрый warm start. При смене сети проводится короткая revalidation вместо полного уничтожения знаний или слепого доверия прошлой успешной проверке. Восстановленная ОС сеть не означает автоматически восстановленный proxy/overlay.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ALG-14",
       "text": "Выбранный путь описывается как лучший из актуально проверенных допустимых кандидатов, с количеством проверенных/оставшихся и confidence. При конечном статичном наборе доступных кандидатов поисковый план должен иметь воспроизводимый порядок и продолжение; глобальный оптимум в меняющемся интернете не объявляется доказанным.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ALG-15",
@@ -1020,38 +1115,50 @@
     {
       "id": "BAD-01",
       "text": "Локальное хранилище хранит health records отдельно для профиля, ребра и целой цепочки. Ключ включает resource/profile ID и spec/secret version, ordered path hash, физический сетевой контекст/режим, traffic class, protocol/IP family, probe profile и версии движка. Сырые секреты не входят в cache key.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-02",
       "text": "Record содержит error class/attribution/confidence, время/число успехов и ошибок, окна latency/stability, nextProbeAt/cooldownUntil, circuit state и invalidate conditions. Кэш не превращается в общий бессрочный список запретов.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-03",
       "text": "Circuit states: healthy/unknown, suspect, open, half-open, recovered; отдельно disabled by policy и invalid config. Начальный cooldown transient path failures - 30 секунд с экспоненциальным ростом до 10 минут и jitter, сбросом серии после подтверждённого восстановления. Конкретные значения задаются policy в безопасных пределах.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-04",
       "text": "Open кандидат временно исключается из обычного выбора. После срока допускается одна ограниченная half-open проверка; массовых одновременных retries нет. Ошибка auth/config не проверяется каждую секунду: изменение credentials/profile является отдельным событием инвалидирования.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-05",
       "text": "NXDOMAIN либо недоступность конечного домашнего сервиса не ухудшают глобально профиль, если нет доказательства отказа пути. Отказ конкретного метода проверки не равен отказу всех методов. При общей сетевой проблеме фиксируется network evidence, а не тысячи независимых proxy faults.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-06",
       "text": "Смена сети, IP family, спецификации, secret version или engine revision инвалидирует затронутую часть негативных знаний либо переводит её в recheck. Подтверждённый отказ в одной LTE сети не запрещает профиль на домашнем Wi-Fi. Сетевой fingerprint хранится локально и не требует IMEI, GPS или отправки SSID/BSSID.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-07",
@@ -1226,7 +1333,8 @@
       "text": "Для каждого routing rule/traffic class, конкретного пути, chain template и overlay resource назначается один или несколько HealthCheckProfile. Домашний узел, 2ip.ru и gstatic - только примеры. Проверочные hosts/URL/IP, методы и условия не зашиты в тип RU/NON_RU или в приложение. Поддерживается любая валидная композиция реализованных методов, допустимых целей и правил; новый сетевой primitive требует новой capability evaluator/движка.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/route-frontier.md"
       ],
       "implementationScope": "Per-outbound TCP/SSH/TLS/HTTPS all-of profiles and bounded scoped status/check/cancel.",
       "remainingScope": "Full traffic-rule plans, any/quorum/stages, exit attribution and profile editor."
@@ -1357,14 +1465,22 @@
     {
       "id": "TEL-01",
       "text": "Техническая телеметрия является обязательной возможностью клиента и включена в базовый сервисный профиль с понятным уведомлением. Собираются структурированные события, агрегаты и метрики с отдельной политикой подробности; расширенные сырые материалы требуют отдельного пользовательского действия.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Local opt-in and fixed technical events with no raw log upload.",
+      "remainingScope": "Base service-profile and detail policy, aggregate metrics and end-to-end acceptance."
     },
     {
       "id": "TEL-02",
       "text": "Общие поля: eventId, schemaVersion, время UTC и monotonic time, pseudonymous deviceId, sessionId, app/core/build версии, policyRevision, networkEpoch, pathId, eventType, severity, duration, result, errorCode. Backend добавляет время приёма и обрабатывает расхождение часов. Дополнительно фиксируются algorithm/evaluator revision, cohortId, health profile revision и decisionId; эти поля не требуют раскрытия пользовательского назначения.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Typed event envelope carries ID, UTC/monotonic time, build, session and epoch.",
+      "remainingScope": "Full build/core/algorithm/policy/cohort/decision metadata and clock-skew analysis."
     },
     {
       "id": "TEL-03",
@@ -1397,8 +1513,12 @@
     {
       "id": "TEL-07",
       "text": "Пароли, auth/enrollment tokens, подписочные URL-capabilities и приватные ключи запрещены при любом уровне телеметрии и удалённой диагностики. История сайтов, полный DNS-журнал, пользовательские payload/пакеты, IMSI/IMEI, точная геолокация и сырые SSID/BSSID не входят в стандартный сбор. Расширенные категории требуют отдельного согласия SEC-09; домены/IP назначенных diagnostic targets могут быть в контролируемом результате. Входящий IP виден transport уровню сервера, поэтому access logs также ограничены.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Local allowlist and scoped storage omit raw logs, identities and addresses.",
+      "remainingScope": "Broader server log/diagnostics access controls and expanded privacy acceptance."
     },
     {
       "id": "TEL-08",
@@ -1409,20 +1529,32 @@
     {
       "id": "TEL-09",
       "text": "Очередь локальная, ограниченная, с шифрованием на диске и приоритетом crash/config/network-change событий. Начальные значения: 32 MiB или 7 суток; вытеснение сначала низкоприоритетных записей; счётчик потерь обязателен. Успешный HTTP upload без подтверждения event IDs не считается доставкой.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Bounded encrypted queue, expiry, stable IDs and exact receipt verification.",
+      "remainingScope": "Priority, loss counters, product retention limits and full queue failure acceptance."
     },
     {
       "id": "TEL-10",
       "text": "Передача сжимается пакетами; возможны повторы, сервер дедуплицирует eventId/batchId. Retry ограничен, с backoff/jitter. Начальные бюджеты telemetry плюс routine probes: 2MiB/сутки metered, 10MiB/сутки unmetered; отдельно ограниченный recovery reserve 512KiB и 2MiB соответственно. Явная глубокая диагностика имеет свой показанный пользователю бюджет. При исчерпании routine бюджета фоновые пробы откладываются, passive evidence сохраняется. Reserve применяется только для восстановления полезного пути с отдельным учётом и rate limit, без бесконечных retries. Exhausted budget даёт stale/search incomplete, а не proxy failure.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Bounded foreground Wi-Fi attempts and stable IDs on retries.",
+      "remainingScope": "Compression, jitter, shared metered/unmetered probe budgets and recovery reserve."
     },
     {
       "id": "TEL-11",
       "text": "При работающем foreground VPN типовая отправка - раз в 5 минут или при достижении размера пакета; критические события пытаются отправиться раньше. При остановленном VPN используется WorkManager с окном от 15 минут и без гарантии точного расписания. Android может откладывать такие задания. [WorkManager](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work).",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Foreground active VPN scheduler with a five-minute minimum interval and unmetered Wi-Fi.",
+      "remainingScope": "Critical-event expedited delivery, Android WorkManager and end-to-end acceptance."
     },
     {
       "id": "TEL-12",
@@ -1435,7 +1567,11 @@
       "text": "Каналы: lifecycle, network, selector, DNS, routing, protocol, NetBird, provisioning, telemetry, crash. Уровни error/warn/info/debug/trace, структурированный JSONL с correlation ID. Ограниченные info события доступны даже при выключенных подробных core логах.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/managed-overlay.md#startup-failure-diagnosis",
+        "native/engine-netbird/startup_trace_test.go",
+        "docs/managed-overlay.md#stable-default-peer-hostname",
+        "native/engine-netbird/hostname_test.go"
       ],
       "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
       "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
@@ -1455,7 +1591,9 @@
       "text": "Редактируются не только известные значения секретов, но и потенциально секретные поля path, serviceName, headers, query, userinfo, subscription URL и вложенный JSON. Очистка выполняется при записи и перед экспортом. Неизвестный сторонний raw log не считается безопасным автоматически. Для удалённой отправки предпочтителен allowlist структурированных полей; неизвестный free-text/raw third-party вывод автоматически не загружается. Sanitization - проверяемый барьер с тестовыми секретами, а не обещание анонимности любого сырого текста.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/managed-overlay.md#startup-failure-diagnosis",
+        "native/engine-netbird/startup_trace_test.go"
       ],
       "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
       "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
@@ -1610,8 +1748,12 @@
     {
       "id": "MOB-01",
       "text": "У пользователя с административными правами есть заметная кнопка «Администрирование» на главном экране и в меню. Обычному пользователю она не показывается; прямое открытие admin URL/API всё равно проверяется сервером. Одно приложение совмещает клиентский и административный режимы.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/mobile-administration.md"
+      ],
+      "implementationScope": "Home screen navigation gated by a short-lived device-bound hint and a trusted HTTPS origin.",
+      "remainingScope": "Menu entry, native administration and physical acceptance with the configured control plane."
     },
     {
       "id": "MOB-02",
@@ -1909,40 +2051,44 @@
       "text": "Сохраняется интерфейс для LLM и оператора: capabilities, status, config export/plan/apply/import, render, logs read/follow, diagnostics snapshot/bundle, health check, peers, mode get/set, VPN start/stop/reconnect.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/adb-control.md"
       ],
-      "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
-      "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
+      "implementationScope": "Explicit-device debug CLI for status, events, diagnostics, route/overlay checks, VPN intent and guarded local configuration preview/apply.",
+      "remainingScope": "Configuration export/render and managed import, network modes and atomic reconnect."
     },
     {
       "id": "ADB-02",
       "text": "Формат ответа machine-readable JSON, везде указаны ревизии и состояние операции. Потенциально длительные действия возвращают job ID; поддерживаются polling/cancel, отсутствие зависания CLI и документированные exit codes.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/adb-control.md"
       ],
-      "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
-      "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
+      "implementationScope": "Versioned JSON, stable error codes, bounded ADB calls and JSON Lines event snapshots.",
+      "remainingScope": "Stable job IDs and complete polling/cancel contract with all operation revisions."
     },
     {
       "id": "ADB-03",
       "text": "В рабочем приложении доступ только после локального opt-in и проверки разрешённого Android shell UID. Порт управления не публикуется в LAN/интернет. Managed policy не обходится ADB изменением locked полей.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/adb-control.md"
       ],
-      "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
-      "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
+      "implementationScope": "Existing same-UID/debug shell authorization and an explicit device selector; no listening port.",
+      "remainingScope": "Release opt-in and complete managed field and operation acceptance."
     },
     {
       "id": "ADB-04",
       "text": "Обычные экспорты и бандлы очищены. Полный экспорт с секретами требует явного флага и отдельного права. Он не включает приватные identity files. Записи о выполненных изменениях появляются в локальном и серверном аудите, когда сервер доступен.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/adb-control.md"
       ],
-      "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
-      "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
+      "implementationScope": "Projected diagnostic snapshot without config, peer identities or free-form fields.",
+      "remainingScope": "Full redaction/retention policy, authorized secret exports, and durable local/server operation audit."
     },
     {
       "id": "BOOT-01",
@@ -2013,20 +2159,33 @@
     {
       "id": "BOOT-12",
       "text": "Origin сервера допускается только из доверенного списка установки либо из bootstrap manifest с подписью уже доверенного ключа. Сам QR не становится новым корнем доверия. Обычная TLS-валидация обязательна; redirects с переносом кода на другой origin запрещены. До подтверждения пользователь видит сервис и факт привязки; deep link не выполняет произвольные команды или admin-публикации.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/bootstrap-trust.md#managed-first-launch",
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/BootstrapTrustStoreTest.kt",
+        "tools/test_installation_profile.py"
+      ]
     },
     {
       "id": "BOOT-13",
       "text": "Обработчик работает при закрытом приложении и при уже открытом экране, включая повторный Intent и ссылку из мессенджера. Парсер ограничивает размер, число полей, допустимые host/path/version и rejects повторяющиеся критические параметры. Новое приглашение поверх действующего аккаунта требует явного выбора и не уничтожает текущую идентичность автоматически.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md",
+        "app/src/androidTest/kotlin/io/syn443/android/EnrollmentAppLinkTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/InvitationControllerTest.kt"
+      ]
     },
     {
       "id": "BOOT-14",
       "text": "Custom URI может открыть и другое Android-приложение с той же схемой, поэтому эксклюзивное владение схемой не предполагается. Для распространения через браузер дополнительно поддерживается verified HTTPS App Link доверенного домена. Без установленного клиента HTTPS-страница предлагает установить APK и затем повторно открыть ссылку; скрытого переноса кода через store не требуется. [Android deep links](https://developer.android.com/training/app-links/create-deeplinks).",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/bootstrap-trust.md#https-app-links",
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/EnrollmentAppLinkTest.kt"
+      ]
     },
     {
       "id": "BOOT-15",
@@ -2141,8 +2300,12 @@
     {
       "id": "SEC-05",
       "text": "Invite claim/approval/consume - атомарный автомат с CAS; approval связан с inviteId, claimId и точным device key fingerprint. Параллельные претенденты не могут заменить ключ после одобрения. Refresh/retry тем же ключом идемпотентен; переустановка/утрата ключа не восстанавливает доступ по старому ID. Коды имеют ограниченные попытки и безопасные ошибки без перечисления пользователей.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/InvitationProtocol.kt",
+        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt"
+      ]
     },
     {
       "id": "SEC-06",
@@ -2152,7 +2315,13 @@
         "docs/managed-policy.md",
         "docs/enrollment-pilot.md",
         "docs/identity-lifecycle.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/bootstrap-trust.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/BootstrapTrust.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt",
+        "docs/manual-enrollment.md",
+        "core/identity/src/main/kotlin/io/syn443/identity/InvitationProtocol.kt",
+        "app/src/main/kotlin/io/syn443/android/EnrollmentActivity.kt"
       ]
     },
     {

@@ -2,6 +2,7 @@ package io.syn443.identity
 
 import io.syn443.policy.Canonical
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 import java.security.KeyPairGenerator
@@ -10,6 +11,18 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class LoginPayloadTest {
+    @Test fun confirmedCapabilitiesAreProtectedCanonicalAndAbsentFromLegacyBytes() {
+        val legacy=LoginPayload(bootstrap,session=session)
+        assertFalse(Identity.objectJSON(legacy.encode()).containsKey("advertisedCapabilities"))
+        assertNull(LoginPayload.decode(legacy.encode(),registered).advertisedCapabilities)
+        val declared=CapabilityNegotiation.canonical(IdentityOperation.supportedCapabilities)
+        val next=legacy.copy(advertisedCapabilities=declared)
+        assertEquals(declared,LoginPayload.decode(next.encode(),registered).advertisedCapabilities)
+        invalid {next.copy(advertisedCapabilities=declared.reversed()).encode()}
+        invalid {next.copy(advertisedCapabilities=declared+"unknown.v1").encode()}
+        invalid {LoginPayload(bootstrap,user=user,advertisedCapabilities=declared).encode()}
+        invalid {LoginPayload.decode(Canonical.encode(JsonObject(Identity.objectJSON(legacy.encode())+("advertisedCapabilities" to JsonNull))),registered)}
+    }
     private val key=KeyPairGenerator.getInstance("EC").apply {initialize(ECGenParameterSpec("secp256r1"))}.generateKeyPair()
     private val bootstrap=Bootstrap("test","https://id.example.invalid/realms/test","test","https://api.example.invalid",
         mapOf("root" to Base64.getEncoder().encodeToString(key.public.encoded)))
@@ -68,4 +81,14 @@ class LoginPayloadTest {
         invalid {LoginPayload.decode(raw.replace("\"generation\":1","\"generation\":\"1\""),browser)}
         invalid {LoginPayload.decode(raw.dropLast(1)+",\"extra\":1}",browser)}
     }
+    @Test fun previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding() {
+        for((payload,intent) in listOf(LoginPayload(bootstrap,pending=pending) to browser,
+            LoginPayload(bootstrap,user=user) to authenticated,LoginPayload(bootstrap,session=session) to registered)) {
+            val before=JsonObject(Identity.objectJSON(payload.encode())-"invitation")
+            val decoded=LoginPayload.decode(Canonical.encode(before),intent)
+            assertEquals(payload.encode(),decoded.encode())
+            invalid {LoginPayload.decode(Canonical.encode(before),intent.copy(authority=Identity.random()))}
+        }
+    }
+
 }

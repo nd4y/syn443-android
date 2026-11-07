@@ -21,21 +21,28 @@ local Stop, hard limits, ownership fences or authorization checks.
 ## M2 - identity and provisioning (pilot implemented, milestone open)
 OIDC/PKCE/DPoP, Keystore identity, SQL device sessions, separate API/publisher,
 signed assignments, cache/lease/refresh/revoke and transactional rollback have
-pilot code and tests. Remaining work includes release QR/manual invitations,
-managed overlay credential namespaces/retirement, extended activation acceptance,
-rotation and full end-user/operational acceptance.
+pilot code and tests. Manual links and QR use the same installation trust and
+independent administrator approval. The candidate supports a managed
+[first launch and HTTPS App Links](bootstrap-trust.md) and
+[reports the outcome](activation-reporting.md) of signed activation or rollback.
+Physical camera and HTTPS domain association, full typed overlay acceptance,
+root rotation and managed first launch with the configured APK remain open.
 
 The [signed route-profile pilot](assigned-route-activation.md) adds independent
 native route gates and final storage fencing; physical acceptance remains separate.
 
 ## M3 - engines, sources and administration (partial foundation)
-Embedded engine adapters exist. One Remnawave API resource, subscription adapters,
-complete protocol/chain acceptance, mobile edit/publish and the full responsive
-administrative frontend remain open. The existing support-chat web service is not
-the full panel. Multiple Remnawave/x-ui/3x-ui are extension contracts only.
+Embedded engine adapters exist. The control plane has one scoped Remnawave API
+resource and can compile approved network layers into device policy. Addressed
+device subscription fetch has a Wi-Fi implementation; end-to-end and physical
+acceptance remain open. Complete protocol/chain acceptance, full managed
+settings, native editing and full administration remain open. Multiple
+Remnawave/x-ui/3x-ui remain extension contracts.
 
 ## M4 - autonomous routing and support (partial)
-Reference ranking and bounded per-target checks exist. Basic SQL user/admin chat,
+Reference ranking, bounded per-target checks and a lazy graph frontier exist.
+The frontier is a JVM planner and is not wired into runtime route selection.
+Basic SQL user/admin chat,
 Android/web UI and device media compression have scoped acceptance. Full contextual
 quarantine/graph exploration for four network modes, cohort rollout, central
 telemetry/incident analysis and operational retention controls remain open.

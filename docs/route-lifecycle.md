@@ -121,3 +121,14 @@ credentials must not be changed to manufacture a locked-boot test. USB/Wi-Fi can
 verify supported reboot/update/force-stop/system-policy behavior and real external/
 internal traffic. LTE, natural unplugged battery/Doze/endurance and complete M1-M5
 acceptance are explicitly outside this stage. Green CI is not physical acceptance.
+
+### Physical network preference
+
+The network candidate compares the platform's validation and captive-portal
+signals separately from transport. A newly visible, unvalidated Wi-Fi network
+does not replace a validated network or the current VPN path with successful
+checks. Validated Wi-Fi is preferred, equal choices retain their current
+owner, and lost networks cannot lend their evidence to a replacement. The
+selector does not infer trusted home Wi-Fi or restricted cellular access
+from a transport. JVM cases cover candidate order and loss; physical
+handover and the four-mode policy matrix require separate acceptance.

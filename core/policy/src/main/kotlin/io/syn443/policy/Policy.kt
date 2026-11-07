@@ -93,6 +93,14 @@ object Canonical {
 }
 
 object Policy {
+    /** Select from a worker-verified, still-authorized policy for the running
+     * engine. A managed failure cannot silently revert to a public default URL. */
+    fun internetChecks(managed:Boolean, verified:Verified?, runningHash:String, synthetic:Boolean=false):List<Check> {
+        if(!managed)return listOf(Check("internet","https_204",if(synthetic)"https://health.example.org/generate_204" else "https://www.gstatic.com/generate_204"))
+        requireNotNull(verified)
+        require(verified.payload.contentHash==runningHash)
+        return verified.payload.activation.checks.filter {it.required && it.type=="https_204"}.also {require(it.size in 1..8)}
+    }
     /** Local scheduling is not evidence of a defective signed candidate. */
     fun preparation(desiredOn: Boolean, activeExists: Boolean, activeAuthorized: Boolean,
         ownerPresent: Boolean, ownerReady: Boolean, replacementRequired: Boolean, restartReady: Boolean,
@@ -112,7 +120,7 @@ object Policy {
         return if (ownerReady) Preparation.CHECK_BASELINE else Preparation.WAIT
     }
     val json = Canonical.json
-    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless")
+    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1")
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     fun decode64(value: String): ByteArray {
         require(value.matches(Regex("[A-Za-z0-9_-]+")))

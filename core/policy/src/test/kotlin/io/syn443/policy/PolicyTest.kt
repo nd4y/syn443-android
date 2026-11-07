@@ -10,6 +10,54 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class PolicyTest {
+    @Test fun managedRouteChecksKeepTheirSignedBindingAndCapability() {
+        val thumb=enc(java.security.MessageDigest.getInstance("SHA-256").digest("synthetic-device-key".toByteArray()))
+        val config="""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"},"route_checks":[{"outbound":"direct","required":true,"checks":[{"method":"tcp","target":"home.example.invalid:22"}]}]}"""
+        val base=payload()
+        val p=base.copy(schemaVersion=2,keyThumbprint=thumb,
+            requiredCapabilities=base.requiredCapabilities+listOf("policy.keybound.v2","route.health.v1"),
+            engineConfigB64=enc(config.toByteArray()),contentHash=Policy.hash(config))
+        val verified=Policy.verifyBound(sign(p),roots,"device-example",thumb,now)
+        assertEquals(config,verified.engineConfig)
+        assertTrue("route.health.v1" in verified.payload.requiredCapabilities)
+        val changed=config.replace(":22",":443")
+        invalid{Policy.verifyBound(sign(p.copy(engineConfigB64=enc(changed.toByteArray()))),roots,"device-example",thumb,now)}
+    }
+    @Test fun signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences() {
+        fun digest(text:String)=enc(java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()))
+        val thumb=digest("synthetic-device-key")
+        val config="""{"outbounds":[{"type":"netbird","tag":"home","management_url":"https://overlay.example.invalid","managed":{"overlayId":"home","resourceId":"resource","networkId":"tenant","identityEpoch":1,"setupReference":"${digest("synthetic-reference")}","setupVersion":1}}],"route":{"final":"home"}}"""
+        val p=payload().copy(schemaVersion=2,keyThumbprint=thumb,
+            requiredCapabilities=payload().requiredCapabilities+listOf("policy.keybound.v2","overlay.credentials.v1"),
+            engineConfigB64=enc(config.toByteArray()),contentHash=Policy.hash(config))
+        val raw=sign(p)
+        val verified=Policy.verifyBound(raw,roots,"device-example",thumb,now)
+        assertEquals(config,verified.engineConfig);assertEquals(p.contentHash,verified.payload.contentHash)
+        invalid{Policy.verifyBound(raw,roots,"device-example",digest("other-device-key"),now)}
+        invalid{Policy.verifyBound(raw,roots,"other-device",thumb,now)}
+        invalid{Policy.verifyBound(raw,emptyMap(),"device-example",thumb,now)}
+        invalid{Policy.verifyBound(raw,roots,"device-example",thumb,p.offlineUntilMs)}
+        invalid{Policy.verifyBound(sign(p.copy(requiredCapabilities=p.requiredCapabilities+"overlay.future")),roots,"device-example",thumb,now)}
+        invalid{Policy.verifyBound(sign(p.copy(requiredCapabilities=p.requiredCapabilities+"overlay.credentials.v1")),roots,"device-example",thumb,now)}
+    }
+    @Test fun runningManagedHealthUsesEveryRequiredSignedHTTPSTargetWithoutDefaultFallback() {
+        val checks=listOf(Check("first","https_204","https://health.example.org/generate_204"),
+            Check("second","https_204","https://alternate.example.org/204"),
+            Check("optional","https_204","https://optional.example.org/204",required=false),
+            Check("home","tcp_banner","192.0.2.1",22,"SSH-"))
+        val v=verify(sign(payload().copy(activation=Gate(30,false,checks))))
+        assertEquals(checks.take(2),Policy.internetChecks(true,v,v.payload.contentHash))
+        invalid {Policy.internetChecks(true,v,"foreign-running-engine")}
+        invalid {Policy.internetChecks(true,null,v.payload.contentHash)}
+        val empty=v.copy(payload=v.payload.copy(activation=Gate(30,false,checks.drop(2))))
+        invalid {Policy.internetChecks(true,empty,v.payload.contentHash)}
+        val tooMany=v.copy(payload=v.payload.copy(activation=Gate(30,false,List(9){checks.first()})))
+        invalid {Policy.internetChecks(true,tooMany,v.payload.contentHash)}
+    }
+    @Test fun unmanagedHealthHasExplicitProductionAndEmulatorDefaults() {
+        assertEquals("https://www.gstatic.com/generate_204",Policy.internetChecks(false,null,"").single().target)
+        assertEquals("https://health.example.org/generate_204",Policy.internetChecks(false,null,"",true).single().target)
+    }
     @Test fun revokedAccessClosesBeforeBudgetWaitWithoutStartingCandidateDeadline() {
         val v = verify(sign())
         val staged = Policy.stage(Journal(active = "old", lastGood = "old"), v)

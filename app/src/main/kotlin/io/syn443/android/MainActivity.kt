@@ -43,6 +43,8 @@ private fun Prototype(request: Request, consentGeneration: Long = -1) {
         Text("SYN443", style = MaterialTheme.typography.headlineLarge)
         Text("Secure Your Network")
         io.syn443.android.vpn.LoginControls()
+        val enrollmentContext=androidx.compose.ui.platform.LocalContext.current
+        Button(onClick={enrollmentContext.startActivity(android.content.Intent(enrollmentContext,EnrollmentActivity::class.java))},modifier=Modifier.testTag("manual-enrollment")){Text("Привязать по приглашению или QR")}
         val context=androidx.compose.ui.platform.LocalContext.current
         Button(onClick={context.startActivity(android.content.Intent(context,io.syn443.android.chat.SupportActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))},modifier=Modifier.testTag("support-chat")) {Text("Чат с администратором")}
         io.syn443.android.vpn.VpnControls(consentGeneration)

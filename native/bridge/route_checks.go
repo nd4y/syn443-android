@@ -42,8 +42,9 @@ type routeResult struct {
 	ElapsedMS        int64    `json:"elapsedMs"`
 	SampledElapsedMS int64    `json:"sampledElapsedMs"`
 	Path             []string `json:"path"`
+	outbound         string
 }
-type routeNode struct{ ID, Detour string }
+type routeNode struct{ ID, Detour, Kind string }
 type routeReport struct {
 	Request string        `json:"request"`
 	Running bool          `json:"running"`
@@ -51,15 +52,18 @@ type routeReport struct {
 }
 
 type routeRunner struct {
-	mu     sync.Mutex
-	ctx    context.Context
-	lookup func(string) (adapter.Outbound, bool)
-	cancel context.CancelFunc
-	serial uint64
-	busy   bool
-	report routeReport
-	nodes  map[string]routeNode // Immutable once a runtime starts.
-	limit  func() time.Duration
+	mu            sync.Mutex
+	ctx           context.Context
+	lookup        func(string) (adapter.Outbound, bool)
+	cancel        context.CancelFunc
+	serial        uint64
+	busy          bool
+	report        routeReport
+	nodes         map[string]routeNode       // Immutable once a runtime starts.
+	selectors     map[string]map[string]bool // Membership of noninterrupting selectors.
+	selectionUsed bool
+	restore       map[string]string
+	limit         func() time.Duration
 }
 
 func (r *routeRunner) path(tag string) []string {
@@ -96,12 +100,101 @@ func (r *routeRunner) snapshot() string {
 func (r *routeRunner) stop() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.stopLocked()
+}
+func (r *routeRunner) stopLocked() {
 	if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
 	}
 	r.serial++
+	r.selectionUsed = false
 	r.report = routeReport{Results: []routeResult{}}
+}
+
+type routeSelector interface {
+	Now() string
+	SelectOutbound(string) bool
+}
+
+func (r *routeRunner) networkChanged() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stopLocked()
+	for group, previous := range r.restore {
+		outbound, ok := r.lookup(group)
+		if !ok || !r.selectors[group][previous] {
+			continue
+		}
+		if selector, ok := outbound.(routeSelector); ok {
+			selector.SelectOutbound(previous)
+		}
+	}
+	r.restore = nil
+}
+
+// The check must cover one concrete end-to-end path, not a group whose
+// selected member can change between evidence and selection.
+func (r *routeRunner) fixedPath(tag string) []string {
+	path := []string{}
+	seen := map[string]bool{}
+	for tag != "" {
+		node, ok := r.nodes[tag]
+		if !ok || seen[tag] || len(path) == 4 {
+			return nil
+		}
+		switch node.Kind {
+		case "http", "socks", "vless", "ssh":
+		default:
+			return nil
+		}
+		seen[tag] = true
+		path = append(path, node.ID)
+		tag = node.Detour
+	}
+	return path
+}
+
+func (r *routeRunner) selectVerified(request, checkID, group, previous, candidate string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if request == "" || request != r.report.Request || r.busy || r.selectionUsed ||
+		r.ctx.Err() != nil || !r.allowed() || candidate == previous || !r.selectors[group][candidate] {
+		return false
+	}
+	path := r.fixedPath(candidate)
+	if len(path) == 0 {
+		return false
+	}
+	var verified bool
+	now := bootMillis()
+	for _, result := range r.report.Results {
+		if result.ID == checkID && result.outbound == candidate && result.OK && result.Complete &&
+			now != math.MaxInt64 && result.SampledElapsedMS > 0 && result.SampledElapsedMS <= now &&
+			now-result.SampledElapsedMS < 15_000 && strings.Join(result.Path, "/") == strings.Join(path, "/") {
+			verified = true
+			break
+		}
+	}
+	if !verified {
+		return false
+	}
+	outbound, ok := r.lookup(group)
+	if !ok {
+		return false
+	}
+	selector, ok := outbound.(routeSelector)
+	if !ok || selector.Now() != previous || !r.allowed() || !selector.SelectOutbound(candidate) {
+		return false
+	}
+	r.selectionUsed = true
+	if r.restore == nil {
+		r.restore = map[string]string{}
+	}
+	if _, restored := r.restore[group]; !restored {
+		r.restore[group] = previous
+	}
+	return true
 }
 func validRouteRequest(q routeRequest) bool {
 	if len(q.Request) < 1 || len(q.Request) > 80 || len(q.Routes) < 1 || len(q.Routes) > 64 {
@@ -182,6 +275,7 @@ func (r *routeRunner) start(raw string) bool {
 	r.serial++
 	serial := r.serial
 	r.busy = true
+	r.selectionUsed = false
 	r.report = routeReport{Request: q.Request, Running: true, Results: []routeResult{}}
 	r.mu.Unlock()
 	go func() {
@@ -256,7 +350,7 @@ func (c *authorizedRouteConn) Write(b []byte) (int, error) {
 func (c *authorizedRouteConn) NeedHandshakeForWrite() bool { return N.NeedHandshakeForWrite(c.Conn) }
 func (r *routeRunner) runPlan(ctx context.Context, p routePlan) (result routeResult) {
 	start := time.Now()
-	result = routeResult{ID: p.ID, Complete: true, OK: true, Code: "ok"}
+	result = routeResult{ID: p.ID, Complete: true, OK: true, Code: "ok", outbound: p.Outbound}
 	defer func() {
 		if recover() != nil {
 			result.OK = false

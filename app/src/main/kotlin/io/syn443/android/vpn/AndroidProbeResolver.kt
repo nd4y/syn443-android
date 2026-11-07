@@ -27,21 +27,22 @@ internal class AndroidProbeResolver(
         fun onError()
     }
     init { require(timeoutMillis in 1..2_500) }
-    fun resolve(host: String): InetAddress {
-        if (InetAddresses.isNumericAddress(host)) return InetAddresses.parseNumericAddress(host)
+    fun resolve(host: String): InetAddress = resolveAll(host).first()
+    fun resolveAll(host: String): List<InetAddress> {
+        if (InetAddresses.isNumericAddress(host)) return listOf(InetAddresses.parseNumericAddress(host))
         val cancel = CancellationSignal()
         val done = CountDownLatch(1)
-        val address = AtomicReference<InetAddress?>()
+        val address = AtomicReference<List<InetAddress>>()
         try {
             query(host, cancel, object : Answer {
                 override fun onAnswer(answer: List<InetAddress>, rcode: Int) {
-                    if (!cancel.isCanceled && rcode == 0) address.set(answer.firstOrNull())
+                    if (!cancel.isCanceled && rcode == 0) address.set(answer.take(16).distinct())
                     done.countDown()
                 }
                 override fun onError() { done.countDown() }
             })
             if (!done.await(timeoutMillis, TimeUnit.MILLISECONDS)) throw SocketTimeoutException()
-            return address.get() ?: throw UnknownHostException()
+            return address.get()?.takeIf {it.isNotEmpty()} ?: throw UnknownHostException()
         } finally { cancel.cancel() }
     }
 }

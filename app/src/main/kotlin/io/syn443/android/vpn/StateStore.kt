@@ -71,7 +71,10 @@ class StateStore private constructor(context: Context) {
         update { value ->
             value.put("phase", phase).put("reason", code).put("networkEpoch", epoch)
             val events = value.optJSONArray("events") ?: JSONArray()
+            val sequence=(value.optLong("eventSequence").coerceIn(0,9_007_199_254_740_990L)+1)
+            value.put("eventSequence",sequence)
             events.put(JSONObject().put("at", System.currentTimeMillis()).put("phase", phase).put("code", code)
+                .put("sequence",sequence).put("elapsed",android.os.SystemClock.elapsedRealtime())
                 .put("intentGeneration", value.optLong("generation")).put("networkEpoch", epoch))
             while (events.length() > 64) events.remove(0)
             value.put("events", events)
@@ -97,6 +100,23 @@ class StateStore private constructor(context: Context) {
         try { output.write(cipher.iv.size); output.write(cipher.iv); output.write(ciphertext); config.finishWrite(output) }
         catch (e: Exception) { config.failWrite(output); throw e }
         update { it.put("configRevision", revision(raw)) }
+    }
+    @Synchronized fun localConfig(raw:String,expected:String,candidate:String,apply:Boolean):JSONObject {
+        require(!policyStore.managed() && !checkpoint().desiredOn && !read().optBoolean("engineActive"))
+        val previous=originalConfig()?.let(::revision) ?: "none"
+        require(previous==expected && revision(raw)==candidate)
+        EngineConfig.validate(raw)
+        val changed=previous!=candidate
+        if(apply && changed) {
+            importConfig(raw)
+            require(originalConfig()?.let(::revision)==candidate)
+        }
+        val parsed=JSONObject(raw)
+        return JSONObject().put("schemaVersion",1).put("baseRevision",previous).put("candidateRevision",candidate)
+            .put("generation",checkpoint().generation).put("different",changed).put("written",apply && changed)
+            .put("currentRevision",if(apply)candidate else previous)
+            .put("outboundCount",parsed.getJSONArray("outbounds").length())
+            .put("configuredCheckCount",parsed.optJSONArray("route_checks")?.length() ?: 0)
     }
     @Synchronized fun originalConfig(): String? {
         if (!config.baseFile.exists()) return null

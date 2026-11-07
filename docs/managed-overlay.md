@@ -1,0 +1,280 @@
+# Managed overlay identity and credentials
+
+The completion branch adds the addressed grant, protected vault, SDK ownership
+and controller/native handoff below. This remains partial M2/M3 work: exact final
+Actions, real managed provider enrollment and physical acceptance are required.
+It does not adopt the operator NetBird identity or activate future providers.
+
+## Identity and authority
+
+The namespace is the shared canonical SHA256 derivation from authenticated
+service/account/device and signed overlay/provider/resource/network/identity epoch
+plus normalized management origin. Its separate managed-netbird root cannot alias
+legacy operator netbird state. Outbound renaming, config revisions, direct/VLESS
+selection and Wi-Fi changes do not rename that identity. The shared Go/Kotlin
+vectors cover canonical origins and authority separation. Tailscale and ZeroTier
+remain rejected extension contracts.
+
+A signed policy carries closed managed metadata and the required capability
+`overlay.credentials.v1`; it contains no setup key or local state path. Local
+identity, device key, scope, independent policy signature and conservative lease
+are prerequisites. Metadata cannot authorize itself. New enrollment/invitation
+requests advertise the module; immutable older three-capability retry bodies stay
+unchanged. Updating capabilities of an already registered server device remains
+separate work and cannot be inferred from the new factory.
+
+## Worker preparation and protected grants
+
+LoginController derives the binding from its current verified assignment and
+persists its bounded namespace claim before grant requests or SDK effects. One
+stable operation is persisted before fetch. AuthProtocol uses the bound session,
+fresh DPoP proof/body hash and independent addressed ES256 envelope verification.
+The envelope binds service/account/device/resource/network/identity epoch, device
+key, reference/version, security epoch, kind and a short conservative expiry.
+
+OverlayVault uses an independent nonexportable Android Keystore AES-GCM key per
+grant, noBackup AtomicFiles, bound AAD, CAS/readback, bounded closed metadata and
+worker-only crypto. Late time/cancel/generation results, missing keys, corruption,
+foreign paths and orphan ciphertext fail closed. Authorization/time callbacks use
+immutable or volatile views; they never acquire UI/controller locks or do I/O.
+No setup value enters the login intent, signed config, logs or public snapshots.
+
+ManagedOverlayProvisioner composes RESERVED, protected CACHED and ENROLLING before
+native effects. OverlayRuntimeMaterial owns the optional setup bytes only in RAM,
+checks the exact signed config hash, current admission, credential and policy
+expiry and localizes closed metadata into a locally derived SDK directory. Inline
+keys/paths, another binding and numeric coercion are rejected. Local rendering
+does not change the saved signed config or its content hash. A missing/expired
+launch value waits for credentials without spending a native crash-restart budget.
+
+An expired or superseded unconfirmed grant enters durable DISCARDING/DISCARDED.
+Only its grant alias/ciphertext are erased; SDK keys are untouched. The old
+operation remains until the server acknowledges irreversible consumption. SQL can
+atomically abandon a never-dispatched issued grant; late fetch is permanently
+denied. A different signed reference/version for the same namespace/device key
+and login generation can then reserve a new operation. Confirmed registration
+cannot take this path to silently re-enroll a revoked peer.
+
+## Native registration and removal of setup material
+
+The native SDK directory has a bounded closed ownership manifest and sealed
+public-key evidence. Existing SDK files without a valid matching manifest are
+never adopted. Missing, corrupt or changed established keys are rejected before
+SDK.New can regenerate them. Ownership is reserved under the native lock before
+SDK creation; initial keys and manifest are synced/read back before SDK.Start.
+Offline pinned SDK tests cover key continuity, not actual provider registration.
+
+The private native proof additionally requires the current owner, connected
+management and signal, and a valid assigned IP; it rechecks ownership/lease after
+SDK snapshot work. EngineHostService samples it on at most one disposable worker,
+away from Stop/lease/control. Only a first-enrollment host with setup material
+samples it. The one-way private Binder callback is separate from UI telemetry.
+The controller fences it by host session, recovery generation, signed config hash,
+namespace, login authority and conservative policy time before/after persistence.
+
+REGISTERED is durable before local alias/cipher erasure. ERASED can prepare a
+keyless runtime while consumption is offline; the exact old operation retries on
+later preparation, including current reference/epoch refresh for the same identity.
+Consumption returns no setup value, never proves SDK registration and cannot erase
+another delivery's operation. Current account/session/policy/capability/namespace
+and final SQL commit remain mandatory.
+
+The active native host can complete registration after setup expiry while its
+policy remains authorized. A new launch still requires an unexpired setup value or
+confirmed keyless identity. After registration and candidate activation commit,
+the supervisor retires the native process once and restarts from the same SDK keys
+without setup material. Stop and owner-release fences remain authoritative. The
+controller drops serialized setup JSON immediately after Binder dispatch. JVM,
+crypto/JSON and Go/SDK strings remain GC-managed until their owning process is
+retired; byte-owner closure alone does not guarantee their zeroization.
+
+## Logout and retirement
+
+LoginRecovery keeps at most16 canonical namespace claims through refresh/restart
+and turns them into durable retirement claims on cancellation. Runtime admission
+and RAM material are withdrawn first. The worker waits for actual native exit and
+holds the native owner lock throughout SDK cleanup. It preflights the entire owned
+tree, never follows symlinks and deletes the manifest last for crash recovery.
+It verifies grant key/cipher erasure and removes operation metadata before dropping
+claims or deleting the device key. Unreadable ownership leaves retirement pending;
+repair of the same ownership permits retry. Operator/sibling state is untouched.
+
+## Evidence and remaining work
+
+CP5ab9cb4fc9bc90f367ef3a0d58e2f9373f2f9534 / Actions41409513759 and
+CP8f3bab71b91dbc09622e7c4910fe9a91a3ed0bdc / Actions41413333223 passed all8 jobs,
+including actual PostgreSQL expired/refreshed, revoked and unsent grant cleanup,
+exact-operation rejection, irreversible erasure, role and cancellation boundaries.
+Android3477ebb6ef675b6800c7bb32959eabc72e3fc1c1 passed native/JVM and API29/37;
+API35 stopped before tests when Maven artifact resolution failed. This is not an
+API35 acceptance result. Android08927c3adc7df0206408d9cac39f07b26e0c2ad9 native/JVM
+passed; its new Keystore/platform cases are still awaiting the complete matrix.
+
+The current controller/host changes add five Android integration cases and one
+capability migration JVM case, for95 identity methods and171 required emulator
+outcomes. They use actual Keystore/journals/signatures with synthetic issuer/API
+replies. Injecting a private proof in a controller test does not establish native
+Cloud registration or actual process-key cleanup on the phone.
+
+Remaining: exact final controller/host Actions and physical keyless rotation,
+provider issuer/configuration publisher wiring, existing-device capability upgrade,
+full configuration/administration and real managed Cloud/browser/QR/trust-rotation
+acceptance. No new APK has been installed for this branch. Physical LTE, natural
+Doze, unplugged energy/endurance and full autonomous routing remain separate open
+M1/M4/M5 gates.
+
+The active and candidate configuration can share an SDK namespace while naming
+different pending grants. A current native owner finishes registration first;
+without an owner the candidate is prepared first. Other pending references cannot
+alternately discard one another. After durable registration both configurations
+prepare the same keyless identity. An explicit controller case checks no second
+fetch/consumption while the active proof is pending, and immediate candidate
+preparation after that proof. Launch credential expiry and active policy expiry
+are checked separately.
+
+The first complete controller run7a87a2b passed native/JVM95/APK but failed all
+three emulator matrices before grant dispatch: the lower-level Kotlin signed-policy
+capability set had not yet admitted overlay.credentials.v1. The addressed wire
+schema and Go verifier already allowed it. A focused signed-policy regression now
+requires successful module admission while keeping wrong key/device/signature,
+expiry, unknown features and duplicate capabilities rejected. The five original
+controller cases remain mandatory and unchanged; the corrected exact matrix is
+still pending.
+
+## Optional credential outage (implementation, Actions acceptance pending)
+
+A valid signed policy can retain its base routes when an addressed NetBird setup
+grant is missing, unavailable or rejected. Its locally rendered NetBird outbound
+is a fail-closed credential-waiting placeholder. It performs no SDK construction,
+identity-directory creation, registration, retry-budget consumption or private
+route fallback. The grant operation and signed configuration hash stay unchanged.
+The controller retries credential delivery; after successful preparation the
+service retires the waiting host once and starts the same policy with the new
+material. Required activation checks still decide whether that policy can commit.
+
+The waiting flag cannot be imported or supplied in a signed configuration; only
+the identity worker derives it from an authorized managed namespace. Expired
+policy leases, logout and lost scope still withdraw all launch authority. The
+wrong-address grant test now asserts that its key is never used and that only
+this closed placeholder is available, while a retry retains the original grant
+operation. Native tests additionally assert no SDK/storage effects and closed
+TCP/UDP, rather than treating successful base-policy preparation as overlay health.
+
+The initial waiting implementation at1652ab4 failed all three Android matrices:
+API35 has134 connected cases with three failures and no skips. Its verified
+artifact and job stack show that INVALID_REPLY escaped optional grant handling,
+and the storage test incorrectly assumed its pre-reserved fixture ledger was
+absent. The correction retains the ledger unchanged, handles rejected/pending/
+conflicting credential replies through the closed placeholder, uses the actual
+transport-exception type in its outage fixture, and adds202/400/409/429/503 vs
+401/403 cases. Cancellation/authentication denial still withdraw authority; none
+of these replies permits using a setup value. Exact corrected Actions acceptance
+is pending.
+
+The28ae correction left one failing API35 connected case (135 total, one failure,
+no skips): recovery stayed in waiting after credential delivery. The grant API
+validated its new HTTPS Date, but the vault then rechecked the same credential
+against an older policy-time anchor. The controller now persists the newly
+verified, monotonic bounded Date in the assignment journal before vault caching,
+checks the same current signed configuration/lease, and publishes that refreshed
+state instead of the stale caller argument. The recovery case advances only the
+credential API clock by two seconds and checks durable restoration without another
+fetch. The policy lease, generation, envelope and configuration hash are unchanged.
+Exact new Actions acceptance is pending.
+
+## Interrupted registration recovery (implementation, acceptance pending)
+
+An expired ENROLLING grant with the same addressed reference now enters a durable
+RECONCILING_ERASING/RECONCILING flow. It erases the per-grant Keystore alias and
+ciphertext before a keyless probe, preserves the consume operation and never
+fetches a replacement under that reference. This phase does not claim registration.
+Only a current private native owner proof can move it to ERASED/acknowledgment.
+An explicitly authorized new setup reference still follows separate discard/ACK
+replacement rules; an existing SDK identity is never inferred from a directory.
+
+The local recovery render flag cannot be imported or supplied by a signed policy.
+Native recovery accepts only an already initialized managed ownership manifest
+whose private-key evidence still matches. Missing, unclaimed, uninitialized or
+corrupt identity never reaches SDK.New or automatic key generation. A missing
+identity stops without creating SDK storage or spending network retry attempts.
+The pinned SDK embed.Start calls Auth.Login, which first tries the existing key;
+its empty setup/JWT path fails registration validation rather than launching SSO.
+The local host samples registration proof for this probe and retires it once after
+confirmed recovery, then uses the same keys in steady state without setup material.
+
+New Actions cases cover the complete ledger/proof restrictions, interrupted local
+erasure, real Keystore deletion, no replacement fetch, current controller/native
+proof fencing, expired credential recovery, strict native sealed-key admission
+and missing-key fail-closed behavior. Core identity minimum97 and Android minimum177
+include the new named cases. Actual provider registration/revocation and final
+physical acceptance remain separate; the controller fixture injects its private
+proof and is not evidence of a Cloud enrollment.
+
+At74a479c the fresh-time recovery reached enrolling as intended; its only API35
+connected failure (135 cases, one failure, zero skips) observed four fetches
+instead of two. Both local activation transitions retried the unavailable grant.
+Those transitions now prepare only local cached authority; network retry stays
+in synchronization and explicit retry. The regression explicitly checks one
+initial failed request across begin/commit and exactly one successful retry.
+No timeout, assertion or credential verification was relaxed.
+
+## Startup failure diagnosis
+
+The optional module now preserves at most16 distinct startup cause codes even
+when engine logging is disabled and the SDK recorder is not yet available.
+Codes distinguish DNS, TCP, TLS, gRPC and management-registration failures from
+the eventual cancellation/deadline returned by Start. They contain only fixed
+strings: SDK messages, endpoint/account identifiers and credentials are never
+retained by this collector. Input processing is bounded to8192 bytes per write;
+snapshots copy state under a local collector lock and never call the SDK.
+The last failed attempt remains observable during a retry that has no new codes.
+These are diagnostic observations, not registration receipts or route health.
+They cannot change authentication, retry limits, private-route blocking or Stop.
+
+Actions cover cause classification, disabled-logger delivery through the actual
+outbound writer and rejected enrollment, duplicate/unknown input, bounded work,
+snapshot isolation and concurrent writes/reads under the existing race gate.
+Real Cloud registration and subsequent Wi-Fi recovery remain unaccepted; an
+initial timed-out registration must not be declared an invalid-key root cause
+merely because a short-lived credential later expires.
+
+## Stable default peer hostname
+
+An omitted hostname previously reached embed as an explicit empty DeviceName.
+The pinned SDK's context lookup preserves that empty value, while management's
+DNS-label validator rejects it. The adapter now supplies a stable opaque label:
+managed identities derive it from the authenticated namespace; unmanaged states
+persist a random local label in an atomic0600 metadata file under the held SDK
+directory lock. Explicit names are preserved. No OS hostname, hardware serial or
+setup credential participates. Config changes, direct/VLESS selection, restart
+and network changes do not rotate the managed default name or either SDK key.
+
+Malformed, linked or oversized local name metadata fails before SDK/network
+effects and requires action without spending network retry attempts. No SDK
+config is replaced to repair metadata. Actions exercise the real pinned
+management DNS-label validator, actual outbound-to-SDK options, stable/reopened
+and distinct identities, explicit overrides, local file modes, key-file
+preservation and unsafe metadata. Startup codes cover every non-OK gRPC status
+and the empty/invalid-hostname and unavailable-management cases.
+
+Upstream source: [SDK context lookup](https://github.com/netbirdio/netbird/blob/cf017119711184a0661062a0c8ac2043e4e8d411/client/system/info.go#L168),
+[management DNS-label validation](https://github.com/netbirdio/netbird/blob/cf017119711184a0661062a0c8ac2043e4e8d411/dns/dns.go#L103).
+
+### Diagnostic readiness after network changes
+
+An empty SDK recorder during reconnect does not prove successful peer checks.
+Explicit diagnostics report `no_peers` with zero results, remain retryable and
+become stale across another network change. The UI explains that there are no
+peers to check and the list may still be refreshing. This state is distinct from
+`completed`, whose individual peer outcomes still determine reachability.
+
+Private USB/Wi-Fi acceptance of source492cdb52d75649340af0d13c8119dc9724992474
+verified managed registration, required internal peer DNS/TCP, external HTTPS,
+native crash/hang recovery and bounded Wi-Fi rebound with stable SDK keys. An
+initial zero-roster check exposed the reporting issue above; it is retained as
+failed evidence rather than counted as recovery success. Automatic scoped Cloud
+retirement, unchanged existing inventory and complete local configuration/OS
+restoration were independently checked. No account/device/resource identifiers
+or credential material are published. Version34 requires its own Actions and
+affected physical acceptance; these are not full M2/M3 completion or LTE/energy
+acceptance.

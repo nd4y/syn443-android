@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=144
+    minimum=188
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -16,16 +16,16 @@ elif mode=="recovery":
     minimum=15
 elif mode=="policy":
     paths=list((root/"core/policy/build/test-results/test").glob("TEST-*.xml"))
-    minimum=15
+    minimum=16
 elif mode=="observability":
     paths=list((root/"core/observability/build/test-results/test").glob("TEST-*.xml"))
     minimum=10
 elif mode=="health":
     paths=list((root/"core/health/build/test-results/test").glob("TEST-*.xml"))
-    minimum=21
+    minimum=23
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=80
+    minimum=111
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -38,7 +38,153 @@ for path in paths:
         assert not any(case.find(k) is not None for k in ("skipped","failure","error")),(path,case.attrib)
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
+if mode=="jvm":
+    assert {("io.syn443.decision.RouteFrontierTest",name) for name in {
+        "boundedCursorCoversSparseGraphWithoutDuplicateOrWrongExitPaths",
+        "allHopsAndEdgesSatisfyModeAndFullPathCapabilityRequirements",
+        "warmHintComesFirstOnlyIfItStillBelongsToTheGraph",
+        "oldOrExpiredCursorNeverResumes",
+        "oversizedTemplateFailsInsteadOfReportingTruncatedCoverage",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route search cases missing"
+    assert {("io.syn443.decision.RouteHealthMemoryTest",name) for name in {
+        "pathFailuresQuarantineThenDemandFreshEvidence",
+        "commonFailuresAndAnotherTrafficClassCannotPoisonPath",
+        "authorizationFailureWaitsForContextAndRejectsLateCompletion",
+        "capacityCannotEvictAnActiveQuarantineOrConfigurationFence",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route health cases missing"
+    assert {("io.syn443.decision.FailoverAdmissionTest",name) for name in {
+        "independentFailuresAndCurrentVerifiedReservePermitOneSwitch",
+        "targetFailureAndWrongScopeDoNotCountTowardFailover",
+        "staleOrDifferentCheckGroupCannotAuthorizeReplacement",
+        "stabilityThenEnergyTakePriorityOverLatency",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
+    assert {("io.syn443.android.ManagedFailoverTest",name) for name in {
+        "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
+        "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed Wi-Fi failover cases missing"
+    assert {
+        ("io.syn443.android.TechnicalTelemetryDiskTest","encryptedQueueRestartsWithoutExposingAnotherEnrollment"),
+        ("io.syn443.android.TechnicalTelemetryDiskTest","consentFenceDropsPriorEventsAndRawDiagnosticStrings"),
+        ("io.syn443.android.PhysicalIdentityRouteTest","technicalTelemetryCannotUseMeteredWifiOrCellular"),
+    } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required technical telemetry device cases missing"
+if mode=="policy":
+    assert {("io.syn443.policy.PolicyTest",name) for name in {
+        "signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences",
+        "managedRouteChecksKeepTheirSignedBindingAndCapability",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
+if mode=="health":
+    assert {('io.syn443.health.ChecksTest',name) for name in {
+        'positionalDiagnosticsKeepEachFailureSeparateFromLaterSuccessOrMismatch',
+        'checksNeverStartedDoNotInheritAStageOrNetworkFailure',
+        'oneAdmissionRetryUsesFreedCapacityAndRunsTheProbeOnlyOnce'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required per-check diagnostic cases missing'
+    required={('io.syn443.health.AddressFallbackTest',name) for name in {
+        'unavailableFirstFamilyFallsBackWithoutExtraWorkersOrLeakedSockets',
+        'connectionFailureTriesOnlyFourDistinctAddressesAndKeepsFailureAttribution',
+        'emptyDnsResultDoesNotAllocateSocketAndRemainsDnsFailure',
+        'cancellationClosesCurrentAttemptAndCannotStartAnAlternative',
+        'releasingAnOldOrForeignSocketCannotDetachTheCurrentAttempt',
+        'unexpectedConnectionFailureClosesOnlyItsSocketAndNeverStartsAnAlternative'}}
+    required.add(('io.syn443.health.TlsTest','certificateFailureDoesNotTryAnotherAddressOrWeakenTrust'))
+    assert required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required bounded address fallback cases missing'
+if mode=="identity":
+    assert {
+        ("io.syn443.identity.AuthProtocolTest","technicalTelemetryIsProofBoundAndDisabledEndpointDoesNotAcknowledge"),
+        ("io.syn443.identity.TelemetryTest","acknowledgmentRemovesOnlyTheOriginalPrefixAndNeverAnotherScope"),
+        ("io.syn443.identity.TelemetryTest","queueCapsBatchesAndExpiresOldEvidenceWithoutReordering"),
+    } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required telemetry queue or wire cases missing"
+    assert ('io.syn443.identity.BootstrapTrustTest','appLinkUnwrapsOnlyAnExactHttpsCarrierAndRetainsInstallationTrust') in {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required HTTPS enrollment carrier case missing'
+    assert ('io.syn443.identity.BootstrapTrustTest','installationProfileIsBoundedAndHasNoImportedRotationHistory') in {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required installation profile case missing'
+    assert ('io.syn443.identity.BootstrapTrustTest','installationUpgradeRequiresClosedVersionAndAdjacentDistinctRoots') in {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required installation upgrade profile case missing'
+    assert {('io.syn443.identity.AuthProtocolTest','administrationHintIsBoundedAndOlderServersDenyNavigation'),
+        ('io.syn443.identity.AuthProtocolTest','sourceFetchUploadBindsTheCompleteBinaryFrameToTheDeviceProof'),
+        ('io.syn443.identity.AuthProtocolTest','conditionalSourceLeaseSignsMetadataAndFallsBackOnOldServers'),
+        ('io.syn443.identity.BoundedHttpTest','subscriptionTlsPreservesQueryAndBoundsDecodedGzip'),
+        ('io.syn443.identity.BoundedHttpTest','conditionalProviderLengthDoesNotCreateBodyOrRelaxIdentityFraming'),
+        ('io.syn443.identity.SubscriptionDownloadTest','privateAddressesRequireExplicitScopeAndNeverAllowMetadataOrLoopback'),
+        ('io.syn443.identity.SubscriptionDownloadTest','validatorsAreScopedToTheOriginalRepresentationEvenOnSameOriginRedirect'),
+        ('io.syn443.identity.SubscriptionDownloadTest','redirectRechecksResolvedAddressesAndNeverRestoresRemovedCredentials')} <= {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required device source transport cases missing'
+    assert {('io.syn443.identity.AssignmentsTest','activationReportPersistsOnlyFinalCurrentEnvelopeDecisions'),
+        ('io.syn443.identity.AuthProtocolTest','activationReportBindsBodyToCurrentDeviceProofAndSupportsOlderServers')} <= {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required activation reporting cases missing'
+    logout_required={('io.syn443.identity.AuthProtocolTest',name) for name in {
+        'expiredAccessLogoutRefreshesInRamAndRevokesOnlyTheSameDeviceWithCurrentProof',
+        'freshAccessLogoutDoesNotRotateAndExpiredRefreshOrBootCannotDispatch',
+        'uncertainExpiredLogoutRefreshNeverReenrollsOrSendsAnOldRevocationCredential',
+        'substitutedOrCancelledLogoutRefreshCannotReachRevocation'}}
+    assert logout_required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required expired-access logout cases missing'
+    renewal_required={('io.syn443.identity.AssignmentsTest',name) for name in {
+        'identicalExecutionRenewsDurablyWithoutCandidateActivationOrLossOfFailureHistory',
+        'freshSignedLeaseCanAuthorizeKnownExpiredExecutionButNeverReviveItsExpiredReader',
+        'renewalOfAuthorizedRollbackKeepsFailedCandidateQuarantinedAndOtherFallbackLeaseUnextended',
+        'renewalDoesNotBypassChangedAuthorityCapabilitiesGateOrPendingActivation',
+        'shorterRenewedLeaseTightensDeadlineAndNeverMakesAnUnrelatedActiveSnapshotGood'}}
+    assert renewal_required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required lease renewal cases missing'
+    capability_required={('io.syn443.identity.CapabilityNegotiationTest',name) for name in {
+        'canonicalAvailabilityAndOperationAreStableWithoutMutatingAnOldRequest',
+        'malformedUnknownAndInconsistentHistoryCannotBecomeAvailability',
+        'pendingAndApprovedRepliesAreBoundToExactOperationAndExpectedHead'}}
+    capability_required.update({('io.syn443.identity.AuthProtocolTest',name) for name in {
+        'deviceCapabilitiesReusePendingBytesAndRecoverAnUnknownApprovalAck',
+        'independentlyApprovedCapabilitiesAreConfirmedBeforeBecomingProtectedMetadata',
+        'oidcCapabilityApprovalRetainsTheOriginalDurableEnrollmentOperation',
+        'capabilityErrorsUnknownModulesCancellationAndMalformedApprovalDoNotGrantAccess'}})
+    capability_required.update({('io.syn443.identity.LoginRecoveryTest',name) for name in {
+        'recordedCapabilitiesPreserveActivationGenerationSessionAndOverlayClaims',
+        'legacyEnrollmentCanBeSupersededOnlyAfterItsBoundAcknowledgement'}})
+    capability_required.add(('io.syn443.identity.LoginPayloadTest','confirmedCapabilitiesAreProtectedCanonicalAndAbsentFromLegacyBytes'))
+    assert capability_required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required capability negotiation cases missing'
+    assert ("io.syn443.identity.OverlayEnrollmentTest","newCapabilityAdvertisementPreservesExactLegacyEnrollmentAndInvitationRetries") in {(c.get("classname"),c.get("name")) for c in cases}, "Required capability migration case missing"
+    assert {("io.syn443.identity.OverlayEnrollmentTest",name) for name in {"interruptedRegistrationErasesSetupBeforeKeylessProbeAndNeedsNativeProof","keylessProbeCannotBorrowAnotherIdentityOrInventFreshEnrollment"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required keyless reconciliation ledger cases missing"
+    login_overlay_required={'namespaceClaimSurvivesRefreshAndCancelUntilActualErasureCompletes','namespaceClaimsRejectUnsafePathsUnboundedSetsAndUnprovisionedAuthority','recoveryMetadataBeforeManagedOverlaysRetainsEmptyOwnershipClaims'}
+    assert {("io.syn443.identity.LoginRecoveryTest",name) for name in login_overlay_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed namespace recovery cases missing"
+    assert ("io.syn443.identity.AuthProtocolTest","overlayConsumptionKeepsItsOperationAfterCurrentReferenceAndEpochRefresh") in {(c.get("classname"),c.get("name")) for c in cases}, "Required expired-operation cleanup case missing"
+    assert {("io.syn443.identity.OverlayEnrollmentTest",name) for name in {"grantReplacementKeepsIdentityButRequiresErasureAndANewAddressedReference","confirmedIdentityCannotDiscardItsGrantToSilentlyRegisterAgain"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required grant replacement cases missing"
+    overlay_required={('io.syn443.identity.OverlayEnrollmentTest', 'pendingAuthorityCannotSwitchAccountKeyDeviceEpochReferenceOrGeneration'), ('io.syn443.identity.OverlayAssignmentsTest', 'unmanagedInlineSecretPathUnknownFieldsAndDuplicateIdentityAreRejected'), ('io.syn443.identity.OverlayAssignmentsTest', 'assignedIdentityDerivesOnlyFromLocalScopeAndSignedMetadata'), ('io.syn443.identity.OverlayEnrollmentTest', 'cancellationWithdrawsEveryPhaseAndCannotBeReactivated'), ('io.syn443.identity.OverlayEnrollmentTest', 'durableFlowRetainsOperationAndErasesBeforeAcknowledgment'), ('io.syn443.identity.OverlayEnrollmentTest', 'boundedOperationsAndCorruptJournalAreRejected'), ('io.syn443.identity.AuthProtocolTest', 'overlayCannotAcceptUnsignedSecretCrossScopeOrFalseConsumption'), ('io.syn443.identity.AuthProtocolTest', 'addressedOverlayDeliveryBindsProofBodySessionAndIndependentEnvelope')}
+    assert overlay_required <= {(c.get("classname"),c.get("name")) for c in cases}, "Required addressed overlay state/protocol cases missing"
+    assert {"manualClaimConfirmationAndCompletionConvergeOnNormalBoundSession",
+        "sameProtectedPendingCanResumeAndThenUseExistingLoginPolicyLifecycle",
+        "stateSubstitutionClockRollbackAndNumericCoercionFailClosed",
+        "malformedOperationsStatesAndWrongKeyNeverReachNetwork",
+        "transportCancellationAndServerErrorsRemainDistinct",
+        "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
+if mode=="emulator":
+    assert ('io.syn443.android.EnrollmentAppLinkTest','repeatViewIntentsPreviewOnlyAndClearTheirCarrier') in {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required enrollment intent lifecycle case missing'
+    assert ('io.syn443.android.LoginControllerTest','activationDeliveryUsesDurableDecisionAndCannotChangeLoginOnFailure') in {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required Android activation reporting case missing'
+    assert {('io.syn443.android.PolicyCheckSnapshotTest',name) for name in {
+        'diagnosticsArePositionalBoundedAndReturnedAsIndependentCopies',
+        'changedOwnerIntentNetworkActivationOrStoppedVpnCannotRelabelEvidenceAsCurrent',
+        'staleOrBackwardClockKeepsHistoryWithoutClaimingCurrentHealth'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required fenced policy diagnostic cases missing'
+    assert {('io.syn443.android.LoginControllerTest',name) for name in {
+        'logoutAfterAccessExpiryRotatesOnlyInRamRevokesAndErasesTheProtectedSession',
+        'lostLogoutRefreshKeepsRecoveryTombstoneWithoutRestoringSecretsOrRetryingEnrollment'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android expired-session retirement cases missing'
+    assert ('io.syn443.android.HealthChecksTest','androidDnsRetainsBoundedDistinctAddressesForFallbackAndStillCancelsQuery') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android DNS fallback case missing'
+    assert ('io.syn443.android.LoginControllerTest','assignedLeaseRenewalPersistsWithoutNewActivationAndRetainsDeviceIdentityAcrossRestart') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required durable Android lease renewal case missing'
+    assert {('io.syn443.android.LoginControllerTest',name) for name in {
+        'legacyCapabilityApprovalSurvivesRestartWithoutChangingAssignedPolicyOrDeviceIdentity',
+        'lostCapabilityAckAndUnavailableEndpointKeepCurrentAssignmentAndStopStillWins',
+        'oldEnrollmentAckCreatesANewPersistedRequestAndPendingApprovalCanPoll',
+        'confirmedCapabilitiesSurviveRefreshAndCannotBecomePublicStatusMetadata'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required capability lifecycle cases missing'
+    assert ("io.syn443.android.OverlayVaultTest","changedSecurityEpochProbesSameIdentityWithoutBorrowingGrantOrAcknowledgingBeforeNativeProof") in {(c.get("classname"),c.get("name")) for c in cases}, "Required changed-authority keyless recovery case missing"
+    assert ("io.syn443.android.LoginControllerTest","periodicManagedCredentialRetryUsesSameOperationWithoutFetchingPolicyOrBypassingBackoff") in {(c.get("classname"),c.get("name")) for c in cases}, "Required independent overlay retry case missing"
+    assert ("io.syn443.android.HostProcessTest","rejectedForeignBindingCannotRetireTheCurrentDiagnosticSession") in {(c.get("classname"),c.get("name")) for c in cases}, "Required diagnostic binding ownership case missing"
+    assert {("io.syn443.android.LoginControllerTest",name) for name in {"managedControllerClaimsNamespaceBeforeFetchAndRestoresProtectedMaterialWithoutRefetch","managedControllerNativeReceiptErasesGrantAndRecoversKeylessWhileConsumptionIsOffline","managedControllerLogoutFencesALateCredentialAndKeepsNoRuntimeMaterial","managedControllerRejectsSignedWrongAddressAndRetriesTheSameReservedOperation","managedCredentialOutageKeepsBasePolicyAndRetriesSameOperationBeforeEnrollment","managedGrantFailureNeverUsesAKeyAndAuthenticationDenialWithdrawsBaseAuthority","interruptedManagedRegistrationExpiresIntoKeylessProbeUntilCurrentNativeProof"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed controller integration cases missing"
+    assert ("io.syn443.android.LoginControllerTest","activePendingIdentityAndFreshCandidateNeverConsumeEachOthersGrant") in {(c.get("classname"),c.get("name")) for c in cases}, "Required active/candidate same-identity fence missing"
+    login_overlay_required={'persistedOverlayClaimsSurviveRestartAndRetireBeforeDeviceKey','unreadableOwnedOverlayKeepsLogoutPendingUntilTheSameCleanupCanResume'}
+    assert {("io.syn443.android.LoginControllerTest",name) for name in login_overlay_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required controller SDK retirement cases missing"
+    overlay_storage_required={'ownedNamespaceRetiresUnderLockAndLeavesEverySiblingAndOperatorFileUntouched', 'wrongEvidenceUnclaimedSDKAndAmbiguousManifestNeverAuthorizeErasure', 'symlinkAndOversizedTreesFailBeforeDeletingAnyOwnedFile', 'heldNativeOwnershipPreventsAllDeletionAndCancellationCannotBorrowIt', 'nativeOwnershipIsHeldThroughoutCleanupAndMainThreadCannotErase', 'interruptedDeletionKeepsOwnershipUntilTheSameRetirementCompletes'}
+    assert {("io.syn443.android.ManagedOverlayStorageTest",name) for name in overlay_storage_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required owned SDK retirement cases missing"
+    assert ("io.syn443.android.OverlayVaultTest","expiredPendingGrantCanBeReplacedOnlyAfterErasureAndServerAckWithoutTouchingSdkIdentity") in {(c.get("classname"),c.get("name")) for c in cases}, "Required grant erasure/replacement case missing"
+    assert {("io.syn443.android.OverlayVaultTest",name) for name in {"managedProvisionerPersistsBeforeFetchAndErasesBeforeIndependentConsumption","managedProvisionerRenewalRetriesLostAckAndNeverResetsSdkKeys","managedProvisionerRejectsLateFetchAndNativeProofAfterCancellation"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed provisioning orchestration cases missing"
+    assert {("io.syn443.android.OverlayVaultTest",name) for name in {"runtimeMaterialRendersOnlyItsSignedConfigAndLocallyDerivedOwnedDirectory","keylessMaterialCannotAdoptInlineKeysPathsOtherNamespacesOrCoercedMetadata","waitingMaterialKeepsSignedMetadataAndNeverCreatesCredentialOrSDKStorage","expiredUnconfirmedGrantErasesBeforeExistingIdentityProbeAndNeverFetchesAReplacement","interruptedRecoveryErasureFinishesWithoutBorrowingTheOldCiphertext"}} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required RAM material localization cases missing"
+    overlay_vault_required={'perGrantKeyCiphertextAndDurableOperationSurviveProcessObjectsThenEraseBeforeAck', 'aLateCredentialCannotBeCachedOrBorrowedAfterTheTrustedUpperDeadline', 'missingKeyTamperingUnknownJournalAndOrphanCipherNeverResetEnrollment', 'cancellationRejectsLateAndQueuedCryptoAndWaitsForConfirmedOwnerRelease', 'interruptedCacheCommitRetainsReservedOperationAndCannotCrossStorageArea', 'mainThreadCannotEncryptDecryptOrMutateEnrollmentButMayPersistCancellation', 'retiredMetadataIsRemovedOnlyAfterConfirmedCredentialAndSdkErasure'}
+    assert {("io.syn443.android.OverlayVaultTest",name) for name in overlay_vault_required} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required overlay Keystore/retirement cases missing"
     route_activation_required={"assignedActivationWaitsForCandidateRoutesAndIgnoresOptionalFailure",
         "assignedFinishRechecksLocalProofAfterEncryptedPreparation",
         "assignedActivationCannotReusePriorScopeOrIncompleteRouteProof",
@@ -47,6 +193,7 @@ if mode=="emulator":
         "enrolledStopFencesPendingCandidateRouteSuccess"}
     live_engine_required={"savedEngineCheckpointCannotClaimAnUnownedLiveProcess"}
     route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
+    route_required.add("adbLocalConfigPreviewDoesNotWriteAndApplyFencesStaleBase")
     fatal_required={"competingVpnOwnsTunAndRevokesOriginalWithoutRetryFight","fatalCommandsCannotStartAnOffNativeOwner","uncaughtJavaFaultRecoversRealTunAndRetainsIntent","uncaughtNativeFaultRecoversRealTunAndRetainsIntent","fatalCrashSeriesPreservesRestartBudgetAndStopFencesLateRecovery",
         "exitSnapshotFiltersRolesBoundsAndSortsWithoutIdentifiers","exitCategoriesAreFixedAndUnknownReasonCannotBecomeCrash","exitReadFailureAndInvalidQueryReturnUnavailableWithoutText","exitPidFilterRejectsStaleFutureAndForeignRecords","exitMetadataReadsRealPlatformWithoutChangingIntent","emptyExitHistoryIsAvailableAndDoesNotInventSuccess","engineExitHistoryHasVisibleOnDemandControls"}
     chat_required={"chatSqlOutboxPersistsCiphertextAndFencesAccountGeneration","chatSqlChunksPreserveTwentyFiveMiBAndRejectOversize","chatOutboxQuotaAndLogoutEraseTheOwnedKey","chatPhotoCompressionAppliesOrientationAndStripsGps","chatTextAndDocumentBoundariesDoNotAcceptInvalidMedia","supportChatHasVisibleTitleAndConnectionStatus"}
@@ -97,6 +244,16 @@ if mode=="emulator":
                  "androidDnsLiteralNeverStartsPlatformQuery", "androidDnsCallbacksKeepFailuresDistinctAndCancelQuery",
                  "androidDnsDeadlineCancelsQueryAndRejectsLateSuccess", "androidDnsCancellationReleasesWorkersForNextPolicyCheck"}
     required |= identity_required | chat_required | route_activation_required
+    required |= {"qrImageReturnsOnlyASyntacticallyBoundedInvitation",
+        "floorsPersistAcrossRecreationAndCorruptionNeverResetsToInstallationRoot",
+        "installationUpgradeCommitsBothSignaturesAndKeepsTheRevisionFloor",
+        "administrationEntryUsesTrustedMetadataAndCannotOutliveItsLoginGeneration",
+        "olderIdentityServerKeepsAdministrationHiddenWithoutChangingLogin",
+        "subscriptionRouteRequiresValidatedWifiAndNeverUsesCellular",
+        "manualInvitationStaysLocalUntilConfirmationAndThenUsesOrdinarySession",
+        "cancelledClaimCannotCompleteOrResurrectItsRetiredKey",
+        "signedServiceCanPrepareKeycloakWithoutClaimingTheInvitation",
+        "expiredManualApprovalRequiresActionInsteadOfPollingForever"}
     required |= {"browserReservationAndCancellationPreserveVpnAndDeleteTheKey",
         "controllerRestartResumesSameBrowserGenerationWithoutANewKey",
         "exactErrorCallbackIsSingleUseAndNeverConnectsVpn"}

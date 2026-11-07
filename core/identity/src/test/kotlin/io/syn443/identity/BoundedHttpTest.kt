@@ -7,6 +7,9 @@ import org.junit.AfterClass
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.URI
+import java.io.ByteArrayOutputStream
+import java.util.zip.GZIPOutputStream
 import java.nio.file.Files
 import java.security.KeyStore
 import java.util.concurrent.*
@@ -16,6 +19,13 @@ import io.syn443.policy.Canonical
 import kotlinx.serialization.json.*
 
 class BoundedHttpTest {
+    @Test fun conditionalProviderLengthDoesNotCreateBodyOrRelaxIdentityFraming() {
+        val wire="HTTP/1.1 304 Not Modified\r\nContent-Length: 1024\r\nETag: \"fixture\"\r\n\r\n".toByteArray()
+        val provider=response(wire.inputStream(),2048,allowGzip=true)
+        assertEquals(304,provider.status);assertEquals(0,provider.body.size)
+        assertEquals("\"fixture\"",provider.single("etag"))
+        assertThrows(DeliveryException::class.java) {response(wire.inputStream(),2048)}
+    }
     companion object {
         private val directory=Files.createTempDirectory("syn443-identity-tls")
         private val file=directory.resolve("fixture.p12")
@@ -60,18 +70,36 @@ class BoundedHttpTest {
         assertThrows(DeliveryException::class.java) {reply("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n12345\r\n0\r\n\r\n",4)}
         assertThrows(DeliveryException::class.java) {reply("HTTP/1.1 401 Unauthorized\r\nDPoP-Nonce: first\r\nDPoP-Nonce: second\r\n\r\n").single("dpop-nonce")}
     }
-    private fun tlsRequest(host:String="localhost",factory:SSLSocketFactory=trusted,status:Int=200,body:ByteArray?=null,route:HttpRoute?=null):Reply {
+    private fun tlsRequest(host:String="localhost",factory:SSLSocketFactory=trusted,status:Int=200,body:ByteArray?=null,route:HttpRoute?=null,query:String?=null):Reply {
         val server=serverContext.serverSocketFactory.createServerSocket(0,2,InetAddress.getByName("127.0.0.1")) as SSLServerSocket
         val worker=Executors.newSingleThreadExecutor {r->Thread(r).apply {isDaemon=true}}
         val serving=worker.submit {runCatching {server.accept().use {socket->socket.soTimeout=2000
             val input=socket.inputStream.buffered();var size=0;var first=true;var length=0
             fun line():String {val text=StringBuilder();while(true){val c=input.read();require(c>=0 && ++size<32768);if(c==10)return text.toString().trimEnd('\r');text.append(c.toChar())}}
-            while(true) {val text=line();if(first){assertTrue(text.startsWith((if(body==null)"GET" else "POST")+" /test HTTP/1.1"));first=false};if(text.startsWith("Content-Length: "))length=text.substringAfter(": ").toInt();if(text.isEmpty())break}
+            while(true) {val text=line();if(first){assertEquals((if(body==null)"GET" else "POST")+" /test"+(query?.let {"?$it"}?:"")+" HTTP/1.1",text);first=false};if(text.startsWith("Content-Length: "))length=text.substringAfter(": ").toInt();if(text.isEmpty())break}
             if(body!=null) {assertEquals(body.size,length);assertArrayEquals(body,input.readNBytes(length))}
             socket.outputStream.write("HTTP/1.1 $status Test\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".toByteArray())
         }}}
-        return try {BoundedHttp().use {it.exchange(if(body==null)"GET" else "POST","https://$host:${server.localPort}/test",body=body,factory=factory,route=route)}}
+        return try {BoundedHttp().use {
+            val url="https://$host:${server.localPort}/test"
+            if(query==null)it.exchange(if(body==null)"GET" else "POST",url,body=body,factory=factory,route=route)
+            else it.subscription(URI("$url?$query"),emptyMap(),BoundedHttp.Scope(),5_000,checkNotNull(route),factory)
+        }}
         finally {server.close();serving.get(4,TimeUnit.SECONDS);worker.shutdownNow()}
+    }
+    @Test fun subscriptionTlsPreservesQueryAndBoundsDecodedGzip() {
+        val route=object:HttpRoute {
+            override fun resolve(host:String)=listOf(InetAddress.getByAddress(byteArrayOf(127,0,0,1)))
+            override fun bind(socket:Socket)=Unit
+            override fun check()=Unit
+        }
+        assertEquals("ok",String(tlsRequest(route=route,query="id=synthetic%20source").body))
+        val clear=ByteArray(1024){'a'.code.toByte()}
+        val bytes=ByteArrayOutputStream().apply {GZIPOutputStream(this).use {it.write(clear)}}.toByteArray()
+        val raw="HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: ${bytes.size}\r\n\r\n".toByteArray()+bytes
+        assertArrayEquals(clear,response(raw.inputStream(),clear.size,allowGzip=true).body)
+        assertThrows(DeliveryException::class.java) {response(raw.inputStream(),clear.size-1,allowGzip=true)}
+        assertThrows(DeliveryException::class.java) {response(raw.inputStream(),clear.size)}
     }
     @Test fun actualTlsUsesTrustAndHostnameVerificationAndDoesNotFollowRedirects() {
         assertEquals("ok",String(tlsRequest().body))
