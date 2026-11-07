@@ -28,6 +28,60 @@ class BootstrapTrustStoreTest {
         val der=Signature.getInstance("SHA256withECDSA").run {initSign(key.private);update(text.toByteArray());sign()}
         return text+"."+Identity.encode(Identity.derToRaw(der))
     }
+    @Test fun installationUpgradeCommitsBothSignaturesAndKeepsTheRevisionFloor() {
+        assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val namespace="test-upgrade-"+UUID.randomUUID().toString().replace("-","").take(20)
+        val file=File(context.noBackupFilesDir,"$namespace.bin")
+        val freshNamespace="$namespace-new"
+        val freshFile=File(context.noBackupFilesDir,"$freshNamespace.bin")
+        val oldKey=pair();val nextKey=pair();val online=pair()
+        fun spki(key:KeyPair)=Base64.getEncoder().encodeToString(key.public.encoded)
+        val old=TrustAnchor("root-old",spki(oldKey),1)
+        val next=TrustAnchor("root-new",spki(nextKey),2)
+        val now=System.currentTimeMillis()/1000
+        fun manifest(anchor:TrustAnchor,key:KeyPair,revision:Long):String {
+            val descriptor=ServiceDescriptor(1,"syn443-client-bootstrap",anchor.epoch,revision,"service-a",
+                "https://id.example.invalid/realms/test","syn443-android","https://api.example.invalid",
+                mapOf("online" to spki(online)),now,now,now+3600)
+            return signed(key,anchor.id,Canonical.json.encodeToJsonElement(descriptor),"syn443-bootstrap+jws")
+        }
+        fun rotation(issued:Long,expiry:Long):RootRotation {
+            val transition=RootTransition(1,"syn443-root-transition",old.id,next.id,next.spki,2,issued,issued,expiry)
+            val body=Canonical.json.encodeToJsonElement(transition)
+            return RootRotation(signed(oldKey,old.id,body,"syn443-root-transition+jws"),
+                signed(nextKey,next.id,body,"syn443-root-transition+jws"))
+        }
+        val prior=InstallationProfile(1,old,manifest(old,oldKey,2))
+        val proof=rotation(now,now+3600)
+        val upgraded=InstallationProfile(2,next,manifest(next,nextKey,3),InstallationUpgrade(old,proof))
+        val expired=InstallationUpgrade(old,rotation(now-3600,now-1))
+        val executor=Executors.newSingleThreadExecutor()
+        try {
+            executor.submit {
+                fun store(profile:InstallationProfile)=BootstrapTrustStore(context,namespace,testProfile=profile)
+                assertEquals("service-a",store(prior).defaultBootstrap().serviceId)
+                val original=file.readBytes()
+                for(invalid in listOf(upgraded.copy(upgrade=expired),upgraded.copy(service=prior.service),
+                    upgraded.copy(service=manifest(next,nextKey,2)),
+                    upgraded.copy(upgrade=InstallationUpgrade(old,proof.copy(next=proof.previous))))) {
+                    assertTrue(runCatching {store(invalid).defaultBootstrap()}.isFailure)
+                    assertArrayEquals(original,file.readBytes())
+                }
+                assertEquals("service-a",store(upgraded).defaultBootstrap().serviceId)
+                val migrated=file.readBytes()
+                assertFalse(original.contentEquals(migrated))
+                assertEquals("service-a",store(upgraded).defaultBootstrap().serviceId)
+                assertArrayEquals(migrated,file.readBytes())
+                assertTrue(runCatching {store(prior).defaultBootstrap()}.isFailure)
+                assertArrayEquals(migrated,file.readBytes())
+                val refreshed=InstallationProfile(1,next,manifest(next,nextKey,4))
+                assertEquals("service-a",store(refreshed).defaultBootstrap().serviceId)
+                assertEquals("service-a",BootstrapTrustStore(context,freshNamespace,
+                    testProfile=upgraded.copy(upgrade=expired)).defaultBootstrap().serviceId)
+            }.get(20,TimeUnit.SECONDS)
+        }finally{executor.shutdownNow();file.delete();freshFile.delete()}
+    }
     @Test fun floorsPersistAcrossRecreationAndCorruptionNeverResetsToInstallationRoot(){
         assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
         val context=InstrumentationRegistry.getInstrumentation().targetContext

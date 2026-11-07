@@ -25,16 +25,17 @@ import javax.crypto.spec.GCMParameterSpec
  * The installation asset is public and cannot be replaced by an incoming URI.
  * Root/floor state survives logout and is excluded from Android backup. */
 class BootstrapTrustStore(private val context:Context,private val namespace:String="installation-trust-v1",
-    private val testAnchor:TrustAnchor?=null) {
+    private val testAnchor:TrustAnchor?=null,private val testProfile:InstallationProfile?=null) {
     private val file:AtomicFile
     init {
         require(namespace.matches(Regex("[a-z0-9-]{1,48}")))
-        if(testAnchor!=null)require(io.syn443.android.BuildConfig.DEBUG && namespace.startsWith("test-") && android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        if(testAnchor!=null || testProfile!=null)require((testAnchor==null || testProfile==null) &&
+            io.syn443.android.BuildConfig.DEBUG && namespace.startsWith("test-") && android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
         file=AtomicFile(File(context.noBackupFilesDir,"$namespace.bin"))
     }
     companion object {private val lock=Any();private const val alias="syn443-bootstrap-trust-v1"}
     private val installationProfile by lazy {
-        io.syn443.android.BuildConfig.INSTALLATION_PROFILE.takeIf {testAnchor==null && it.isNotEmpty()}
+        testProfile?:io.syn443.android.BuildConfig.INSTALLATION_PROFILE.takeIf {testAnchor==null && it.isNotEmpty()}
             ?.let(BootstrapTrust::installationProfile)
     }
     private fun worker(){check(Looper.myLooper()!=Looper.getMainLooper() && !Thread.currentThread().name.startsWith("Binder:"))}
@@ -60,7 +61,7 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
     private fun validate(record:TrustRecord,installation:TrustAnchor) {
         BootstrapTrust.validateAnchor(installation);BootstrapTrust.validateAnchor(record.anchor)
         require(record.revision in 0..9_007_199_254_740_991L && record.anchor.epoch>=installation.epoch && record.timeFloor>=0 && record.floors.size<=32)
-        if(record.anchor.epoch==installation.epoch)require(record.anchor==installation)
+        if(record.anchor.epoch==installation.epoch)require(record.anchor.copy(lastTransition="")==installation)
         if(record.installationHash.isNotEmpty())require(record.installationHash==installationHash(installation))
         else if(installationProfile!=null)require(record.anchor==installation)
         record.floors.forEach {(id,floor)->require(id==floor.serviceId && id.matches(Regex("[A-Za-z0-9_-]{1,64}")) &&
@@ -68,14 +69,30 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
     }
     private fun read():TrustRecord {
         val installation=installed().also(BootstrapTrust::validateAnchor)
-        if(!file.baseFile.exists() && !File(file.baseFile.path+".bak").exists() && !File(file.baseFile.path+".new").exists())return TrustRecord(anchor=installation)
+        val record=readRecord()?:return TrustRecord(anchor=installation)
+        val profile=installationProfile
+        val upgrade=profile?.upgrade
+        if(upgrade==null || record.installationHash==installationHash(installation)) {
+            validate(record,installation)
+            return record
+        }
+        validate(record,upgrade.previousAnchor)
+        val now=maxOf(System.currentTimeMillis()/1000,record.timeFloor)
+        val next=BootstrapTrust.advance(upgrade.rotation,record.anchor,now)
+        require(next.copy(lastTransition="")==installation)
+        val (descriptor,floor)=defaultDescriptor(checkNotNull(profile).service,record.copy(anchor=next),now)
+        return write(record.copy(revision=Math.addExact(record.revision,1),anchor=next,
+            floors=record.floors+(floor.serviceId to floor),timeFloor=maxOf(record.timeFloor,descriptor.issuedAt)))
+    }
+    private fun readRecord():TrustRecord? {
+        if(!file.baseFile.exists() && !File(file.baseFile.path+".bak").exists() && !File(file.baseFile.path+".new").exists())return null
         val bytes=bounded(file.openRead(),65_536);require(bytes.size>=30 && bytes[0]==1.toByte())
         val plain=try {Cipher.getInstance("AES/GCM/NoPadding").run {
             init(Cipher.DECRYPT_MODE,key(false),GCMParameterSpec(128,bytes.copyOfRange(1,13)));updateAAD(aad());doFinal(bytes.copyOfRange(13,bytes.size))
         }}finally {bytes.fill(0)}
-        return try {Canonical.json.decodeFromString<TrustRecord>(Policy.utf8(plain)).also {validate(it,installation)}}finally{plain.fill(0)}
+        return try {Canonical.json.decodeFromString<TrustRecord>(Policy.utf8(plain))}finally{plain.fill(0)}
     }
-    private fun write(record:TrustRecord) {
+    private fun write(record:TrustRecord):TrustRecord {
         val installation=installed()
         val bound=record.copy(installationHash=installationHash(installation))
         validate(bound,installation)
@@ -84,7 +101,8 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
         val data=try {Cipher.getInstance("AES/GCM/NoPadding").run {init(Cipher.ENCRYPT_MODE,key(true));updateAAD(aad());byteArrayOf(1)+iv+doFinal(plain)}}finally{plain.fill(0)}
         val output=file.startWrite()
         try {output.write(data);file.finishWrite(output)}catch(e:Exception){file.failWrite(output);throw e}finally{data.fill(0)}
-        require(read()==bound)
+        require(readRecord()==bound)
+        return bound
     }
     fun preview(raw:String):AuthenticatedInvite {worker();return synchronized(lock){
         val state=read();val link=BootstrapTrust.parse(raw)
@@ -100,17 +118,23 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
 
     fun defaultBootstrap():Bootstrap = acceptDefaultDescriptor(checkNotNull(installationProfile).service)
 
+    private fun defaultDescriptor(raw:String,state:TrustRecord,now:Long):Pair<ServiceDescriptor,ServiceFloor> {
+        val (descriptor,floor)=BootstrapTrust.descriptor(raw,state.anchor,ServiceFloor(),now)
+        installationProfile?.upgrade?.previousAnchor?.let {require(it.spki !in descriptor.roots.values)}
+        val previous=state.floors[floor.serviceId]
+        require(if(previous==null) state.floors.size<32 else floor==previous || floor.revision>previous.revision)
+        return descriptor to floor
+    }
+
     internal fun acceptDefaultDescriptor(raw:String):Bootstrap {
         worker()
         return synchronized(lock) {
             val state=read()
             val now=maxOf(System.currentTimeMillis()/1000,state.timeFloor)
-            val (descriptor,floor)=BootstrapTrust.descriptor(raw,state.anchor,ServiceFloor(),now)
-            val previous=state.floors[floor.serviceId]
-            require(if(previous==null) state.floors.size<32 else floor==previous || floor.revision>previous.revision)
+            val (descriptor,floor)=defaultDescriptor(raw,state,now)
             val bootstrap=Bootstrap(descriptor.serviceId,descriptor.issuer,descriptor.clientId,descriptor.apiOrigin,
                 descriptor.roots.toMap(),controlPanelOrigin=descriptor.controlPanelOrigin).also {it.validate()}
-            if(floor!=previous)write(state.copy(revision=Math.addExact(state.revision,1),
+            if(floor!=state.floors[floor.serviceId])write(state.copy(revision=Math.addExact(state.revision,1),
                 floors=state.floors+(floor.serviceId to floor),timeFloor=maxOf(state.timeFloor,descriptor.issuedAt)))
             bootstrap
         }

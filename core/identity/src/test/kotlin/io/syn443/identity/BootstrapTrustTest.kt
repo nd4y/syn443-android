@@ -154,6 +154,21 @@ class BootstrapTrustTest {
         fail {BootstrapTrust.installationProfile("x".repeat(12_001))}
         fail {BootstrapTrust.installationProfile(encode(profile)+"=")}
     }
+    @Test fun installationUpgradeRequiresClosedVersionAndAdjacentDistinctRoots() {
+        val upgrade=InstallationUpgrade(anchor,RootRotation("old.proof.signature","new.proof.signature"))
+        val profile=InstallationProfile(2,nextAnchor,manifest(),upgrade)
+        fun encode(value:InstallationProfile)=Identity.encode(Canonical.json.encodeToString(value).toByteArray())
+        assertEquals(profile,BootstrapTrust.installationProfile(encode(profile)))
+        val invalidProfiles=listOf(profile.copy(schemaVersion=1),profile.copy(schemaVersion=3),
+            profile.copy(upgrade=null),profile.copy(anchor=nextAnchor.copy(epoch=3)),
+            profile.copy(anchor=nextAnchor.copy(id=anchor.id)),profile.copy(anchor=nextAnchor.copy(spki=anchor.spki)),
+            profile.copy(upgrade=upgrade.copy(previousAnchor=anchor.copy(lastTransition=Identity.random()))),
+            profile.copy(upgrade=upgrade.copy(rotation=upgrade.rotation.copy(previous=""))),
+            profile.copy(upgrade=upgrade.copy(rotation=upgrade.rotation.copy(next="x".repeat(BootstrapTrust.MAX_MANIFEST+1)))))
+        for(invalid in invalidProfiles) {
+            fail {BootstrapTrust.installationProfile(encode(invalid))}
+        }
+    }
     @Test fun sharedGoCertificatesMatchKotlinFloorsAndDualRootTransition() {
         val raw=requireNotNull(javaClass.classLoader.getResourceAsStream("bootstrap-wire-vectors.json")).use {it.readBytes().toString(Charsets.UTF_8)}
         val fixture=Canonical.parse(raw).jsonObject

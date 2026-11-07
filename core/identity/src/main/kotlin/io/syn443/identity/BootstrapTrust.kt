@@ -31,7 +31,10 @@ import java.util.Base64
 @Serializable data class RootTransition(val schemaVersion:Int,val audience:String,val from:String,val to:String,
     val spki:String,val epoch:Long,val issuedAt:Long,val notBefore:Long,val expires:Long)
 @Serializable data class RootRotation(val previous:String,val next:String)
-@Serializable data class InstallationProfile(val schemaVersion:Int,val anchor:TrustAnchor,val service:String) {
+@Serializable data class InstallationUpgrade(val previousAnchor:TrustAnchor,val rotation:RootRotation)
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable data class InstallationProfile(val schemaVersion:Int,val anchor:TrustAnchor,val service:String,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val upgrade:InstallationUpgrade?=null) {
     override fun toString()="InstallationProfile([redacted])"
 }
 data class InviteLink(val serviceId:String,val origin:String,val code:String,val manifest:String) {
@@ -55,10 +58,22 @@ object BootstrapTrust {
 
     fun installationProfile(encoded:String):InstallationProfile {
         require(encoded.length in 1..12_000)
-        val raw=Policy.utf8(Policy.decode64(encoded))
-        return Canonical.json.decodeFromString<InstallationProfile>(Canonical.encode(Canonical.parse(raw))).also {
-            require(it.schemaVersion==1 && it.anchor.lastTransition.isEmpty() && it.service.length in 1..MAX_MANIFEST)
+        val document=Canonical.parse(Policy.utf8(Policy.decode64(encoded))).jsonObject
+        return Canonical.json.decodeFromString<InstallationProfile>(Canonical.encode(document)).also {
+            require(it.anchor.lastTransition.isEmpty() && it.service.length in 1..MAX_MANIFEST)
             validateAnchor(it.anchor)
+            when(it.schemaVersion) {
+                1 -> require("upgrade" !in document)
+                2 -> {
+                    val upgrade=requireNotNull(it.upgrade)
+                    val previous=upgrade.previousAnchor
+                    validateAnchor(previous)
+                    require(previous.lastTransition.isEmpty() && previous.epoch==it.anchor.epoch-1 &&
+                        previous.id!=it.anchor.id && previous.spki!=it.anchor.spki)
+                    require(upgrade.rotation.previous.length in 1..MAX_MANIFEST && upgrade.rotation.next.length in 1..MAX_MANIFEST)
+                }
+                else -> error("Unsupported installation profile")
+            }
         }
     }
     fun publicKey(raw:String):ECPublicKey {

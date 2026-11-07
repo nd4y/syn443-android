@@ -58,3 +58,17 @@ rotation history to the original installed anchor. Existing enrolled sessions
 keep their protected authority. A damaged local override or trust journal
 fails closed. Configure and physically verify the real signed managed APK
 separately from generic Actions builds.
+
+An APK may carry a version 2 profile with the next installation anchor, a
+descriptor signed by that anchor and a dual-signed proof from the previous APK
+anchor. On an existing installation, the worker checks the stored anchor binding,
+the transition window and the descriptor revision before committing the new root
+and service floors in one encrypted write. An unrelated transition or an expired
+transition the client has never accepted leaves the journal intact. An APK carrying the previous root can no longer read
+the migrated journal. Existing enrolled sessions retain their own authority.
+
+A clean installation uses the root from its signed APK. Once migration succeeds,
+a later APK can use a normal version 1 profile signed by the new root. A client
+that misses the transition window needs a separately trusted recovery release.
+The automated tests cover the journal and profile formats. A signed update on
+the configured release device remains a separate acceptance check.

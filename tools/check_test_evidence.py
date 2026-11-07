@@ -58,6 +58,8 @@ if mode=="identity":
         (c.get('classname'),c.get('name')) for c in cases}, 'Required HTTPS enrollment carrier case missing'
     assert ('io.syn443.identity.BootstrapTrustTest','installationProfileIsBoundedAndHasNoImportedRotationHistory') in {
         (c.get('classname'),c.get('name')) for c in cases}, 'Required installation profile case missing'
+    assert ('io.syn443.identity.BootstrapTrustTest','installationUpgradeRequiresClosedVersionAndAdjacentDistinctRoots') in {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required installation upgrade profile case missing'
     assert {('io.syn443.identity.AssignmentsTest','activationReportPersistsOnlyFinalCurrentEnvelopeDecisions'),
         ('io.syn443.identity.AuthProtocolTest','activationReportBindsBodyToCurrentDeviceProofAndSupportsOlderServers')} <= {
         (c.get('classname'),c.get('name')) for c in cases}, 'Required activation reporting cases missing'
@@ -195,6 +197,7 @@ if mode=="emulator":
     required |= identity_required | chat_required | route_activation_required
     required |= {"qrImageReturnsOnlyASyntacticallyBoundedInvitation",
         "floorsPersistAcrossRecreationAndCorruptionNeverResetsToInstallationRoot",
+        "installationUpgradeCommitsBothSignaturesAndKeepsTheRevisionFloor",
         "manualInvitationStaysLocalUntilConfirmationAndThenUsesOrdinarySession",
         "cancelledClaimCannotCompleteOrResurrectItsRetiredKey",
         "signedServiceCanPrepareKeycloakWithoutClaimingTheInvitation",
