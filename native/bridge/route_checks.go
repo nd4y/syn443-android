@@ -10,6 +10,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -22,8 +23,9 @@ import (
 )
 
 type routeCheck struct {
-	Method string `json:"method"`
-	Target string `json:"target"`
+	Method     string `json:"method"`
+	Target     string `json:"target"`
+	ExpectedIP string `json:"expected_ip,omitempty"`
 }
 type routePlan struct {
 	ID       string       `json:"id"`
@@ -220,15 +222,30 @@ func validRouteCheck(c routeCheck) bool {
 	if len(c.Target) < 1 || len(c.Target) > 2048 {
 		return false
 	}
+	if c.Method == "https_exit_ip" {
+		if _, ok := routeExitIP(c.ExpectedIP); !ok {
+			return false
+		}
+	} else if c.ExpectedIP != "" {
+		return false
+	}
 	switch c.Method {
 	case "tcp", "ssh_banner":
 		host, port, err := net.SplitHostPort(c.Target)
 		return err == nil && host != "" && validRoutePort(port) && !strings.ContainsAny(host, " /\\\r\n\t")
-	case "tls", "https_204":
+	case "tls", "https_204", "https_exit_ip":
 		u, err := url.Parse(c.Target)
 		return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Fragment == "" && (u.Port() == "" || validRoutePort(u.Port()))
 	}
 	return false
+}
+
+func routeExitIP(raw string) (netip.Addr, bool) {
+	if len(raw) < 2 || len(raw) > 45 {
+		return netip.Addr{}, false
+	}
+	address, err := netip.ParseAddr(raw)
+	return address, err == nil && address.Zone() == "" && !address.Is4In6()
 }
 func validRoutePort(port string) bool {
 	n, e := strconv.ParseUint(port, 10, 16)
@@ -440,7 +457,7 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 	defer cancel()
 	target := c.Target
 	var u *url.URL
-	if c.Method == "tls" || c.Method == "https_204" {
+	if c.Method == "tls" || c.Method == "https_204" || c.Method == "https_exit_ip" {
 		u, _ = url.Parse(target)
 		port := u.Port()
 		if port == "" {
@@ -512,8 +529,15 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 	if c.Method == "tls" {
 		return "ok", true
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.Target, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Target, nil)
+	if err != nil {
+		return "unsupported", false
+	}
 	req.Header.Set("Connection", "close")
+	if c.Method == "https_exit_ip" {
+		req.Header.Set("Cache-Control", "no-cache, no-store")
+		req.Header.Set("Accept-Encoding", "identity")
+	}
 	if req.Write(secure) != nil {
 		return "request_failed", true
 	}
@@ -528,6 +552,28 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 		return "check_timeout", true
 	}
 	defer response.Body.Close()
+	if c.Method == "https_exit_ip" {
+		if response.StatusCode != 200 || response.ContentLength < 2 || response.ContentLength > 47 ||
+			len(response.TransferEncoding) > 0 || response.Header.Get("Content-Encoding") != "" || response.Header.Get("Age") != "" {
+			return "exit_evidence_invalid", true
+		}
+		body, readErr := io.ReadAll(response.Body)
+		if parent.Err() != nil {
+			return "cancelled", false
+		}
+		if ctx.Err() != nil {
+			return "check_timeout", false
+		}
+		reported, ok := routeExitIP(strings.TrimSuffix(strings.TrimSuffix(string(body), "\n"), "\r"))
+		if readErr != nil || int64(len(body)) != response.ContentLength || !ok {
+			return "exit_evidence_invalid", true
+		}
+		expected, _ := routeExitIP(c.ExpectedIP)
+		if reported != expected {
+			return "exit_ip_mismatch", true
+		}
+		return "ok", true
+	}
 	length := response.Header.Get("Content-Length")
 	if response.StatusCode != 204 || response.ContentLength > 0 || len(response.TransferEncoding) > 0 || (length != "" && length != "0") {
 		return "http_response_mismatch", true

@@ -169,6 +169,18 @@ class PolicyTest {
         invalid { verify(sign(candidate.copy(schemaVersion=1,keyThumbprint="",
             requiredCapabilities=candidate.requiredCapabilities-"policy.keybound.v2"))) }
     }
+    @Test fun exitCheckRequiresMatchingCapabilityOnKeyBoundConfiguration() {
+        val baseline = payload()
+        val engine = """{"outbounds":[{"type":"direct","tag":"direct"}],"route_checks":[{"outbound":"direct","checks":[{"method":"https_exit_ip","target":"https://health.example.invalid/address","expected_ip":"192.0.2.9"}]}]}"""
+        val qualified = baseline.copy(schemaVersion = 2, keyThumbprint = enc(ByteArray(32) { 9 }),
+            requiredCapabilities = baseline.requiredCapabilities + listOf("policy.keybound.v2", "route.health.v1", Policy.ROUTE_EXIT_IP),
+            engineConfigB64 = enc(engine.toByteArray()), contentHash = Policy.hash(engine))
+        assertEquals(engine, verify(sign(qualified)).engineConfig)
+        invalid { verify(sign(qualified.copy(operation = "release"))) }
+        invalid { verify(sign(qualified.copy(requiredCapabilities = qualified.requiredCapabilities - Policy.ROUTE_EXIT_IP))) }
+        invalid { verify(sign(qualified.copy(engineConfigB64 = baseline.engineConfigB64, contentHash = baseline.contentHash))) }
+    }
+
     @Test fun replayAndFloorsSurviveSerialization() {
         val p = verify(sign()); val j = Policy.stage(Journal(), p)
         val disk = Policy.json.decodeFromString<Journal>(Policy.json.encodeToString(j))

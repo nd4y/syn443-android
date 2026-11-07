@@ -67,6 +67,7 @@ if mode=="emulator":
     assert {("io.syn443.android.RouteSnapshotTest",name) for name in {
         "sshWithoutServerPinCannotBeImportedAssignedOrRendered",
         "insecureProxyAndDnsTlsCannotBeImportedAssignedOrRendered",
+        "routeExitProofIsRequiredAndReportsMismatchWithoutExposingAddresses",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required peer verification cases missing"
     assert {("io.syn443.android.ManagedFailoverTest",name) for name in {
         "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
@@ -84,6 +85,7 @@ if mode=="policy":
         "signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences",
         "managedRouteChecksKeepTheirSignedBindingAndCapability",
         "reserveCooldownRequiresBoundConfigurationAndHasAnIndependentRollbackFingerprint",
+        "exitCheckRequiresMatchingCapabilityOnKeyBoundConfiguration",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="health":
     assert {('io.syn443.health.ChecksTest',name) for name in {
