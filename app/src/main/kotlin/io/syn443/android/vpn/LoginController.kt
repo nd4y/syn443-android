@@ -26,13 +26,15 @@ import javax.net.ssl.TrustManagerFactory
 /** Controller-process pilot. One bounded worker; intent writes never wait for Keystore/network. */
 class LoginController private constructor(private val context:android.app.Application,
     private val namespace:String="device-login-v1",private val testExchange:IdentityExchange?=null,
-    private val testBeforeQueue:(()->Unit)?=null,private val testTrustAnchor:TrustAnchor?=null) {
+    private val testBeforeQueue:(()->Unit)?=null,private val testTrustAnchor:TrustAnchor?=null,
+    private val testReportVpnOn:(()->Boolean)?=null) {
     companion object {
         @Volatile private var instance:LoginController?=null
         @Synchronized fun get(context:Context):LoginController = instance ?: LoginController(context.applicationContext as android.app.Application).also {instance=it}
-        internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange,beforeQueue:(()->Unit)?=null,anchor:TrustAnchor?=null):LoginController {
+        internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange,beforeQueue:(()->Unit)?=null,
+            anchor:TrustAnchor?=null,reportVpnOn:(()->Boolean)?=null):LoginController {
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") && namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
-            return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue,anchor)
+            return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue,anchor,reportVpnOn)
         }
     }
     private val journal=LoginJournal(context,namespace)
@@ -72,6 +74,8 @@ class LoginController private constructor(private val context:android.app.Applic
     private var provisioningRetry=ProvisioningRetry()
     @Volatile private var lastOverlayFetch=0L
     private var overlayRetry=ProvisioningRetry()
+    private data class ActivationDelivery(val generation:Long,val hash:String,val retryAt:Long,val done:Boolean)
+    private var activationDelivery:ActivationDelivery?=null
     private data class ChatTicket(val id:String,val generation:Long,val expires:Long,var state:String="pending",var body:String="",var reason:String="")
     private var chatTicket:ChatTicket?=null
     /** Private UI mailbox: at most one bounded operation; no content enters public status. */
@@ -130,7 +134,7 @@ class LoginController private constructor(private val context:android.app.Applic
     private fun boot()=Settings.Global.getInt(context.contentResolver,Settings.Global.BOOT_COUNT,-1).also {require(it>=0)}
     private fun elapsed()=SystemClock.elapsedRealtime()
     private val pendingCommands=java.util.concurrent.atomic.AtomicInteger()
-    private inner class Command(private val admitted:Long,private val block:()->Unit):Runnable {
+    private inner class Command(private val admitted:Long,private val block:()->Unit,private val quiet:Boolean=false):Runnable {
         private val completed=java.util.concurrent.atomic.AtomicBoolean()
         fun obsolete()=admitted!=commandEpoch
         fun complete() {if(completed.compareAndSet(false,true))check(pendingCommands.decrementAndGet()>=0)}
@@ -139,7 +143,7 @@ class LoginController private constructor(private val context:android.app.Applic
                 if(synchronized(commands) {if(admitted!=commandEpoch)true else {workerEpoch=admitted;false}})return
                 block();""
             } catch(e:AuthException) {
-                if(e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))runCatching {
+                if(!quiet && e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))runCatching {
                     val s=journal.snapshot()
                     if(s.phase in setOf(LoginPhase.INVITING,LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))reauthenticate(s)
                 }
@@ -147,7 +151,7 @@ class LoginController private constructor(private val context:android.app.Applic
             }
             catch(e:LoginStorageException) {if(e.reason==LoginStorageFailure.STALE)"" else e.reason.name}
             catch(_:Exception) {"LOGIN_UNAVAILABLE"}
-            synchronized(commands) {if(admitted==commandEpoch)error=reason}
+            if(!quiet)synchronized(commands) {if(admitted==commandEpoch)error=reason}
         } finally {complete()}}
     }
     private fun submit(block:()->Unit) {
@@ -164,11 +168,11 @@ class LoginController private constructor(private val context:android.app.Applic
             }
         } catch(e:Exception) {task.complete();throw e}
     }
-    private fun submitIfIdle(onAdmission:()->Unit={},admit:()->Boolean={true},block:()->Unit):Boolean {
+    private fun submitIfIdle(onAdmission:()->Unit={},admit:()->Boolean={true},quiet:Boolean=false,block:()->Unit):Boolean {
         val task=synchronized(commands) {
             if(pendingCommands.get()!=0 || !admit())return false
             onAdmission()
-            pendingCommands.incrementAndGet();Command(commandEpoch,block)
+            pendingCommands.incrementAndGet();Command(commandEpoch,block,quiet)
         }
         enqueue(task);return true
     }
@@ -719,10 +723,44 @@ class LoginController private constructor(private val context:android.app.Applic
             val policy=checkNotNull(assignedRuntime.allowed(s,raw))
             (policy.payload.refreshAfterMs-checkNotNull(view.state.time).window(boot(),elapsed()).upperMs).coerceIn(30_000,300_000)
         }.getOrDefault(30_000L)
-        if(elapsed()-lastAssignmentFetch<interval)return !force && refreshOverlayCredential()
+        if(elapsed()-lastAssignmentFetch<interval)return !force && (refreshOverlayCredential() || reportActivation())
         if(runCatching {assignedRuntime.read(s).state.journal.phase=="applying"}.getOrDefault(false))return false
         return submitIfIdle(onAdmission={lastAssignmentFetch=elapsed()}) {
             current(s);resumeWorker(s)
+        }
+    }
+    /** Piggyback on the existing supervisor tick and physical account transport. */
+    private fun reportVpnOn():Boolean = testReportVpnOn?.invoke() ?: state().checkpoint().desiredOn
+    private fun reportActivation():Boolean {
+        if(!reportVpnOn())return false
+        lateinit var expected:LoginIntent
+        lateinit var report:DeviceActivationReport
+        return submitIfIdle(quiet=true,admit={
+            val s=journal.snapshot()
+            val value=runCatching {assignedRuntime.read(s).state.activationReport}.getOrNull()
+            val previous=activationDelivery
+            if(s.phase!=LoginPhase.POLICY_CACHED || value==null ||
+                previous?.let {it.generation==s.generation && it.hash==value.envelopeHash && (it.done || elapsed()<it.retryAt)}==true)false
+            else {expected=s;report=value;true}
+        },onAdmission={activationDelivery=ActivationDelivery(expected.generation,report.envelopeHash,elapsed()+60_000,false)}) {
+            current(expected)
+            val payload=payload(expected)
+            val assignment=checkNotNull(journal.readAssignment(expected))
+            require(Assignments.report(assignment,expected,payload,boot(),elapsed())==report)
+            if(!reportVpnOn())return@submitIfIdle
+            try {
+                withProtocol(expected,payload.bootstrap) {protocol,scope->
+                    protocol.reportActivation(report,checkNotNull(payload.session),scope)
+                }
+            } catch(error:AuthException) {
+                // Superseded publications cannot be acknowledged. All other
+                // failures retain the same bounded retry and never change login.
+                if(error.reason!=AuthFailure.CONFLICT)throw error
+            }
+            synchronized(commands) {
+                current(expected)
+                activationDelivery=ActivationDelivery(expected.generation,report.envelopeHash,0,true)
+            }
         }
     }
     /** Supervisor calls this only with desired On and an eligible physical
@@ -826,7 +864,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }}
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
-        commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()
+        commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;activationDelivery=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {

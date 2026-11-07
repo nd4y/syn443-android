@@ -39,6 +39,28 @@ class AssignmentsTest {
         Assignments.receive(state,intent,payload,PolicyReply(signed(p),time),1,1000)
     private fun acknowledged(state:AssignmentState)=LoginRecovery.policyCached(login,1,Assignments.receipt(state,login,payload,1,1000),login.protectedHash)
     private fun invalid(block:()->Unit) {assertThrows(IllegalArgumentException::class.java,block)}
+    @Test fun activationReportPersistsOnlyFinalCurrentEnvelopeDecisions() {
+        val first=receive();val enrolled=acknowledged(first)
+        assertNull(Assignments.report(first,enrolled,payload,1,1000))
+        val applying=Assignments.begin(first,enrolled,payload,listOf(false),1,1000)
+        assertNull(Assignments.report(applying,enrolled,payload,1,1000))
+        val committed=Assignments.finish(applying,enrolled,payload,listOf(true),true,1,1000)
+        val restored=Policy.json.decodeFromString<AssignmentState>(Policy.json.encodeToString(committed))
+        val report=checkNotNull(Assignments.report(restored,enrolled,payload,1,1000))
+        assertEquals(DeviceActivationReport(1,1,enrolled.policyHash,committed.journal.activationGeneration,"committed",1),report)
+        assertFalse(report.toString().contains(enrolled.policyHash))
+        invalid {Assignments.report(restored,enrolled.copy(policyHash=Identity.random()),payload,1,1000)}
+        invalid {Assignments.report(restored,enrolled,payload,2,1000)}
+        val renewed=receive(committed,policy(2).copy(offlineUntilMs=now+7_200_000),enrolled)
+        assertEquals("committed",renewed.journal.phase)
+        assertNull(Assignments.report(renewed,acknowledged(renewed),payload,1,1000))
+        val changed=receive(committed,policy(2).copy(activation=policy().activation.copy(timeoutSeconds=31)),enrolled)
+        val current=acknowledged(changed)
+        val rollback=Assignments.abort(Assignments.begin(changed,current,payload,listOf(true),1,1000),current,payload,"required_route_failed")
+        assertEquals(DeviceActivationReport(1,2,current.policyHash,rollback.journal.activationGeneration,"rolled_back",1),
+            Assignments.report(rollback,current,payload,1,1000))
+        assertEquals(1L,Assignments.authorized(rollback,current,payload,1,1000).payload.revision)
+    }
     @Test fun firstAssignmentRequiresDurableReceiptAndSuccessfulChecksWithoutUnsignedFallback() {
         val state=receive();assertEquals("prepared",state.journal.phase)
         assertEquals(state,Policy.json.decodeFromString<AssignmentState>(Policy.json.encodeToString(state)))

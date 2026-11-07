@@ -120,6 +120,8 @@ class LoginControllerTest {
             return reply(text=Canonical.encode(buildJsonObject{put("consumed",false);put("envelope",envelope)}),timeMs=issued)
         }
         @Volatile var policyRevision=1L
+        @Volatile var activationStatus=204
+        val activationReports=java.util.Collections.synchronizedList(mutableListOf<DeviceActivationReport>())
         @Volatile var engineTag="direct"
         @Volatile var policyStatus=200
         @Volatile var policyProblem="test_failure"
@@ -244,6 +246,11 @@ class LoginControllerTest {
                 if(dropRefresh) {dropRefresh=false;throw DeliveryException(DeliveryFailure.TRANSPORT)}
                 return reply(text=receipt.second)
             }
+            if(url.endsWith("/device/policy/status")) {
+                check(method=="POST" && headers["Authorization"]=="DPoP "+sessions.getValue(thumb).accessToken)
+                activationReports.add(Canonical.json.decodeFromString<DeviceActivationReport>(checkNotNull(body).toString(Charsets.UTF_8)))
+                return reply(activationStatus,if(activationStatus==204)"" else "{}")
+            }
             if(url.endsWith("/device/policy")) {
                 if(policyStatus!=200)return reply(policyStatus,org.json.JSONObject().put("code",policyProblem).toString())
                 if(!policyReady)return reply(202,"""{"code":"provisioning_pending"}""")
@@ -279,9 +286,9 @@ class LoginControllerTest {
         val end=SystemClock.elapsedRealtime()+20_000
         while(!predicate()) {check(SystemClock.elapsedRealtime()<end) {"isolated login timed out"};Thread.sleep(50)}
     }
-    private inner class Fixture(val server:Server=Server(),val beforeQueue:(()->Unit)?=null) {
+    private inner class Fixture(val server:Server=Server(),val beforeQueue:(()->Unit)?=null,val reportVpnOn:(()->Boolean)?=null) {
         val namespace="test-"+UUID.randomUUID().toString()
-        var controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue)
+        var controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,reportVpnOn=reportVpnOn)
         val journal=LoginJournal(context,namespace)
         fun idle()=until {!controller.status().getBoolean("busy")}
         fun begin():String {
@@ -290,14 +297,14 @@ class LoginControllerTest {
             val state=checkNotNull(server.authorization.toUri().getQueryParameter("state"))
             return Identity.callback+"?"+Identity.form(mapOf("state" to state,"iss" to server.bootstrap.issuer,"code" to "synthetic-code"))
         }
-        fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue);controller.recover();idle()}
+        fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,reportVpnOn=reportVpnOn);controller.recover();idle()}
         fun legacyCache() {
             idle();controller.shutdownTest()
             val s=journal.snapshot();val p=LoginPayload.decode(journal.readProtected(s),s).copy(advertisedCapabilities=null)
             journal.prepare(s,p.encode()).use {prepared->journal.commit(s,LoginRecovery.capabilitiesRecorded(s,s.generation,prepared.hash),prepared)}
             server.capabilities[s.thumbprint]=IdentityOperation.requiredCapabilities
             server.capabilityVersions.remove(s.thumbprint)
-            controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue)
+            controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,reportVpnOn=reportVpnOn)
         }
         fun cleanup() {
             server.release.countDown();server.releaseRevoke.countDown();server.releaseOverlayFetch.countDown();controller.cancel();idle();check(journal.snapshot().phase==LoginPhase.SIGNED_OUT)
@@ -307,14 +314,14 @@ class LoginControllerTest {
             check(listOf(bootstrap,File(bootstrap.path+".bak"),File(bootstrap.path+".new")).none {it.exists()})
         }
     }
-    private fun fixture(beforeQueue:(()->Unit)?=null,controlPanelOrigin:String="",block:(Fixture)->Unit) {
+    private fun fixture(beforeQueue:(()->Unit)?=null,controlPanelOrigin:String="",reportVpnOn:(()->Boolean)?=null,block:(Fixture)->Unit) {
         check(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
         context.contentResolver.call("content://io.syn443.control".toUri(),"disconnect",null,null)
         until {
             val raw=context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null)?.getString("json")
             raw!=null && org.json.JSONObject(raw).let {!it.optBoolean("desiredOn") && !it.optBoolean("engineActive")}
         }
-        val f=Fixture(server=Server(controlPanelOrigin),beforeQueue=beforeQueue)
+        val f=Fixture(server=Server(controlPanelOrigin),beforeQueue=beforeQueue,reportVpnOn=reportVpnOn)
         var failure:Throwable?=null
         try {
             f.controller.configure(Canonical.json.encodeToString(f.server.bootstrap));f.idle()
@@ -326,6 +333,38 @@ class LoginControllerTest {
             block(f)
         } catch(e:Throwable) {failure=e;throw e}
         finally {try {f.cleanup()} catch(e:Throwable) {if(failure==null)throw e else failure.addSuppressed(e)}}
+    }
+    @Test fun activationDeliveryUsesDurableDecisionAndCannotChangeLoginOnFailure() {
+        val on=java.util.concurrent.atomic.AtomicBoolean()
+        fixture(reportVpnOn=on::get) { f ->
+            f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+            fun finish(baseline:Boolean,actual:Boolean):AssignmentState {
+                val ticket=f.controller.assignmentTicket()
+                assertTrue(f.controller.beginAssignment(ticket,listOf(baseline)));f.idle()
+                assertTrue(f.controller.finishAssignment(ticket,listOf(actual),true));f.idle()
+                return checkNotNull(f.journal.readAssignment(f.journal.snapshot()))
+            }
+            val first=finish(false,true);val original=f.journal.snapshot()
+            assertFalse(f.controller.refreshAssignment(false))
+            assertTrue(f.server.activationReports.isEmpty())
+            on.set(true);f.server.activationStatus=403
+            val reason=f.controller.status().getString("reason")
+            assertTrue(f.controller.refreshAssignment(false));f.idle()
+            assertEquals(listOf(first.activationReport),f.server.activationReports.toList())
+            assertEquals(original,f.journal.snapshot())
+            assertEquals(reason,f.controller.status().getString("reason"))
+            assertFalse(f.controller.refreshAssignment(false))
+            f.server.policyRevision=2;f.server.engineTag="replacement"
+            f.controller.retry(original.generation);f.idle()
+            val rollback=finish(true,false)
+            assertEquals("rolled_back",rollback.journal.phase)
+            f.server.activationStatus=204
+            assertTrue(f.controller.refreshAssignment(false));f.idle()
+            assertEquals(listOf(first.activationReport,rollback.activationReport),f.server.activationReports.toList())
+            assertEquals(1L,checkNotNull(rollback.activationReport).activePolicyRevision)
+            assertFalse(f.controller.refreshAssignment(false))
+            assertEquals(rollback,f.journal.readAssignment(f.journal.snapshot()))
+        }
     }
     @Test fun legacyCapabilityApprovalSurvivesRestartWithoutChangingAssignedPolicyOrDeviceIdentity()=fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle();val first=f.journal.snapshot()

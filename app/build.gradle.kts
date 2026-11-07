@@ -33,8 +33,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 42
-        versionName = "0.9.14-policy-check-diagnostics"
+        versionCode = 43
+        versionName = "0.9.15-activation-reporting"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }

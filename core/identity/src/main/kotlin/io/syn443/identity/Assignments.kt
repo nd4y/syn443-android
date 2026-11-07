@@ -16,7 +16,8 @@ import kotlinx.serialization.ExperimentalSerializationApi
 @Serializable data class AssignmentState(val identity:AssignmentIdentity?=null,
     val journal:Journal=Journal(),val time:TrustedTime?=null,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val applyDeadlineElapsed:Long=0,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val applyBoot:Int=-1) {
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val applyBoot:Int=-1,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val activationReport:DeviceActivationReport?=null) {
     override fun toString()="AssignmentState(phase=${journal.phase}, [redacted])"
 }
 
@@ -56,7 +57,7 @@ object Assignments {
         if(reply.envelope==j.desired || reply.envelope==j.active || reply.envelope==j.candidate)
             return state.copy(time=reply.time)
         require(j.phase!="applying") // Finish/retire an activation before admitting another candidate.
-        if(leaseRenewal(state,login,payload,verified))return state.copy(time=reply.time,journal=j.copy(
+        if(leaseRenewal(state,login,payload,verified))return state.copy(time=reply.time,activationReport=null,journal=j.copy(
             desired=reply.envelope,active=reply.envelope,
             lastGood=if(j.lastGood==j.active)reply.envelope else j.lastGood,
             maxRevision=verified.payload.revision))
@@ -124,7 +125,7 @@ object Assignments {
         if(state.applyBoot!=boot || elapsed>=state.applyDeadlineElapsed)
             return abort(state,login,payload,"activation_deadline")
         val candidate=authorized(state,login,payload,boot,elapsed,true)
-        return state.copy(journal=Policy.finish(state.journal,candidate,actual,engineStarted),applyDeadlineElapsed=0,applyBoot=-1)
+        return observe(state.copy(journal=Policy.finish(state.journal,candidate,actual,engineStarted),applyDeadlineElapsed=0,applyBoot=-1),candidate.payload.revision)
     }
     /** An interrupted/failed activation is poisoned without depending on a trustworthy wall clock. */
     fun abort(state:AssignmentState,login:LoginIntent,payload:LoginPayload,reason:String):AssignmentState {
@@ -133,7 +134,24 @@ object Assignments {
         if(state.journal.phase!="applying")return state
         val raw=checkNotNull(state.journal.candidate)
         val candidate=Policy.json.decodeFromString<io.syn443.policy.Payload>(Policy.utf8(Policy.decode64(raw.split('.')[1])))
-        return state.copy(journal=Policy.rollback(state.journal,candidate.revision,reason),applyDeadlineElapsed=0,applyBoot=-1)
+        return observe(state.copy(journal=Policy.rollback(state.journal,candidate.revision,reason),applyDeadlineElapsed=0,applyBoot=-1),candidate.revision)
+    }
+    private fun observe(state:AssignmentState,revision:Long):AssignmentState {
+        // Reporting must never prevent a commit or a safety rollback.
+        val report=runCatching {
+            val journal=state.journal
+            val desired=checkNotNull(journal.desired)
+            val selected=journal.active?.let {Policy.json.decodeFromString<io.syn443.policy.Payload>(Policy.utf8(Policy.decode64(it.split('.')[1]))).revision} ?: 0L
+            DeviceActivationReport(1,revision,Identity.hash(desired.toByteArray(Charsets.UTF_8)),journal.activationGeneration,journal.phase,selected)
+        }.getOrNull()
+        return state.copy(activationReport=report)
+    }
+    fun report(state:AssignmentState,login:LoginIntent,payload:LoginPayload,boot:Int,elapsed:Long):DeviceActivationReport? {
+        val report=state.activationReport ?: return null
+        require(login.phase==LoginPhase.POLICY_CACHED && state.journal.phase==report.outcome &&
+            state.journal.activationGeneration==report.activationGeneration && state.journal.maxRevision==report.policyRevision)
+        require(receipt(state,login,payload,boot,elapsed)==report.envelopeHash && login.policyHash==report.envelopeHash)
+        return report
     }
     /** Called only after the native owner is gone and namespace credential erasure is confirmed. */
     fun retire(state:AssignmentState,login:LoginIntent,nativeOwnerGone:Boolean,namespaceErased:Boolean):AssignmentState {

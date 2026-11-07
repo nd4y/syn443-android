@@ -18,6 +18,26 @@ import java.util.Base64
 import java.util.Locale
 
 class AuthProtocolTest {
+    @Test fun activationReportBindsBodyToCurrentDeviceProofAndSupportsOlderServers() {
+        val f=Fixture();val current=f.current()
+        val report=DeviceActivationReport(1,2,Identity.random(),3,"rolled_back",1)
+        var response=204
+        f.handler={method,url,headers,body,_,maximum->
+            assertEquals("POST",method);assertEquals(b.apiOrigin+"/v1/device/policy/status",url)
+            assertEquals(8192,maximum);assertEquals("application/json",headers["Content-Type"])
+            assertEquals("DPoP "+current.session.accessToken,headers["Authorization"])
+            val raw=checkNotNull(body)
+            val proof=Identity.objectJSON(Policy.utf8(Policy.decode64(headers.getValue("DPoP").split('.')[1])))
+            assertEquals(Identity.hash(raw),proof.getValue("req_hash").jsonPrimitive.content)
+            assertEquals(current.session.nonce,proof.getValue("nonce").jsonPrimitive.content)
+            assertEquals(report,Canonical.json.decodeFromString<DeviceActivationReport>(raw.toString(Charsets.UTF_8)))
+            json(response,text="")
+        }
+        assertTrue(f.client.reportActivation(report,current,IdentityScope()))
+        response=404;assertFalse(f.client.reportActivation(report,current,IdentityScope()))
+        error(AuthFailure.INVALID_REPLY) {f.client.reportActivation(report,current.copy(session=current.session.copy(accessUntilMs=now)),IdentityScope())}
+        assertEquals(2,f.requests.size)
+    }
     private fun capabilitySnapshot(caps:List<String>,version:Long)=Canonical.encode(buildJsonObject {
         put("version",version);put("hash",CapabilityNegotiation.hash(caps));put("capabilities",JsonArray(caps.map(::JsonPrimitive)))
         put("authorityHash",Identity.hash("capability-fixture-authority".toByteArray()))

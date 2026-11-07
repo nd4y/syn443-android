@@ -167,6 +167,7 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     }
     private data class Delivered(val reply:Reply,val time:TrustedTime,val nonce:String)
     private class CapabilityApprovalRequired:Exception()
+    private class ActivationReportingUnavailable:Exception()
     private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int=if(body==null)524_288 else 65_536):Delivered {
         require(token.length in 24..16_384 && token.all {it.code in 33..126})
         val url=bootstrap.apiOrigin+path;val method=if(body==null)"GET" else "POST";val bytes=body?.toByteArray(Charsets.UTF_8)
@@ -184,7 +185,8 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
                 throw AuthException(AuthFailure.REAUTHENTICATE)
             if(path=="/v1/devices/enroll" && reply.status==409 && json(reply)["code"]?.text()=="capabilities_update_required")
                 throw CapabilityApprovalRequired()
-            status(reply,if(path.endsWith("/revoke"))204 else 200)
+            if(path=="/v1/device/policy/status" && reply.status==404)throw ActivationReportingUnavailable()
+            status(reply,if(path.endsWith("/revoke") || path=="/v1/device/policy/status")204 else 200)
             return Delivered(reply,observed(reply,start,floor),currentNonce)
         }
         throw AuthException(AuthFailure.REAUTHENTICATE)
@@ -263,6 +265,16 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
         val upper=result.time.window(boot(),elapsed()).upperMs
         Policy.verifyBound(envelope,bootstrap.roots,current.session.deviceId,thumbprint,upper)
         PolicyReply(envelope,result.time)
+    }
+    /** Older servers may omit this endpoint. Reporting does not refresh or replace authority. */
+    fun reportActivation(report:DeviceActivationReport,current:SessionReply,scope:IdentityScope):Boolean=checked {
+        bound(current)
+        require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val result=try {
+            api("/v1/device/policy/status",report.body(),current.session.accessToken,current.session.nonce,current.time,scope,8192)
+        } catch(_:ActivationReportingUnavailable) {return@checked false}
+        require(result.reply.body.isEmpty())
+        true
     }
     /** A stable protected operation is persisted before dispatch. Every retry has
      * a fresh proof; account, key, namespace and conservative time are local. */

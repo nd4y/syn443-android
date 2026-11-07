@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=186
+    minimum=187
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=23
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=107
+    minimum=109
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -54,6 +54,9 @@ if mode=="health":
     required.add(('io.syn443.health.TlsTest','certificateFailureDoesNotTryAnotherAddressOrWeakenTrust'))
     assert required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required bounded address fallback cases missing'
 if mode=="identity":
+    assert {('io.syn443.identity.AssignmentsTest','activationReportPersistsOnlyFinalCurrentEnvelopeDecisions'),
+        ('io.syn443.identity.AuthProtocolTest','activationReportBindsBodyToCurrentDeviceProofAndSupportsOlderServers')} <= {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required activation reporting cases missing'
     logout_required={('io.syn443.identity.AuthProtocolTest',name) for name in {
         'expiredAccessLogoutRefreshesInRamAndRevokesOnlyTheSameDeviceWithCurrentProof',
         'freshAccessLogoutDoesNotRotateAndExpiredRefreshOrBootCannotDispatch',
@@ -96,6 +99,8 @@ if mode=="identity":
         "transportCancellationAndServerErrorsRemainDistinct",
         "previousProtectedOidcPayloadWithoutInvitationVariantKeepsItsBinding"} <= {c.get("name") for c in cases}
 if mode=="emulator":
+    assert ('io.syn443.android.LoginControllerTest','activationDeliveryUsesDurableDecisionAndCannotChangeLoginOnFailure') in {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required Android activation reporting case missing'
     assert {('io.syn443.android.PolicyCheckSnapshotTest',name) for name in {
         'diagnosticsArePositionalBoundedAndReturnedAsIndependentCopies',
         'changedOwnerIntentNetworkActivationOrStoppedVpnCannotRelabelEvidenceAsCurrent',

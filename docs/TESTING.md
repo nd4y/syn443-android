@@ -1,5 +1,8 @@
 # Testing and release gates
 
+[Managed activation reporting](activation-reporting.md) adds two mandatory
+identity JVM cases (minimum109) and one Android case per API (minimum187).
+
 [Activation diagnostics](policy-check-diagnostics.md) adds two mandatory health
 JVM cases (minimum23) and three mandatory Android cases per API (minimum186).
 These tests and builds run only in Actions. Exact-source CI and physical
