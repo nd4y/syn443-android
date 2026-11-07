@@ -24,4 +24,14 @@ class PhysicalNetworkSelectionTest {
         assertEquals(10L, PhysicalNetworkSelection.choose(listOf(a), 20, true))
         assertNull(PhysicalNetworkSelection.choose(emptyList(), 20, true))
     }
+
+    @Test fun captiveCandidateCannotBeSelectedEvenWithPriorProof() {
+        val portal=wifi.copy(captive=true)
+        assertNull(PhysicalNetworkSelection.choose(listOf(portal), wifi.handle, true))
+        assertNull(PhysicalNetworkSelection.choose(listOf(portal.copy(validated=true)), wifi.handle, true))
+        // Unknown reachability alone is not evidence of a portal or allowlist.
+        assertEquals(wifi.handle, PhysicalNetworkSelection.choose(listOf(wifi), null, false))
+        assertEquals(cellular.handle, PhysicalNetworkSelection.choose(listOf(portal, cellular), wifi.handle, true))
+        assertEquals(wifi.handle, PhysicalNetworkSelection.choose(listOf(wifi.copy(validated=true)), null, false))
+    }
 }

@@ -38,6 +38,9 @@ for path in paths:
         assert not any(case.find(k) is not None for k in ("skipped","failure","error")),(path,case.attrib)
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
+if mode=="recovery":
+    assert ("io.syn443.recovery.PhysicalNetworkSelectionTest","captiveCandidateCannotBeSelectedEvenWithPriorProof") in {
+        (c.get("classname"),c.get("name")) for c in cases}, "Required captive network case missing"
 if mode=="jvm":
     assert {("io.syn443.decision.RouteFrontierTest",name) for name in {
         "boundedCursorCoversSparseGraphWithoutDuplicateOrWrongExitPaths",

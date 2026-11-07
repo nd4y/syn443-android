@@ -16,14 +16,8 @@ object PhysicalNetworkSelection {
 
     fun choose(candidates: List<PhysicalCandidate>, current: Long?, currentVpnVerified: Boolean): Long? {
         require(candidates.size <= MAX_CANDIDATES)
-        return candidates.minWithOrNull(compareBy<PhysicalCandidate>(
-            {
-                when {
-                    it.captive -> 2
-                    it.validated || (it.handle == current && currentVpnVerified) -> 0
-                    else -> 1
-                }
-            },
+        return candidates.asSequence().filterNot { it.captive }.minWithOrNull(compareBy<PhysicalCandidate>(
+            { if (it.validated || (it.handle == current && currentVpnVerified)) 0 else 1 },
             {
                 when {
                     it.transport == PhysicalTransport.WIFI -> 0

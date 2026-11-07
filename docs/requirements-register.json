@@ -815,8 +815,12 @@
     {
       "id": "MODE-04",
       "text": "При captive portal приложение показывает требование входа и не перебирает бесконечно прокси. Если системный lockdown блокирует браузер входа, пользователь получает инструкцию; несанкционированного обхода ОС нет.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md#captive-portal-wait"
+      ],
+      "implementationScope": "Exclude Android-confirmed captive networks from VPN admission; show sign-in and lockdown guidance while preserving intent.",
+      "remainingScope": "End-to-end actual captive login and lockdown acceptance."
     },
     {
       "id": "MODE-05",
