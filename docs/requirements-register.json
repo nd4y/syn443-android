@@ -584,6 +584,7 @@
       "status": "partial",
       "evidence": [
         "docs/managed-policy.md",
+        "tools/run_policy_activation.py",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/assigned-route-activation.md",
         "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",

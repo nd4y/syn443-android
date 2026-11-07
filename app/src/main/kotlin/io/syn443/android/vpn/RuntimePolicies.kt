@@ -31,10 +31,12 @@ internal class RuntimePolicies(private val context:Context,
     fun config(original:()->String?):String? = if(login.ownsPolicy())login.assignedRead {login.assignedRuntime.config(it)} else legacy.config(original())
     fun internetChecks(hash:String,synthetic:Boolean=false):List<io.syn443.policy.Check> {
         val d=read()
-        val raw=if(d.journal.phase=="applying")d.journal.candidate else d.journal.active
         // Only the legacy operator path may measure an unsigned first baseline.
         val baseline=!d.enrolled && d.journal.phase=="prepared" && d.journal.active==null
-        return io.syn443.policy.Policy.internetChecks(d.managed && !baseline,if(raw==null)null else allowed(raw,d),hash,synthetic)
+        // Release retains the old envelope for revision history but drops its binding.
+        if(!d.managed || baseline)return io.syn443.policy.Policy.internetChecks(false,null,hash,synthetic)
+        val raw=if(d.journal.phase=="applying")d.journal.candidate else d.journal.active
+        return io.syn443.policy.Policy.internetChecks(true,allowed(raw,d),hash,synthetic)
     }
     fun leaseDeadline(hash:String):Long = if(login.ownsPolicy())login.assignedRead {login.assignedRuntime.leaseDeadline(it,hash)} else legacy.leaseDeadline(hash)
     fun render(raw:String?,root:java.io.File):String = if(login.ownsPolicy())login.renderAssigned(checkNotNull(raw),root) else EngineConfig.render(raw,root)

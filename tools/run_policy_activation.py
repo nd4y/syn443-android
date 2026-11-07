@@ -99,9 +99,27 @@ def main():
                 original = pid(':engine'); active = call('status')['policy']['activeRevision']
                 if name.startswith('signed'):
                     if name.startswith('signedManagement'):
+                        local_revision = call('status')['configRevision']
                         stage(publisher.sign(config, revision=2, operation='release'))
                         await_condition(lambda: not call('status')['policy']['managed'] and call('status')['policy']['phase'] == 'released')
                         assert pid(':engine') == original and call('status')['desiredOn']
+                        stop()
+                        progress = proxy.progress
+                        call('connect')
+
+                        def released_online():
+                            snapshot = call('status')
+                            assert snapshot['phase'] != 'BlockedByPolicy'
+                            return snapshot['phase'] == 'Online' and snapshot['engineActive'] and any(
+                                event['code'] == 'required_https_ok' and event['intentGeneration'] == snapshot['generation']
+                                for event in snapshot['events'])
+
+                        await_condition(released_online)
+                        snapshot = call('status')
+                        assert pid(':engine') and proxy.progress > progress
+                        assert snapshot['configRevision'] == local_revision
+                        assert not snapshot['policy']['managed'] and snapshot['policy']['phase'] == 'released'
+                        assert snapshot['policy']['activeRevision'] == 2
                     else:
                         assert active == 1 and call('status')['policy']['lastKnownGoodRevision'] == 1
                 elif name.startswith('healthyChanged'):
