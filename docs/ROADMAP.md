@@ -39,7 +39,9 @@ native editing and full administration remain open. Multiple Remnawave/x-ui/3x-u
 remain extension contracts.
 
 ## M4 - autonomous routing and support (partial)
-Reference ranking and bounded per-target checks exist. Basic SQL user/admin chat,
+Reference ranking, bounded per-target checks and a lazy graph frontier exist.
+The frontier is a JVM planner and is not wired into runtime route selection.
+Basic SQL user/admin chat,
 Android/web UI and device media compression have scoped acceptance. Full contextual
 quarantine/graph exploration for four network modes, cohort rollout, central
 telemetry/incident analysis and operational retention controls remain open.

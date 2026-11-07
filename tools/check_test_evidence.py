@@ -38,6 +38,14 @@ for path in paths:
         assert not any(case.find(k) is not None for k in ("skipped","failure","error")),(path,case.attrib)
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
+if mode=="jvm":
+    assert {("io.syn443.decision.RouteFrontierTest",name) for name in {
+        "boundedCursorCoversSparseGraphWithoutDuplicateOrWrongExitPaths",
+        "allHopsAndEdgesSatisfyModeAndFullPathCapabilityRequirements",
+        "warmHintComesFirstOnlyIfItStillBelongsToTheGraph",
+        "oldOrExpiredCursorNeverResumes",
+        "oversizedTemplateFailsInsteadOfReportingTruncatedCoverage",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route search cases missing"
 if mode=="policy":
     assert ("io.syn443.policy.PolicyTest","signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences") in {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="health":
