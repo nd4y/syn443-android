@@ -151,6 +151,24 @@ class PolicyTest {
         invalid { verify(sign(payload().copy(activation = Gate(30, false, listOf(Check("bad", "https_204", "http://health.example.org")))))) }
         invalid { verify(sign(payload().copy(activation = Gate(30, false, listOf(Check("bad", "shell", "anything")))))) }
     }
+    @Test fun reserveCooldownRequiresBoundConfigurationAndHasAnIndependentRollbackFingerprint() {
+        val base=payload()
+        val engine="""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"},"route_failover":{}}"""
+        val legacy=base.copy(schemaVersion=2,keyThumbprint=enc(ByteArray(32){9}),
+            requiredCapabilities=base.requiredCapabilities+listOf("policy.keybound.v2","route.health.v1","route.failover.v1"),
+            engineConfigB64=enc(engine.toByteArray()),contentHash=Policy.hash(engine))
+        val candidate=legacy.copy(revision=2,requiredCapabilities=legacy.requiredCapabilities+Policy.RESERVE_PROBE_COOLDOWN)
+        val verified=verify(sign(candidate))
+        assertTrue(Policy.RESERVE_PROBE_COOLDOWN in verified.payload.requiredCapabilities)
+        val journal=Policy.rollback(Policy.stage(Journal(),verified),2,"activation_failed")
+        invalid { Policy.stage(journal,verify(sign(candidate.copy(revision=3)))) }
+        assertEquals("prepared",Policy.stage(journal,verify(sign(legacy.copy(revision=3)))).phase)
+        invalid { verify(sign(candidate.copy(operation="release"))) }
+        invalid { verify(sign(candidate.copy(requiredCapabilities=candidate.requiredCapabilities-"route.health.v1"))) }
+        invalid { verify(sign(candidate.copy(engineConfigB64=base.engineConfigB64,contentHash=base.contentHash))) }
+        invalid { verify(sign(candidate.copy(schemaVersion=1,keyThumbprint="",
+            requiredCapabilities=candidate.requiredCapabilities-"policy.keybound.v2"))) }
+    }
     @Test fun replayAndFloorsSurviveSerialization() {
         val p = verify(sign()); val j = Policy.stage(Journal(), p)
         val disk = Policy.json.decodeFromString<Journal>(Policy.json.encodeToString(j))

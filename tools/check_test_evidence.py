@@ -57,11 +57,14 @@ if mode=="jvm":
         "targetFailureAndWrongScopeDoNotCountTowardFailover",
         "staleOrDifferentCheckGroupCannotAuthorizeReplacement",
         "stabilityThenEnergyTakePriorityOverLatency",
+        "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
     assert {("io.syn443.android.ManagedFailoverTest",name) for name in {
         "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
         "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
+        "routineBatchesDeferOnlyCoolingReserveAndKeepRequiredSelector",
+        "firstValidatedManagedBatchBypassesCadenceOnceWithoutCancellingInFlightWork",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed Wi-Fi failover cases missing"
     assert {
         ("io.syn443.android.TechnicalTelemetryDiskTest","encryptedQueueRestartsWithoutExposingAnotherEnrollment"),
@@ -72,6 +75,7 @@ if mode=="policy":
     assert {("io.syn443.policy.PolicyTest",name) for name in {
         "signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences",
         "managedRouteChecksKeepTheirSignedBindingAndCapability",
+        "reserveCooldownRequiresBoundConfigurationAndHasAnIndependentRollbackFingerprint",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="health":
     assert {('io.syn443.health.ChecksTest',name) for name in {

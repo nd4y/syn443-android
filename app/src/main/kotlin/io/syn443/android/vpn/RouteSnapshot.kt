@@ -26,6 +26,7 @@ object RouteSnapshot {
     private var receipts = emptyMap<String,String>()
     private var live: RouteScope? = null
     private var current: RouteScope? = null
+    private var validatedBatch: RouteScope? = null
     private var pending = ""
     private var startedAt = 0L
     private var lastStarted = -60_000L
@@ -40,6 +41,7 @@ object RouteSnapshot {
     private val methods=setOf("tcp","tls","https_204","ssh_banner")
     private var measuredPaths=emptyMap<String,JSONArray>()
     private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","path_changed","check_timeout","probe_unavailable")
+    private val completedProbeFailures=setOf("dial_failed","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","check_timeout")
     fun validate(config: JSONObject) {
         if(!config.has("route_checks"))return
         val settings=config.getJSONArray("route_checks")
@@ -89,7 +91,7 @@ object RouteSnapshot {
         }
         revision=hash;invalidate()
     }
-    @Synchronized fun invalidate() {current=null;pending="";queued=emptySet();observations=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000;activationAttempt=null
+    @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000;activationAttempt=null
         completedReceipt="";failoverAdmission=null;batchSequence=0;confirmingFailure=false}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
@@ -117,15 +119,29 @@ object RouteSnapshot {
     @Synchronized fun accepts(only:String?)=rows.any {(only==null || it.id==only) && it.checks.length()>0}
     @Synchronized fun view(status:JSONObject):JSONObject = read(status.optBoolean("desiredOn"),status.optBoolean("engineActive") && live!=null,
         live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch")))
-    @Synchronized fun request(scope:RouteScope, only:String?=null, force:Boolean=false):String? {
+    private fun failoverContext(scope:RouteScope) =
+        Context(scope.network,scope.activation,"active","wifi-internal-v1",scope.intent,scope.config)
+
+    @Synchronized internal fun awaitingValidatedBatch(scope:RouteScope):Boolean =
+        live==scope && failover!=null && validatedBatch!=scope
+
+    @Synchronized fun request(scope:RouteScope, only:String?=null, force:Boolean=false, deferCoolingReserves:Boolean=false,
+                              validatedManagedWifi:Boolean=false):String? {
         val now=SystemClock.elapsedRealtime()
         if(pending.isNotEmpty() && now-startedAt<35_000) return null
-        if(!force && now-lastStarted<60_000) return null
+        val firstValidated=only==null && validatedManagedWifi && awaitingValidatedBatch(scope)
+        if(!force && !firstValidated && now-lastStarted<60_000) return null
         if(only!=null && rows.none {it.id==only})return null
-        val selected=rows.filter {(only==null || it.id==only) && it.checks.length()>0}
+        val admission=failoverAdmission?.takeIf {deferCoolingReserves && only==null && live==scope}
+        val context=failoverContext(scope)
+        val selected=rows.filter {row->
+            (only==null || row.id==only) && row.checks.length()>0 &&
+                (row.required || admission?.deferReserveProbe(context,row.tag,now)!=true)
+        }
         if(selected.isEmpty())return null
         // Never stamp a previous observation with this new scope.
         current=scope;pending=UUID.randomUUID().toString();startedAt=now;lastStarted=now;queued=selected.map {it.id}.toSet()
+        if(firstValidated)validatedBatch=scope
         completedReceipt="";batchSequence++
         return JSONObject().put("request",pending).put("routes",JSONArray(selected.map {row->JSONObject().put("id",row.id).put("outbound",row.tag).put("checks",row.checks)})).toString()
     }
@@ -162,7 +178,7 @@ object RouteSnapshot {
     @Synchronized fun cancelled(resetInterval:Boolean=false){pending="";queued=emptySet();current=null;completedReceipt="";confirmingFailure=false;if(resetInterval)lastStarted=-60_000}
     @Synchronized internal fun confirmingFailover(scope:RouteScope):Boolean=live==scope && confirmingFailure
     @Synchronized internal fun hasManagedFailover(scope:RouteScope):Boolean=live==scope && failover!=null && completedReceipt.isNotEmpty()
-    @Synchronized internal fun failoverAdvice(scope:RouteScope):FailoverCommand? {
+    @Synchronized internal fun failoverAdvice(scope:RouteScope,trackReserveFailures:Boolean=false):FailoverCommand? {
         val plan=failover ?: return null
         val receipt=completedReceipt
         if(live!=scope || current!=scope || receipt.isEmpty())return null
@@ -171,20 +187,29 @@ object RouteSnapshot {
         val path=measuredPaths[group.id] ?: return null
         if(path.length()<2 || path.getString(0)!=group.id)return null
         val selected=rows.singleOrNull {it.id==path.getString(1) && it.tag in plan.members} ?: return null
+        if(path.length()!=selected.chain.size+1 || selected.chain.indices.any {path.optString(it+1)!=selected.chain[it]})return null
         val groupSample=observations[group.id]?.takeIf {it.scope==scope} ?: return null
         val now=SystemClock.elapsedRealtime()
         val comparison="internal-check"
         val reserves=rows.filter {it.tag in plan.members && it.id!=selected.id && receipts[it.id]==receipt}.mapNotNull {row->
-            val sample=observations[row.id]?.takeIf {it.scope==scope && it.complete && it.ok && now-it.elapsedMs in 0L until 15_000} ?: return@mapNotNull null
-            VerifiedPathSample(row.tag,receipt,comparison,sample.elapsedMs,ProbeVerdict.VERIFIED,timings[row.id] ?: 0)
+            val sample=observations[row.id]?.takeIf {it.scope==scope && it.complete && now-it.elapsedMs in 0L until 15_000} ?: return@mapNotNull null
+            val measured=measuredPaths[row.id] ?: return@mapNotNull null
+            if(measured.length()!=row.chain.size || row.chain.indices.any {measured.optString(it)!=row.chain[it]})return@mapNotNull null
+            val verdict=when {
+                sample.ok -> ProbeVerdict.VERIFIED
+                trackReserveFailures && codes[row.id] in completedProbeFailures -> ProbeVerdict.CONFIRMED_PATH_FAILURE
+                else -> return@mapNotNull null
+            }
+            VerifiedPathSample(row.tag,receipt,comparison,sample.elapsedMs,verdict,timings[row.id] ?: 0)
         }
         val verdict=when {
             groupSample.complete && groupSample.ok -> ProbeVerdict.VERIFIED
-            groupSample.complete && reserves.isNotEmpty() -> ProbeVerdict.CONFIRMED_PATH_FAILURE
+            groupSample.complete && codes[group.id] in completedProbeFailures &&
+                reserves.any {it.verdict==ProbeVerdict.VERIFIED} -> ProbeVerdict.CONFIRMED_PATH_FAILURE
             else -> ProbeVerdict.UNKNOWN
         }
         confirmingFailure=verdict==ProbeVerdict.CONFIRMED_PATH_FAILURE
-        val context=Context(scope.network,scope.activation,"active","wifi-internal-v1",scope.intent,scope.config)
+        val context=failoverContext(scope)
         val admission=failoverAdmission ?: FailoverAdmission(context,plan.members.toSet(),comparison,
             rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)})
             .also {failoverAdmission=it}

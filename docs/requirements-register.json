@@ -1097,8 +1097,12 @@
     {
       "id": "ALG-22",
       "text": "В здоровом состоянии выполняется ограниченное исследование резервов с rotation/jitter, чтобы находить улучшения без постоянного перебора. На разряжающемся устройстве или metered сети probe plan сокращается. Потеря основного пути имеет приоритет над фоновым уточнением метрик.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md#reserve-probe-cooldown"
+      ],
+      "implementationScope": "Signed internal Wi-Fi failover defers optional reserve probes during attributed cooldown while continuing required selector checks.",
+      "remainingScope": "Other route classes and network modes, rotation and jitter of the runtime frontier, metered and battery budgets."
     },
     {
       "id": "ALG-23",
@@ -1141,7 +1145,8 @@
       "text": "Open кандидат временно исключается из обычного выбора. После срока допускается одна ограниченная half-open проверка; массовых одновременных retries нет. Ошибка auth/config не проверяется каждую секунду: изменение credentials/profile является отдельным событием инвалидирования.",
       "status": "partial",
       "evidence": [
-        "docs/route-frontier.md"
+        "docs/route-frontier.md",
+        "docs/route-lifecycle.md#reserve-probe-cooldown"
       ]
     },
     {
@@ -1149,7 +1154,8 @@
       "text": "NXDOMAIN либо недоступность конечного домашнего сервиса не ухудшают глобально профиль, если нет доказательства отказа пути. Отказ конкретного метода проверки не равен отказу всех методов. При общей сетевой проблеме фиксируется network evidence, а не тысячи независимых proxy faults.",
       "status": "partial",
       "evidence": [
-        "docs/route-frontier.md"
+        "docs/route-frontier.md",
+        "docs/route-lifecycle.md#reserve-probe-cooldown"
       ]
     },
     {
@@ -1235,8 +1241,12 @@
     {
       "id": "RLP-09",
       "text": "Config и decision policy активируются совместимой парой. Локальный эксперимент администратора и будущая серверная публикация имеют видимые версии; повторный запуск сохраняет выбранную стабильную версию cohort. Старый клиент получает совместимый bundle либо понятный отказ с последней разрешённой версией.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md#reserve-probe-cooldown"
+      ],
+      "implementationScope": "One fixed optional route behavior requires a signed key-bound capability on the active approved configuration and distinguishes its rollback fingerprint.",
+      "remainingScope": "Independent decision bundle evaluation, persisted cohort rollout and operator experiment UI."
     },
     {
       "id": "RLP-10",

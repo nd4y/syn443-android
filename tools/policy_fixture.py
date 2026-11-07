@@ -51,7 +51,10 @@ class Publisher:
             payload['schemaVersion']=2;payload['keyThumbprint']=key_thumbprint
             payload['requiredCapabilities'].append('policy.keybound.v2')
         assert len(set(extra_capabilities)) == len(extra_capabilities)
-        assert set(extra_capabilities) <= {'route.health.v1', 'route.failover.v1'}
+        assert set(extra_capabilities) <= {'route.health.v1', 'route.failover.v1', 'route.reserve-cooldown.v1'}
+        if 'route.reserve-cooldown.v1' in extra_capabilities:
+            assert key_thumbprint is not None and operation == 'configure'
+            assert {'route.health.v1', 'route.failover.v1'} <= set(extra_capabilities) and isinstance(config.get('route_failover'), dict)
         payload['requiredCapabilities'].extend(extra_capabilities)
         canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
         content = b64(canonical(header)) + '.' + b64(canonical(payload))

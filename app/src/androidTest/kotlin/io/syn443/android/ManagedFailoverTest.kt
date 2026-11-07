@@ -67,4 +67,69 @@ class ManagedFailoverTest {
             .put("target","other.example.invalid:22")
         assertThrows(IllegalArgumentException::class.java){EngineConfig.validate(json.toString())}
     }
+
+    @Test fun routineBatchesDeferOnlyCoolingReserveAndKeepRequiredSelector() {
+        val scope=RouteScope(10,22,30,"synthetic-engine",Policy.hash(config))
+        RouteSnapshot.configure(config,scope.config)
+        RouteSnapshot.owner(scope)
+        fun request(scope:RouteScope,defer:Boolean=false,only:String?=null)=JSONObject(checkNotNull(
+            RouteSnapshot.request(scope,only=only,force=true,deferCoolingReserves=defer)))
+        fun tags(request:JSONObject)=request.getJSONArray("routes").let { routes->
+            (0 until routes.length()).map {routes.getJSONObject(it).getString("outbound")}.toSet()
+        }
+        fun batch(reservePath:String="route-2",reserveCode:String="dial_failed",track:Boolean=true) {
+            val request=request(scope).getString("request")
+            val now=SystemClock.elapsedRealtime()
+            fun result(id:String,code:String,path:List<String>)=JSONObject().put("id",id).put("complete",true)
+                .put("ok",code=="ok").put("code",code).put("elapsedMs",20).put("sampledElapsedMs",now)
+                .put("path",JSONArray(path))
+            val report=JSONObject().put("request",request).put("running",false).put("results",JSONArray(listOf(
+                result("route-1","ok",listOf("route-1")),result("route-2",reserveCode,listOf(reservePath)),
+                result("route-3","ok",listOf("route-3","route-1")))))
+            assertTrue(RouteSnapshot.update(scope,report.toString()))
+            assertNull(RouteSnapshot.failoverAdvice(scope,trackReserveFailures=track))
+        }
+        try {
+            repeat(2) { batch(track=false) }
+            assertEquals(setOf("primary","reserve","internal"),tags(request(scope,true)))
+            RouteSnapshot.cancelled()
+            batch(reservePath="route-1")
+            batch(reserveCode="probe_unavailable")
+            batch()
+            assertEquals(setOf("primary","reserve","internal"),tags(request(scope,true)))
+            RouteSnapshot.cancelled()
+            batch()
+            assertEquals(setOf("primary","internal"),tags(request(scope,true)))
+            RouteSnapshot.cancelled()
+            assertEquals(setOf("primary","reserve","internal"),tags(request(scope)))
+            RouteSnapshot.cancelled()
+            assertEquals(setOf("reserve"),tags(request(scope,true,only="route-2")))
+            val newNetwork=scope.copy(network=23)
+            RouteSnapshot.owner(newNetwork)
+            assertEquals(setOf("primary","reserve","internal"),tags(request(newNetwork,true)))
+        } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
+    }
+
+    @Test fun firstValidatedManagedBatchBypassesCadenceOnceWithoutCancellingInFlightWork() {
+        val scope=RouteScope(10,24,30,"synthetic-engine",Policy.hash(config))
+        RouteSnapshot.configure(config,scope.config)
+        RouteSnapshot.owner(scope)
+        try {
+            assertNotNull(RouteSnapshot.request(scope))
+            assertTrue(RouteSnapshot.awaitingValidatedBatch(scope))
+            assertNull(RouteSnapshot.request(scope,validatedManagedWifi=true))
+            assertTrue(RouteSnapshot.awaitingValidatedBatch(scope))
+            RouteSnapshot.cancelled()
+            assertNull(RouteSnapshot.request(scope))
+            assertNotNull(RouteSnapshot.request(scope,validatedManagedWifi=true))
+            assertFalse(RouteSnapshot.awaitingValidatedBatch(scope))
+            RouteSnapshot.cancelled()
+            assertNull(RouteSnapshot.request(scope,validatedManagedWifi=true))
+            val next=scope.copy(network=25)
+            RouteSnapshot.owner(next)
+            assertTrue(RouteSnapshot.awaitingValidatedBatch(next))
+            assertNotNull(RouteSnapshot.request(next,validatedManagedWifi=true))
+            assertFalse(RouteSnapshot.awaitingValidatedBatch(next))
+        } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
+    }
 }

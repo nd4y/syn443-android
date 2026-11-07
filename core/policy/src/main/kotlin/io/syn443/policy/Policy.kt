@@ -120,7 +120,8 @@ object Policy {
         return if (ownerReady) Preparation.CHECK_BASELINE else Preparation.WAIT
     }
     val json = Canonical.json
-    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1")
+    const val RESERVE_PROBE_COOLDOWN = "route.reserve-cooldown.v1"
+    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1", RESERVE_PROBE_COOLDOWN)
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     fun decode64(value: String): ByteArray {
         require(value.matches(Regex("[A-Za-z0-9_-]+")))
@@ -174,6 +175,11 @@ object Policy {
         require(p.refreshAfterMs in p.notBeforeMs..p.offlineUntilMs && p.offlineUntilMs > now && p.offlineUntilMs - p.issuedAtMs <= 604_800_000)
         require(p.algorithmRevision == "m1-local-v1" && p.requiredCapabilities.containsAll(setOf("engine-config.v1", "tun.lease.v1")) && p.requiredCapabilities.size <= 16 && p.requiredCapabilities.toSet().size == p.requiredCapabilities.size && capabilities.containsAll(p.requiredCapabilities))
         val engine = utf8(decode64(p.engineConfigB64)); require(engine.toByteArray().size in 1..262_144 && hash(engine) == p.contentHash)
+        if(RESERVE_PROBE_COOLDOWN in p.requiredCapabilities) {
+            require(p.schemaVersion==2 && p.operation=="configure" &&
+                p.requiredCapabilities.containsAll(setOf("route.health.v1","route.failover.v1")))
+            require((json.parseToJsonElement(engine) as? JsonObject)?.get("route_failover") is JsonObject)
+        }
         val g = p.activation; require(g.timeoutSeconds in 30..120 && g.checks.size in 1..8 && g.checks.map { it.id }.toSet().size == g.checks.size)
         require(g.checks.any { it.required && it.type == "https_204" })
         g.checks.forEach { c ->
@@ -210,7 +216,9 @@ object Policy {
         return j.copy(phase = if (v.payload.operation == "release") "released" else if (failed.isEmpty()) "committed" else "degraded", active = v.envelope,
             lastGood = if (failed.isEmpty()) v.envelope else j.lastGood, candidate = null, baseline = emptyList(), reason = if (failed.isEmpty()) "checks_passed" else "baseline_also_unavailable")
     }
-    fun snapshot(p: Payload) = hash(p.operation + ":" + p.contentHash + ":" + p.algorithmRevision + ":" + Canonical.encode(json.encodeToJsonElement(p.activation)))
+    fun snapshot(p: Payload) = hash(p.operation + ":" + p.contentHash + ":" + p.algorithmRevision + ":" +
+        Canonical.encode(json.encodeToJsonElement(p.activation)) +
+        if(RESERVE_PROBE_COOLDOWN in p.requiredCapabilities) ":$RESERVE_PROBE_COOLDOWN" else "")
     fun rollback(j: Journal, revision: Long, reason: String): Journal {
         val fingerprint = j.candidate?.let { snapshot(json.decodeFromString<Payload>(utf8(decode64(it.split('.')[1])))) }
         return j.copy(phase = "rolled_back", candidate = null, active = j.lastGood,
