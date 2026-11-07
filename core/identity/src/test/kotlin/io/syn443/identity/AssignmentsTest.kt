@@ -233,7 +233,7 @@ class AssignmentsTest {
     @Test fun renewalDoesNotBypassChangedAuthorityCapabilitiesGateOrPendingActivation() {
         val good=committed();val current=acknowledged(good)
         val changes=listOf(policy(2).copy(securityEpoch=1),policy(2).copy(revocationFloor=1),
-            policy(2).copy(requiredCapabilities=IdentityOperation.supportedCapabilities),
+            policy(2).copy(requiredCapabilities=IdentityOperation.supportedCapabilities - Policy.RESERVE_PROBE_COOLDOWN),
             policy(2).copy(activation=policy().activation.copy(timeoutSeconds=31)),
             policy(2).copy(engineConfigB64=Identity.encode(engine.replace("direct","alternate").toByteArray()),contentHash=Policy.hash(engine.replace("direct","alternate"))))
         changes.forEach {p->val staged=receive(good,p,current);assertEquals("prepared",staged.journal.phase)

@@ -74,6 +74,7 @@ if mode=="policy":
     assert {("io.syn443.policy.PolicyTest",name) for name in {
         "signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences",
         "managedRouteChecksKeepTheirSignedBindingAndCapability",
+        "reserveCooldownRequiresBoundConfigurationAndHasAnIndependentRollbackFingerprint",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="health":
     assert {('io.syn443.health.ChecksTest',name) for name in {

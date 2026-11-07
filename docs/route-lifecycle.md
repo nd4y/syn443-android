@@ -159,3 +159,11 @@ needs fresh evidence. Changing the network, configuration or engine
 fences both observations and cooldown. This is a single-intent Wi-Fi
 implementation; it does not claim graph exploration, persistence across
 process restart or physical cellular acceptance.
+
+The controller requires the signed `route.reserve-cooldown.v1` capability
+on the active, key-bound configuration to attribute optional reserve
+failures and suppress their routine probes. Existing signed configurations
+continue the previous scheduling behavior. A failed opt-in uses a distinct
+rollback fingerprint; the legacy configuration with identical proxy bytes
+can still be issued as a newer revision. This is a fixed local evaluator
+feature that can be enabled for a reviewed recipient set.

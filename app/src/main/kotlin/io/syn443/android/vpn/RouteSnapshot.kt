@@ -171,7 +171,7 @@ object RouteSnapshot {
     @Synchronized fun cancelled(resetInterval:Boolean=false){pending="";queued=emptySet();current=null;completedReceipt="";confirmingFailure=false;if(resetInterval)lastStarted=-60_000}
     @Synchronized internal fun confirmingFailover(scope:RouteScope):Boolean=live==scope && confirmingFailure
     @Synchronized internal fun hasManagedFailover(scope:RouteScope):Boolean=live==scope && failover!=null && completedReceipt.isNotEmpty()
-    @Synchronized internal fun failoverAdvice(scope:RouteScope):FailoverCommand? {
+    @Synchronized internal fun failoverAdvice(scope:RouteScope,trackReserveFailures:Boolean=false):FailoverCommand? {
         val plan=failover ?: return null
         val receipt=completedReceipt
         if(live!=scope || current!=scope || receipt.isEmpty())return null
@@ -190,7 +190,7 @@ object RouteSnapshot {
             if(measured.length()!=row.chain.size || row.chain.indices.any {measured.optString(it)!=row.chain[it]})return@mapNotNull null
             val verdict=when {
                 sample.ok -> ProbeVerdict.VERIFIED
-                codes[row.id] in completedProbeFailures -> ProbeVerdict.CONFIRMED_PATH_FAILURE
+                trackReserveFailures && codes[row.id] in completedProbeFailures -> ProbeVerdict.CONFIRMED_PATH_FAILURE
                 else -> return@mapNotNull null
             }
             VerifiedPathSample(row.tag,receipt,comparison,sample.elapsedMs,verdict,timings[row.id] ?: 0)

@@ -7,6 +7,15 @@ useDefault = true
 [[rules]]
 id = "generic-api-key"
 [[rules.allowlists]]
+description = "Reviewed SHA-256 of public reserve probe cooldown contracts"
+condition = "AND"
+paths = ['''^contracts/lock\.json$''']
+regexTarget = "line"
+regexes = [
+  '''^\s*"policy-payload\.schema\.json": "5b637dc08abe9463e5d58ff111785eccafdb071144103570a456b88dcae547a2",?\s*$''',
+]
+
+[[rules.allowlists]]
 description = "Reviewed SHA-256 of the public telemetry enrollment contract"
 condition = "AND"
 paths = ['''^contracts/lock\.json$''']

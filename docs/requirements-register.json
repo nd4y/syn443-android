@@ -1241,8 +1241,12 @@
     {
       "id": "RLP-09",
       "text": "Config и decision policy активируются совместимой парой. Локальный эксперимент администратора и будущая серверная публикация имеют видимые версии; повторный запуск сохраняет выбранную стабильную версию cohort. Старый клиент получает совместимый bundle либо понятный отказ с последней разрешённой версией.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md#reserve-probe-cooldown"
+      ],
+      "implementationScope": "One fixed optional route behavior requires a signed key-bound capability on the active approved configuration and distinguishes its rollback fingerprint.",
+      "remainingScope": "Independent decision bundle evaluation, persisted cohort rollout and operator experiment UI."
     },
     {
       "id": "RLP-10",

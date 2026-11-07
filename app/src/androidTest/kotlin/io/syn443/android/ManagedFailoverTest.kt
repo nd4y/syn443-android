@@ -77,7 +77,7 @@ class ManagedFailoverTest {
         fun tags(request:JSONObject)=request.getJSONArray("routes").let { routes->
             (0 until routes.length()).map {routes.getJSONObject(it).getString("outbound")}.toSet()
         }
-        fun batch(reservePath:String="route-2",reserveCode:String="dial_failed") {
+        fun batch(reservePath:String="route-2",reserveCode:String="dial_failed",track:Boolean=true) {
             val request=request(scope).getString("request")
             val now=SystemClock.elapsedRealtime()
             fun result(id:String,code:String,path:List<String>)=JSONObject().put("id",id).put("complete",true)
@@ -87,9 +87,12 @@ class ManagedFailoverTest {
                 result("route-1","ok",listOf("route-1")),result("route-2",reserveCode,listOf(reservePath)),
                 result("route-3","ok",listOf("route-3","route-1")))))
             assertTrue(RouteSnapshot.update(scope,report.toString()))
-            assertNull(RouteSnapshot.failoverAdvice(scope))
+            assertNull(RouteSnapshot.failoverAdvice(scope,trackReserveFailures=track))
         }
         try {
+            repeat(2) { batch(track=false) }
+            assertEquals(setOf("primary","reserve","internal"),tags(request(scope,true)))
+            RouteSnapshot.cancelled()
             batch(reservePath="route-1")
             batch(reserveCode="probe_unavailable")
             batch()

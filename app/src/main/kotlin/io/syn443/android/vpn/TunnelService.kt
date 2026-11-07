@@ -82,13 +82,13 @@ class TunnelService : VpnService() {
         it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
             it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
     }==true
-    private fun allowManagedFailover():Boolean {
-        if(!failoverWifi())return false
+    private fun managedFailoverCapabilities():List<String>? {
+        if(!failoverWifi())return null
         val state=policies.read()
-        if(!state.enrolled || state.journal.phase !in setOf("committed","degraded","rolled_back"))return false
-        return policies.allowed(state.journal.active,state)?.payload?.let {
+        if(!state.enrolled || state.journal.phase !in setOf("committed","degraded","rolled_back"))return null
+        return policies.allowed(state.journal.active,state)?.payload?.takeIf {
             it.contentHash==runningConfigHash && "route.failover.v1" in it.requiredCapabilities
-        }==true
+        }?.requiredCapabilities
     }
     private fun checkRoutes(force:Boolean=false,only:String?=null,activation:Boolean=false,manual:Boolean=false) {
         if(!ready || network==null || retiring || !Recovery.current(store.checkpoint(),boundGeneration))return
@@ -96,7 +96,8 @@ class TunnelService : VpnService() {
         RouteSnapshot.owner(scope)
         val confirmation=RouteSnapshot.confirmingFailover(scope) && failoverWifi()
         if(!force && !RouteSnapshot.due(if(activation||confirmation)10_000 else 60_000))return
-        val deferCoolingReserves=!manual && !activation && allowManagedFailover()
+        val deferCoolingReserves=!manual && !activation &&
+            managedFailoverCapabilities()?.contains(Policy.RESERVE_PROBE_COOLDOWN)==true
         RouteSnapshot.request(scope,only,force || activation || confirmation,deferCoolingReserves)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
     }
     private var registered = false
@@ -379,7 +380,9 @@ class TunnelService : VpnService() {
             val scope=routeScope() ?: return@post
             if(!runCatching {RouteSnapshot.update(scope,raw)}.getOrDefault(false))return@post
             if(internetHealthy)phase("Online","required_https_ok",boundGeneration)
-            if(RouteSnapshot.hasManagedFailover(scope) && allowManagedFailover())runCatching {RouteSnapshot.failoverAdvice(scope)}.getOrNull()?.let {command->
+            if(!RouteSnapshot.hasManagedFailover(scope))return@post
+            val capabilities=managedFailoverCapabilities() ?: return@post
+            runCatching {RouteSnapshot.failoverAdvice(scope,Policy.RESERVE_PROBE_COOLDOWN in capabilities)}.getOrNull()?.let {command->
                 pendingFailover=scope to command.receipt
                 runCatching {host?.selectVerifiedRoute(session,command.receipt,command.checkId,command.group,command.previous,command.candidate)}
             }
@@ -388,7 +391,7 @@ class TunnelService : VpnService() {
             val scope=routeScope() ?: return@post
             if(session!=token || pendingFailover!=(scope to receipt) || !Recovery.current(store.checkpoint(),boundGeneration))return@post
             pendingFailover=null
-            if(!selected || !ready || retiring || !allowManagedFailover())return@post
+            if(!selected || !ready || retiring || managedFailoverCapabilities()==null)return@post
             RouteSnapshot.cancelled(true)
             phase("Degraded","managed_route_recheck",boundGeneration)
             checkRoutes(force=true)
