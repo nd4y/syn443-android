@@ -63,8 +63,10 @@ if mode=="jvm":
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
-    assert ("io.syn443.android.RouteSnapshotTest","sshWithoutServerPinCannotBeImportedAssignedOrRendered") in {
-        (c.get("classname"),c.get("name")) for c in cases}, "Required SSH pin admission case missing"
+    assert {("io.syn443.android.RouteSnapshotTest",name) for name in {
+        "sshWithoutServerPinCannotBeImportedAssignedOrRendered",
+        "insecureProxyAndDnsTlsCannotBeImportedAssignedOrRendered",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required peer verification cases missing"
     assert {("io.syn443.android.ManagedFailoverTest",name) for name in {
         "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
         "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",

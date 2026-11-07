@@ -88,6 +88,33 @@ class RouteSnapshotTest {
             val rendered = JSONObject(EngineConfig.render(raw, root)).getJSONArray("outbounds").getJSONObject(0)
             assertEquals(pins.toString(), rendered.get("host_key").toString())
         }
+        ssh.put("HOST_KEY", org.json.JSONArray())
+        assertEquals("ssh_host_key_required", assertThrows(IllegalArgumentException::class.java) {
+            EngineConfig.validate(config.toString())
+        }.message)
+        ssh.remove("HOST_KEY")
+        ssh.put("type", "direct").put("TYPE", "ssh").remove("host_key")
+        assertEquals("ambiguous_outbound_type", assertThrows(IllegalArgumentException::class.java) {
+            EngineConfig.validate(config.toString())
+        }.message)
+    }
+    @Test fun insecureProxyAndDnsTlsCannotBeImportedAssignedOrRendered() {
+        val root = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir
+        val proxy = """{"outbounds":[{"type":"http","tag":"proxy","server":"proxy.example.invalid","server_port":443,"tls":{"enabled":true,"insecure":FLAG}}]}"""
+        val dns = """{"outbounds":[{"type":"direct","tag":"direct"}],"dns":{"servers":[{"type":"https","tag":"resolver","server":"dns.example.invalid","tls":{"enabled":true,"insecure":FLAG}}],"final":"resolver"}}"""
+        val admit = listOf<(String) -> Unit>(EngineConfig::validate, EngineConfig::validateAssigned, { EngineConfig.render(it, root); Unit })
+        for (config in listOf(proxy, dns)) for (apply in admit) {
+            apply(config.replace("FLAG", "false"))
+            apply(config.replace(",\"insecure\":FLAG", ""))
+            for (flag in listOf("true", "null", "\"false\"")) {
+                assertEquals("tls_verification_required", assertThrows(IllegalArgumentException::class.java) {
+                    apply(config.replace("FLAG", flag))
+                }.message)
+            }
+            assertEquals("tls_verification_required", assertThrows(IllegalArgumentException::class.java) {
+                apply(config.replace("\"tls\"", "\"TLS\"").replace("\"insecure\"", "\"Insecure\"").replace("FLAG", "true"))
+            }.message)
+        }
     }
     @Test fun assignedActivationWaitsForCandidateRoutesAndIgnoresOptionalFailure() {
         val candidate=scope.copy(config="assigned-${java.util.UUID.randomUUID()}")

@@ -8,11 +8,22 @@ object EngineConfig {
     fun validate(raw: String) {
         // JSONObject alone silently drops duplicate keys; preserve their rejection.
         android.util.JsonReader(java.io.StringReader(raw)).use { reader ->
-            fun value(depth: Int) {
+            fun value(depth: Int, tlsOptions: Boolean = false) {
                 require(depth <= 32)
                 when (reader.peek()) {
-                    android.util.JsonToken.BEGIN_OBJECT -> { reader.beginObject(); val keys = mutableSetOf<String>()
-                        while (reader.hasNext()) { require(keys.size < 256 && keys.add(reader.nextName())); value(depth + 1) }; reader.endObject() }
+                    android.util.JsonToken.BEGIN_OBJECT -> {
+                        reader.beginObject(); val keys = mutableSetOf<String>()
+                        while (reader.hasNext()) {
+                            val key = reader.nextName()
+                            require(keys.size < 256 && keys.add(key))
+                            if (tlsOptions && key.equals("insecure", ignoreCase = true)) {
+                                require(depth < 32 && reader.peek() == android.util.JsonToken.BOOLEAN && !reader.nextBoolean()) {
+                                    "tls_verification_required"
+                                }
+                            } else value(depth + 1, tlsOptions = key.equals("tls", ignoreCase = true))
+                        }
+                        reader.endObject()
+                    }
                     android.util.JsonToken.BEGIN_ARRAY -> { reader.beginArray(); var n = 0
                         while (reader.hasNext()) { require(++n <= 4096); value(depth + 1) }; reader.endArray() }
                     android.util.JsonToken.NUMBER -> require(reader.nextString().toDouble().isFinite())
@@ -33,6 +44,7 @@ object EngineConfig {
         for (i in 0 until outbounds.length()) {
             val item = outbounds.getJSONObject(i)
             require(!item.has("credential_pending") && !item.has("recover_existing")) { "local overlay state cannot be imported" }
+            require(item.keys().asSequence().none { it != "type" && it.equals("type", ignoreCase = true) }) { "ambiguous_outbound_type" }
             val type = item.getString("type")
             require(type in supported)
             require(item.getString("tag").toByteArray(Charsets.UTF_8).size in 1..256 && tags.add(item.getString("tag")))
@@ -41,7 +53,7 @@ object EngineConfig {
                 // It parses the actual public key before dialing. Do not accept a missing or
                 // empty list here, regardless of whether the config was imported or assigned.
                 val pins = item.opt("host_key")
-                require(when (pins) {
+                require(item.keys().asSequence().none { it != "host_key" && it.equals("host_key", ignoreCase = true) } && when (pins) {
                     is String -> validSshPin(pins)
                     is JSONArray -> pins.length() in 1..16 &&
                         (0 until pins.length()).all { validSshPin(pins.opt(it)) }
