@@ -44,6 +44,9 @@ An enrolled client can use `route.failover.v1` for an explicitly configured
 internal rule on validated Wi-Fi. The active member and reserves share the same
 signed probe plan. Two different batches must show an active path failure and
 a fresh successful reserve. Comparison uses recent successful checks, a cost
-class estimated from the number of hops, and then latency. The selector changes
-new connections and requests a fresh check. No implicit direct path is allowed. This pilot does not enable
-failover for RU or NON_RU, cellular modes, or dynamic graph discovery.
+class estimated from the number of hops, and then latency. Confirmed failures
+quarantine a member in the current network and activation context. It can
+rejoin only with a fresh check sampled after its cooldown. The selector
+changes new connections and requests a fresh check. No implicit direct path
+is allowed. This pilot does not enable failover for RU or NON_RU, cellular
+modes, or dynamic graph discovery.

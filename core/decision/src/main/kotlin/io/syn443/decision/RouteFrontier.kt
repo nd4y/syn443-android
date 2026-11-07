@@ -3,7 +3,13 @@ package io.syn443.decision
 import java.security.MessageDigest
 
 enum class NetworkMode { HOME_WIFI, WIFI, CELLULAR_RESTRICTED, CELLULAR }
-enum class ExitClass { RU, NON_RU, INTERNAL }
+enum class ExitClass {
+    RU, NON_RU, INTERNAL;
+
+    companion object {
+        internal val privateRoute = INTERNAL
+    }
+}
 enum class PathFeature { TCP, UDP, IPV4, IPV6, ICMP }
 
 data class RouteHop(

@@ -107,7 +107,7 @@ class RouteHealthMemory(private var context: Context) {
         return when {
             retry != null && nowMs < retry -> PathHealth(PathReadiness.QUARANTINED, retry)
             trial != null && nowMs < trial.untilMs -> PathHealth(PathReadiness.HALF_OPEN, trial.untilMs)
-            retry != null || nowMs - entry.observedAtMs >= 120_000 -> PathHealth(PathReadiness.REVALIDATE)
+            retry != null || nowMs - entry.observedAtMs >= 120_000 -> PathHealth(PathReadiness.REVALIDATE, retry)
             entry.failures > 0 -> PathHealth(PathReadiness.SUSPECT)
             else -> PathHealth(PathReadiness.VERIFIED)
         }

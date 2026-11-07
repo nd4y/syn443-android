@@ -60,4 +60,24 @@ class FailoverAdmissionTest {
         assertEquals("reserve-b", choose(history = true))
         assertEquals("reserve-a", choose(history = false))
     }
+
+    @Test fun failedMemberCannotReturnUsingEvidenceFromBeforeCooldown() {
+        val decision = make()
+        fun batch(n: Long, now: Long, active: String, reserve: String, sampled: Long = now): FailoverChoice? {
+            val receipt = "probe-$n"
+            return decision.decide(context, n, receipt, now, active,
+                VerifiedPathSample(active, receipt, "comparison", now, ProbeVerdict.CONFIRMED_PATH_FAILURE, 30),
+                listOf(VerifiedPathSample(reserve, receipt, "comparison", sampled, ProbeVerdict.VERIFIED, 5)))
+        }
+        assertNull(batch(1, 1_000, "primary", "reserve-a"))
+        assertEquals(FailoverChoice("primary", "reserve-a", "probe-2"),
+            batch(2, 2_000, "primary", "reserve-a"))
+        // These are recent enough for the generic 15s freshness window, but
+        // were sampled before the earliest possible quarantine expiry (32s).
+        assertNull(batch(3, 32_000, "reserve-a", "primary", sampled = 30_000))
+        assertNull(batch(4, 39_000, "reserve-a", "primary", sampled = 30_000))
+        assertNull(batch(5, 40_000, "reserve-a", "primary"))
+        assertEquals(FailoverChoice("reserve-a", "primary", "probe-6"),
+            batch(6, 41_000, "reserve-a", "primary"))
+    }
 }

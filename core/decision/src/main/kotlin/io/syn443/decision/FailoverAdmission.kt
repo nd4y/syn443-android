@@ -26,6 +26,7 @@ class FailoverAdmission(
     private val energy = energyClasses.toMap()
     private data class Success(val at: Long, val streak: Int)
     private val success = mutableMapOf<String, Success>()
+    private val health = RouteHealthMemory(context)
     private var lastSequence = 0L
     private var lastClock = 0L
     private var lastFailureAt = 0L
@@ -48,6 +49,19 @@ class FailoverAdmission(
         failureStreak = 0
     }
 
+    private fun track(sample: VerifiedPathSample, sequence: Long, nowMs: Long): Boolean {
+        val key = PathHealthKey(sample.pathId, ExitClass.privateRoute, metricGroup)
+        val before = health.view(context, key, nowMs)
+        when (before.readiness) {
+            PathReadiness.CONFIG_CHANGE_REQUIRED, PathReadiness.QUARANTINED, PathReadiness.HALF_OPEN -> return false
+            PathReadiness.REVALIDATE -> before.retryAtMs?.let { retryAt ->
+                if (sample.sampledAtMs < retryAt || !health.beginRetry(context, key, sequence, nowMs)) return false
+            }
+            else -> Unit
+        }
+        return health.record(context, key, sequence, nowMs, sample.verdict)
+    }
+
     /** A repeated heartbeat cannot count the same batch as two failures. */
     @Synchronized
     fun decide(
@@ -60,27 +74,35 @@ class FailoverAdmission(
         reserves: List<VerifiedPathSample>,
     ): FailoverChoice? {
         if (current != context || sequence !in 1..Decision.MAX_TIME || sequence <= lastSequence ||
-            nowMs !in lastClock..(Decision.MAX_TIME - 30_000) || !Decision.validId(receipt) ||
+            nowMs !in lastClock..(Decision.MAX_TIME - 720_000) || !Decision.validId(receipt) ||
             active.pathId != selected || !valid(active, receipt, nowMs) || reserves.size > 7 ||
             reserves.any { it.pathId == selected || !valid(it, receipt, nowMs) } ||
             reserves.map { it.pathId }.toSet().size != reserves.size) return null
         lastSequence = sequence
         lastClock = nowMs
+        val verified = mutableListOf<VerifiedPathSample>()
+        val observedReserve = reserves.any { it.verdict == ProbeVerdict.VERIFIED }
         for (sample in listOf(active) + reserves) {
+            if (sample.verdict !in setOf(ProbeVerdict.VERIFIED, ProbeVerdict.CONFIRMED_PATH_FAILURE,
+                    ProbeVerdict.PATH_AUTH_OR_CONFIGURATION)) continue
+            // For this pilot, a path failure is attributable only when another
+            // member successfully ran the identical checks in this batch.
+            if (sample.verdict == ProbeVerdict.CONFIRMED_PATH_FAILURE && !observedReserve) continue
+            if (!track(sample, sequence, nowMs)) continue
             when (sample.verdict) {
                 ProbeVerdict.VERIFIED -> {
                     val old = success[sample.pathId]
                     val streak = if (old != null && nowMs - old.at < 120_000) (old.streak + 1).coerceAtMost(5) else 1
                     success[sample.pathId] = Success(nowMs, streak)
+                    if (sample.pathId != selected) verified += sample
                 }
                 ProbeVerdict.CONFIRMED_PATH_FAILURE, ProbeVerdict.PATH_AUTH_OR_CONFIGURATION -> success.remove(sample.pathId)
                 else -> Unit
             }
         }
-        val verified = reserves.filter { it.verdict == ProbeVerdict.VERIFIED }
         if (active.verdict != ProbeVerdict.CONFIRMED_PATH_FAILURE || verified.isEmpty()) {
             // No evidence that one specific path failed and an eligible
-            // replacement works. Keep the current choice and do not quarantine.
+            // replacement works and is eligible. Keep the current selection.
             clearFailure()
             return null
         }
