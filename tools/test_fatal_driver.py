@@ -1,8 +1,23 @@
 import unittest
+from unittest.mock import patch
 from run_vpn_fatal import native_crash_matches, await_native_crash, scoped_libc_abort_matches
+from run_vpn_process_faults import ControlUnavailable, pid
 
 
 class NativeCrashEvidenceTest(unittest.TestCase):
+    def test_overlapping_processes_are_neither_absent_nor_a_unique_owner(self):
+        with patch('run_vpn_process_faults.adb', side_effect=[b'42 99\n', b'99\n', b'\n']):
+            with self.assertRaises(ControlUnavailable):
+                pid(':engine')
+            self.assertEqual('99', pid(':engine'))
+            self.assertEqual('', pid(':engine'))
+
+    def test_unexpected_process_output_still_fails_closed(self):
+        for output in (b'error: device offline', b'42 42', b'0'):
+            with patch('run_vpn_process_faults.adb', return_value=output):
+                with self.assertRaisesRegex(AssertionError, 'Unexpected process identity format'):
+                    pid(':engine')
+
     def test_api29_libc_record_requires_its_real_owner_and_exact_signal(self):
         raw=(b'11-07 13:58:41.558  42  99 F libc    : Fatal signal 6 (SIGABRT), '
              b'code -6 (SI_TKILL) in tid 99 (native-engine), pid 42 (.android:engine)\n')
