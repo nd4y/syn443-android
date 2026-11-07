@@ -42,7 +42,7 @@ outbound failure does not block an otherwise authorized configuration.
 
 An enrolled client can use `route.failover.v1` for an explicitly configured
 internal rule on validated Wi-Fi. The active member and reserves share the same
-signed probe plan. Two different batches must show an active path failure and
+signed probe plan. The baseline needs two different batches with an active path failure and
 a fresh successful reserve. Comparison uses recent successful checks, a cost
 class estimated from the number of hops, and then latency. Confirmed failures
 quarantine a member in the current network and activation context. It can
@@ -50,6 +50,14 @@ rejoin only with a fresh check sampled after its cooldown. The selector
 changes new connections and requests a fresh check. No implicit direct path
 is allowed. This pilot does not enable failover for RU or NON_RU, cellular
 modes, or dynamic graph discovery.
+
+The panel can assign the built-in conservative algorithm with
+`algorithmRevision: "m4-confirmed-v1"` in the signed, device-bound policy.
+It requires three independent batches and at least 60 seconds between
+switches. The baseline requires two batches and a 30-second interval. The
+variant only changes switching thresholds within the approved selector. With
+telemetry consent, a confirmed reselection records the applied policy revision
+and numeric algorithm code (1 baseline, 2 conservative).
 
 Failover evidence carries the exit class from the authorized plan. A batch
 labelled for a different exit cannot influence selection, failure count, or

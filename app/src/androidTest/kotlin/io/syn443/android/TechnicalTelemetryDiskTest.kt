@@ -34,6 +34,29 @@ class TechnicalTelemetryDiskTest {
             assertNull(capture.consent(owner))
         }finally {capture.disable()}
     }
+    @Test fun onlyConfirmedRouteSelectionCarriesItsPolicyAndAlgorithmRevisions() {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val capture=TelemetryCapture(context,"test-consent-"+UUID.randomUUID().toString().replace("-",""))
+        val owner=Identity.hash("synthetic enrollment".toByteArray())
+        fun row(sequence:Long,code:String,revision:Long,algorithm:String)=JSONObject().put("sequence",sequence)
+            .put("at",1_800_000_000_000).put("elapsed",10).put("networkEpoch",1).put("phase","Degraded")
+            .put("code",code).put("policyRevision",revision).put("algorithmRevision",algorithm)
+        try {
+            capture.enable(owner,0)
+            val consent=checkNotNull(capture.consent(owner))
+            val events=JSONArray(listOf(
+                row(1,"managed_route_recheck",41,"m4-confirmed-v1"),
+                row(2,"other",41,"m4-confirmed-v1"),
+                row(3,"managed_route_recheck",42,"m1-local-v1"),
+                row(4,"managed_route_recheck",-1,"m4-confirmed-v1")))
+            val (entries,through)=capture.sample(JSONObject().put("events",events),consent,60)
+            assertEquals(4L,through)
+            assertEquals(listOf(41L to 2, 0L to 1, 42L to 1, 0L to 1),
+                entries.map {it.key.policyRevision to it.key.algorithmRevision})
+            assertTrue(entries.all {it.event.path==null})
+        } finally {capture.disable()}
+    }
+
     @Test fun encryptedQueueRestartsWithoutExposingAnotherEnrollment() {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val namespace="test-telemetry-"+UUID.randomUUID().toString().replace("-","")

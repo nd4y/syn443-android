@@ -12,6 +12,16 @@ data class VerifiedPathSample(
 
 data class FailoverChoice(val previous: String, val candidate: String, val receipt: String)
 
+/** Immutable local algorithms selected by the verified policy revision. */
+enum class FailoverAlgorithm(val revision: String, val confirmations: Int, val switchIntervalMs: Long) {
+    BASELINE("m1-local-v1", 2, 30_000),
+    CONFIRMED("m4-confirmed-v1", 3, 60_000);
+
+    companion object {
+        fun fromRevision(revision: String): FailoverAlgorithm? = entries.firstOrNull { it.revision == revision }
+    }
+}
+
 /**
  * Decides whether to ask the engine for a make-before-break switch.
  * Every route is already authorized for one intent and this comparison group.
@@ -23,6 +33,7 @@ class FailoverAdmission(
     authorized: Set<String>,
     private val metricGroup: String,
     energyClasses: Map<String, Int> = emptyMap(),
+    private val algorithm: FailoverAlgorithm = FailoverAlgorithm.BASELINE,
 ) {
     private val members = authorized.toSet()
     private val energy = energyClasses.toMap()
@@ -127,15 +138,15 @@ class FailoverAdmission(
             return null
         }
         failureStreak = if (lastFailureMember == selected && nowMs - lastFailureAt < 120_000)
-            (failureStreak + 1).coerceAtMost(2) else 1
+            (failureStreak + 1).coerceAtMost(algorithm.confirmations) else 1
         lastFailureMember = selected
         lastFailureAt = nowMs
-        if (failureStreak < 2 || nowMs < nextSwitch) return null
+        if (failureStreak < algorithm.confirmations || nowMs < nextSwitch) return null
         val best = verified.minWith(compareBy<VerifiedPathSample>(
             { -(success[it.pathId]?.streak ?: 0) }, { energy[it.pathId] ?: 2 }, { it.latencyMs }, { it.pathId },
         ))
         clearFailure()
-        nextSwitch = nowMs + 30_000
+        nextSwitch = nowMs + algorithm.switchIntervalMs
         return FailoverChoice(selected, best.pathId, receipt)
     }
 }

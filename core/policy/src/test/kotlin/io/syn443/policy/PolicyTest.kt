@@ -169,6 +169,27 @@ class PolicyTest {
         invalid { verify(sign(candidate.copy(schemaVersion=1,keyThumbprint="",
             requiredCapabilities=candidate.requiredCapabilities-"policy.keybound.v2"))) }
     }
+    @Test fun decisionRevisionMustMatchKeyBoundFailoverCapability() {
+        val base = payload()
+        val engine = """{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"},"route_failover":{}}"""
+        val baseline = base.copy(schemaVersion = 2, keyThumbprint = enc(ByteArray(32) { 9 }),
+            requiredCapabilities = base.requiredCapabilities + listOf("policy.keybound.v2", "route.health.v1", "route.failover.v1"),
+            engineConfigB64 = enc(engine.toByteArray()), contentHash = Policy.hash(engine))
+        val configured = baseline.copy(algorithmRevision = Policy.CONFIRMED_ALGORITHM,
+            requiredCapabilities = baseline.requiredCapabilities + Policy.ROUTE_DECISION)
+        assertEquals(Policy.CONFIRMED_ALGORITHM, verify(sign(configured)).payload.algorithmRevision)
+        assertEquals(verify(sign(baseline)).engineConfig, verify(sign(configured)).engineConfig)
+        val rejected = Policy.rollback(Policy.stage(Journal(), verify(sign(configured))), 1, "activation_failed")
+        assertEquals("prepared", Policy.stage(rejected, verify(sign(baseline.copy(revision = 2)))).phase)
+        invalid { verify(sign(configured.copy(algorithmRevision = "external-program"))) }
+        invalid { verify(sign(configured.copy(algorithmRevision = Policy.BASELINE_ALGORITHM))) }
+        invalid { verify(sign(configured.copy(requiredCapabilities = baseline.requiredCapabilities))) }
+        invalid { verify(sign(configured.copy(operation = "release"))) }
+        invalid { verify(sign(configured.copy(engineConfigB64 = base.engineConfigB64, contentHash = base.contentHash))) }
+        invalid { verify(sign(configured.copy(schemaVersion = 1, keyThumbprint = "",
+            requiredCapabilities = configured.requiredCapabilities - "policy.keybound.v2"))) }
+    }
+
     @Test fun exitCheckRequiresMatchingCapabilityOnKeyBoundConfiguration() {
         val baseline = payload()
         val engine = """{"outbounds":[{"type":"direct","tag":"direct"}],"route_checks":[{"outbound":"direct","checks":[{"method":"https_exit_ip","target":"https://health.example.invalid/address","expected_ip":"192.0.2.9"}]}]}"""

@@ -34,7 +34,10 @@ import java.net.HttpURLConnection
 import java.util.UUID
 import java.util.concurrent.Executors
 import javax.net.ssl.HttpsURLConnection
+import io.syn443.decision.FailoverAlgorithm
+import io.syn443.policy.Payload
 import io.syn443.policy.Policy
+import io.syn443.recovery.RouteScope
 import io.syn443.policy.Preparation
 
 /** Sole TUN owner, durable intent reconciler and native-process watchdog. Never loads Go. */
@@ -77,19 +80,20 @@ class TunnelService : VpnService() {
     private var lastProbe = 0L
     private var internetHealthy = false
     private var networkWaitReason = "network_unavailable"
-    private var pendingFailover:Pair<io.syn443.recovery.RouteScope,String>?=null
-    private fun routeScope() = token?.let {io.syn443.recovery.RouteScope(boundGeneration,epoch,policies.read().journal.activationGeneration,it,runningConfigHash)}
+    private data class PendingFailover(val scope: RouteScope, val receipt: String, val decision: RouteDecisionStamp)
+    private var pendingFailover: PendingFailover? = null
+    private fun routeScope() = token?.let {RouteScope(boundGeneration,epoch,policies.read().journal.activationGeneration,it,runningConfigHash)}
     private fun failoverWifi():Boolean=network?.let(connectivity::getNetworkCapabilities)?.let {
         it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
             it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
     }==true
-    private fun managedFailoverCapabilities():List<String>? {
+    private fun managedFailoverPolicy():Payload? {
         if(!failoverWifi())return null
         val state=policies.read()
         if(!state.enrolled || state.journal.phase !in setOf("committed","degraded","rolled_back"))return null
         return policies.allowed(state.journal.active,state)?.payload?.takeIf {
             it.contentHash==runningConfigHash && "route.failover.v1" in it.requiredCapabilities
-        }?.requiredCapabilities
+        }
     }
     private fun checkRoutes(force:Boolean=false,only:String?=null,activation:Boolean=false,manual:Boolean=false) {
         if(!ready || network==null || retiring || !Recovery.current(store.checkpoint(),boundGeneration))return
@@ -97,13 +101,13 @@ class TunnelService : VpnService() {
         RouteSnapshot.owner(scope)
         val confirmation=RouteSnapshot.confirmingFailover(scope) && failoverWifi()
         val awaitingValidated=only==null && !activation && RouteSnapshot.awaitingValidatedBatch(scope)
-        val validationCaps=if(awaitingValidated)managedFailoverCapabilities() else null
-        if(!force && validationCaps==null && !RouteSnapshot.due(if(activation||confirmation)10_000 else 60_000))return
+        val validatedPolicy=if(awaitingValidated)managedFailoverPolicy() else null
+        if(!force && validatedPolicy==null && !RouteSnapshot.due(if(activation||confirmation)10_000 else 60_000))return
         val deferCoolingReserves=!manual && !activation &&
-            (validationCaps ?: if(awaitingValidated)null else managedFailoverCapabilities())
-                ?.contains(Policy.RESERVE_PROBE_COOLDOWN)==true
+            (validatedPolicy ?: if(awaitingValidated)null else managedFailoverPolicy())
+                ?.requiredCapabilities?.contains(Policy.RESERVE_PROBE_COOLDOWN)==true
         RouteSnapshot.request(scope,only,force || activation || confirmation,deferCoolingReserves,
-            validatedManagedWifi=validationCaps!=null)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
+            validatedManagedWifi=validatedPolicy!=null)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
     }
     private var registered = false
     private var foreground = false
@@ -180,7 +184,7 @@ class TunnelService : VpnService() {
         handler.post(tick)
         return START_STICKY
     }
-    private fun phase(name: String, reason: String, generation: Long? = null) {
+    private fun phase(name: String, reason: String, generation: Long? = null, decision: RouteDecisionStamp? = null) {
         val policyPhase = runCatching { policies.read().journal.phase }.getOrDefault("blocked")
         if (name == "Online" && policyPhase == "applying") { phase("Connecting", "policy_gate_pending", generation); return }
         if (name == "Online" && policyPhase == "degraded") { phase("Degraded", "policy_baseline_degraded", generation); return }
@@ -188,8 +192,8 @@ class TunnelService : VpnService() {
         val previous = store.read()
         if (generation != null && !Recovery.current(store.checkpoint(previous), generation)) return
         if (!previous.optBoolean("desiredOn") && name != "Off") return
-        if (previous.optString("phase") != name || previous.optString("reason") != reason) {
-            if (!store.event(name, reason, epoch, generation ?: previous.optLong("generation"))) return
+        if (decision != null || previous.optString("phase") != name || previous.optString("reason") != reason) {
+            if (!store.event(name, reason, epoch, generation ?: previous.optLong("generation"), decision)) return
         }
         val text = when (name) {
             "Online" -> "Работает"
@@ -394,19 +398,25 @@ class TunnelService : VpnService() {
             if(!runCatching {RouteSnapshot.update(scope,raw)}.getOrDefault(false))return@post
             if(internetHealthy)phase("Online","required_https_ok",boundGeneration)
             if(!RouteSnapshot.hasManagedFailover(scope))return@post
-            val capabilities=managedFailoverCapabilities() ?: return@post
-            runCatching {RouteSnapshot.failoverAdvice(scope,Policy.RESERVE_PROBE_COOLDOWN in capabilities)}.getOrNull()?.let {command->
-                pendingFailover=scope to command.receipt
+            val policy=managedFailoverPolicy() ?: return@post
+            val algorithm=FailoverAlgorithm.fromRevision(policy.algorithmRevision) ?: return@post
+            val trackReserves=Policy.RESERVE_PROBE_COOLDOWN in policy.requiredCapabilities
+            runCatching {RouteSnapshot.failoverAdvice(scope,trackReserves,algorithm)}.getOrNull()?.let {command->
+                pendingFailover=PendingFailover(scope,command.receipt,RouteDecisionStamp(policy.revision,algorithm))
                 runCatching {host?.selectVerifiedRoute(session,command.receipt,command.checkId,command.group,command.previous,command.candidate)}
             }
         }}
         override fun routeSelected(session:String,receipt:String,selected:Boolean) {handler.post {
             val scope=routeScope() ?: return@post
-            if(session!=token || pendingFailover!=(scope to receipt) || !Recovery.current(store.checkpoint(),boundGeneration))return@post
+            val pending=pendingFailover ?: return@post
+            if(session!=token || pending.scope!=scope || pending.receipt!=receipt ||
+                !Recovery.current(store.checkpoint(),boundGeneration))return@post
             pendingFailover=null
-            if(!selected || !ready || retiring || managedFailoverCapabilities()==null)return@post
+            if(!selected || !ready || retiring)return@post
+            val policy=managedFailoverPolicy() ?: return@post
+            if(policy.revision!=pending.decision.policyRevision || policy.algorithmRevision!=pending.decision.algorithm.revision)return@post
             RouteSnapshot.cancelled(true)
-            phase("Degraded","managed_route_recheck",boundGeneration)
+            phase("Degraded","managed_route_recheck",boundGeneration,pending.decision)
             checkRoutes(force=true)
         }}
         override fun exchangeDNS(query: ByteArray, session: String): ByteArray {
