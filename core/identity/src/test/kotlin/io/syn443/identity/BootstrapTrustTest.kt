@@ -123,6 +123,22 @@ class BootstrapTrustTest {
             fail {BootstrapTrust.authenticate(bad,anchor,ServiceFloor(),now)}
         }
     }
+    @Test fun appLinkUnwrapsOnlyAnExactHttpsCarrierAndRetainsInstallationTrust() {
+        val host="links.example.invalid"
+        val base="https://$host"+BootstrapTrust.APP_LINK_PATH
+        val direct=link()
+        val carrier="$base#$direct"
+        assertEquals(direct,BootstrapTrust.unwrapAppLink(carrier,host))
+        assertEquals(descriptor(),BootstrapTrust.authenticate(BootstrapTrust.unwrapAppLink(carrier,host),anchor,ServiceFloor(),now).descriptor)
+        val mismatched=BootstrapTrust.unwrapAppLink("$base#"+link(origin="https://other.example.invalid"),host)
+        fail {BootstrapTrust.authenticate(mismatched,anchor,ServiceFloor(),now)}
+        for(bad in listOf(carrier.replace("https://","http://"),carrier.replace(host,"other.example.invalid"),
+            carrier.replace(host,"$host:443"),carrier.replace(host,"other@$host"),"$base/?code=x#$direct",
+            "$base?code=x#$direct",base,"$base#","$carrier#nested","$carrier&code=duplicate",
+            "$base#"+Identity.form(mapOf("link" to direct)),"$base#"+"x".repeat(BootstrapTrust.MAX_LINK+1))) {
+            fail {BootstrapTrust.unwrapAppLink(bad,host)}
+        }
+    }
     @Test fun sharedGoCertificatesMatchKotlinFloorsAndDualRootTransition() {
         val raw=requireNotNull(javaClass.classLoader.getResourceAsStream("bootstrap-wire-vectors.json")).use {it.readBytes().toString(Charsets.UTF_8)}
         val fixture=Canonical.parse(raw).jsonObject

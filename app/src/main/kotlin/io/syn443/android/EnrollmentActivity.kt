@@ -37,16 +37,42 @@ class EnrollmentFileProvider:FileProvider()
 /** Incoming content is preview-only. No key/code leaves this device before the
  * explicit binding confirmation and installation-root verification. */
 class EnrollmentActivity:ComponentActivity() {
+    private var incoming by mutableStateOf("")
+    private var arrival by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        val incoming=intent.dataString?.takeIf {it.length<=BootstrapTrust.MAX_LINK}.orEmpty()
-        intent=Intent(this,EnrollmentActivity::class.java) // Do not retain a secret in the Activity intent.
-        setContent {MaterialTheme(colorScheme=darkColorScheme()){Surface(Modifier.fillMaxSize()){EnrollmentScreen(incoming){browser->
-            startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
-            if(browser!=null)startActivity(Intent(Intent.ACTION_VIEW,browser.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
-            finish()
-        }}}}
+        receive(intent)
+        setContent {
+            MaterialTheme(colorScheme=darkColorScheme()) {
+                Surface(Modifier.fillMaxSize()) {
+                    key(arrival) {
+                        EnrollmentScreen(incoming) { browser ->
+                            startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+                            if(browser!=null)startActivity(Intent(Intent.ACTION_VIEW,browser.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
+                            finish()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent:Intent) {
+        super.onNewIntent(intent)
+        receive(intent)
+    }
+
+    private fun receive(source:Intent) {
+        val raw=source.dataString?.takeIf {source.action==Intent.ACTION_VIEW}
+        incoming=when {
+            raw==null -> ""
+            raw.startsWith("syn443://") -> raw.takeIf {it.length<=BootstrapTrust.MAX_LINK}.orEmpty()
+            else -> runCatching {BootstrapTrust.unwrapAppLink(raw,BuildConfig.ENROLLMENT_LINK_HOST)}.getOrDefault("")
+        }
+        intent=Intent(this,EnrollmentActivity::class.java)
+        arrival++
     }
 }
 

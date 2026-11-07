@@ -26,6 +26,12 @@ val prototypeAssets = tasks.register<PrototypeAssets>("preparePrototypeAssets") 
 androidComponents.onVariants { variant ->
     variant.sources.assets?.addGeneratedSourceDirectory(prototypeAssets, PrototypeAssets::outputDirectory)
 }
+val enrollmentLinkHost = providers.environmentVariable("SYN443_ENROLLMENT_LINK_HOST").orElse("").get()
+    .ifBlank { "links.example.invalid" }
+val dnsLabel = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+require(enrollmentLinkHost.length <= 253 && enrollmentLinkHost.matches(Regex("(?:$dnsLabel\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"))) {
+    "SYN443_ENROLLMENT_LINK_HOST must be a lowercase public DNS hostname"
+}
 android {
     namespace = "io.syn443.android"
     compileSdk = 37
@@ -33,9 +39,11 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 43
-        versionName = "0.9.15-activation-reporting"
+        versionCode = 44
+        versionName = "0.9.16-invitation-app-links"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
+        manifestPlaceholders["enrollmentLinkHost"] = enrollmentLinkHost
+        buildConfigField("String", "ENROLLMENT_LINK_HOST", "\"$enrollmentLinkHost\"")
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }
     compileOptions {

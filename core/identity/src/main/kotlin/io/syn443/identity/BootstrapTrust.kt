@@ -45,6 +45,7 @@ class AuthenticatedInvite internal constructor(val descriptor:ServiceDescriptor,
 object BootstrapTrust {
     const val MAX_MANIFEST=6144
     const val MAX_LINK=8192
+    const val APP_LINK_PATH="/syn443/enroll"
     private const val SAFE=9_007_199_254_740_991L
     private val identifier=Regex("[A-Za-z0-9_-]{1,64}")
     private val digest=Regex("[A-Za-z0-9_-]{43}")
@@ -153,6 +154,15 @@ object BootstrapTrust {
         require(identifier.matches(result.serviceId) && digest.matches(result.code) && Policy.decode64(result.code).size==32 &&
             result.manifest.length in 1..MAX_MANIFEST);secureURL(result.origin,false)
         return result
+    }
+
+    /** A verified HTTPS carrier leaves the invitation in the fragment, so the
+     * landing server never receives it. Its service descriptor still needs the
+     * same installation-root verification as the direct URI. */
+    fun unwrapAppLink(raw:String,host:String):String {
+        val prefix="https://$host$APP_LINK_PATH#"
+        require(raw.length in prefix.length+1..prefix.length+MAX_LINK && raw.startsWith(prefix))
+        return raw.substring(prefix.length).also {parse(it)}
     }
     fun authenticate(raw:String,anchor:TrustAnchor,floor:ServiceFloor,now:Long):AuthenticatedInvite {
         val invitation=parse(raw);val (value,next)=descriptor(invitation.manifest,anchor,floor,now)

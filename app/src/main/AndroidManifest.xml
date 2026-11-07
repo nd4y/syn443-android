@@ -13,12 +13,20 @@
         android:label="SYN443"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
-        <activity android:name=".EnrollmentActivity" android:exported="true" android:excludeFromRecents="true">
+        <activity android:name=".EnrollmentActivity" android:exported="true" android:excludeFromRecents="true" android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="syn443" android:host="enroll" android:path="/v1" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="${enrollmentLinkHost}" android:path="/syn443/enroll" />
             </intent-filter>
         </activity>
         <provider android:name=".EnrollmentFileProvider" android:authorities="io.syn443.android.enrollment.files" android:exported="false" android:grantUriPermissions="true">

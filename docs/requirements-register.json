@@ -2102,8 +2102,12 @@
     {
       "id": "BOOT-14",
       "text": "Custom URI может открыть и другое Android-приложение с той же схемой, поэтому эксклюзивное владение схемой не предполагается. Для распространения через браузер дополнительно поддерживается verified HTTPS App Link доверенного домена. Без установленного клиента HTTPS-страница предлагает установить APK и затем повторно открыть ссылку; скрытого переноса кода через store не требуется. [Android deep links](https://developer.android.com/training/app-links/create-deeplinks).",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/bootstrap-trust.md#https-app-links",
+        "core/identity/src/test/kotlin/io/syn443/identity/BootstrapTrustTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/EnrollmentAppLinkTest.kt"
+      ]
     },
     {
       "id": "BOOT-15",

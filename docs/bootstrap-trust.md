@@ -24,3 +24,20 @@ The protected Android journal and camera/paste/Intent UI are integrated with
 manual claim/approval/session provisioning; see [manual enrollment](manual-enrollment.md).
 New Actions and physical Xperia acceptance remain open; integration alone does
 not complete M2 or M3. All compilation/tests run in GitHub Actions.
+
+## HTTPS App Links
+
+The manually dispatched Android Actions build reads the repository variable
+`SYN443_PUBLIC_ENROLLMENT_LINK_HOST`. Set it only to an explicitly public
+hostname. Generic builds use the reserved `links.example.invalid` fixture.
+The APK declares `/syn443/enroll` for Android domain verification. The public host
+must serve a Digital Asset Links statement for the exact app package and signing
+certificate. [Android intent filters](https://developer.android.com/training/app-links/add-applinks)
+
+Share `https://HOST/syn443/enroll#` followed by the original `syn443://enroll/v1`
+invitation. The web request omits the fragment. The client accepts only the
+configured HTTPS host and exact path. The inner invitation must pass the same
+bounded parser and installation-root verification as a direct link or QR. A
+valid incoming Intent fills the private preview field. Binding still requires
+the user's confirmation and the independent server approval. Browser fallback
+and Android domain association need a real deployed host for acceptance.

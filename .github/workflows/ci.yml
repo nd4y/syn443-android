@@ -8,6 +8,8 @@ on:
     - cron: '47 2 * * *'
 permissions:
   contents: read
+env:
+  SYN443_ENROLLMENT_LINK_HOST: ${{ github.event_name == 'workflow_dispatch' && vars.SYN443_PUBLIC_ENROLLMENT_LINK_HOST || '' }}
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
