@@ -56,3 +56,11 @@ labelled for a different exit cannot influence selection, failure count, or
 quarantine, even when its probe target and latency are otherwise comparable.
 This is a decision boundary for future traffic classes. It is not proof of the
 geographic exit and does not enable a new class in the managed runtime.
+
+An imported route profile can set `method: "https_exit_ip"` with an HTTPS
+target and `expected_ip`. The approved target must return the current peer IP
+as plain text in a noncached HTTP 200 response with a bounded content length.
+The client dials through the configured outbound, verifies TLS and checks the
+literal IPv4 or IPv6 address. Status keeps a mismatched address separate from
+an invalid response and omits both addresses. The result depends on the
+approved endpoint reporting the peer address correctly.

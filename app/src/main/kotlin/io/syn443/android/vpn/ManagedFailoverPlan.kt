@@ -50,6 +50,7 @@ internal data class ManagedFailoverPlan(val selector:String,val intent:ExitClass
             require(groupProbe.optBoolean("required"))
             fun checks(row:JSONObject)=rows(row.getJSONArray("checks")).map {it.getString("method") to it.getString("target")}
             val expected=checks(groupProbe)
+            require(expected.none { (method, _) -> method == "https_exit_ip" })
             for(member in members) {
                 val check=probes.getValue(member)
                 require(!check.optBoolean("required") && checks(check)==expected)

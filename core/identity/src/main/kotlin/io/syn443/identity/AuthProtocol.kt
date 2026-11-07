@@ -82,7 +82,7 @@ data class PolicyReply(val envelope:String,val time:TrustedTime,val deviceSource
         val requiredCapabilities=listOf("engine-config.v1","tun.lease.v1","policy.keybound.v2")
         // The base remains valid for old immutable retry bodies. New installs
         // advertise implemented optional modules without rewriting old requests.
-        val supportedCapabilities=requiredCapabilities+listOf("overlay.credentials.v1","route.health.v1","route.failover.v1",io.syn443.policy.Policy.RESERVE_PROBE_COOLDOWN)
+        val supportedCapabilities=requiredCapabilities+listOf("overlay.credentials.v1","route.health.v1","route.failover.v1",io.syn443.policy.Policy.RESERVE_PROBE_COOLDOWN,io.syn443.policy.Policy.ROUTE_EXIT_IP)
         fun enroll(key:ECPublicKey)=IdentityOperation("/v1/devices/enroll",Canonical.encode(buildJsonObject {
             put("requestId",Identity.random());put("key",Identity.jwk(key));put("capabilities",JsonArray(supportedCapabilities.map(::JsonPrimitive)))
         }))

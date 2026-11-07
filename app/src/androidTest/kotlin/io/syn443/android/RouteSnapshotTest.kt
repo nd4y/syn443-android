@@ -64,6 +64,28 @@ class RouteSnapshotTest {
         EngineConfig.validateAssigned(config)
         assertThrows(IllegalArgumentException::class.java){EngineConfig.validateAssigned("""{"outbounds":[{"type":"netbird","tag":"overlay"}]}""")}
     }
+    @Test fun routeExitProofIsRequiredAndReportsMismatchWithoutExposingAddresses() {
+        val raw = config.replace("\"method\":\"https_204\"", "\"method\":\"https_exit_ip\",\"expected_ip\":\"2001:db8::9\"")
+        EngineConfig.validate(raw)
+        for (invalid in listOf("exit.example.invalid", "192.0.2.09", "fe80::1%wifi", "::ffff:192.0.2.9", "2001:db8::/32")) {
+            assertThrows(IllegalArgumentException::class.java) { EngineConfig.validate(raw.replace("2001:db8::9", invalid)) }
+        }
+        assertThrows(IllegalArgumentException::class.java) { EngineConfig.validate(raw.replace("https_exit_ip", "https_204")) }
+
+        RouteSnapshot.configure(raw, scope.config)
+        RouteSnapshot.owner(scope)
+        val request = checkNotNull(RouteSnapshot.request(scope))
+        val check = JSONObject(request).getJSONArray("routes").getJSONObject(0).getJSONArray("checks").getJSONObject(0)
+        assertEquals("2001:db8::9", check.getString("expected_ip"))
+        val mismatch = JSONObject(report(request, false))
+        mismatch.getJSONArray("results").getJSONObject(0).put("code", "exit_ip_mismatch")
+        assertTrue(RouteSnapshot.update(scope, mismatch.toString()))
+        val result = RouteSnapshot.read(true, true, scope)
+        assertFalse(result.getBoolean("requiredReady"))
+        assertEquals("failed", result.getJSONArray("routes").getJSONObject(0).getString("state"))
+        assertFalse(result.toString().contains("2001:db8::9"))
+        assertFalse(result.toString().contains("probe.example.org"))
+    }
     @Test fun sshWithoutServerPinCannotBeImportedAssignedOrRendered() {
         val root = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir
         val config = JSONObject("""{"outbounds":[{"type":"ssh","tag":"ssh-hop","server":"proxy.example.invalid","server_port":22,"user":"fixture"}]}""")

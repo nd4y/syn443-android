@@ -1,5 +1,6 @@
 package io.syn443.android.vpn
 
+import android.net.InetAddresses
 import android.os.SystemClock
 import io.syn443.decision.Context
 import io.syn443.decision.FailoverAdmission
@@ -12,6 +13,7 @@ import io.syn443.recovery.RouteState
 import io.syn443.recovery.RouteActivation
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.Inet6Address
 import java.net.URI
 import java.util.UUID
 
@@ -38,10 +40,21 @@ object RouteSnapshot {
     private var batchSequence=0L
     private var completedReceipt=""
     private var confirmingFailure=false
-    private val methods=setOf("tcp","tls","https_204","ssh_banner")
+    private val methods=setOf("tcp","tls","https_204","ssh_banner","https_exit_ip")
+    private val tlsMethods=setOf("tls","https_204","https_exit_ip")
+    private val ipv4Literal=Regex("(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}")
+    private val ipv6Literal=Regex("[0-9a-fA-F:.]{2,45}")
     private var measuredPaths=emptyMap<String,JSONArray>()
-    private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","path_changed","check_timeout","probe_unavailable")
+    private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","exit_evidence_invalid","exit_ip_mismatch","path_changed","check_timeout","probe_unavailable")
     private val completedProbeFailures=setOf("dial_failed","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","check_timeout")
+
+    private fun validExitIP(value: Any?): Boolean {
+        if (value !is String) return false
+        val ipv6 = ':' in value
+        if (!(if (ipv6) ipv6Literal else ipv4Literal).matches(value)) return false
+        return runCatching { (InetAddresses.parseNumericAddress(value) is Inet6Address) == ipv6 }.getOrDefault(false)
+    }
+
     fun validate(config: JSONObject) {
         if(!config.has("route_checks"))return
         val settings=config.getJSONArray("route_checks")
@@ -58,12 +71,14 @@ object RouteSnapshot {
             val checks=item.getJSONArray("checks");require(checks.length() in 1..4)
             for(j in 0 until checks.length()) {
                 val check=checks.getJSONObject(j)
-                require(check.keys().asSequence().toSet()==setOf("method","target"))
                 val method=check.getString("method");val target=check.getString("target")
+                val fields=if(method=="https_exit_ip") setOf("method","target","expected_ip") else setOf("method","target")
+                require(check.keys().asSequence().toSet()==fields)
+                if(method=="https_exit_ip")require(validExitIP(check.get("expected_ip")))
                 require(method in methods && target.length in 1..2048)
-                val uri=if(method in setOf("tls","https_204")) URI(target) else URI("tcp://$target")
+                val uri=if(method in tlsMethods) URI(target) else URI("tcp://$target")
                 require(uri.host!=null && uri.userInfo==null && uri.fragment==null)
-                require(if(method in setOf("tls","https_204")) uri.scheme=="https" && (uri.port==-1 || uri.port in 1..65535) else uri.port in 1..65535 && uri.rawPath.isNullOrEmpty() && uri.query==null)
+                require(if(method in tlsMethods) uri.scheme=="https" && (uri.port==-1 || uri.port in 1..65535) else uri.port in 1..65535 && uri.rawPath.isNullOrEmpty() && uri.query==null)
             }
         }
     }
