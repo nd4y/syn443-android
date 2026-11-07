@@ -5,6 +5,7 @@ emulator. TLS implementation/physical HTTPS acceptance is a separate gate.
 """
 import base64
 import copy
+import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -14,6 +15,7 @@ import time
 import xml.etree.ElementTree as ET
 from policy_fixture import Publisher
 from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition
+from syn443ctl import ControlError, Device
 
 class Delivery(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -152,6 +154,22 @@ def main():
                     else:
                         raise AssertionError('Managed import bypass')
                     assert call('status')['policy']['activeRevision'] == active and pid(':engine') == original
+                    stop()
+                    stopped=call('status')
+                    assert stopped['policy']['managed'] and not stopped['desiredOn']
+                    local=copy.deepcopy(config)
+                    local['outbounds'][0]['tag']='local-only'
+                    local['route']['final']='local-only'
+                    raw=json.dumps(local).encode()
+                    operator=Device(adb('get-serialno').decode().strip(),15)
+                    try:
+                        operator.config('config-apply',raw,stopped['configRevision'],hashlib.sha256(raw).hexdigest())
+                    except ControlError as denied:
+                        assert denied.code=='command_rejected'
+                    else:
+                        raise AssertionError('Local ADB apply bypassed an active management binding while Off')
+                    after=call('status')
+                    assert after['configRevision']==stopped['configRevision'] and after['policy']['activeRevision']==active
                 elif name.startswith('failedNative'):
                     bad = copy.deepcopy(config); bad['outbounds'][0]['server_port'] = -1
                     candidate = publisher.sign(bad, revision=2); stage(candidate)
