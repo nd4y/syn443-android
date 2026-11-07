@@ -64,6 +64,7 @@ if mode=="emulator":
         "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
         "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
         "routineBatchesDeferOnlyCoolingReserveAndKeepRequiredSelector",
+        "firstValidatedManagedBatchBypassesCadenceOnceWithoutCancellingInFlightWork",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed Wi-Fi failover cases missing"
     assert {
         ("io.syn443.android.TechnicalTelemetryDiskTest","encryptedQueueRestartsWithoutExposingAnotherEnrollment"),

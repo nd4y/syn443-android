@@ -109,4 +109,27 @@ class ManagedFailoverTest {
             assertEquals(setOf("primary","reserve","internal"),tags(request(newNetwork,true)))
         } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
     }
+
+    @Test fun firstValidatedManagedBatchBypassesCadenceOnceWithoutCancellingInFlightWork() {
+        val scope=RouteScope(10,24,30,"synthetic-engine",Policy.hash(config))
+        RouteSnapshot.configure(config,scope.config)
+        RouteSnapshot.owner(scope)
+        try {
+            assertNotNull(RouteSnapshot.request(scope))
+            assertTrue(RouteSnapshot.awaitingValidatedBatch(scope))
+            assertNull(RouteSnapshot.request(scope,validatedManagedWifi=true))
+            assertTrue(RouteSnapshot.awaitingValidatedBatch(scope))
+            RouteSnapshot.cancelled()
+            assertNull(RouteSnapshot.request(scope))
+            assertNotNull(RouteSnapshot.request(scope,validatedManagedWifi=true))
+            assertFalse(RouteSnapshot.awaitingValidatedBatch(scope))
+            RouteSnapshot.cancelled()
+            assertNull(RouteSnapshot.request(scope,validatedManagedWifi=true))
+            val next=scope.copy(network=25)
+            RouteSnapshot.owner(next)
+            assertTrue(RouteSnapshot.awaitingValidatedBatch(next))
+            assertNotNull(RouteSnapshot.request(next,validatedManagedWifi=true))
+            assertFalse(RouteSnapshot.awaitingValidatedBatch(next))
+        } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
+    }
 }

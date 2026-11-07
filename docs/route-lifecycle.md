@@ -167,3 +167,10 @@ continue the previous scheduling behavior. A failed opt-in uses a distinct
 rollback fingerprint; the legacy configuration with identical proxy bytes
 can still be issued as a newer revision. This is a fixed local evaluator
 feature that can be enabled for a reviewed recipient set.
+
+Wi-Fi can be available before Android marks it validated. The first
+validated, signed failover batch for the current route scope can bypass
+the normal cadence once. It waits for a batch already in progress and
+does not reuse its unvalidated measurements as a new receipt. Later
+validation callbacks for the same scope cannot repeatedly accelerate
+probing. Two independent receipts and a verified reserve remain required.

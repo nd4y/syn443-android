@@ -26,6 +26,7 @@ object RouteSnapshot {
     private var receipts = emptyMap<String,String>()
     private var live: RouteScope? = null
     private var current: RouteScope? = null
+    private var validatedBatch: RouteScope? = null
     private var pending = ""
     private var startedAt = 0L
     private var lastStarted = -60_000L
@@ -90,7 +91,7 @@ object RouteSnapshot {
         }
         revision=hash;invalidate()
     }
-    @Synchronized fun invalidate() {current=null;pending="";queued=emptySet();observations=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000;activationAttempt=null
+    @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000;activationAttempt=null
         completedReceipt="";failoverAdmission=null;batchSequence=0;confirmingFailure=false}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
@@ -121,10 +122,15 @@ object RouteSnapshot {
     private fun failoverContext(scope:RouteScope) =
         Context(scope.network,scope.activation,"active","wifi-internal-v1",scope.intent,scope.config)
 
-    @Synchronized fun request(scope:RouteScope, only:String?=null, force:Boolean=false, deferCoolingReserves:Boolean=false):String? {
+    @Synchronized internal fun awaitingValidatedBatch(scope:RouteScope):Boolean =
+        live==scope && failover!=null && validatedBatch!=scope
+
+    @Synchronized fun request(scope:RouteScope, only:String?=null, force:Boolean=false, deferCoolingReserves:Boolean=false,
+                              validatedManagedWifi:Boolean=false):String? {
         val now=SystemClock.elapsedRealtime()
         if(pending.isNotEmpty() && now-startedAt<35_000) return null
-        if(!force && now-lastStarted<60_000) return null
+        val firstValidated=only==null && validatedManagedWifi && awaitingValidatedBatch(scope)
+        if(!force && !firstValidated && now-lastStarted<60_000) return null
         if(only!=null && rows.none {it.id==only})return null
         val admission=failoverAdmission?.takeIf {deferCoolingReserves && only==null && live==scope}
         val context=failoverContext(scope)
@@ -135,6 +141,7 @@ object RouteSnapshot {
         if(selected.isEmpty())return null
         // Never stamp a previous observation with this new scope.
         current=scope;pending=UUID.randomUUID().toString();startedAt=now;lastStarted=now;queued=selected.map {it.id}.toSet()
+        if(firstValidated)validatedBatch=scope
         completedReceipt="";batchSequence++
         return JSONObject().put("request",pending).put("routes",JSONArray(selected.map {row->JSONObject().put("id",row.id).put("outbound",row.tag).put("checks",row.checks)})).toString()
     }

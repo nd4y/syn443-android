@@ -95,10 +95,14 @@ class TunnelService : VpnService() {
         val scope=routeScope() ?: return
         RouteSnapshot.owner(scope)
         val confirmation=RouteSnapshot.confirmingFailover(scope) && failoverWifi()
-        if(!force && !RouteSnapshot.due(if(activation||confirmation)10_000 else 60_000))return
+        val awaitingValidated=only==null && !activation && RouteSnapshot.awaitingValidatedBatch(scope)
+        val validationCaps=if(awaitingValidated)managedFailoverCapabilities() else null
+        if(!force && validationCaps==null && !RouteSnapshot.due(if(activation||confirmation)10_000 else 60_000))return
         val deferCoolingReserves=!manual && !activation &&
-            managedFailoverCapabilities()?.contains(Policy.RESERVE_PROBE_COOLDOWN)==true
-        RouteSnapshot.request(scope,only,force || activation || confirmation,deferCoolingReserves)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
+            (validationCaps ?: if(awaitingValidated)null else managedFailoverCapabilities())
+                ?.contains(Policy.RESERVE_PROBE_COOLDOWN)==true
+        RouteSnapshot.request(scope,only,force || activation || confirmation,deferCoolingReserves,
+            validatedManagedWifi=validationCaps!=null)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
     }
     private var registered = false
     private var foreground = false
