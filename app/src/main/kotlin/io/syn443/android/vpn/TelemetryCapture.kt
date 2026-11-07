@@ -1,6 +1,7 @@
 package io.syn443.android.vpn
 
 import android.content.Context
+import android.content.SharedPreferences
 import io.syn443.identity.Identity
 import io.syn443.identity.TechnicalTelemetry
 import org.json.JSONObject
@@ -12,25 +13,30 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
     }
     init {require(namespace.matches(Regex("[a-z0-9-]{8,64}")))}
     private val prefs=context.getSharedPreferences(namespace,Context.MODE_PRIVATE)
+    // The KTX extension returns Unit even with commit=true. Consent and the
+    // durable upload cursor require the actual result of the synchronous write.
+    @android.annotation.SuppressLint("UseKtx")
+    private fun commit(edit:SharedPreferences.Editor.()->Unit):Boolean=prefs.edit().apply(edit).commit()
     @Synchronized fun consent(scope:String):Consent? {
         if(prefs.getString("scope",null)!=scope)return null
         return Consent(scope,prefs.getString("session",null) ?: return null,prefs.getLong("through",0),prefs.getLong("attempt",0))
     }
     @Synchronized fun enable(scope:String,sequence:Long) {
         require(sequence>=0)
-        if(consent(scope)==null)check(prefs.edit().clear().putString("scope",scope).putString("session",Identity.random())
-            .putLong("through",sequence).commit())
+        if(consent(scope)==null)check(commit {
+            clear();putString("scope",scope);putString("session",Identity.random());putLong("through",sequence)
+        })
     }
-    @Synchronized fun disable() {check(prefs.edit().clear().commit())}
+    @Synchronized fun disable() {check(commit {clear()})}
     @Synchronized fun recorded(value:Consent,through:Long):Boolean {
         val latest=consent(value.scope) ?: return false
         if(latest.session!=value.session || through<latest.through)return false
-        return prefs.edit().putLong("through",through).commit()
+        return commit {putLong("through",through)}
     }
     @Synchronized fun attempted(value:Consent,nowMs:Long):Boolean {
         val latest=consent(value.scope) ?: return false
         if(latest.session!=value.session || nowMs<latest.attemptedAt || latest.attemptedAt>0 && nowMs-latest.attemptedAt<300_000)return false
-        return prefs.edit().putLong("attempt",nowMs).commit()
+        return commit {putLong("attempt",nowMs)}
     }
     fun sample(state:JSONObject,consent:Consent,build:Int):Pair<List<TechnicalTelemetry.Queued>,Long> {
         val rows=state.optJSONArray("events") ?: return emptyList<TechnicalTelemetry.Queued>() to consent.through
