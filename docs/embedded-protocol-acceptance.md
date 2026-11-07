@@ -28,6 +28,15 @@ failed; that failure is distinct from the native protocol result.
 | SOCKS5 UDP over HTTP entry | Unsupported packet path must fail without physical UDP escape |
 | SSH | Actual SSH password/key handshake, pinned generated host key, direct-tcpip channel and target payload; wrong key/password/refused endpoint cannot reach target |
 
+The Android importer and managed activation require `host_key` for every SSH
+outbound. A previously saved SSH profile without a pin must be updated with an
+independently verified server public key before reuse. The client never learns
+and trusts the current key from the connection automatically. The engine parses
+the supplied public keys and rejects a mismatch before authentication.
+Proxy and DNS TLS also require verification. Configurations that set
+`tls.insecure` to true or use a non-boolean value are refused before they can
+start an engine, including through managed activation or a saved fallback.
+
 Listeners, accepted connections, packet sockets and goroutines have bounded
 retirement/deadlines. No retry, skipped negative assertion or permissive TLS/SSH
 verification substitutes for a passed fixture. These are loopback protocol tests,

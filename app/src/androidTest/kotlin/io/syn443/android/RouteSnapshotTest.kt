@@ -64,6 +64,58 @@ class RouteSnapshotTest {
         EngineConfig.validateAssigned(config)
         assertThrows(IllegalArgumentException::class.java){EngineConfig.validateAssigned("""{"outbounds":[{"type":"netbird","tag":"overlay"}]}""")}
     }
+    @Test fun sshWithoutServerPinCannotBeImportedAssignedOrRendered() {
+        val root = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir
+        val config = JSONObject("""{"outbounds":[{"type":"ssh","tag":"ssh-hop","server":"proxy.example.invalid","server_port":22,"user":"fixture"}]}""")
+        val ssh = config.getJSONArray("outbounds").getJSONObject(0)
+        // RFC 8032 public test vector encoded as an OpenSSH authorized key.
+        val syntheticPublicPin = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINdamAGCsQq31Uv+08lkBzoO4XLz2qYjJa8CGmj3B1Ea"
+        val invalid = listOf(null, JSONObject.NULL, "", " \t", 12, org.json.JSONArray(),
+            org.json.JSONArray().put(syntheticPublicPin).put(JSONObject.NULL),
+            org.json.JSONArray(List(17) { syntheticPublicPin }), "x".repeat(8193), "x\u0000y")
+        for (pins in invalid) {
+            ssh.put("host_key", pins)
+            val raw = config.toString()
+            for (admit in listOf<(String) -> Unit>(EngineConfig::validate, EngineConfig::validateAssigned, { EngineConfig.render(it, root); Unit })) {
+                assertEquals("ssh_host_key_required", assertThrows(IllegalArgumentException::class.java) { admit(raw) }.message)
+            }
+        }
+        for (pins in listOf(syntheticPublicPin, org.json.JSONArray().put(syntheticPublicPin))) {
+            ssh.put("host_key", pins)
+            val raw = config.toString()
+            EngineConfig.validate(raw)
+            EngineConfig.validateAssigned(raw)
+            val rendered = JSONObject(EngineConfig.render(raw, root)).getJSONArray("outbounds").getJSONObject(0)
+            assertEquals(pins.toString(), rendered.get("host_key").toString())
+        }
+        ssh.put("HOST_KEY", org.json.JSONArray())
+        assertEquals("ssh_host_key_required", assertThrows(IllegalArgumentException::class.java) {
+            EngineConfig.validate(config.toString())
+        }.message)
+        ssh.remove("HOST_KEY")
+        ssh.put("type", "direct").put("TYPE", "ssh").remove("host_key")
+        assertEquals("ambiguous_outbound_type", assertThrows(IllegalArgumentException::class.java) {
+            EngineConfig.validate(config.toString())
+        }.message)
+    }
+    @Test fun insecureProxyAndDnsTlsCannotBeImportedAssignedOrRendered() {
+        val root = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir
+        val proxy = """{"outbounds":[{"type":"http","tag":"proxy","server":"proxy.example.invalid","server_port":443,"tls":{"enabled":true,"insecure":FLAG}}]}"""
+        val dns = """{"outbounds":[{"type":"direct","tag":"direct"}],"dns":{"servers":[{"type":"https","tag":"resolver","server":"dns.example.invalid","tls":{"enabled":true,"insecure":FLAG}}],"final":"resolver"}}"""
+        val admit = listOf<(String) -> Unit>(EngineConfig::validate, EngineConfig::validateAssigned, { EngineConfig.render(it, root); Unit })
+        for (config in listOf(proxy, dns)) for (apply in admit) {
+            apply(config.replace("FLAG", "false"))
+            apply(config.replace(",\"insecure\":FLAG", ""))
+            for (flag in listOf("true", "null", "\"false\"")) {
+                assertEquals("tls_verification_required", assertThrows(IllegalArgumentException::class.java) {
+                    apply(config.replace("FLAG", flag))
+                }.message)
+            }
+            assertEquals("tls_verification_required", assertThrows(IllegalArgumentException::class.java) {
+                apply(config.replace("\"tls\"", "\"TLS\"").replace("\"insecure\"", "\"Insecure\"").replace("FLAG", "true"))
+            }.message)
+        }
+    }
     @Test fun assignedActivationWaitsForCandidateRoutesAndIgnoresOptionalFailure() {
         val candidate=scope.copy(config="assigned-${java.util.UUID.randomUUID()}")
         RouteSnapshot.configure(config,candidate.config);RouteSnapshot.owner(candidate)
