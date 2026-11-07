@@ -141,3 +141,21 @@ seconds. Completion, cancellation, network replacement and owner retirement
 end the polling window. This moves result delivery off the slower host
 heartbeat without scheduling additional network probes. The two distinct
 failure batches and fresh reserve checks remain required.
+
+### Reserve probe cooldown
+
+For the enrolled, signed internal Wi-Fi selector, a failed optional reserve
+is attributed only when a different member passes the identical checks in
+the same batch. The result must name the complete expected chain; missing,
+cancelled and changed-path samples cannot create a failure. The second
+independent attributable failure starts the existing local cooldown.
+
+Routine checks defer optional members during that cooldown. They still
+probe the required selector and any other required routes. A manual
+diagnostic or a policy activation keeps its full check set; it cannot
+promote a reserve with evidence sampled before the cooldown expires.
+After expiry the reserve returns to the bounded probe scheduler and
+needs fresh evidence. Changing the network, configuration or engine
+fences both observations and cooldown. This is a single-intent Wi-Fi
+implementation; it does not claim graph exploration, persistence across
+process restart or physical cellular acceptance.

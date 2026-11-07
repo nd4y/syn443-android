@@ -40,6 +40,7 @@ object RouteSnapshot {
     private val methods=setOf("tcp","tls","https_204","ssh_banner")
     private var measuredPaths=emptyMap<String,JSONArray>()
     private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","path_changed","check_timeout","probe_unavailable")
+    private val completedProbeFailures=setOf("dial_failed","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","check_timeout")
     fun validate(config: JSONObject) {
         if(!config.has("route_checks"))return
         val settings=config.getJSONArray("route_checks")
@@ -117,12 +118,20 @@ object RouteSnapshot {
     @Synchronized fun accepts(only:String?)=rows.any {(only==null || it.id==only) && it.checks.length()>0}
     @Synchronized fun view(status:JSONObject):JSONObject = read(status.optBoolean("desiredOn"),status.optBoolean("engineActive") && live!=null,
         live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch")))
-    @Synchronized fun request(scope:RouteScope, only:String?=null, force:Boolean=false):String? {
+    private fun failoverContext(scope:RouteScope) =
+        Context(scope.network,scope.activation,"active","wifi-internal-v1",scope.intent,scope.config)
+
+    @Synchronized fun request(scope:RouteScope, only:String?=null, force:Boolean=false, deferCoolingReserves:Boolean=false):String? {
         val now=SystemClock.elapsedRealtime()
         if(pending.isNotEmpty() && now-startedAt<35_000) return null
         if(!force && now-lastStarted<60_000) return null
         if(only!=null && rows.none {it.id==only})return null
-        val selected=rows.filter {(only==null || it.id==only) && it.checks.length()>0}
+        val admission=failoverAdmission?.takeIf {deferCoolingReserves && only==null && live==scope}
+        val context=failoverContext(scope)
+        val selected=rows.filter {row->
+            (only==null || row.id==only) && row.checks.length()>0 &&
+                (row.required || admission?.deferReserveProbe(context,row.tag,now)!=true)
+        }
         if(selected.isEmpty())return null
         // Never stamp a previous observation with this new scope.
         current=scope;pending=UUID.randomUUID().toString();startedAt=now;lastStarted=now;queued=selected.map {it.id}.toSet()
@@ -171,20 +180,29 @@ object RouteSnapshot {
         val path=measuredPaths[group.id] ?: return null
         if(path.length()<2 || path.getString(0)!=group.id)return null
         val selected=rows.singleOrNull {it.id==path.getString(1) && it.tag in plan.members} ?: return null
+        if(path.length()!=selected.chain.size+1 || selected.chain.indices.any {path.optString(it+1)!=selected.chain[it]})return null
         val groupSample=observations[group.id]?.takeIf {it.scope==scope} ?: return null
         val now=SystemClock.elapsedRealtime()
         val comparison="internal-check"
         val reserves=rows.filter {it.tag in plan.members && it.id!=selected.id && receipts[it.id]==receipt}.mapNotNull {row->
-            val sample=observations[row.id]?.takeIf {it.scope==scope && it.complete && it.ok && now-it.elapsedMs in 0L until 15_000} ?: return@mapNotNull null
-            VerifiedPathSample(row.tag,receipt,comparison,sample.elapsedMs,ProbeVerdict.VERIFIED,timings[row.id] ?: 0)
+            val sample=observations[row.id]?.takeIf {it.scope==scope && it.complete && now-it.elapsedMs in 0L until 15_000} ?: return@mapNotNull null
+            val measured=measuredPaths[row.id] ?: return@mapNotNull null
+            if(measured.length()!=row.chain.size || row.chain.indices.any {measured.optString(it)!=row.chain[it]})return@mapNotNull null
+            val verdict=when {
+                sample.ok -> ProbeVerdict.VERIFIED
+                codes[row.id] in completedProbeFailures -> ProbeVerdict.CONFIRMED_PATH_FAILURE
+                else -> return@mapNotNull null
+            }
+            VerifiedPathSample(row.tag,receipt,comparison,sample.elapsedMs,verdict,timings[row.id] ?: 0)
         }
         val verdict=when {
             groupSample.complete && groupSample.ok -> ProbeVerdict.VERIFIED
-            groupSample.complete && reserves.isNotEmpty() -> ProbeVerdict.CONFIRMED_PATH_FAILURE
+            groupSample.complete && codes[group.id] in completedProbeFailures &&
+                reserves.any {it.verdict==ProbeVerdict.VERIFIED} -> ProbeVerdict.CONFIRMED_PATH_FAILURE
             else -> ProbeVerdict.UNKNOWN
         }
         confirmingFailure=verdict==ProbeVerdict.CONFIRMED_PATH_FAILURE
-        val context=Context(scope.network,scope.activation,"active","wifi-internal-v1",scope.intent,scope.config)
+        val context=failoverContext(scope)
         val admission=failoverAdmission ?: FailoverAdmission(context,plan.members.toSet(),comparison,
             rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)})
             .also {failoverAdmission=it}

@@ -69,6 +69,16 @@ class FailoverAdmission(
             .takeIf { it.retryAtMs != null }
     }
 
+    /** Optional measurement only. The caller must keep measuring the active selector. */
+    @Synchronized
+    fun deferReserveProbe(current: Context, pathId: String, nowMs: Long): Boolean {
+        if (current != context || pathId !in members) return false
+        return when (health.view(context, PathHealthKey(pathId, ExitClass.privateRoute, metricGroup), nowMs).readiness) {
+            PathReadiness.QUARANTINED, PathReadiness.HALF_OPEN, PathReadiness.CONFIG_CHANGE_REQUIRED -> true
+            else -> false
+        }
+    }
+
     /** A repeated heartbeat cannot count the same batch as two failures. */
     @Synchronized
     fun decide(
@@ -92,9 +102,10 @@ class FailoverAdmission(
         for (sample in listOf(active) + reserves) {
             if (sample.verdict !in setOf(ProbeVerdict.VERIFIED, ProbeVerdict.CONFIRMED_PATH_FAILURE,
                     ProbeVerdict.PATH_AUTH_OR_CONFIGURATION)) continue
-            // For this pilot, a path failure is attributable only when another
-            // member successfully ran the identical checks in this batch.
-            if (sample.verdict == ProbeVerdict.CONFIRMED_PATH_FAILURE && !observedReserve) continue
+            // A successful comparator must be a different member in this
+            // batch. When every route fails, preserve the existing memory.
+            if (sample.verdict == ProbeVerdict.CONFIRMED_PATH_FAILURE &&
+                !observedReserve && (sample.pathId == selected || active.verdict != ProbeVerdict.VERIFIED)) continue
             if (!track(sample, sequence, nowMs)) continue
             when (sample.verdict) {
                 ProbeVerdict.VERIFIED -> {

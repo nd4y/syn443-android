@@ -57,11 +57,13 @@ if mode=="jvm":
         "targetFailureAndWrongScopeDoNotCountTowardFailover",
         "staleOrDifferentCheckGroupCannotAuthorizeReplacement",
         "stabilityThenEnergyTakePriorityOverLatency",
+        "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
     assert {("io.syn443.android.ManagedFailoverTest",name) for name in {
         "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
         "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
+        "routineBatchesDeferOnlyCoolingReserveAndKeepRequiredSelector",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed Wi-Fi failover cases missing"
     assert {
         ("io.syn443.android.TechnicalTelemetryDiskTest","encryptedQueueRestartsWithoutExposingAnotherEnrollment"),

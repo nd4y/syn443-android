@@ -1,7 +1,9 @@
 package io.syn443.decision
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FailoverAdmissionTest {
@@ -79,5 +81,25 @@ class FailoverAdmissionTest {
         assertNull(batch(5, 40_000, "reserve-a", "primary"))
         assertEquals(FailoverChoice("reserve-a", "primary", "probe-6"),
             batch(6, 41_000, "reserve-a", "primary"))
+    }
+
+    @Test fun optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator() {
+        val d = make()
+        fun batch(n: Int, active: ProbeVerdict, reserve: ProbeVerdict) =
+            d.decide(context, n.toLong(), "probe-$n", n * 1_000L, "primary", sample("primary", n, active),
+                listOf(sample("reserve-a", n, reserve)))
+        val fail = ProbeVerdict.CONFIRMED_PATH_FAILURE
+        assertNull(batch(1, fail, fail))
+        assertNull(batch(2, fail, fail))
+        assertFalse(d.deferReserveProbe(context, "reserve-a", 2_000))
+        assertNull(batch(3, ProbeVerdict.VERIFIED, fail))
+        assertNull(batch(3, ProbeVerdict.VERIFIED, fail))
+        assertFalse(d.deferReserveProbe(context, "reserve-a", 3_000))
+        assertNull(batch(4, ProbeVerdict.VERIFIED, fail))
+        val retry = checkNotNull(d.cooldown("reserve-a", 4_000)?.retryAtMs)
+        assertTrue(d.deferReserveProbe(context, "reserve-a", retry - 1))
+        assertFalse(d.deferReserveProbe(context.copy(networkEpoch = 2), "reserve-a", retry - 1))
+        assertFalse(d.deferReserveProbe(context, "primary", retry - 1))
+        assertFalse(d.deferReserveProbe(context, "reserve-a", retry))
     }
 }

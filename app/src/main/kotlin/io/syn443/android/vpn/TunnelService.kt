@@ -90,13 +90,14 @@ class TunnelService : VpnService() {
             it.contentHash==runningConfigHash && "route.failover.v1" in it.requiredCapabilities
         }==true
     }
-    private fun checkRoutes(force:Boolean=false,only:String?=null,activation:Boolean=false) {
+    private fun checkRoutes(force:Boolean=false,only:String?=null,activation:Boolean=false,manual:Boolean=false) {
         if(!ready || network==null || retiring || !Recovery.current(store.checkpoint(),boundGeneration))return
         val scope=routeScope() ?: return
         RouteSnapshot.owner(scope)
         val confirmation=RouteSnapshot.confirmingFailover(scope) && failoverWifi()
         if(!force && !RouteSnapshot.due(if(activation||confirmation)10_000 else 60_000))return
-        RouteSnapshot.request(scope,only,force || activation || confirmation)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
+        val deferCoolingReserves=!manual && !activation && allowManagedFailover()
+        RouteSnapshot.request(scope,only,force || activation || confirmation,deferCoolingReserves)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
     }
     private var registered = false
     private var foreground = false
@@ -164,7 +165,7 @@ class TunnelService : VpnService() {
         if (intent?.action == "fault-owner" && io.syn443.android.BuildConfig.DEBUG) retire(true)
         if (intent?.action == "fault-hang" && io.syn443.android.BuildConfig.DEBUG && verifiedPid()) Process.sendSignal(hostPid, 19)
         if (intent?.action == "netbird-diagnose" && ready) token?.let { host?.diagnoseNetBird(it) }
-        if(intent?.action=="routes-check")checkRoutes(true,intent.getStringExtra("routeId"))
+        if(intent?.action=="routes-check")checkRoutes(true,intent.getStringExtra("routeId"),manual=true)
         if(intent?.action=="routes-cancel") {RouteSnapshot.cancelled();token?.let {host?.cancelRouteChecks(it)}}
         if (intent?.action == "policy-refresh") forcePolicyFetch = true
         refreshNetwork()
