@@ -25,7 +25,7 @@ object EngineConfig {
             value(0); require(reader.peek() == android.util.JsonToken.END_DOCUMENT)
         }
         val value = JSONObject(raw)
-        require(value.keys().asSequence().all { it in setOf("outbounds", "dns", "route", "route_checks") }) { "unsupported root field" }
+        require(value.keys().asSequence().all { it in setOf("outbounds", "dns", "route", "route_checks", "route_failover") }) { "unsupported root field" }
         val outbounds = value.getJSONArray("outbounds")
         require(outbounds.length() in 1..64)
         val tags = mutableSetOf<String>()
@@ -43,6 +43,7 @@ object EngineConfig {
         val final = value.optJSONObject("route")?.optString("final").orEmpty()
         require(final.isEmpty() || final in tags)
         RouteSnapshot.validate(value)
+        ManagedFailoverPlan.read(value)
     }
     /** Overlay state must acquire an account namespace before managed enrollment advertises it. */
     fun validateAssigned(raw:String) = validateAssigned(raw,null)
@@ -66,6 +67,7 @@ object EngineConfig {
     private fun renderInternal(raw:String?,stateRoot:java.io.File,material:OverlayRuntimeMaterial?):String {
         val value = if (raw == null) JSONObject("""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}""") else JSONObject(raw).also { validate(raw) }
         value.remove("route_checks") // Client metadata is not a sing-box option.
+        value.remove("route_failover")
         value.put("log", JSONObject().put("disabled", true))
         val outbounds = value.getJSONArray("outbounds")
         var managedApplied=false

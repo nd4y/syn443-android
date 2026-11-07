@@ -7,5 +7,6 @@ interface IPlatform {
     oneway void overlayState(String token, String state);
     oneway void overlayIdentity(String token, String proof);
     oneway void routeState(String token, String state);
+    oneway void routeSelected(String token, String receipt, boolean selected);
     oneway void event(String token, int kind);
 }

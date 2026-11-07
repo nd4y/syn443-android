@@ -110,4 +110,9 @@ func TestVerifiedSelectorSwitchKeepsExistingTrafficAndRejectsStaleProof(t *testi
 	if err := payloadWire(t, group, address); err != nil || reserve.calls.Load() <= calls {
 		t.Fatal("new connection did not use the verified reserve", err)
 	}
+	runner.networkChanged()
+	if selectable.Now() != "primary" {
+		t.Fatal("new physical context inherited an adaptive selection")
+	}
+	echo("after-context-reset")
 }

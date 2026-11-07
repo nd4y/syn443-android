@@ -73,13 +73,27 @@ class TunnelService : VpnService() {
     @Volatile private var boundGeneration = -1L
     private var lastProbe = 0L
     private var internetHealthy = false
+    private var pendingFailover:Pair<io.syn443.recovery.RouteScope,String>?=null
     private fun routeScope() = token?.let {io.syn443.recovery.RouteScope(boundGeneration,epoch,policies.read().journal.activationGeneration,it,runningConfigHash)}
+    private fun failoverWifi():Boolean=network?.let(connectivity::getNetworkCapabilities)?.let {
+        it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
+            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+    }==true
+    private fun allowManagedFailover():Boolean {
+        if(!failoverWifi())return false
+        val state=policies.read()
+        if(!state.enrolled || state.journal.phase !in setOf("committed","degraded","rolled_back"))return false
+        return policies.allowed(state.journal.active,state)?.payload?.let {
+            it.contentHash==runningConfigHash && "route.failover.v1" in it.requiredCapabilities
+        }==true
+    }
     private fun checkRoutes(force:Boolean=false,only:String?=null,activation:Boolean=false) {
         if(!ready || network==null || retiring || !Recovery.current(store.checkpoint(),boundGeneration))return
         val scope=routeScope() ?: return
         RouteSnapshot.owner(scope)
-        if(!force && !RouteSnapshot.due(if(activation)10_000 else 60_000))return
-        RouteSnapshot.request(scope,only,force || activation)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
+        val confirmation=RouteSnapshot.confirmingFailover(scope) && failoverWifi()
+        if(!force && !RouteSnapshot.due(if(activation||confirmation)10_000 else 60_000))return
+        RouteSnapshot.request(scope,only,force || activation || confirmation)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
     }
     private var registered = false
     private var foreground = false
@@ -345,8 +359,21 @@ class TunnelService : VpnService() {
         override fun routeState(session:String,raw:String) {handler.post {
             if(session!=token || retiring || !ready || !Recovery.current(store.checkpoint(),boundGeneration))return@post
             val scope=routeScope() ?: return@post
-            if(runCatching {RouteSnapshot.update(scope,raw)}.getOrDefault(false) && internetHealthy)
-                phase("Online","required_https_ok",boundGeneration)
+            if(!runCatching {RouteSnapshot.update(scope,raw)}.getOrDefault(false))return@post
+            if(internetHealthy)phase("Online","required_https_ok",boundGeneration)
+            if(RouteSnapshot.hasManagedFailover(scope) && allowManagedFailover())runCatching {RouteSnapshot.failoverAdvice(scope)}.getOrNull()?.let {command->
+                pendingFailover=scope to command.receipt
+                runCatching {host?.selectVerifiedRoute(session,command.receipt,command.checkId,command.group,command.previous,command.candidate)}
+            }
+        }}
+        override fun routeSelected(session:String,receipt:String,selected:Boolean) {handler.post {
+            val scope=routeScope() ?: return@post
+            if(session!=token || pendingFailover!=(scope to receipt) || !Recovery.current(store.checkpoint(),boundGeneration))return@post
+            pendingFailover=null
+            if(!selected || !ready || retiring || !allowManagedFailover())return@post
+            RouteSnapshot.cancelled(true)
+            phase("Degraded","managed_route_recheck",boundGeneration)
+            checkRoutes(force=true)
         }}
         override fun exchangeDNS(query: ByteArray, session: String): ByteArray {
             check(query.size in 12..4096 && session == token && Recovery.current(store.checkpoint(), boundGeneration))

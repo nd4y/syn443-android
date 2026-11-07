@@ -31,12 +31,19 @@ and application of a freshly verified path are separate gates.
 The native bridge has a guarded selector operation for a configured
 noninterrupting group. It requires a current successful check on the exact
 concrete member path, a matching previous member, and an unused receipt.
-Network changes invalidate receipts. The wire fixture exercises an existing
-connection and a new connection across a switch. Android does not call this
-operation until policy and controller admission are wired.
+Network changes invalidate receipts and restore the original selected member.
+The wire fixture exercises an existing and a new connection across a switch.
 
 For signed provisioning, `route.health.v1` advertises support for the
 per-outbound `route_checks` metadata that the client already consumes.
 The control plane compiler checks scope, bounds, method and TCP capability
 before signing it. Required checks are part of activation; an optional
 outbound failure does not block an otherwise authorized configuration.
+
+An enrolled client can use `route.failover.v1` for an explicitly configured
+internal rule on validated Wi-Fi. The active member and reserves share the same
+signed probe plan. Two different batches must show an active path failure and
+a fresh successful reserve. Comparison uses recent successful checks, a cost
+class estimated from the number of hops, and then latency. The selector changes new connections and requests a
+fresh check. No implicit direct path is allowed. This pilot does not enable
+failover for RU or NON_RU, cellular modes, or dynamic graph discovery.

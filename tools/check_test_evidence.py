@@ -52,6 +52,17 @@ if mode=="jvm":
         "authorizationFailureWaitsForContextAndRejectsLateCompletion",
         "capacityCannotEvictAnActiveQuarantineOrConfigurationFence",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route health cases missing"
+    assert {("io.syn443.decision.FailoverAdmissionTest",name) for name in {
+        "independentFailuresAndCurrentVerifiedReservePermitOneSwitch",
+        "targetFailureAndWrongScopeDoNotCountTowardFailover",
+        "staleOrDifferentCheckGroupCannotAuthorizeReplacement",
+        "stabilityThenEnergyTakePriorityOverLatency",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
+if mode=="emulator":
+    assert {("io.syn443.android.ManagedFailoverTest",name) for name in {
+        "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
+        "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed Wi-Fi failover cases missing"
 if mode=="policy":
     assert {("io.syn443.policy.PolicyTest",name) for name in {
         "signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences",

@@ -136,6 +136,14 @@ class EngineHostService : Service() {
             if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid())return
             worker.post {if(session==token)engine?.cancelRouteChecks()}
         }
+        override fun selectVerifiedRoute(session:String,receipt:String,checkId:String,group:String,previous:String,candidate:String) {
+            if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid() ||
+                listOf(receipt,checkId,group,previous,candidate).any {it.length !in 1..64})return
+            worker.post {if(session==token) {
+                val selected=runCatching {engine?.selectVerifiedRoute(receipt,checkId,group,previous,candidate)==true}.getOrDefault(false)
+                runCatching {callback?.routeSelected(session,receipt,selected)}
+            }}
+        }
     }
     @Volatile private var callback: IPlatform? = null
     override fun onBind(intent: Intent): IBinder = object : IEngineHost.Stub() {
@@ -149,6 +157,8 @@ class EngineHostService : Service() {
         override fun diagnoseNetBird(token: String) = binder.diagnoseNetBird(token)
         override fun checkRoutes(token:String,request:String)=binder.checkRoutes(token,request)
         override fun cancelRouteChecks(token:String)=binder.cancelRouteChecks(token)
+        override fun selectVerifiedRoute(token:String,receipt:String,checkId:String,group:String,previous:String,candidate:String)=
+            binder.selectVerifiedRoute(token,receipt,checkId,group,previous,candidate)
         override fun debugFatal(token: String, kind: String) = binder.debugFatal(token, kind)
         override fun networkChanged(token: String, name: String, index: Int) = binder.networkChanged(token, name, index)
     }

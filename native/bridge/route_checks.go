@@ -62,6 +62,7 @@ type routeRunner struct {
 	nodes         map[string]routeNode       // Immutable once a runtime starts.
 	selectors     map[string]map[string]bool // Membership of noninterrupting selectors.
 	selectionUsed bool
+	restore       map[string]string
 	limit         func() time.Duration
 }
 
@@ -99,6 +100,9 @@ func (r *routeRunner) snapshot() string {
 func (r *routeRunner) stop() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.stopLocked()
+}
+func (r *routeRunner) stopLocked() {
 	if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
@@ -106,6 +110,27 @@ func (r *routeRunner) stop() {
 	r.serial++
 	r.selectionUsed = false
 	r.report = routeReport{Results: []routeResult{}}
+}
+
+type routeSelector interface {
+	Now() string
+	SelectOutbound(string) bool
+}
+
+func (r *routeRunner) networkChanged() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stopLocked()
+	for group, previous := range r.restore {
+		outbound, ok := r.lookup(group)
+		if !ok || !r.selectors[group][previous] {
+			continue
+		}
+		if selector, ok := outbound.(routeSelector); ok {
+			selector.SelectOutbound(previous)
+		}
+	}
+	r.restore = nil
 }
 
 // The check must cover one concrete end-to-end path, not a group whose
@@ -158,14 +183,17 @@ func (r *routeRunner) selectVerified(request, checkID, group, previous, candidat
 	if !ok {
 		return false
 	}
-	selector, ok := outbound.(interface {
-		Now() string
-		SelectOutbound(string) bool
-	})
+	selector, ok := outbound.(routeSelector)
 	if !ok || selector.Now() != previous || !r.allowed() || !selector.SelectOutbound(candidate) {
 		return false
 	}
 	r.selectionUsed = true
+	if r.restore == nil {
+		r.restore = map[string]string{}
+	}
+	if _, restored := r.restore[group]; !restored {
+		r.restore[group] = previous
+	}
 	return true
 }
 func validRouteRequest(q routeRequest) bool {

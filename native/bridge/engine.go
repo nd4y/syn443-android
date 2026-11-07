@@ -164,7 +164,7 @@ func (e *Runtime) NetBirdIdentityProof() string {
 }
 func (e *Runtime) DiagnoseNetBird() bool { return netbird.RequestDiagnostics() }
 func (e *Runtime) UpdateNetwork(name string, index int32) {
-	e.routes.stop()
+	e.routes.networkChanged()
 	e.platform.mu.Lock()
 	e.platform.iface.Name = name
 	e.platform.iface.Index = int(index)
