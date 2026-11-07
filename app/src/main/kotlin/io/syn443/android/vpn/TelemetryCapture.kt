@@ -2,6 +2,7 @@ package io.syn443.android.vpn
 
 import android.content.Context
 import android.content.SharedPreferences
+import io.syn443.decision.FailoverAlgorithm
 import io.syn443.identity.Identity
 import io.syn443.identity.TechnicalTelemetry
 import org.json.JSONObject
@@ -68,8 +69,12 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
             val id=Identity.hash(("${consent.session}/$sequence").toByteArray(Charsets.US_ASCII))
             val event=TechnicalTelemetry.Event(id,row.optLong("at"),row.optLong("elapsed",-1),
                 row.optLong("networkEpoch",-1),kind,code,"unknown")
+            val isRouteSelection=kind=="route" && code=="reselected"
+            val policyRevision=if(isRouteSelection)row.optLong("policyRevision").takeIf {it in 1..9_007_199_254_740_991L} ?: 0 else 0
+            val algorithmRevision=if(policyRevision>0 &&
+                FailoverAlgorithm.fromRevision(row.optString("algorithmRevision"))==FailoverAlgorithm.CONFIRMED)2 else 1
             if(runCatching {event.validate()}.isSuccess)output+=TechnicalTelemetry.Queued(
-                TechnicalTelemetry.Key(consent.session,build,0,1),event)
+                TechnicalTelemetry.Key(consent.session,build,policyRevision,algorithmRevision),event)
         }
         return output to through
     }

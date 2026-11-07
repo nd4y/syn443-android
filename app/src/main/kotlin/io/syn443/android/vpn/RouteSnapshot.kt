@@ -4,6 +4,7 @@ import android.net.InetAddresses
 import android.os.SystemClock
 import io.syn443.decision.Context
 import io.syn443.decision.FailoverAdmission
+import io.syn443.decision.FailoverAlgorithm
 import io.syn443.decision.ProbeVerdict
 import io.syn443.decision.VerifiedPathSample
 import io.syn443.recovery.RouteEvidence
@@ -36,7 +37,7 @@ object RouteSnapshot {
     private var revision = ""
     private var activationAttempt:Pair<RouteScope,Long>?=null
     private var failover:ManagedFailoverPlan?=null
-    private var failoverAdmission:FailoverAdmission?=null
+    private var failoverAdmission:Pair<FailoverAlgorithm,FailoverAdmission>?=null
     private var batchSequence=0L
     private var completedReceipt=""
     private var confirmingFailure=false
@@ -134,8 +135,8 @@ object RouteSnapshot {
     @Synchronized fun accepts(only:String?)=rows.any {(only==null || it.id==only) && it.checks.length()>0}
     @Synchronized fun view(status:JSONObject):JSONObject = read(status.optBoolean("desiredOn"),status.optBoolean("engineActive") && live!=null,
         live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch")))
-    private fun failoverContext(scope:RouteScope) =
-        Context(scope.network,scope.activation,"active","wifi-internal-v1",scope.intent,scope.config)
+    private fun failoverContext(scope:RouteScope, algorithm:FailoverAlgorithm) =
+        Context(scope.network,scope.activation,"active",algorithm.revision,scope.intent,scope.config)
 
     @Synchronized internal fun awaitingValidatedBatch(scope:RouteScope):Boolean =
         live==scope && failover!=null && validatedBatch!=scope
@@ -148,10 +149,9 @@ object RouteSnapshot {
         if(!force && !firstValidated && now-lastStarted<60_000) return null
         if(only!=null && rows.none {it.id==only})return null
         val admission=failoverAdmission?.takeIf {deferCoolingReserves && only==null && live==scope}
-        val context=failoverContext(scope)
         val selected=rows.filter {row->
             (only==null || row.id==only) && row.checks.length()>0 &&
-                (row.required || admission?.deferReserveProbe(context,row.tag,now)!=true)
+                (row.required || admission?.let {(algorithm, state)->state.deferReserveProbe(failoverContext(scope,algorithm),row.tag,now)}!=true)
         }
         if(selected.isEmpty())return null
         // Never stamp a previous observation with this new scope.
@@ -193,7 +193,8 @@ object RouteSnapshot {
     @Synchronized fun cancelled(resetInterval:Boolean=false){pending="";queued=emptySet();current=null;completedReceipt="";confirmingFailure=false;if(resetInterval)lastStarted=-60_000}
     @Synchronized internal fun confirmingFailover(scope:RouteScope):Boolean=live==scope && confirmingFailure
     @Synchronized internal fun hasManagedFailover(scope:RouteScope):Boolean=live==scope && failover!=null && completedReceipt.isNotEmpty()
-    @Synchronized internal fun failoverAdvice(scope:RouteScope,trackReserveFailures:Boolean=false):FailoverCommand? {
+    @Synchronized internal fun failoverAdvice(scope:RouteScope,trackReserveFailures:Boolean=false,
+        algorithm:FailoverAlgorithm=FailoverAlgorithm.BASELINE):FailoverCommand? {
         val plan=failover ?: return null
         val receipt=completedReceipt
         if(live!=scope || current!=scope || receipt.isEmpty())return null
@@ -224,10 +225,10 @@ object RouteSnapshot {
             else -> ProbeVerdict.UNKNOWN
         }
         confirmingFailure=verdict==ProbeVerdict.CONFIRMED_PATH_FAILURE
-        val context=failoverContext(scope)
-        val admission=failoverAdmission ?: FailoverAdmission(context,plan.intent,plan.members.toSet(),comparison,
-            rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)})
-            .also {failoverAdmission=it}
+        val context=failoverContext(scope,algorithm)
+        val admission=failoverAdmission?.takeIf {it.first==algorithm}?.second ?: FailoverAdmission(context,plan.intent,plan.members.toSet(),comparison,
+            rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)},algorithm)
+            .also {failoverAdmission=algorithm to it}
         val choice=admission.decide(context,batchSequence,receipt,now,selected.tag,
             VerifiedPathSample(selected.tag,plan.intent,receipt,comparison,groupSample.elapsedMs,verdict,timings[group.id] ?: 0),reserves) ?: return null
         val candidate=rows.singleOrNull {it.tag==choice.candidate} ?: return null
@@ -249,7 +250,7 @@ object RouteSnapshot {
                 .put("ageMs",if(sample!=null && sample.scope==scope && now>=sample.elapsedMs)now-sample.elapsedMs else JSONObject.NULL)
                 .put("latencyMs",if(sample?.scope==scope)timings[row.id] ?: JSONObject.NULL else JSONObject.NULL)
                 .also {value->
-                    if(scope!=null && scope==live)failoverAdmission?.cooldown(row.tag,now)?.let {cooldown->
+                    if(scope!=null && scope==live)failoverAdmission?.second?.cooldown(row.tag,now)?.let {cooldown->
                         value.put("selectionState",cooldown.readiness.name.lowercase(java.util.Locale.ROOT))
                             .put("retryInMs",(checkNotNull(cooldown.retryAtMs)-now).coerceAtLeast(0))
                     }

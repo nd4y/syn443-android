@@ -25,6 +25,28 @@ class FailoverAdmissionTest {
         assertNull(decide(4))
     }
 
+    @Test fun conservativeRevisionRequiresThreeIndependentBatchesAndSixtySecondsBetweenSwitches() {
+        val variant = FailoverAlgorithm.CONFIRMED
+        val scope = context.copy(algorithmRevision = variant.revision)
+        val d = FailoverAdmission(scope, ExitClass.privateRoute, members, "comparison", algorithm = variant)
+        fun batch(n: Long, now: Long, selected: String, reserve: String, current: Context = scope): FailoverChoice? {
+            val receipt = "probe-$n"
+            return d.decide(current, n, receipt, now, selected,
+                VerifiedPathSample(selected, ExitClass.privateRoute, receipt, "comparison", now, ProbeVerdict.CONFIRMED_PATH_FAILURE, 20),
+                listOf(VerifiedPathSample(reserve, ExitClass.privateRoute, receipt, "comparison", now, ProbeVerdict.VERIFIED, 10)))
+        }
+        assertEquals(variant, FailoverAlgorithm.fromRevision(scope.algorithmRevision))
+        assertNull(batch(1, 1_000, "primary", "reserve-a"))
+        assertNull(batch(1, 1_000, "primary", "reserve-a"))
+        assertNull(batch(2, 2_000, "primary", "reserve-a", context))
+        assertNull(batch(2, 2_000, "primary", "reserve-a"))
+        assertEquals(FailoverChoice("primary", "reserve-a", "probe-3"), batch(3, 3_000, "primary", "reserve-a"))
+        assertNull(batch(4, 34_000, "reserve-a", "reserve-b"))
+        assertNull(batch(5, 40_000, "reserve-a", "reserve-b"))
+        assertNull(batch(6, 62_999, "reserve-a", "reserve-b"))
+        assertEquals(FailoverChoice("reserve-a", "reserve-b", "probe-7"), batch(7, 63_000, "reserve-a", "reserve-b"))
+    }
+
     @Test fun targetFailureAndWrongScopeDoNotCountTowardFailover() {
         val d = make()
         fun decide(n: Int, verdict: ProbeVerdict, current: Context = context, candidate: String = "reserve-a") =

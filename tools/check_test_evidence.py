@@ -57,6 +57,7 @@ if mode=="jvm":
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route health cases missing"
     assert {("io.syn443.decision.FailoverAdmissionTest",name) for name in {
         "independentFailuresAndCurrentVerifiedReservePermitOneSwitch",
+        "conservativeRevisionRequiresThreeIndependentBatchesAndSixtySecondsBetweenSwitches",
         "targetFailureAndWrongScopeDoNotCountTowardFailover",
         "staleOrDifferentCheckGroupCannotAuthorizeReplacement",
         "stabilityThenEnergyTakePriorityOverLatency",
@@ -71,6 +72,7 @@ if mode=="emulator":
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required peer verification cases missing"
     assert {("io.syn443.android.ManagedFailoverTest",name) for name in {
         "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
+        "conservativeRevisionRequiresThirdCurrentRouteBatch",
         "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
         "routineBatchesDeferOnlyCoolingReserveAndKeepRequiredSelector",
         "firstValidatedManagedBatchBypassesCadenceOnceWithoutCancellingInFlightWork",
@@ -78,6 +80,7 @@ if mode=="emulator":
     assert {
         ("io.syn443.android.TechnicalTelemetryDiskTest","encryptedQueueRestartsWithoutExposingAnotherEnrollment"),
         ("io.syn443.android.TechnicalTelemetryDiskTest","consentFenceDropsPriorEventsAndRawDiagnosticStrings"),
+        ("io.syn443.android.TechnicalTelemetryDiskTest","onlyConfirmedRouteSelectionCarriesItsPolicyAndAlgorithmRevisions"),
         ("io.syn443.android.PhysicalIdentityRouteTest","technicalTelemetryCannotUseMeteredWifiOrCellular"),
     } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required technical telemetry device cases missing"
 if mode=="policy":
@@ -86,6 +89,7 @@ if mode=="policy":
         "managedRouteChecksKeepTheirSignedBindingAndCapability",
         "reserveCooldownRequiresBoundConfigurationAndHasAnIndependentRollbackFingerprint",
         "exitCheckRequiresMatchingCapabilityOnKeyBoundConfiguration",
+        "decisionRevisionMustMatchKeyBoundFailoverCapability",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="health":
     assert {('io.syn443.health.ChecksTest',name) for name in {

@@ -3,6 +3,7 @@ package io.syn443.android
 import android.os.SystemClock
 import io.syn443.android.vpn.EngineConfig
 import io.syn443.android.vpn.RouteSnapshot
+import io.syn443.decision.FailoverAlgorithm
 import io.syn443.policy.Policy
 import io.syn443.recovery.RouteScope
 import org.json.JSONArray
@@ -23,7 +24,13 @@ class ManagedFailoverTest {
       "route_failover":{"selector":"internal","network_mode":"wifi","intent":"INTERNAL","members":["primary","reserve"]}
     }"""
 
-    @Test fun twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve() {
+    @Test fun twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve() =
+        assertSelection(FailoverAlgorithm.BASELINE)
+
+    @Test fun conservativeRevisionRequiresThirdCurrentRouteBatch() =
+        assertSelection(FailoverAlgorithm.CONFIRMED)
+
+    private fun assertSelection(algorithm: FailoverAlgorithm) {
         EngineConfig.validate(config)
         val scope=RouteScope(10,20,30,"synthetic-engine",Policy.hash(config))
         RouteSnapshot.configure(config,scope.config)
@@ -41,12 +48,14 @@ class ManagedFailoverTest {
             return request
         }
         try {
-            batch()
-            assertNull(RouteSnapshot.failoverAdvice(scope))
-            assertTrue(RouteSnapshot.confirmingFailover(scope))
-            assertNull(RouteSnapshot.failoverAdvice(scope))
+            repeat(algorithm.confirmations - 1) {
+                batch()
+                assertNull(RouteSnapshot.failoverAdvice(scope, algorithm = algorithm))
+                assertTrue(RouteSnapshot.confirmingFailover(scope))
+                assertNull(RouteSnapshot.failoverAdvice(scope, algorithm = algorithm))
+            }
             val receipt=batch()
-            val command=checkNotNull(RouteSnapshot.failoverAdvice(scope))
+            val command=checkNotNull(RouteSnapshot.failoverAdvice(scope, algorithm = algorithm))
             assertEquals(receipt,command.receipt);assertEquals("route-2",command.checkId)
             assertEquals("internal",command.group);assertEquals("primary",command.previous);assertEquals("reserve",command.candidate)
             val primary=RouteSnapshot.read(true,true,scope).getJSONArray("routes").getJSONObject(0)
