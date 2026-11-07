@@ -16,6 +16,14 @@ exhaustion. A changed context or expired monotonic deadline retires the cursor.
 
 The JVM tests exercise complete enumeration of a sparse fixture across steps,
 mode and capability fences, separate RU and NON_RU exits, warm hints and bounds.
+The accompanying in-memory health table accepts only ordered evidence for the
+exact context, path, traffic class and check group. Two confirmed failures
+quarantine a path. The initial cooldown is 30 seconds. It grows exponentially,
+with jitter and a ten-minute cap. After cooldown, one half-open probe is allowed.
+Failures of a shared network or target, cancellation, exhaustion and unknown
+errors do not affect that path's history. A confirmed authorization or config
+failure waits for a new context. The table holds at most 64 records.
+
 The planner does not establish tunnels or treat eligibility as evidence of
-reachability. Signed graph delivery, runtime probe admission, observed health,
-quarantine and application of a freshly verified path are separate gates.
+reachability. Signed graph delivery, runtime probe admission, fault attribution
+and application of a freshly verified path are separate gates.

@@ -46,6 +46,12 @@ if mode=="jvm":
         "oldOrExpiredCursorNeverResumes",
         "oversizedTemplateFailsInsteadOfReportingTruncatedCoverage",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route search cases missing"
+    assert {("io.syn443.decision.RouteHealthMemoryTest",name) for name in {
+        "pathFailuresQuarantineThenDemandFreshEvidence",
+        "commonFailuresAndAnotherTrafficClassCannotPoisonPath",
+        "authorizationFailureWaitsForContextAndRejectsLateCompletion",
+        "capacityCannotEvictAnActiveQuarantineOrConfigurationFence",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route health cases missing"
 if mode=="policy":
     assert ("io.syn443.policy.PolicyTest","signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences") in {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="health":

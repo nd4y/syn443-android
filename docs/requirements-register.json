@@ -1093,38 +1093,38 @@
     {
       "id": "BAD-01",
       "text": "Локальное хранилище хранит health records отдельно для профиля, ребра и целой цепочки. Ключ включает resource/profile ID и spec/secret version, ordered path hash, физический сетевой контекст/режим, traffic class, protocol/IP family, probe profile и версии движка. Сырые секреты не входят в cache key.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": ["docs/route-frontier.md"]
     },
     {
       "id": "BAD-02",
       "text": "Record содержит error class/attribution/confidence, время/число успехов и ошибок, окна latency/stability, nextProbeAt/cooldownUntil, circuit state и invalidate conditions. Кэш не превращается в общий бессрочный список запретов.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": ["docs/route-frontier.md"]
     },
     {
       "id": "BAD-03",
       "text": "Circuit states: healthy/unknown, suspect, open, half-open, recovered; отдельно disabled by policy и invalid config. Начальный cooldown transient path failures - 30 секунд с экспоненциальным ростом до 10 минут и jitter, сбросом серии после подтверждённого восстановления. Конкретные значения задаются policy в безопасных пределах.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": ["docs/route-frontier.md"]
     },
     {
       "id": "BAD-04",
       "text": "Open кандидат временно исключается из обычного выбора. После срока допускается одна ограниченная half-open проверка; массовых одновременных retries нет. Ошибка auth/config не проверяется каждую секунду: изменение credentials/profile является отдельным событием инвалидирования.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": ["docs/route-frontier.md"]
     },
     {
       "id": "BAD-05",
       "text": "NXDOMAIN либо недоступность конечного домашнего сервиса не ухудшают глобально профиль, если нет доказательства отказа пути. Отказ конкретного метода проверки не равен отказу всех методов. При общей сетевой проблеме фиксируется network evidence, а не тысячи независимых proxy faults.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": ["docs/route-frontier.md"]
     },
     {
       "id": "BAD-06",
       "text": "Смена сети, IP family, спецификации, secret version или engine revision инвалидирует затронутую часть негативных знаний либо переводит её в recheck. Подтверждённый отказ в одной LTE сети не запрещает профиль на домашнем Wi-Fi. Сетевой fingerprint хранится локально и не требует IMEI, GPS или отправки SSID/BSSID.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": ["docs/route-frontier.md"]
     },
     {
       "id": "BAD-07",
