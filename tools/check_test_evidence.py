@@ -198,6 +198,8 @@ if mode=="emulator":
     required |= {"qrImageReturnsOnlyASyntacticallyBoundedInvitation",
         "floorsPersistAcrossRecreationAndCorruptionNeverResetsToInstallationRoot",
         "installationUpgradeCommitsBothSignaturesAndKeepsTheRevisionFloor",
+        "administrationEntryUsesTrustedMetadataAndCannotOutliveItsLoginGeneration",
+        "olderIdentityServerKeepsAdministrationHiddenWithoutChangingLogin",
         "manualInvitationStaysLocalUntilConfirmationAndThenUsesOrdinarySession",
         "cancelledClaimCannotCompleteOrResurrectItsRetiredKey",
         "signedServiceCanPrepareKeycloakWithoutClaimingTheInvitation",

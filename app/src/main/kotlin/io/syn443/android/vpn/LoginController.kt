@@ -76,6 +76,9 @@ class LoginController private constructor(private val context:android.app.Applic
     private var overlayRetry=ProvisioningRetry()
     private data class ActivationDelivery(val generation:Long,val hash:String,val retryAt:Long,val done:Boolean)
     private var activationDelivery:ActivationDelivery?=null
+    private data class PanelHint(val intent:LoginIntent,val untilElapsed:Long)
+    private var panelHint:PanelHint?=null
+    private var panelPoll:Pair<Long,Long>?=null
     private data class ChatTicket(val id:String,val generation:Long,val expires:Long,var state:String="pending",var body:String="",var reason:String="")
     private var chatTicket:ChatTicket?=null
     /** Private UI mailbox: at most one bounded operation; no content enters public status. */
@@ -212,6 +215,7 @@ class LoginController private constructor(private val context:android.app.Applic
         JSONObject().put("phase",s.phase.name).put("method",s.method).put("generation",s.generation).put("configured",configured)
             .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
+            .put("controlPanelConfigured",panelOrigin(s)!=null)
             .put("controlPanelAvailable",adminPanelUrl(s.generation)!=null)
             .put("inviteState",if(s.phase==LoginPhase.INVITING)inviteState else "").put("pairCode",if(s.phase==LoginPhase.INVITING)invitePair else "")
             .put("cleanupPending",s.tombstones.size).put("assignedPolicy",assignedRuntime.status(s))
@@ -334,10 +338,39 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     /** Navigation metadata only; the browser obtains its own control-audience
      * session and fresh MFA. No device/user credential enters the URL. */
+    private fun panelOrigin(s:LoginIntent):String? {
+        val active=cached?:return null
+        if(s.phase !in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING) ||
+            active.first.generation!=s.generation || active.first.ownerTag!=s.ownerTag || active.first.deviceId!=s.deviceId)return null
+        return active.second.bootstrap.controlPanelOrigin.takeIf {it.isNotEmpty()}?.also {Identity.controlOrigin(it)}
+    }
     fun adminPanelUrl(expectedGeneration:Long):String?=synchronized(commands) {
-        val s=journal.snapshot();val active=cached
-        if(s.generation!=expectedGeneration || s.phase !in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING) || active==null || active.first.generation!=s.generation || active.first.ownerTag!=s.ownerTag || active.first.deviceId!=s.deviceId)return@synchronized null
-        active.second.bootstrap.controlPanelOrigin.takeIf {it.isNotEmpty()}?.also {Identity.controlOrigin(it)}
+        val s=journal.snapshot()
+        if(s.generation!=expectedGeneration)return@synchronized null
+        val hint=panelHint?:return@synchronized null
+        if(hint.intent.generation!=s.generation || hint.intent.sessionGeneration!=s.sessionGeneration ||
+            hint.intent.ownerTag!=s.ownerTag || hint.intent.deviceId!=s.deviceId || elapsed()>=hint.untilElapsed)return@synchronized null
+        panelOrigin(s)
+    }
+    fun pollAdminPanel(expectedGeneration:Long):Boolean {
+        lateinit var expected:LoginIntent
+        return submitIfIdle(quiet=true,admit={
+            val s=journal.snapshot()
+            if(s.generation!=expectedGeneration || s.phase !in setOf(LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED) ||
+                panelOrigin(s)==null ||
+                panelPoll?.let {it.first==s.generation && elapsed()<it.second}==true)false
+            else {expected=s;true}
+        },onAdmission={panelPoll=expected.generation to (elapsed()+60_000)}) {
+            current(expected)
+            val p=payload(expected)
+            withProtocol(expected,p.bootstrap) {protocol,scope->
+                val until=try {protocol.controlPanelUntilElapsed(checkNotNull(p.session),scope)}catch(error:AuthException) {
+                    if(error.reason !in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))throw error
+                    0L
+                }
+                synchronized(commands) {current(expected);panelHint=PanelHint(expected,until)}
+            }
+        }
     }
     fun callback(raw:String) {
         require(raw.length<=8192)
@@ -867,7 +900,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }}
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
-        commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;activationDelivery=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()
+        commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;activationDelivery=null;panelHint=null;panelPoll=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {

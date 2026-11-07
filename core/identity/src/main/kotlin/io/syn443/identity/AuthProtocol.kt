@@ -168,6 +168,7 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     private data class Delivered(val reply:Reply,val time:TrustedTime,val nonce:String)
     private class CapabilityApprovalRequired:Exception()
     private class ActivationReportingUnavailable:Exception()
+    private class ControlPanelUnavailable:Exception()
     private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int=if(body==null)524_288 else 65_536):Delivered {
         require(token.length in 24..16_384 && token.all {it.code in 33..126})
         val url=bootstrap.apiOrigin+path;val method=if(body==null)"GET" else "POST";val bytes=body?.toByteArray(Charsets.UTF_8)
@@ -186,6 +187,7 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
             if(path=="/v1/devices/enroll" && reply.status==409 && json(reply)["code"]?.text()=="capabilities_update_required")
                 throw CapabilityApprovalRequired()
             if(path=="/v1/device/policy/status" && reply.status==404)throw ActivationReportingUnavailable()
+            if(path=="/v1/device/control-panel" && reply.status==404)throw ControlPanelUnavailable()
             status(reply,if(path.endsWith("/revoke") || path=="/v1/device/policy/status")204 else 200)
             return Delivered(reply,observed(reply,start,floor),currentNonce)
         }
@@ -265,6 +267,21 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
         val upper=result.time.window(boot(),elapsed()).upperMs
         Policy.verifyBound(envelope,bootstrap.roots,current.session.deviceId,thumbprint,upper)
         PolicyReply(envelope,result.time)
+    }
+    fun controlPanelUntilElapsed(current:SessionReply,scope:IdentityScope):Long=checked {
+        bound(current)
+        require(bootstrap.controlPanelOrigin.isNotEmpty() && current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val result=try {
+            api("/v1/device/control-panel",null,current.session.accessToken,current.session.nonce,current.time,scope,1024)
+        }catch(_:ControlPanelUnavailable){return@checked 0L}
+        require(result.reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+        val value=json(result.reply)
+        require(value.keys==setOf("schemaVersion","untilMs") && value.getValue("schemaVersion").number()==1L)
+        val until=value.getValue("untilMs").number()
+        val observedElapsed=elapsed()
+        val upper=result.time.window(boot(),observedElapsed).upperMs
+        require(until in 0L..minOf(current.session.accessUntilMs,upper+120_000))
+        if(until<=upper)0L else Math.addExact(observedElapsed,until-upper)
     }
     /** Older servers may omit this endpoint. Reporting does not refresh or replace authority. */
     fun reportActivation(report:DeviceActivationReport,current:SessionReply,scope:IdentityScope):Boolean=checked {

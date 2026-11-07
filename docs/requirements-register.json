@@ -1689,8 +1689,10 @@
     {
       "id": "MOB-01",
       "text": "У пользователя с административными правами есть заметная кнопка «Администрирование» на главном экране и в меню. Обычному пользователю она не показывается; прямое открытие admin URL/API всё равно проверяется сервером. Одно приложение совмещает клиентский и административный режимы.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": ["docs/mobile-administration.md"],
+      "implementationScope": "Home screen navigation gated by a short-lived device-bound hint and a trusted HTTPS origin.",
+      "remainingScope": "Menu entry, native administration and physical acceptance with the configured control plane."
     },
     {
       "id": "MOB-02",

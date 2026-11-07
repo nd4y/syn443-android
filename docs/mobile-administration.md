@@ -7,21 +7,22 @@ explicit default443 port. Empty/absent metadata provides no button and does not
 invent an address from the enrollment API. Existing serialized authority bytes
 remain unchanged when the optional field is absent.
 
-For a registered current login, the UI exposes Panel management and opens the
-system browser. The controller checks the current generation/device/owner before
-returning the URL; the app-only provider action cannot be invoked by debug ADB
-shell. Logout/cancellation immediately removes the entry. Only availability is
-included in ordinary status, without publishing the configured URL.
+The home screen exposes Administration after the current device session receives
+a live navigation hint from the server. The controller checks login generation,
+session generation, device, owner and a monotonic deadline before returning the
+URL. It refreshes the hint at most once a minute while the home screen is visible.
+The hint stays in memory. An absent grant, expired session, older server, logout
+or process restart hides the entry until the server confirms eligibility. Status
+contains only flags, with the URL returned to the app's own UI on explicit click.
 
 The link contains no token, private key, invitation or device credential. The
 control console obtains its own Keycloak control-audience session and fresh MFA;
 server-side granular ACL remains mandatory. A visible button grants no rights.
-An administrator-specific bootstrap can supply this metadata; complete managed
-UI-permission settings remain separate work. A browser session has its own
-server logout/expiry lifecycle.
+A browser session has its own server logout and expiry lifecycle. Native quick
+screens, the menu entry and the full managed editor remain separate work.
 
 Core tests cover authenticated metadata, canonical URL rejection, authority
 binding and legacy omission. Android controller tests cover current generation,
-controller restart, absent metadata and immediate logout fencing on the required
-emulators. Source v35 is pending GitHub Actions and exact Xperia UI acceptance.
-It does not claim a live control-panel login or complete mobile administration.
+controller restart, absent grant, older servers, rate bounds and immediate logout
+fencing on the required emulators. Physical role-gated browser entry and native
+administration remain open.

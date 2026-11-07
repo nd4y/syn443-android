@@ -48,6 +48,13 @@ import io.syn443.identity.Identity
         }
     }
     val phase=status.optString("phase");val generation=status.optLong("generation",-1)
+    val panelConfigured=status.optBoolean("controlPanelConfigured")
+    LaunchedEffect(visible,generation,panelConfigured) {
+        if(visible && panelConfigured)while(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            val admitted=command("auth-admin-poll",generation.toString())?.getBoolean("admitted")==true
+            delay(if(admitted)60_000 else 5_000)
+        }
+    }
     LaunchedEffect(visible,generation,status.optBoolean("browserReady"),launchGeneration) {
         if(visible && launchGeneration==generation && status.optBoolean("browserReady")) {
             val url=command("auth-browser",generation.toString())?.getString("url")
@@ -93,7 +100,7 @@ import io.syn443.identity.Identity
                 Identity.controlOrigin(url)
                 context.startActivity(Intent(Intent.ACTION_VIEW,url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
             }.onFailure {message="Не удалось открыть панель управления."}
-        }},modifier=Modifier.testTag("auth-admin-panel")) {Text("Панель управления")}
+        }},modifier=Modifier.testTag("auth-admin-panel")) {Text("Администрирование")}
         if(message.isNotEmpty())Text(message)
     }
 }

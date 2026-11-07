@@ -63,6 +63,8 @@ class LoginControllerTest {
         @Volatile var holdEnrollment=false
         @Volatile var holdRevoke=false
         @Volatile var policyReady=false
+        @Volatile var panelGrant=false
+        @Volatile var panelStatus=200
         @Volatile var foreignPolicyKey=false
         @Volatile var overlayPolicy=false
         @Volatile var managedOverlayPolicy=false
@@ -251,6 +253,11 @@ class LoginControllerTest {
                 activationReports.add(Canonical.json.decodeFromString<DeviceActivationReport>(checkNotNull(body).toString(Charsets.UTF_8)))
                 return reply(activationStatus,if(activationStatus==204)"" else "{}")
             }
+            if(url.endsWith("/device/control-panel")) {
+                val session=sessions.getValue(thumb)
+                check(method=="GET" && body==null && headers["Authorization"]=="DPoP "+session.accessToken)
+                return reply(panelStatus,"""{"schemaVersion":1,"untilMs":${if(panelGrant)now()+60_000 else 0}}""")
+            }
             if(url.endsWith("/device/policy")) {
                 if(policyStatus!=200)return reply(policyStatus,org.json.JSONObject().put("code",policyProblem).toString())
                 if(!policyReady)return reply(202,"""{"code":"provisioning_pending"}""")
@@ -424,14 +431,26 @@ class LoginControllerTest {
         assertNull(f.controller.adminPanelUrl(f.journal.snapshot().generation))
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
         val generation=f.journal.snapshot().generation
+        assertNull(f.controller.adminPanelUrl(generation))
+        assertTrue(f.controller.pollAdminPanel(generation));f.idle()
+        assertNull(f.controller.adminPanelUrl(generation))
+        assertFalse(f.controller.pollAdminPanel(generation))
+        f.server.panelGrant=true;f.restart()
+        assertNull(f.controller.adminPanelUrl(generation))
+        assertTrue(f.controller.pollAdminPanel(generation));f.idle()
         assertEquals("https://control.example.invalid",f.controller.adminPanelUrl(generation))
         assertNull(f.controller.adminPanelUrl(generation+1))
         assertTrue(f.controller.status().getBoolean("controlPanelAvailable"))
-        f.restart()
-        assertEquals("https://control.example.invalid",f.controller.adminPanelUrl(generation))
         f.controller.cancel()
         assertNull(f.controller.adminPanelUrl(generation));f.idle()
         assertFalse(f.controller.status().optBoolean("controlPanelAvailable"))
+    }
+    @Test fun olderIdentityServerKeepsAdministrationHiddenWithoutChangingLogin()=fixture(controlPanelOrigin="https://control.example.invalid") {f->
+        f.server.panelStatus=404;f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val login=f.journal.snapshot()
+        assertTrue(f.controller.pollAdminPanel(login.generation));f.idle()
+        assertNull(f.controller.adminPanelUrl(login.generation))
+        assertEquals(login,f.journal.snapshot())
     }
     @Test fun legacyBootstrapDoesNotInventAnAdministrationAddress()=fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
