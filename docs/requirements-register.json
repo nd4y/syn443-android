@@ -2043,40 +2043,44 @@
       "text": "Сохраняется интерфейс для LLM и оператора: capabilities, status, config export/plan/apply/import, render, logs read/follow, diagnostics snapshot/bundle, health check, peers, mode get/set, VPN start/stop/reconnect.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/adb-control.md"
       ],
-      "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
-      "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
+      "implementationScope": "Explicit-device debug CLI for status, events, diagnostics, route and overlay checks, and VPN intent.",
+      "remainingScope": "Configuration export/plan/apply/import/render, network modes and atomic reconnect."
     },
     {
       "id": "ADB-02",
       "text": "Формат ответа machine-readable JSON, везде указаны ревизии и состояние операции. Потенциально длительные действия возвращают job ID; поддерживаются polling/cancel, отсутствие зависания CLI и документированные exit codes.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/adb-control.md"
       ],
-      "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
-      "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
+      "implementationScope": "Versioned JSON, stable error codes, bounded ADB calls and JSON Lines event snapshots.",
+      "remainingScope": "Stable job IDs and complete polling/cancel contract with all operation revisions."
     },
     {
       "id": "ADB-03",
       "text": "В рабочем приложении доступ только после локального opt-in и проверки разрешённого Android shell UID. Порт управления не публикуется в LAN/интернет. Managed policy не обходится ADB изменением locked полей.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/adb-control.md"
       ],
-      "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
-      "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
+      "implementationScope": "Existing same-UID/debug shell authorization and an explicit device selector; no listening port.",
+      "remainingScope": "Release opt-in and complete managed field and operation acceptance."
     },
     {
       "id": "ADB-04",
       "text": "Обычные экспорты и бандлы очищены. Полный экспорт с секретами требует явного флага и отдельного права. Он не включает приватные identity files. Записи о выполненных изменениях появляются в локальном и серверном аудите, когда сервер доступен.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/adb-control.md"
       ],
-      "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
-      "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
+      "implementationScope": "Projected diagnostic snapshot without config, peer identities or free-form fields.",
+      "remainingScope": "Full redaction/retention policy, authorized secret exports, and durable local/server operation audit."
     },
     {
       "id": "BOOT-01",

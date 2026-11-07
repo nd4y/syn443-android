@@ -99,7 +99,7 @@ No full M1-M5 or production-readiness claim is made by these statuses.
 | MOD-01..10, ENG-05 | Isolated host/TUN adapter, source/patch/toolchain locks, built-in modules, native alignment and ordinary/race tests | Complete capability/version matrix, signed release inventory/SBOM, all update/retirement acceptance |
 | NB-01/02/05/06/07 | Direct-first/deferred SDK, strict VLESS detour, local identity, bounded cached roster/diagnostics and home traffic proof | Managed account credential retirement, backend peer lifecycle, DNS/route conflict and full handover matrix |
 | CHK-01..12, CHECK requirements | Bounded TCP/SSH/TLS/strictHTTPS all-of checks through selected outbound with fresh scoped samples and check/cancel/status | Full rule/class/template plan model, any/quorum/stages, exit attribution, scheduling/dedup and visual profile editor |
-| LOG-01..04, ADB-01..04 | Bounded redacted lifecycle/exit/resource snapshots and debug own-UID/shell control | Full log channels/retention/redactor/bundle, complete CLI, release opt-in and server audit |
+| LOG-01..04, ADB-01..04 | Bounded redacted lifecycle/exit/resource snapshots and [debug ADB client](adb-control.md) | Full log channels/retention, configuration operations, release opt-in and server audit |
 | AUTH/PROV/SEC partial rows | Pilot protocol/Keystore/journals, signed device-key policy and SQL authorization/publication | Full release onboarding, invitation trust, rotation, managed overlays and operational acceptance |
 | CHAT partial rows | SQL message/file integrity and atomicity, Android user/admin and web chat, compression/retry/withdrawal | Complete retention/quota administration, production operations and restricted-network acceptance |
 
