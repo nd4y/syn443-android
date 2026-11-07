@@ -6,10 +6,11 @@ import hashlib
 import json
 import re
 import socketserver
+import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
-from run_vpn_process_faults import ROOT, PACKAGE, Server, Proxy, adb, call, pid, await_condition
+from run_vpn_process_faults import ROOT, PACKAGE, URI, Server, Proxy, adb, call, pid, await_condition
 from emulator_policy_ui import open_policy, toggle, unlock_test_pin
 from emulator_boot import reboot_preserved
 from syn443ctl import ControlError, Device
@@ -41,6 +42,39 @@ def resume_blocked(before):
     assert snapshot['generation']==before['generation'],'Intent generation changed after Force stop/update'
     assert snapshot['desiredOn'] is True,'Desired intent changed after Force stop/update'
     return snapshot.get('resumeRequired') is True
+
+
+def locked_boot_boundary():
+    # Check the engine independently of the provider. Unavailable ADB status
+    # may be transient; a native owner before unlock is an immediate failure.
+    assert not pid(':engine'), 'Unexpected native owner before first unlock'
+    snapshot=call('status')
+    assert not snapshot.get('engineActive'), 'Engine active before first unlock'
+    if snapshot.get('phase')!='NeedsUnlock':
+        return False
+    assert snapshot['engineActive'] is False, 'Locked status must explicitly report no active engine'
+    assert snapshot['desiredOn'] is None and not snapshot['desiredOnKnown'], 'Credential intent disclosed before first unlock'
+    return True
+
+
+def direct_boot_diagnostics():
+    # The caller runs only on the disposable emulator. Keep output to bounded
+    # classifications so errors never emit arbitrary ADB payloads.
+    def probe(*args):
+        try:return adb(*args,timeout=5).decode(errors='replace').strip()
+        except subprocess.CalledProcessError as error:return error.output.decode(errors='replace').strip()
+        except subprocess.TimeoutExpired:return ''
+    user=probe('shell','am','get-started-user-state','0')
+    package=probe('shell','pm','path',PACKAGE)
+    controller=probe('shell','pidof',PACKAGE+':controller')
+    raw=probe('shell','content','call','--uri',URI,'--method','status')
+    if 'Permission Denial' in raw or 'SecurityException' in raw:control='denied'
+    elif 'No content provider found' in raw or 'Could not find provider' in raw:control='missing'
+    elif 'Error while accessing provider' in raw or 'DeadObjectException' in raw:control='binder_error'
+    elif 'ok=true' in raw:control='answered'
+    else:control='unknown'
+    return {'user0State':user if user in ('BOOTING','RUNNING_LOCKED','RUNNING_UNLOCKING','RUNNING_UNLOCKED') else 'unknown',
+            'packagePresent':package.startswith('package:'),'controllerPresent':controller.isdigit(),'control':control}
 
 
 def main():
@@ -136,8 +170,11 @@ def main():
         case=new_case('rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles')
         prepare();before=call('status')
         answer=adb('shell','locksettings','set-pin','2468');assert b'set to' in answer.lower();pin_set=True
-        reboot();await_condition(lambda:call('status').get('phase')=='NeedsUnlock',60)
-        locked=call('status');assert locked['desiredOn'] is None and not locked['desiredOnKnown'] and not locked['engineActive'] and not pid(':engine')
+        reboot()
+        try:await_condition(locked_boot_boundary,60)
+        except Exception:
+            print('Direct boot boundary: '+json.dumps(direct_boot_diagnostics()),flush=True)
+            raise
         unlock_test_pin()
         await_condition(lambda:call('status').get('osPolicy',{}).get('unlocked') is True,30)
         await_condition(lambda:call('status').get('phase')=='Online',150)
