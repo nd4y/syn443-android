@@ -2,6 +2,7 @@ package io.syn443.identity
 
 import io.syn443.policy.*
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -295,7 +296,12 @@ class AssignmentsTest {
         assertEquals(setOf("identity","journal","time","applyDeadlineElapsed","applyBoot"),Policy.json.parseToJsonElement(running).jsonObject.keys)
         assertEquals(applying,Policy.json.decodeFromString<AssignmentState>(running))
         val aborted=Assignments.abort(applying,current,payload,"interrupted_activation")
-        assertEquals(setOf("identity","journal","time"),Policy.json.parseToJsonElement(Policy.json.encodeToString(aborted)).jsonObject.keys)
+        val encoded=Policy.json.parseToJsonElement(Policy.json.encodeToString(aborted)).jsonObject
+        assertEquals(setOf("identity","journal","time","activationReport"),encoded.keys)
+        val legacyAbort=Policy.json.encodeToString(JsonObject(encoded - "activationReport"))
+        val restoredAbort=Policy.json.decodeFromString<AssignmentState>(legacyAbort)
+        assertNull(restoredAbort.activationReport)
+        assertEquals(legacyAbort,Policy.json.encodeToString(restoredAbort))
     }
     @Test fun erasureRequiresNewerLogoutAndConfirmedNativeAndNamespaceRetirement() {
         val state=receive();val retired=LoginRecovery.cancel(login,1)
