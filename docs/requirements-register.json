@@ -1108,10 +1108,11 @@
       "text": "В здоровом состоянии выполняется ограниченное исследование резервов с rotation/jitter, чтобы находить улучшения без постоянного перебора. На разряжающемся устройстве или metered сети probe plan сокращается. Потеря основного пути имеет приоритет над фоновым уточнением метрик.",
       "status": "partial",
       "evidence": [
-        "docs/route-lifecycle.md#reserve-probe-cooldown"
+        "docs/route-lifecycle.md#reserve-probe-cooldown",
+        "docs/route-frontier.md"
       ],
-      "implementationScope": "Signed internal Wi-Fi failover defers optional reserve probes during attributed cooldown while continuing required selector checks.",
-      "remainingScope": "Other route classes and network modes, rotation and jitter of the runtime frontier, metered and battery budgets."
+      "implementationScope": "Signed internal Wi-Fi failover defers optional reserve probes during attributed cooldown and during metered maintenance. Required checks continue and a fresh selector failure triggers a full comparison.",
+      "remainingScope": "Other route classes and network modes, rotation and jitter, battery budgets and physical metered acceptance."
     },
     {
       "id": "ALG-23",

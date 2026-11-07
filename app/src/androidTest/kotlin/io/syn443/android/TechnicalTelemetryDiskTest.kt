@@ -48,11 +48,13 @@ class TechnicalTelemetryDiskTest {
                 row(1,"managed_route_recheck",41,"m4-confirmed-v1"),
                 row(2,"other",41,"m4-confirmed-v1"),
                 row(3,"managed_route_recheck",42,"m1-local-v1"),
-                row(4,"managed_route_recheck",-1,"m4-confirmed-v1")))
-            val (entries,through)=capture.sample(JSONObject().put("events",events),consent,60)
-            assertEquals(4L,through)
-            assertEquals(listOf(41L to 2, 0L to 1, 42L to 1, 0L to 1),
+                row(4,"managed_route_recheck",-1,"m4-confirmed-v1"),
+                row(5,"managed_route_recheck",43,"unknown-local-version")))
+            val (entries,through)=capture.sample(JSONObject().put("events",events),consent,62)
+            assertEquals(5L,through)
+            assertEquals(listOf(41L to 2, 0L to 1, 42L to 1, 0L to 1, 0L to 1),
                 entries.map {it.key.policyRevision to it.key.algorithmRevision})
+            assertEquals(listOf("wifi","unknown","wifi","unknown","unknown"),entries.map {it.event.mode})
             assertTrue(entries.all {it.event.path==null})
         } finally {capture.disable()}
     }

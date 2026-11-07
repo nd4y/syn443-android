@@ -140,6 +140,45 @@ class ManagedFailoverTest {
         } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
     }
 
+    @Test fun meteredMaintenanceKeepsRequiredChecksAndOnlyFullComparisonsCountTowardSwitch() {
+        val scope=RouteScope(10,26,30,"synthetic-engine",Policy.hash(config))
+        RouteSnapshot.configure(config,scope.config)
+        RouteSnapshot.owner(scope)
+        fun batch(full:Boolean,reserveWorks:Boolean=false) {
+            val request=JSONObject(checkNotNull(RouteSnapshot.request(scope,force=full,meteredMaintenance=true)))
+            val paths=request.getJSONArray("routes")
+            val tags=(0 until paths.length()).map {paths.getJSONObject(it).getString("outbound")}.toSet()
+            assertEquals(if(full)setOf("primary","reserve","internal") else setOf("internal"),tags)
+            val now=SystemClock.elapsedRealtime()
+            fun result(id:String,ok:Boolean,path:List<String>)=JSONObject().put("id",id).put("complete",true)
+                .put("ok",ok).put("code",if(ok)"ok" else "dial_failed").put("elapsedMs",20)
+                .put("sampledElapsedMs",now).put("path",JSONArray(path))
+            val results=mutableListOf(result("route-3",false,listOf("route-3","route-1")))
+            if(full) {
+                results+=result("route-1",false,listOf("route-1"))
+                results+=result("route-2",reserveWorks,listOf("route-2"))
+            }
+            assertTrue(RouteSnapshot.update(scope,JSONObject().put("request",request.getString("request"))
+                .put("running",false).put("results",JSONArray(results)).toString()))
+        }
+        try {
+            batch(full=false)
+            assertNull(RouteSnapshot.failoverAdvice(scope))
+            assertTrue(RouteSnapshot.confirmingFailover(scope))
+            batch(full=true)
+            assertNull(RouteSnapshot.failoverAdvice(scope))
+            assertFalse(RouteSnapshot.confirmingFailover(scope))
+            RouteSnapshot.cancelled(resetInterval=true)
+            batch(full=false)
+            assertNull(RouteSnapshot.failoverAdvice(scope))
+            assertTrue(RouteSnapshot.confirmingFailover(scope))
+            batch(full=true,reserveWorks=true)
+            assertNull(RouteSnapshot.failoverAdvice(scope))
+            batch(full=true,reserveWorks=true)
+            assertEquals("reserve",RouteSnapshot.failoverAdvice(scope)?.candidate)
+        } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
+    }
+
     @Test fun firstValidatedManagedBatchBypassesCadenceOnceWithoutCancellingInFlightWork() {
         val scope=RouteScope(10,24,30,"synthetic-engine",Policy.hash(config))
         RouteSnapshot.configure(config,scope.config)

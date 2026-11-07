@@ -41,6 +41,7 @@ object RouteSnapshot {
     private var batchSequence=0L
     private var completedReceipt=""
     private var confirmingFailure=false
+    private var skippedMeteredReserves=false
     private val methods=setOf("tcp","tls","https_204","ssh_banner","https_exit_ip")
     private val tlsMethods=setOf("tls","https_204","https_exit_ip")
     private val ipv4Literal=Regex("(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}")
@@ -117,7 +118,7 @@ object RouteSnapshot {
     }
 
     @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000;activationAttempt=null
-        completedReceipt="";failoverAdmission=null;batchSequence=0;confirmingFailure=false}
+        completedReceipt="";failoverAdmission=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
         return rows.any {it.checks.length()>0} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
@@ -151,18 +152,22 @@ object RouteSnapshot {
         live==scope && failover!=null && validatedBatch!=scope
 
     @Synchronized fun request(scope:RouteScope, only:String?=null, force:Boolean=false, deferCoolingReserves:Boolean=false,
-                              validatedManagedWifi:Boolean=false):String? {
+                              validatedManagedWifi:Boolean=false, meteredMaintenance:Boolean=false):String? {
         val now=SystemClock.elapsedRealtime()
         if(pending.isNotEmpty() && now-startedAt<35_000) return null
         val firstValidated=only==null && validatedManagedWifi && awaitingValidatedBatch(scope)
         if(!force && !firstValidated && now-lastStarted<60_000) return null
         if(only!=null && rows.none {it.id==only})return null
         val admission=failoverAdmission?.takeIf {deferCoolingReserves && only==null && live==scope}
+        val omittedReserves = if (meteredMaintenance && only==null && live==scope &&
+            !force && !firstValidated && !confirmingFailure) failover?.members.orEmpty() else emptyList()
         val selected=rows.filter {row->
             (only==null || row.id==only) && row.checks.length()>0 &&
-                (row.required || admission?.let {(algorithm, state)->state.deferReserveProbe(failoverContext(scope,algorithm),row.tag,now)}!=true)
+                (row.required || row.tag !in omittedReserves &&
+                    admission?.let {(algorithm, state)->state.deferReserveProbe(failoverContext(scope,algorithm),row.tag,now)}!=true)
         }
         if(selected.isEmpty())return null
+        skippedMeteredReserves=omittedReserves.isNotEmpty()
         // Never stamp a previous observation with this new scope.
         current=scope;pending=UUID.randomUUID().toString();startedAt=now;lastStarted=now;queued=selected.map {it.id}.toSet()
         if(firstValidated)validatedBatch=scope
@@ -199,7 +204,7 @@ object RouteSnapshot {
         }
         return true
     }
-    @Synchronized fun cancelled(resetInterval:Boolean=false){pending="";queued=emptySet();current=null;completedReceipt="";confirmingFailure=false;if(resetInterval)lastStarted=-60_000}
+    @Synchronized fun cancelled(resetInterval:Boolean=false){pending="";queued=emptySet();current=null;completedReceipt="";confirmingFailure=false;skippedMeteredReserves=false;if(resetInterval)lastStarted=-60_000}
     @Synchronized internal fun confirmingFailover(scope:RouteScope):Boolean=live==scope && confirmingFailure
     @Synchronized internal fun hasManagedFailover(scope:RouteScope):Boolean=live==scope && failover!=null && completedReceipt.isNotEmpty()
     @Synchronized internal fun failoverAdvice(scope:RouteScope,trackReserveFailures:Boolean=false,
@@ -227,13 +232,16 @@ object RouteSnapshot {
             }
             VerifiedPathSample(row.tag,plan.intent,receipt,comparison,sample.elapsedMs,verdict,timings[row.id] ?: 0)
         }
+        val measuredFailure=groupSample.complete && codes[group.id] in completedProbeFailures &&
+            now-groupSample.elapsedMs in 0L until 15_000
         val verdict=when {
             groupSample.complete && groupSample.ok -> ProbeVerdict.VERIFIED
-            groupSample.complete && codes[group.id] in completedProbeFailures &&
-                reserves.any {it.verdict==ProbeVerdict.VERIFIED} -> ProbeVerdict.CONFIRMED_PATH_FAILURE
+            measuredFailure && reserves.any {it.verdict==ProbeVerdict.VERIFIED} -> ProbeVerdict.CONFIRMED_PATH_FAILURE
             else -> ProbeVerdict.UNKNOWN
         }
-        confirmingFailure=verdict==ProbeVerdict.CONFIRMED_PATH_FAILURE
+        // A failed selector in a reduced survey needs one full comparison, but
+        // does not itself count as an independent path failure.
+        confirmingFailure=verdict==ProbeVerdict.CONFIRMED_PATH_FAILURE || measuredFailure && skippedMeteredReserves
         val context=failoverContext(scope,algorithm)
         val admission=failoverAdmission?.takeIf {it.first==algorithm}?.second ?: FailoverAdmission(context,plan.intent,plan.members.toSet(),comparison,
             rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)},algorithm)
