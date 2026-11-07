@@ -1,9 +1,24 @@
 package io.syn443.host
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class RouteReportWindowTest {
+    @Test fun admissionRejectsUnboundedRequestsAndAnOverflowingClock() {
+        for (key in listOf("", "x".repeat(81))) {
+            assertThrows(IllegalArgumentException::class.java) { RouteReportWindow(key, 0L) }
+        }
+        val maxStart = Long.MAX_VALUE - RouteReportWindow.MAX_AGE_MS
+        for (time in listOf(-1L, maxStart + 1)) {
+            assertThrows(IllegalArgumentException::class.java) { RouteReportWindow("admitted", time) }
+        }
+        val maximumKey = "x".repeat(80)
+        val boundary = RouteReportWindow(maximumKey, maxStart)
+        assertEquals(RouteReportWindow.Decision.PUBLISH_AND_POLL, boundary.accept(maximumKey, true, maxStart))
+        assertEquals(RouteReportWindow.Decision.PUBLISH_FINAL, boundary.accept(maximumKey, false, Long.MAX_VALUE - 1))
+    }
+
     @Test fun onlyTheAdmittedBatchCanPublishAndItsTerminalReportEndsPolling() {
         val window = RouteReportWindow("admitted", 100)
         assertEquals(RouteReportWindow.Decision.PUBLISH_AND_POLL, window.accept("admitted", true, 101))
