@@ -32,11 +32,14 @@ class EnrollmentAppLinkTest {
                         .setAction(Intent.ACTION_VIEW).setData(raw.toUri()).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP))
                 }
                 compose.waitUntil(timeoutMillis=5_000) {
-                    val disabled=preview.fetchSemanticsNode().config.contains(SemanticsProperties.Disabled)
-                    disabled!=enabled
+                    runCatching {
+                        val disabled=preview.fetchSemanticsNode().config.contains(SemanticsProperties.Disabled)
+                        disabled!=enabled
+                    }.getOrDefault(false)
                 }
                 scenario.onActivity {assertNull(it.intent.data)}
             }
+            compose.waitUntil(timeoutMillis=8_000) {runCatching {preview.fetchSemanticsNode()}.isSuccess}
             preview.assertIsNotEnabled()
             open("https://"+BuildConfig.ENROLLMENT_LINK_HOST+BootstrapTrust.APP_LINK_PATH+"#"+direct,true)
             compose.onNodeWithTag("invite-confirm").assertDoesNotExist()

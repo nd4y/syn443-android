@@ -96,9 +96,20 @@ internal object InvitationQr {
             val source=RGBLuminanceSource(bitmap.width,bitmap.height,pixels)
             val hints=mapOf(DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),DecodeHintType.TRY_HARDER to true)
             val reader=MultiFormatReader()
-            val result=runCatching {reader.decode(BinaryBitmap(HybridBinarizer(source)),hints)}.getOrElse {
-                reader.reset();reader.decode(BinaryBitmap(HybridBinarizer(source.invert())),hints)
+            fun read(luminance:LuminanceSource,pure:Boolean=false):com.google.zxing.Result? {
+                reader.reset()
+                return try {
+                    reader.decode(BinaryBitmap(HybridBinarizer(luminance)),
+                        if(pure)hints+(DecodeHintType.PURE_BARCODE to true) else hints)
+                } catch(_:NotFoundException) {
+                    null
+                }
             }
+            val inverted=source.invert()
+            // Clean QR images can be read directly if finder-pattern detection
+            // fails. The link still passes the same bounded invitation parser.
+            val result=read(source) ?: read(inverted) ?: read(source,true) ?: read(inverted,true)
+                ?: throw NotFoundException.getNotFoundInstance()
             result.text.also {require(it.length<=BootstrapTrust.MAX_LINK);BootstrapTrust.parse(it)}
         } finally {bitmap.recycle();bytes.fill(0)}
     }
