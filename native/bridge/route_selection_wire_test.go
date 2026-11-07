@@ -13,6 +13,33 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 )
 
+func TestNativeSelectionPlanRejectsWrongMemberIdentityAndMutablePath(t *testing.T) {
+	runner := newRouteRunner(context.Background(), nil)
+	runner.nodes = map[string]routeNode{
+		"primary": {ID: "route-1", Kind: "http"},
+		"reserve": {ID: "route-2", Kind: "socks"},
+	}
+	runner.selectors = map[string]map[string]bool{"group": {"primary": true, "reserve": true}}
+	for _, fixture := range []struct {
+		selector, memberID, memberTag, memberKind string
+	}{
+		{"unknown", "route-2", "reserve", "socks"},
+		{"group", "route-3", "reserve", "socks"},
+		{"group", "route-2", "primary", "socks"},
+		{"group", "route-2", "reserve", "urltest"},
+	} {
+		runner.nodes["reserve"] = routeNode{ID: "route-2", Kind: fixture.memberKind}
+		checks := []routeCheck{{Method: "tcp", Target: "127.0.0.1:12345"}}
+		raw, err := json.Marshal(routeSelectionPlan{Selector: fixture.selector, Paths: []routePlan{
+			{ID: "route-1", Outbound: "primary", Checks: checks},
+			{ID: fixture.memberID, Outbound: fixture.memberTag, Checks: checks},
+		}})
+		if err != nil || runner.configureSelection(string(raw)) || runner.selectionGroup != "" {
+			t.Fatal("invalid plan changed native selection authority", err)
+		}
+	}
+}
+
 func TestVerifiedSelectorSwitchKeepsExistingTrafficAndRejectsStaleProof(t *testing.T) {
 	target := listenWire(t, func(conn net.Conn) { _, _ = io.Copy(conn, conn) })
 	address := target.listener.Addr().String()
@@ -29,7 +56,18 @@ func TestVerifiedSelectorSwitchKeepsExistingTrafficAndRejectsStaleProof(t *testi
 		"reserve": {ID: "route-2", Kind: "http"},
 		"group":   {ID: "route-3", Kind: "selector"},
 	}
-	runner.selectors = map[string]map[string]bool{"group": {"primary": true, "reserve": true}}
+	runner.selectors = map[string]map[string]bool{
+		"group": {"primary": true, "reserve": true}, "other-group": {"primary": true, "reserve": true},
+	}
+	checks := []routeCheck{{Method: "tcp", Target: address}}
+	approved := routeSelectionPlan{Selector: "group", Paths: []routePlan{
+		{ID: "route-1", Outbound: "primary", Checks: checks},
+		{ID: "route-2", Outbound: "reserve", Checks: checks},
+	}}
+	raw, err := json.Marshal(approved)
+	if err != nil || !runner.configureSelection(string(raw)) {
+		t.Fatal("authorized route checks were not installed", err)
+	}
 	group, ok := lookup("group")
 	if !ok {
 		t.Fatal("configured selector missing")
@@ -56,13 +94,13 @@ func TestVerifiedSelectorSwitchKeepsExistingTrafficAndRejectsStaleProof(t *testi
 		}
 	}
 	echo("first")
-	if runner.selectVerified("before-probe", "reserve-check", "group", "primary", "reserve") {
+	if runner.selectVerified("before-probe", "route-2", "group", "primary", "reserve") {
 		t.Fatal("member selected without evidence")
 	}
-	probe := func(receipt string) {
+	probe := func(receipt string, checks []routeCheck) {
 		t.Helper()
 		request, _ := json.Marshal(routeRequest{Request: receipt, Routes: []routePlan{
-			{ID: "reserve-check", Outbound: "reserve", Checks: []routeCheck{{Method: "tcp", Target: address}}},
+			{ID: "route-2", Outbound: "reserve", Checks: checks},
 		}})
 		if !runner.start(string(request)) {
 			t.Fatal("probe not admitted")
@@ -80,30 +118,36 @@ func TestVerifiedSelectorSwitchKeepsExistingTrafficAndRejectsStaleProof(t *testi
 		}
 		t.Fatal("probe completion not observed")
 	}
-	probe("discarded-network")
+	diagnosticChecks := []routeCheck{checks[0], checks[0]}
+	probe("diagnostic-only", diagnosticChecks)
+	if runner.selectVerified("diagnostic-only", "route-2", "group", "primary", "reserve") {
+		t.Fatal("a successful diagnostic outside the approved plan authorized a switch")
+	}
+	probe("discarded-network", checks)
 	runner.stop()
-	if runner.selectVerified("discarded-network", "reserve-check", "group", "primary", "reserve") {
+	if runner.selectVerified("discarded-network", "route-2", "group", "primary", "reserve") {
 		t.Fatal("network invalidation left the old proof usable")
 	}
-	probe("expired-proof")
+	probe("expired-proof", checks)
 	runner.mu.Lock()
 	runner.report.Results[0].SampledElapsedMS = bootMillis() - 15_001
 	runner.mu.Unlock()
-	if runner.selectVerified("expired-proof", "reserve-check", "group", "primary", "reserve") {
+	if runner.selectVerified("expired-proof", "route-2", "group", "primary", "reserve") {
 		t.Fatal("old reserve result was treated as current")
 	}
-	probe("current-network")
+	probe("current-network", checks)
 	if runner.selectVerified("current-network", "wrong-check", "group", "primary", "reserve") ||
-		runner.selectVerified("current-network", "reserve-check", "group", "another", "reserve") ||
-		runner.selectVerified("current-network", "reserve-check", "group", "reserve", "primary") ||
-		runner.selectVerified("current-network", "reserve-check", "group", "primary", "unassigned") {
+		runner.selectVerified("current-network", "route-2", "other-group", "primary", "reserve") ||
+		runner.selectVerified("current-network", "route-2", "group", "another", "reserve") ||
+		runner.selectVerified("current-network", "route-2", "group", "reserve", "primary") ||
+		runner.selectVerified("current-network", "route-2", "group", "primary", "unassigned") {
 		t.Fatal("selection accepted a mismatched probe, previous member or candidate")
 	}
-	if !runner.selectVerified("current-network", "reserve-check", "group", "primary", "reserve") || selectable.Now() != "reserve" {
+	if !runner.selectVerified("current-network", "route-2", "group", "primary", "reserve") || selectable.Now() != "reserve" {
 		t.Fatal("verified reserve did not become the new path")
 	}
 	echo("after-switch")
-	if runner.selectVerified("current-network", "reserve-check", "group", "primary", "reserve") {
+	if runner.selectVerified("current-network", "route-2", "group", "primary", "reserve") {
 		t.Fatal("selector reused a consumed check")
 	}
 	calls := reserve.calls.Load()

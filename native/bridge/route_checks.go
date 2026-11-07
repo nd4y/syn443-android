@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,10 @@ type routeRequest struct {
 	Request string      `json:"request"`
 	Routes  []routePlan `json:"routes"`
 }
+type routeSelectionPlan struct {
+	Selector string      `json:"selector"`
+	Paths    []routePlan `json:"paths"`
+}
 type routeResult struct {
 	ID               string   `json:"id"`
 	Complete         bool     `json:"complete"`
@@ -45,6 +50,7 @@ type routeResult struct {
 	SampledElapsedMS int64    `json:"sampledElapsedMs"`
 	Path             []string `json:"path"`
 	outbound         string
+	selectionProof   bool
 }
 type routeNode struct{ ID, Detour, Kind string }
 type routeReport struct {
@@ -54,18 +60,20 @@ type routeReport struct {
 }
 
 type routeRunner struct {
-	mu            sync.Mutex
-	ctx           context.Context
-	lookup        func(string) (adapter.Outbound, bool)
-	cancel        context.CancelFunc
-	serial        uint64
-	busy          bool
-	report        routeReport
-	nodes         map[string]routeNode       // Immutable once a runtime starts.
-	selectors     map[string]map[string]bool // Membership of noninterrupting selectors.
-	selectionUsed bool
-	restore       map[string]string
-	limit         func() time.Duration
+	mu             sync.Mutex
+	ctx            context.Context
+	lookup         func(string) (adapter.Outbound, bool)
+	cancel         context.CancelFunc
+	serial         uint64
+	busy           bool
+	report         routeReport
+	nodes          map[string]routeNode       // Immutable once a runtime starts.
+	selectors      map[string]map[string]bool // Membership of noninterrupting selectors.
+	selectionGroup string
+	selectionPlans map[string]routePlan // Immutable approved checks, indexed by concrete member.
+	selectionUsed  bool
+	restore        map[string]string
+	limit          func() time.Duration
 }
 
 func (r *routeRunner) path(tag string) []string {
@@ -93,6 +101,40 @@ func (r *routeRunner) path(tag string) []string {
 func newRouteRunner(ctx context.Context, lookup func(string) (adapter.Outbound, bool)) *routeRunner {
 	return &routeRunner{ctx: ctx, lookup: lookup, report: routeReport{Results: []routeResult{}}}
 }
+
+// Called before starting a runtime. A diagnostic request cannot set these checks.
+func (r *routeRunner) configureSelection(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	if len(raw) > 32768 {
+		return false
+	}
+	var selection routeSelectionPlan
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&selection) != nil || decoder.Decode(new(any)) != io.EOF {
+		return false
+	}
+	members := r.selectors[selection.Selector]
+	if len(members) < 2 || len(members) > 8 || len(selection.Paths) != len(members) ||
+		!validRouteRequest(routeRequest{Request: "approved", Routes: selection.Paths}) {
+		return false
+	}
+	approved := make(map[string]routePlan, len(members))
+	for _, path := range selection.Paths {
+		if !members[path.Outbound] || path.ID != r.nodes[path.Outbound].ID || len(r.fixedPath(path.Outbound)) == 0 {
+			return false
+		}
+		if _, duplicate := approved[path.Outbound]; duplicate {
+			return false
+		}
+		approved[path.Outbound] = path
+	}
+	r.selectionGroup, r.selectionPlans = selection.Selector, approved
+	return true
+}
+
 func (r *routeRunner) snapshot() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -161,7 +203,8 @@ func (r *routeRunner) selectVerified(request, checkID, group, previous, candidat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if request == "" || request != r.report.Request || r.busy || r.selectionUsed ||
-		r.ctx.Err() != nil || !r.allowed() || candidate == previous || !r.selectors[group][candidate] {
+		r.ctx.Err() != nil || !r.allowed() || group != r.selectionGroup || candidate == previous ||
+		!r.selectors[group][candidate] || !r.selectors[group][previous] {
 		return false
 	}
 	path := r.fixedPath(candidate)
@@ -171,7 +214,7 @@ func (r *routeRunner) selectVerified(request, checkID, group, previous, candidat
 	var verified bool
 	now := bootMillis()
 	for _, result := range r.report.Results {
-		if result.ID == checkID && result.outbound == candidate && result.OK && result.Complete &&
+		if result.ID == checkID && result.outbound == candidate && result.selectionProof && result.OK && result.Complete &&
 			now != math.MaxInt64 && result.SampledElapsedMS > 0 && result.SampledElapsedMS <= now &&
 			now-result.SampledElapsedMS < 15_000 && strings.Join(result.Path, "/") == strings.Join(path, "/") {
 			verified = true
@@ -367,7 +410,9 @@ func (c *authorizedRouteConn) Write(b []byte) (int, error) {
 func (c *authorizedRouteConn) NeedHandshakeForWrite() bool { return N.NeedHandshakeForWrite(c.Conn) }
 func (r *routeRunner) runPlan(ctx context.Context, p routePlan) (result routeResult) {
 	start := time.Now()
-	result = routeResult{ID: p.ID, Complete: true, OK: true, Code: "ok", outbound: p.Outbound}
+	approved := r.selectionPlans[p.Outbound]
+	result = routeResult{ID: p.ID, Complete: true, OK: true, Code: "ok", outbound: p.Outbound,
+		selectionProof: p.ID == approved.ID && slices.Equal(p.Checks, approved.Checks)}
 	defer func() {
 		if recover() != nil {
 			result.OK = false

@@ -51,8 +51,8 @@ type Runtime struct {
 	routes   *routeRunner
 }
 
-func NewRuntime(config string, fd int32, protector Protector, name string, index int32, leaseDeadline int64) (*Runtime, error) {
-	if fd < 0 || protector == nil || name == "" || index <= 0 {
+func NewRuntime(config, routeSelection string, fd int32, protector Protector, name string, index int32, leaseDeadline int64) (*Runtime, error) {
+	if fd < 0 || protector == nil || name == "" || index <= 0 || routeSelection != "" && leaseDeadline <= 0 {
 		return nil, errors.New("invalid host context")
 	}
 	guard := &leaseGuard{clock: bootMillis}
@@ -87,13 +87,40 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 		cancel()
 		return nil, errors.New("invalid engine configuration")
 	}
+	routes := newRouteRunner(ctx, nil)
+	var routeConfig struct {
+		Outbounds []struct {
+			Tag       string   `json:"tag"`
+			Detour    string   `json:"detour"`
+			Kind      string   `json:"type"`
+			Members   []string `json:"outbounds"`
+			Interrupt bool     `json:"interrupt_exist_connections"`
+		} `json:"outbounds"`
+	}
+	_ = json.Unmarshal([]byte(config), &routeConfig)
+	routes.nodes = map[string]routeNode{}
+	routes.selectors = map[string]map[string]bool{}
+	for i, node := range routeConfig.Outbounds {
+		routes.nodes[node.Tag] = routeNode{ID: fmt.Sprintf("route-%d", i+1), Detour: node.Detour, Kind: node.Kind}
+		if node.Kind == "selector" && !node.Interrupt && len(node.Members) <= 64 {
+			members := make(map[string]bool, len(node.Members))
+			for _, member := range node.Members {
+				members[member] = true
+			}
+			routes.selectors[node.Tag] = members
+		}
+	}
+	if !routes.configureSelection(routeSelection) {
+		cancel()
+		return nil, errors.New("invalid route selection plan")
+	}
 	instance, err := box.New(box.Options{Options: options, Context: ctx})
 	if err != nil {
 		cancel()
 		return nil, errors.New("engine construction failed")
 	}
-	r := &Runtime{box: instance, cancel: cancel, platform: p}
-	r.routes = newRouteRunner(ctx, func(tag string) (adapter.Outbound, bool) { return instance.Outbound().Outbound(tag) })
+	routes.lookup = func(tag string) (adapter.Outbound, bool) { return instance.Outbound().Outbound(tag) }
+	r := &Runtime{box: instance, cancel: cancel, platform: p, routes: routes}
 	r.routes.limit = func() time.Duration {
 		if !guard.allowed() {
 			return 0
@@ -107,28 +134,6 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 			return 0
 		}
 		return time.Duration(remaining) * time.Millisecond
-	}
-	var routeConfig struct {
-		Outbounds []struct {
-			Tag       string   `json:"tag"`
-			Detour    string   `json:"detour"`
-			Kind      string   `json:"type"`
-			Members   []string `json:"outbounds"`
-			Interrupt bool     `json:"interrupt_exist_connections"`
-		} `json:"outbounds"`
-	}
-	_ = json.Unmarshal([]byte(config), &routeConfig)
-	r.routes.nodes = map[string]routeNode{}
-	r.routes.selectors = map[string]map[string]bool{}
-	for i, node := range routeConfig.Outbounds {
-		r.routes.nodes[node.Tag] = routeNode{ID: fmt.Sprintf("route-%d", i+1), Detour: node.Detour, Kind: node.Kind}
-		if node.Kind == "selector" && !node.Interrupt && len(node.Members) <= 64 {
-			members := make(map[string]bool, len(node.Members))
-			for _, member := range node.Members {
-				members[member] = true
-			}
-			r.routes.selectors[node.Tag] = members
-		}
 	}
 	return r, nil
 }

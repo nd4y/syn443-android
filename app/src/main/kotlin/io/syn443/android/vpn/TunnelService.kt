@@ -346,7 +346,8 @@ class TunnelService : VpnService() {
             stableSince = 0; successes = 0; lastProbe = 0
             boundGeneration = cp.generation
             LoginController.get(this).overlayStarting(checkNotNull(token),runningConfigHash)
-            pendingConfig = rendered
+            val routeSelection = if (pendingLeaseDeadline > 0) RouteSnapshot.nativeSelectionPlan(runningConfigHash) else ""
+            pendingConfig = PendingConfig(rendered, routeSelection)
             startAt = SystemClock.uptimeMillis(); lastPulse = startAt
             val reservation = fence.reserveStart(startAt)
             check(reservation.rejection == null)
@@ -361,7 +362,8 @@ class TunnelService : VpnService() {
         catch (_: IllegalArgumentException) { phase("NeedsAction", "configuration_invalid", cp.generation) }
         catch (_: Exception) { failed("start_failed", cp.generation) }
     }
-    private var pendingConfig = ""
+    private class PendingConfig(val engine: String, val routeSelection: String)
+    private var pendingConfig: PendingConfig? = null
     private var pendingLeaseDeadline = 0L
     private var appliedLeaseDeadline = -1L
     private var linkSignature: String? = null // RAM only; never log physical addresses.
@@ -497,8 +499,10 @@ class TunnelService : VpnService() {
                     val deadline = runCatching { policies.leaseDeadline(runningConfigHash) }.getOrNull()
                     if (deadline != null) {
                         appliedLeaseDeadline = deadline
-                        checkNotNull(host).start(checkNotNull(tun), pendingConfig, checkNotNull(token), iface, index, deadline, platform)
-                        pendingConfig="" // The controller never retains a serialized setup-key copy after dispatch.
+                        val config = checkNotNull(pendingConfig)
+                        checkNotNull(host).start(checkNotNull(tun), config.engine, config.routeSelection,
+                            checkNotNull(token), iface, index, deadline, platform)
+                        pendingConfig=null // The controller never retains a serialized setup-key copy after dispatch.
                         authorized = true
                     }
                 }
@@ -561,7 +565,7 @@ class TunnelService : VpnService() {
         hostToken = null
         connection = null
         binding = false; host = null; token = null; hostPid = 0; pidIdentity = null; retiring = false; boundGeneration = -1
-        pendingConfig = ""
+        pendingConfig = null
         handler.removeCallbacks(drain)
         handler.removeCallbacks(tick)
         store.update { it.put("engineActive", false) }

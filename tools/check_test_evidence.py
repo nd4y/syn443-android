@@ -73,6 +73,7 @@ if mode=="emulator":
     assert {("io.syn443.android.ManagedFailoverTest",name) for name in {
         "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
         "conservativeRevisionRequiresThirdCurrentRouteBatch",
+        "nativeSelectionPlanContainsOnlyConcreteChecksForTheExactConfig",
         "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
         "routineBatchesDeferOnlyCoolingReserveAndKeepRequiredSelector",
         "firstValidatedManagedBatchBypassesCadenceOnceWithoutCancellingInFlightWork",

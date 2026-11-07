@@ -74,7 +74,7 @@ class EngineHostService : Service() {
     override fun onCreate() { super.onCreate(); workerThread.start(); worker = Handler(workerThread.looper) }
     private val binder = object : IEngineHost.Stub() {
         override fun pid() = Process.myPid()
-        override fun start(fd: ParcelFileDescriptor, config: String, session: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
+        override fun start(fd: ParcelFileDescriptor, config: String, routeSelection: String, session: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
             synchronized(controlLock) {
                 if (token != null) { fd.close(); platform.event(session, FAILED); return }
                 token = session; callback = platform; desiredLease = leaseDeadline
@@ -90,7 +90,7 @@ class EngineHostService : Service() {
                     lockFile = RandomAccessFile(File(noBackupFilesDir, "engine-owner.lock"), "rw")
                     lock = lockFile!!.channel.tryLock() ?: error("identity already owned")
                     tun = fd
-                    val created = Bridge.newRuntime(config, fd.fd, object : Protector {
+                    val created = Bridge.newRuntime(config, routeSelection, fd.fd, object : Protector {
                         override fun protect(socket: Int) {
                             ParcelFileDescriptor.fromFd(socket).use { if (!platform.protect(it, session)) error("socket protection rejected") }
                         }
@@ -179,8 +179,8 @@ class EngineHostService : Service() {
     @Volatile private var callback: IPlatform? = null
     override fun onBind(intent: Intent): IBinder = object : IEngineHost.Stub() {
         override fun pid() = binder.pid()
-        override fun start(fd: ParcelFileDescriptor, config: String, token: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
-            binder.start(fd, config, token, name, index, leaseDeadline, platform)
+        override fun start(fd: ParcelFileDescriptor, config: String, routeSelection: String, token: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
+            binder.start(fd, config, routeSelection, token, name, index, leaseDeadline, platform)
         }
         override fun leaseDeadline(token: String, deadline: Long) = binder.leaseDeadline(token, deadline)
         override fun stop(token: String) = binder.stop(token)
