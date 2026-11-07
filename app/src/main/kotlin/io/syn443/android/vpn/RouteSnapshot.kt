@@ -200,7 +200,7 @@ object RouteSnapshot {
                 trackReserveFailures && codes[row.id] in completedProbeFailures -> ProbeVerdict.CONFIRMED_PATH_FAILURE
                 else -> return@mapNotNull null
             }
-            VerifiedPathSample(row.tag,receipt,comparison,sample.elapsedMs,verdict,timings[row.id] ?: 0)
+            VerifiedPathSample(row.tag,plan.intent,receipt,comparison,sample.elapsedMs,verdict,timings[row.id] ?: 0)
         }
         val verdict=when {
             groupSample.complete && groupSample.ok -> ProbeVerdict.VERIFIED
@@ -210,11 +210,11 @@ object RouteSnapshot {
         }
         confirmingFailure=verdict==ProbeVerdict.CONFIRMED_PATH_FAILURE
         val context=failoverContext(scope)
-        val admission=failoverAdmission ?: FailoverAdmission(context,plan.members.toSet(),comparison,
+        val admission=failoverAdmission ?: FailoverAdmission(context,plan.intent,plan.members.toSet(),comparison,
             rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)})
             .also {failoverAdmission=it}
         val choice=admission.decide(context,batchSequence,receipt,now,selected.tag,
-            VerifiedPathSample(selected.tag,receipt,comparison,groupSample.elapsedMs,verdict,timings[group.id] ?: 0),reserves) ?: return null
+            VerifiedPathSample(selected.tag,plan.intent,receipt,comparison,groupSample.elapsedMs,verdict,timings[group.id] ?: 0),reserves) ?: return null
         val candidate=rows.singleOrNull {it.tag==choice.candidate} ?: return null
         return FailoverCommand(choice.receipt,candidate.id,group.tag,choice.previous,choice.candidate)
     }

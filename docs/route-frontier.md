@@ -50,3 +50,9 @@ rejoin only with a fresh check sampled after its cooldown. The selector
 changes new connections and requests a fresh check. No implicit direct path
 is allowed. This pilot does not enable failover for RU or NON_RU, cellular
 modes, or dynamic graph discovery.
+
+Failover evidence carries the exit class from the authorized plan. A batch
+labelled for a different exit cannot influence selection, failure count, or
+quarantine, even when its probe target and latency are otherwise comparable.
+This is a decision boundary for future traffic classes. It is not proof of the
+geographic exit and does not enable a new class in the managed runtime.
