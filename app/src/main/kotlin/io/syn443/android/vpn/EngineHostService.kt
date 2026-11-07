@@ -7,9 +7,11 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import android.os.SystemClock
 import bridge.Bridge
 import bridge.Runtime
 import bridge.Protector
+import io.syn443.host.RouteReportWindow
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.channels.FileLock
@@ -29,6 +31,31 @@ class EngineHostService : Service() {
     @Volatile private var latestNetwork: NetworkUpdate? = null
     private val proofRunning=java.util.concurrent.atomic.AtomicBoolean()
     private var managedProofEnabled=false
+    private var routePoll:Runnable?=null // native worker only
+    private fun stopRoutePoll() {
+        routePoll?.let(worker::removeCallbacks)
+        routePoll=null
+    }
+    private fun startRoutePoll(session:String,request:String,runtime:Runtime) {
+        stopRoutePoll()
+        val window=RouteReportWindow(request,SystemClock.elapsedRealtime())
+        val task=object:Runnable {
+            override fun run() {
+                if(routePoll!==this)return
+                if(token!=session || engine!==runtime) {stopRoutePoll();return}
+                val report=runCatching {runtime.routeCheckStatus()}.getOrNull()
+                val parsed=report?.let {runCatching {org.json.JSONObject(it)}.getOrNull()}
+                val decision=parsed?.let {window.accept(it.optString("request"),it.optBoolean("running"),SystemClock.elapsedRealtime())}
+                    ?:RouteReportWindow.Decision.DISCARD
+                if(report!=null && decision!=RouteReportWindow.Decision.DISCARD)
+                    runCatching {callback?.routeState(session,report)}
+                if(decision==RouteReportWindow.Decision.PUBLISH_AND_POLL)worker.postDelayed(this,RouteReportWindow.INTERVAL_MS)
+                else stopRoutePoll()
+            }
+        }
+        routePoll=task
+        task.run()
+    }
     private fun sampleIdentity(session:String) {
         if(!managedProofEnabled)return
         val runtime=engine ?: return
@@ -41,7 +68,7 @@ class EngineHostService : Service() {
         }catch(_:Exception){}finally{proofRunning.set(false)}},"native-overlay-proof").apply{isDaemon=true;start()}
     }
     private val applyNetwork = Runnable {
-        latestNetwork?.let { if (it.session == token) engine?.updateNetwork(it.name, it.index) }
+        latestNetwork?.let { if (it.session == token) {stopRoutePoll();engine?.updateNetwork(it.name, it.index)} }
     }
 
     override fun onCreate() { super.onCreate(); workerThread.start(); worker = Handler(workerThread.looper) }
@@ -93,14 +120,14 @@ class EngineHostService : Service() {
         override fun stop(session: String) {
             if (session != token) return
             leaseDeadline(session, 1L)
-            worker.post { runCatching { engine?.cancel(); engine?.close() }; finishHost() }
+            worker.post { stopRoutePoll();runCatching { engine?.cancel(); engine?.close() }; finishHost() }
         }
         override fun pulse(session: String) {
             if (session != token) return
             worker.post { if (session == token && engine?.pulse() == 1L) {
                 callback?.event(session, PULSE)
                 engine?.netBirdStatus()?.let { callback?.overlayState(session, it) }
-                engine?.routeCheckStatus()?.let { callback?.routeState(session, it) }
+                if(routePoll==null)engine?.routeCheckStatus()?.let { callback?.routeState(session, it) }
                 sampleIdentity(session)
             } }
         }
@@ -127,14 +154,18 @@ class EngineHostService : Service() {
         override fun checkRoutes(session:String,request:String) {
             if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid() || request.length>32768)return
             worker.post {if(session==token) {
-                val accepted=engine?.startRouteChecks(request)==true
-                val report=if(accepted) engine?.routeCheckStatus() else org.json.JSONObject().put("request",org.json.JSONObject(request).getString("request")).put("running",false).put("results",org.json.JSONArray()).toString()
-                report?.let {callback?.routeState(session,it)}
+                val key=runCatching {org.json.JSONObject(request).getString("request")}.getOrNull()
+                val runtime=engine
+                if(key!=null && key.length in 1..80) {
+                    if(runtime!=null && runCatching {runtime.startRouteChecks(request)}.getOrDefault(false))startRoutePoll(session,key,runtime)
+                    else callback?.routeState(session,org.json.JSONObject().put("request",key)
+                        .put("running",false).put("results",org.json.JSONArray()).toString())
+                }
             }}
         }
         override fun cancelRouteChecks(session:String) {
             if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid())return
-            worker.post {if(session==token)engine?.cancelRouteChecks()}
+            worker.post {if(session==token){stopRoutePoll();engine?.cancelRouteChecks()}}
         }
         override fun selectVerifiedRoute(session:String,receipt:String,checkId:String,group:String,previous:String,candidate:String) {
             if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid() ||

@@ -132,3 +132,12 @@ owner, and lost networks cannot lend their evidence to a replacement. The
 selector does not infer trusted home Wi-Fi or restricted cellular access
 from a transport. JVM cases cover candidate order and loss; physical
 handover and the four-mode policy matrix require separate acceptance.
+
+### Route report delivery
+
+The host publishes a route batch as soon as it is admitted, then reads its
+result every two seconds while the same batch is running, for at most 35
+seconds. Completion, cancellation, network replacement and owner retirement
+end the polling window. This moves result delivery off the slower host
+heartbeat without scheduling additional network probes. The two distinct
+failure batches and fresh reserve checks remain required.
