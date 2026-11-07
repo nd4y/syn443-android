@@ -33,9 +33,22 @@ object EngineConfig {
         for (i in 0 until outbounds.length()) {
             val item = outbounds.getJSONObject(i)
             require(!item.has("credential_pending") && !item.has("recover_existing")) { "local overlay state cannot be imported" }
-            require(item.getString("type") in supported)
+            val type = item.getString("type")
+            require(type in supported)
             require(item.getString("tag").toByteArray(Charsets.UTF_8).size in 1..256 && tags.add(item.getString("tag")))
-            if (item.getString("type") == "netbird") {
+            if (type == "ssh") {
+                // The embedded SSH engine accepts any server key when no pin is supplied.
+                // It parses the actual public key before dialing. Do not accept a missing or
+                // empty list here, regardless of whether the config was imported or assigned.
+                val pins = item.opt("host_key")
+                require(when (pins) {
+                    is String -> validSshPin(pins)
+                    is JSONArray -> pins.length() in 1..16 &&
+                        (0 until pins.length()).all { validSshPin(pins.opt(it)) }
+                    else -> false
+                }) { "ssh_host_key_required" }
+            }
+            if (type == "netbird") {
                 require(++overlays <= 1) { "one NetBird identity per native process" }
                 require(item.optString("connection_mode", "direct") in setOf("direct", "vless"))
             }
@@ -45,6 +58,9 @@ object EngineConfig {
         RouteSnapshot.validate(value)
         ManagedFailoverPlan.read(value)
     }
+    private fun validSshPin(pin: Any?): Boolean = pin is String && pin.isNotBlank() &&
+        '\u0000' !in pin && pin.toByteArray(Charsets.UTF_8).size <= 8192
+
     /** Overlay state must acquire an account namespace before managed enrollment advertises it. */
     fun validateAssigned(raw:String) = validateAssigned(raw,null)
     internal fun validateAssigned(raw:String,material:OverlayRuntimeMaterial?) {

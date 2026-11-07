@@ -2273,8 +2273,8 @@
     {
       "id": "SEC-03",
       "text": "У каждого hop объявлены authentication и confidentiality первого физического участка и вложенного транспорта. Plain HTTP/SOCKS credentials либо VLESS без защищённого транспорта не становятся допустимыми лишь из-за хорошего health: они разрешаются только явной политикой для доказанно доверенного контекста или внутри уже защищённого hop. TLS insecure/skipVerify не импортируется молча и не используется recovery; смена SSH host key блокируется до отдельного решения.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": ["docs/embedded-protocol-acceptance.md"]
     },
     {
       "id": "SEC-04",

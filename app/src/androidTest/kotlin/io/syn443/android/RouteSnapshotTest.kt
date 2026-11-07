@@ -64,6 +64,31 @@ class RouteSnapshotTest {
         EngineConfig.validateAssigned(config)
         assertThrows(IllegalArgumentException::class.java){EngineConfig.validateAssigned("""{"outbounds":[{"type":"netbird","tag":"overlay"}]}""")}
     }
+    @Test fun sshWithoutServerPinCannotBeImportedAssignedOrRendered() {
+        val root = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir
+        val config = JSONObject("""{"outbounds":[{"type":"ssh","tag":"ssh-hop","server":"proxy.example.invalid","server_port":22,"user":"fixture"}]}""")
+        val ssh = config.getJSONArray("outbounds").getJSONObject(0)
+        // RFC 8032 public test vector encoded as an OpenSSH authorized key.
+        val syntheticPublicPin = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINdamAGCsQq31Uv+08lkBzoO4XLz2qYjJa8CGmj3B1Ea"
+        val invalid = listOf(null, JSONObject.NULL, "", " \t", 12, org.json.JSONArray(),
+            org.json.JSONArray().put(syntheticPublicPin).put(JSONObject.NULL),
+            org.json.JSONArray(List(17) { syntheticPublicPin }), "x".repeat(8193), "x\u0000y")
+        for (pins in invalid) {
+            ssh.put("host_key", pins)
+            val raw = config.toString()
+            for (admit in listOf<(String) -> Unit>(EngineConfig::validate, EngineConfig::validateAssigned, { EngineConfig.render(it, root); Unit })) {
+                assertEquals("ssh_host_key_required", assertThrows(IllegalArgumentException::class.java) { admit(raw) }.message)
+            }
+        }
+        for (pins in listOf(syntheticPublicPin, org.json.JSONArray().put(syntheticPublicPin))) {
+            ssh.put("host_key", pins)
+            val raw = config.toString()
+            EngineConfig.validate(raw)
+            EngineConfig.validateAssigned(raw)
+            val rendered = JSONObject(EngineConfig.render(raw, root)).getJSONArray("outbounds").getJSONObject(0)
+            assertEquals(pins.toString(), rendered.get("host_key").toString())
+        }
+    }
     @Test fun assignedActivationWaitsForCandidateRoutesAndIgnoresOptionalFailure() {
         val candidate=scope.copy(config="assigned-${java.util.UUID.randomUUID()}")
         RouteSnapshot.configure(config,candidate.config);RouteSnapshot.owner(candidate)
