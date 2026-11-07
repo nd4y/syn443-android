@@ -80,7 +80,8 @@ class LoginController private constructor(private val context:android.app.Applic
     private var panelHint:PanelHint?=null
     private var panelPoll:Pair<Long,Long>?=null
     private var deviceSourcePollAfter=0L
-    private var deviceSourceAuthority:Pair<Long,Long>?=null
+    private data class DeviceSourceAuthority(val generation:Long,val session:Long,val conditional:Boolean)
+    private var deviceSourceAuthority:DeviceSourceAuthority?=null
     private val deviceSourceScope=java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
     private data class ChatTicket(val id:String,val generation:Long,val expires:Long,var state:String="pending",var body:String="",var reason:String="")
     private var chatTicket:ChatTicket?=null
@@ -505,7 +506,8 @@ class LoginController private constructor(private val context:android.app.Applic
         val accepted=persistAssignment(s,p,next,target)
         synchronized(commands) {
             current(accepted)
-            deviceSourceAuthority=if(response.deviceSourceFetch)accepted.generation to accepted.sessionGeneration else null
+            deviceSourceAuthority=if(response.deviceSourceFetch)DeviceSourceAuthority(accepted.generation,accepted.sessionGeneration,
+                response.deviceSourceValidators) else null
         }
         prepareOverlays(accepted,p,next,protocol,scope)
     }
@@ -778,10 +780,13 @@ class LoginController private constructor(private val context:android.app.Applic
     private fun syncDeviceSubscription():Boolean {
         if(!reportVpnOn())return false
         lateinit var expected:LoginIntent
+        var conditional=false
         return submitIfIdle(quiet=true,admit={
             val s=journal.snapshot()
-            if(s.phase!=LoginPhase.POLICY_CACHED || deviceSourceAuthority!=(s.generation to s.sessionGeneration) || elapsed()<deviceSourcePollAfter)false
-            else {expected=s;true}
+            val authority=deviceSourceAuthority
+            if(s.phase!=LoginPhase.POLICY_CACHED || authority==null || authority.generation!=s.generation ||
+                authority.session!=s.sessionGeneration || elapsed()<deviceSourcePollAfter)false
+            else {expected=s;conditional=authority.conditional;true}
         },onAdmission={deviceSourcePollAfter=elapsed()+300_000}) {
             current(expected);if(!reportVpnOn())return@submitIfIdle
             val p=payload(expected)
@@ -800,7 +805,7 @@ class LoginController private constructor(private val context:android.app.Applic
                 try {
                     route.check()
                     val session=checkNotNull(p.session)
-                    val claim=protocol.claimSubscription(session,scope)
+                    val claim=protocol.claimSubscription(session,scope,conditional)
                     if(!claim.available) {
                         synchronized(commands) {current(expected);deviceSourcePollAfter=elapsed()+3_600_000}
                         return@withProtocol
@@ -808,11 +813,11 @@ class LoginController private constructor(private val context:android.app.Applic
                     val lease=claim.lease?:return@withProtocol
                     if("wifi" !in lease.networkModes)return@withProtocol
                     val blocked=setOf(p.bootstrap.apiOrigin,p.bootstrap.issuer,p.bootstrap.controlPanelOrigin).filter(String::isNotEmpty).toSet()
-                    val response=SubscriptionDownload(http).fetch(lease.credential,route,scope,blocked)
+                    val response=SubscriptionDownload(http).fetch(lease.credential,route,scope,blocked,
+                        lease.validators?.etag.orEmpty(),lease.validators?.lastModified.orEmpty())
                     try {
-                        require(response.status==200 && response.body.isNotEmpty())
                         route.check()
-                        protocol.submitSubscription(claim,response.body,session,scope)
+                        protocol.submitSubscriptionResult(claim,response,session,scope)
                     } finally {response.body.fill(0)}
                     synchronized(commands) {current(expected);deviceSourcePollAfter=elapsed()+60_000}
                 } finally {deviceSourceScope.compareAndSet(scope,null)}

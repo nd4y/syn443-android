@@ -77,8 +77,11 @@ if mode=="identity":
         (c.get('classname'),c.get('name')) for c in cases}, 'Required installation upgrade profile case missing'
     assert {('io.syn443.identity.AuthProtocolTest','administrationHintIsBoundedAndOlderServersDenyNavigation'),
         ('io.syn443.identity.AuthProtocolTest','sourceFetchUploadBindsTheCompleteBinaryFrameToTheDeviceProof'),
+        ('io.syn443.identity.AuthProtocolTest','conditionalSourceLeaseSignsMetadataAndFallsBackOnOldServers'),
         ('io.syn443.identity.BoundedHttpTest','subscriptionTlsPreservesQueryAndBoundsDecodedGzip'),
+        ('io.syn443.identity.BoundedHttpTest','conditionalProviderLengthDoesNotCreateBodyOrRelaxIdentityFraming'),
         ('io.syn443.identity.SubscriptionDownloadTest','privateAddressesRequireExplicitScopeAndNeverAllowMetadataOrLoopback'),
+        ('io.syn443.identity.SubscriptionDownloadTest','validatorsAreScopedToTheOriginalRepresentationEvenOnSameOriginRedirect'),
         ('io.syn443.identity.SubscriptionDownloadTest','redirectRechecksResolvedAddressesAndNeverRestoresRemovedCredentials')} <= {
         (c.get('classname'),c.get('name')) for c in cases}, 'Required device source transport cases missing'
     assert {('io.syn443.identity.AssignmentsTest','activationReportPersistsOnlyFinalCurrentEnvelopeDecisions'),

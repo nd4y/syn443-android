@@ -65,6 +65,49 @@ class AuthProtocolTest {
         leaseReply=json(text=Canonical.json.encodeToString(lease.copy(until=now/1000)))
         error(AuthFailure.INVALID_REPLY){f.client.claimSubscription(session,scope)}
     }
+    @Test fun conditionalSourceLeaseSignsMetadataAndFallsBackOnOldServers() {
+        val f=Fixture();val session=f.current();val scope=IdentityScope()
+        val lease=DeviceSubscription.Lease(Identity.random(),Identity.random(),now/1000+60,listOf("wifi"),
+            SubscriptionCredential("https://source.example.invalid/list"),DeviceSubscription.Validators("\"previous\""))
+        val seen=mutableListOf<String>()
+        var newEndpoint=true
+        f.handler={method,url,headers,body,_,_->
+            val path=url.removePrefix(b.apiOrigin);seen.add(path)
+            when(path) {
+                DeviceSubscription.CONDITIONAL_CLAIM_PATH -> {
+                    assertEquals("GET",method)
+                    if(newEndpoint)json(text=Canonical.json.encodeToString(lease)) else json(404)
+                }
+                DeviceSubscription.CLAIM_PATH -> json(text=Canonical.json.encodeToString(lease.copy(validators=null)))
+                DeviceSubscription.CONDITIONAL_RESULT_PATH -> {
+                    assertEquals("POST",method)
+                    val raw=checkNotNull(body)
+                    val proof=Identity.objectJSON(Policy.utf8(Policy.decode64(headers.getValue("DPoP").split('.')[1])))
+                    assertEquals(Identity.hash(raw),proof.getValue("req_hash").jsonPrimitive.content)
+                    assertArrayEquals(byteArrayOf(0,83,52,52,51,2),raw.copyOfRange(88,94))
+                    val size=((raw[94].toInt() and 255) shl 8) or (raw[95].toInt() and 255)
+                    assertEquals(96+size,raw.size)
+                    val metadata=Identity.objectJSON(raw.copyOfRange(96,raw.size).decodeToString())
+                    assertEquals(304,metadata.getValue("status").jsonPrimitive.int)
+                    assertEquals("upload=1; download=2; total=10; expire=0",metadata.getValue("quota").jsonPrimitive.content)
+                    json(204,text="")
+                }
+                else -> kotlin.error("unexpected operation")
+            }
+        }
+        val claim=f.client.claimSubscription(session,scope,conditional=true)
+        assertTrue(claim.conditional);assertEquals(lease,claim.lease)
+        val response=Reply(304,mapOf("subscription-userinfo" to listOf("upload=1; download=2; total=10; expire=0")),byteArrayOf())
+        f.client.submitSubscriptionResult(claim,response,session,scope)
+        error(AuthFailure.INVALID_REPLY) {f.client.submitSubscriptionResult(claim,response.copy(body=byteArrayOf(1)),session,scope)}
+        val gone=lease.conditionalFrame(Reply(410,mapOf("etag" to listOf("\"ignored\"")),"provider error".toByteArray()))
+        assertEquals("""{"status":410}""",gone.copyOfRange(96,gone.size).decodeToString())
+        newEndpoint=false
+        val fallback=f.client.claimSubscription(session,scope,conditional=true)
+        assertFalse(fallback.conditional);assertNull(fallback.lease?.validators)
+        assertEquals(listOf(DeviceSubscription.CONDITIONAL_CLAIM_PATH,DeviceSubscription.CONDITIONAL_RESULT_PATH,
+            DeviceSubscription.CONDITIONAL_CLAIM_PATH,DeviceSubscription.CLAIM_PATH),seen)
+    }
     @Test fun activationReportBindsBodyToCurrentDeviceProofAndSupportsOlderServers() {
         val f=Fixture();val current=f.current()
         val report=DeviceActivationReport(1,2,Identity.random(),3,"rolled_back",1)

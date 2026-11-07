@@ -56,7 +56,7 @@ class BoundedHttp:AutoCloseable {
         connect:(Socket,URI,Int)->Unit={socket,uri,remaining->socket.connect(InetSocketAddress(uri.host,if(uri.port>0)uri.port else 443),remaining)}):Reply {
         require(timeoutMs in 1..20_000 && maxBody in 1..524_288 && method in setOf("GET","POST"))
         val uri=Identity.https(url)
-        val requestLimit=if(uri.path==DeviceSubscription.RESULT_PATH && route!=null && method=="POST")DeviceSubscription.MAX_FRAME else 360_448
+        val requestLimit=if(route!=null && method=="POST")DeviceSubscription.resultLimit(uri.path) ?: 360_448 else 360_448
         require(maxRequestBody in 1..requestLimit)
         require((method=="GET" && body==null) || (method=="POST" && body!=null && body.size<=maxRequestBody))
         return exchangeUri(method,uri,headers,body,scope,timeoutMs,maxBody,factory,route,false,connect)
@@ -175,6 +175,9 @@ internal fun response(input:InputStream,maxBody:Int,allowGzip:Boolean=false,befo
         val buffer=ByteArray(minOf(8192,maxOf(size,1)));var left=size
         while(left>0) {beforeRead();val n=input.read(buffer,0,minOf(left,buffer.size));if(n<0)throw EOFException();if(n==0)throw DeliveryException(DeliveryFailure.PROTOCOL);out.write(buffer,0,n);left-=n}
     }
+    // A conditional provider 304 may advertise the representation's length.
+    // It still ends at the header terminator and the connection is not reused.
+    if(status==304 && allowGzip)return result
     if(status==204 || status==304) {if(encoding!=null || count!=null && count!=0)throw DeliveryException(DeliveryFailure.PROTOCOL);return result}
     if(encoding!=null) {
         var chunks=0

@@ -9,6 +9,38 @@ class SubscriptionDownloadTest {
     private fun address(vararg parts:Int)=InetAddress.getByAddress(parts.map(Int::toByte).toByteArray())
     private fun prefix(vararg parts:Int)=parts.joinToString(".")+"/24"
 
+    @Test fun validatorsAreScopedToTheOriginalRepresentationEvenOnSameOriginRedirect() {
+        val route=object:HttpRoute {
+            override fun resolve(host:String)=listOf(address(8,8,8,8))
+            override fun bind(socket:Socket)=Unit
+            override fun check()=Unit
+        }
+        val credential=SubscriptionCredential("https://source.example.invalid/initial")
+        val seen=mutableListOf<String>()
+        var redirect=false
+        var finish=304
+        val download=SubscriptionDownload {uri,headers,_,_,_,_->
+            seen.add(uri.rawPath)
+            if(uri.rawPath=="/initial") {
+                assertEquals("\"cached\"",headers["If-None-Match"])
+                if(redirect)Reply(307,mapOf("location" to listOf("/other")),byteArrayOf())
+                else Reply(304,emptyMap(),byteArrayOf())
+            } else {
+                assertFalse(headers.containsKey("If-None-Match"))
+                Reply(finish,mapOf("etag" to listOf("\"different\"")),if(finish==200)"content".toByteArray() else byteArrayOf())
+            }
+        }
+        assertEquals(304,download.fetch(credential,route,IdentityScope(),emptySet(),"\"cached\"").status)
+        redirect=true;finish=200
+        val redirected=download.fetch(credential,route,IdentityScope(),emptySet(),"\"cached\"")
+        assertEquals(200,redirected.status);assertNull(redirected.single("etag"))
+        finish=304
+        assertThrows(IllegalArgumentException::class.java) {
+            download.fetch(credential,route,IdentityScope(),emptySet(),"\"cached\"")
+        }
+        assertEquals(listOf("/initial","/initial","/other","/initial","/other"),seen)
+    }
+
     @Test fun privateAddressesRequireExplicitScopeAndNeverAllowMetadataOrLoopback() {
         val local=address(10,12,34,56)
         val metadata=address(100,100,100,200)

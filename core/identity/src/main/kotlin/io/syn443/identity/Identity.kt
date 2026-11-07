@@ -160,7 +160,7 @@ object Identity {
     fun proof(key: ECPublicKey, sign: (ByteArray)->ByteArray, method: String, uri: String, nowSeconds: Long,
         token: String = "", nonce: String = "", body: ByteArray? = null, maxBody:Int=8192): String {
         val url=https(uri)
-        val limit=if(url.path==DeviceSubscription.RESULT_PATH && method=="POST")DeviceSubscription.MAX_FRAME else 360_448
+        val limit=if(method=="POST")DeviceSubscription.resultLimit(url.path) ?: 360_448 else 360_448
         require(maxBody in 1..limit && method in setOf("GET","POST") && nowSeconds>0 && nonce.length<=256 && token.length<=16_384 && (body?.size?:0)<=maxBody)
         val header=buildJsonObject { put("alg","ES256"); put("jwk",jwk(key)); put("typ","dpop+jwt") }
         val claims=buildJsonObject { put("htm",method); put("htu",uri); put("iat",nowSeconds); put("jti",random())

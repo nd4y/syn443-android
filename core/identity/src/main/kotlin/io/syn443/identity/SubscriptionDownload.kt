@@ -50,12 +50,18 @@ class SubscriptionDownload internal constructor(private val request:(URI,Map<Str
             val target=origin(current)
             require(target !in blocked && (target==first || target in redirects))
             val headers=originalHeaders.filterKeys {credentialsAllowed || it.lowercase(Locale.ROOT) in setOf("accept","user-agent")}.toMutableMap()
-            if(credentialsAllowed && etag.isNotEmpty())headers["If-None-Match"]=etag
-            if(credentialsAllowed && lastModified.isNotEmpty())headers["If-Modified-Since"]=lastModified
+            if(hop==0 && etag.isNotEmpty())headers["If-None-Match"]=etag
+            if(hop==0 && lastModified.isNotEmpty())headers["If-Modified-Since"]=lastModified
             val remaining=30_000-TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)
             if(remaining<=0)throw DeliveryException(DeliveryFailure.DEADLINE)
             val reply=scope.request {request(current,headers,it,remaining,bound,tls)}
-            if(reply.status !in setOf(301,302,303,307,308))return reply
+            if(reply.status !in setOf(301,302,303,307,308)) {
+                if(reply.status==304)require(hop==0 && (etag.isNotEmpty() || lastModified.isNotEmpty()) && reply.body.isEmpty())
+                return if(hop==0)reply else reply.copy(headers=reply.headers.filterKeys {
+                    it.lowercase(Locale.ROOT) !in setOf("etag","last-modified")
+                })
+            }
+            reply.body.fill(0)
             require(hop<3)
             val location=sourceUrl(current.resolve(relativeLocation(requireNotNull(reply.single("location")))).toASCIIString())
             credentialsAllowed=credentialsAllowed && origin(location)==target

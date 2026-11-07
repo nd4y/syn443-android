@@ -19,6 +19,13 @@ import io.syn443.policy.Canonical
 import kotlinx.serialization.json.*
 
 class BoundedHttpTest {
+    @Test fun conditionalProviderLengthDoesNotCreateBodyOrRelaxIdentityFraming() {
+        val wire="HTTP/1.1 304 Not Modified\r\nContent-Length: 1024\r\nETag: \"fixture\"\r\n\r\n".toByteArray()
+        val provider=response(wire.inputStream(),2048,allowGzip=true)
+        assertEquals(304,provider.status);assertEquals(0,provider.body.size)
+        assertEquals("\"fixture\"",provider.single("etag"))
+        assertThrows(DeliveryException::class.java) {response(wire.inputStream(),2048)}
+    }
     companion object {
         private val directory=Files.createTempDirectory("syn443-identity-tls")
         private val file=directory.resolve("fixture.p12")
