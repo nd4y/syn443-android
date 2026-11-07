@@ -71,7 +71,10 @@ class StateStore private constructor(context: Context) {
         update { value ->
             value.put("phase", phase).put("reason", code).put("networkEpoch", epoch)
             val events = value.optJSONArray("events") ?: JSONArray()
+            val sequence=(value.optLong("eventSequence").coerceIn(0,9_007_199_254_740_990L)+1)
+            value.put("eventSequence",sequence)
             events.put(JSONObject().put("at", System.currentTimeMillis()).put("phase", phase).put("code", code)
+                .put("sequence",sequence).put("elapsed",android.os.SystemClock.elapsedRealtime())
                 .put("intentGeneration", value.optLong("generation")).put("networkEpoch", epoch))
             while (events.length() > 64) events.remove(0)
             value.put("events", events)

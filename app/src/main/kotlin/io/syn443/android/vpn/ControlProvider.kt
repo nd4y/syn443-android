@@ -66,6 +66,13 @@ class ControlProvider : ContentProvider() {
                 "auth-service-start" -> {require(caller==Process.myUid());LoginController.get(context).startInvitation(requireNotNull(arg),false)}
                 "auth-trust-rotation" -> {require(caller==Process.myUid());LoginController.get(context).rotateBootstrap(requireNotNull(arg))}
                 "auth-status" -> return Bundle().apply {putBoolean("ok",true);putString("json",LoginController.get(context).status().toString())}
+                "auth-telemetry" -> {
+                    require(caller==Process.myUid())
+                    val parts=requireNotNull(arg).split(':',limit=3)
+                    require(parts.size==2)
+                    val changed=LoginController.get(context).chooseTechnicalTelemetry(parts[0].toLong(),parts[1].toBooleanStrict())
+                    return Bundle().apply {putBoolean("ok",changed)}
+                }
                 "auth-bootstrap-file" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller==2000)
                     val file=java.io.File(context.noBackupFilesDir,"operator-identity.json")

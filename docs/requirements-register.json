@@ -42,7 +42,9 @@
       "id": "ARC-05",
       "text": "Разрешённый граф конечен и объявлен шаблонами ingress/transit/egress с cardinality/edge constraints. Reference limit: до4096 различных цепочек на intent, четыре proxy hops, до64 resident frontier states плюс компактный cursor; каталог500профилей не означает500 в каждой позиции четырёх hops. Preview вычисляет/оценивает верхнюю границу, превышение отклоняется с предложением сузить шаблон. Нельзя незаметно обрезать хвост и затем заявить полный coverage. Порядок enumeration и продолжение детерминированы; на малом конечном fixture полнота обхода проверяется.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ARC-06",
@@ -385,7 +387,9 @@
       "id": "SUB-04",
       "text": "Способы загрузки: сервером; самим устройством для подписок с привязкой к устройству/IP; ручной импорт администратором. Выбор фиксируется на источнике. Нельзя обходить лимит устройств подменой HWID или выдавать серверную загрузку за работу пользовательского устройства. Собственные ссылки пользователя, если добавление разрешено, по умолчанию доступны только ему.",
       "status": "partial",
-      "evidence": ["docs/device-subscriptions.md"]
+      "evidence": [
+        "docs/device-subscriptions.md"
+      ]
     },
     {
       "id": "SUB-05",
@@ -1004,31 +1008,41 @@
       "id": "ALG-10",
       "text": "Генерация цепочек лениво следует разрешённым шаблонам и ограничениям длины/типов, исключает циклы, повторные бесполезные hops и запрещённые переходы. Несовместимый UDP либо недоступный DNS bootstrap не обходятся скрытым direct. План может комбинировать назначенные профили из разных разрешённых источников.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ALG-11",
       "text": "Поиск ограничен временем шага, числом кандидатов/соединений, трафиком, памятью и параллелизмом. Сначала last-known-good, затем доступные простые пути и обоснованные цепочки; при неудаче фронтир расширяется. Поиск не создаёт декартово произведение всех профилей и hops в памяти. Ограничение полного допустимого пространства, шаблонов и фронтира задаётся ARC-05, а общая конкуренция всех jobs - ARC-06.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ALG-12",
       "text": "Неисследованные кандидаты не считаются неработающими. Фронтир/coverage сохраняются на последующие шаги с ограниченным сроком; ротация исключает вечную проверку только первых профилей. При изменении графа/сети проверяются совместимость состояния и актуальность результатов.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ALG-13",
       "text": "Память о полезных путях учитывает контекст и позволяет быстрый warm start. При смене сети проводится короткая revalidation вместо полного уничтожения знаний или слепого доверия прошлой успешной проверке. Восстановленная ОС сеть не означает автоматически восстановленный proxy/overlay.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ALG-14",
       "text": "Выбранный путь описывается как лучший из актуально проверенных допустимых кандидатов, с количеством проверенных/оставшихся и confidence. При конечном статичном наборе доступных кандидатов поисковый план должен иметь воспроизводимый порядок и продолжение; глобальный оптимум в меняющемся интернете не объявляется доказанным.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "ALG-15",
@@ -1094,37 +1108,49 @@
       "id": "BAD-01",
       "text": "Локальное хранилище хранит health records отдельно для профиля, ребра и целой цепочки. Ключ включает resource/profile ID и spec/secret version, ordered path hash, физический сетевой контекст/режим, traffic class, protocol/IP family, probe profile и версии движка. Сырые секреты не входят в cache key.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-02",
       "text": "Record содержит error class/attribution/confidence, время/число успехов и ошибок, окна latency/stability, nextProbeAt/cooldownUntil, circuit state и invalidate conditions. Кэш не превращается в общий бессрочный список запретов.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-03",
       "text": "Circuit states: healthy/unknown, suspect, open, half-open, recovered; отдельно disabled by policy и invalid config. Начальный cooldown transient path failures - 30 секунд с экспоненциальным ростом до 10 минут и jitter, сбросом серии после подтверждённого восстановления. Конкретные значения задаются policy в безопасных пределах.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-04",
       "text": "Open кандидат временно исключается из обычного выбора. После срока допускается одна ограниченная half-open проверка; массовых одновременных retries нет. Ошибка auth/config не проверяется каждую секунду: изменение credentials/profile является отдельным событием инвалидирования.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-05",
       "text": "NXDOMAIN либо недоступность конечного домашнего сервиса не ухудшают глобально профиль, если нет доказательства отказа пути. Отказ конкретного метода проверки не равен отказу всех методов. При общей сетевой проблеме фиксируется network evidence, а не тысячи независимых proxy faults.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-06",
       "text": "Смена сети, IP family, спецификации, secret version или engine revision инвалидирует затронутую часть негативных знаний либо переводит её в recheck. Подтверждённый отказ в одной LTE сети не запрещает профиль на домашнем Wi-Fi. Сетевой fingerprint хранится локально и не требует IMEI, GPS или отправки SSID/BSSID.",
       "status": "partial",
-      "evidence": ["docs/route-frontier.md"]
+      "evidence": [
+        "docs/route-frontier.md"
+      ]
     },
     {
       "id": "BAD-07",
@@ -1431,14 +1457,22 @@
     {
       "id": "TEL-01",
       "text": "Техническая телеметрия является обязательной возможностью клиента и включена в базовый сервисный профиль с понятным уведомлением. Собираются структурированные события, агрегаты и метрики с отдельной политикой подробности; расширенные сырые материалы требуют отдельного пользовательского действия.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Local opt-in and fixed technical events with no raw log upload.",
+      "remainingScope": "Base service-profile and detail policy, aggregate metrics and end-to-end acceptance."
     },
     {
       "id": "TEL-02",
       "text": "Общие поля: eventId, schemaVersion, время UTC и monotonic time, pseudonymous deviceId, sessionId, app/core/build версии, policyRevision, networkEpoch, pathId, eventType, severity, duration, result, errorCode. Backend добавляет время приёма и обрабатывает расхождение часов. Дополнительно фиксируются algorithm/evaluator revision, cohortId, health profile revision и decisionId; эти поля не требуют раскрытия пользовательского назначения.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Typed event envelope carries ID, UTC/monotonic time, build, session and epoch.",
+      "remainingScope": "Full build/core/algorithm/policy/cohort/decision metadata and clock-skew analysis."
     },
     {
       "id": "TEL-03",
@@ -1471,8 +1505,12 @@
     {
       "id": "TEL-07",
       "text": "Пароли, auth/enrollment tokens, подписочные URL-capabilities и приватные ключи запрещены при любом уровне телеметрии и удалённой диагностики. История сайтов, полный DNS-журнал, пользовательские payload/пакеты, IMSI/IMEI, точная геолокация и сырые SSID/BSSID не входят в стандартный сбор. Расширенные категории требуют отдельного согласия SEC-09; домены/IP назначенных diagnostic targets могут быть в контролируемом результате. Входящий IP виден transport уровню сервера, поэтому access logs также ограничены.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Local allowlist and scoped storage omit raw logs, identities and addresses.",
+      "remainingScope": "Broader server log/diagnostics access controls and expanded privacy acceptance."
     },
     {
       "id": "TEL-08",
@@ -1483,20 +1521,32 @@
     {
       "id": "TEL-09",
       "text": "Очередь локальная, ограниченная, с шифрованием на диске и приоритетом crash/config/network-change событий. Начальные значения: 32 MiB или 7 суток; вытеснение сначала низкоприоритетных записей; счётчик потерь обязателен. Успешный HTTP upload без подтверждения event IDs не считается доставкой.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Bounded encrypted queue, expiry, stable IDs and exact receipt verification.",
+      "remainingScope": "Priority, loss counters, product retention limits and full queue failure acceptance."
     },
     {
       "id": "TEL-10",
       "text": "Передача сжимается пакетами; возможны повторы, сервер дедуплицирует eventId/batchId. Retry ограничен, с backoff/jitter. Начальные бюджеты telemetry плюс routine probes: 2MiB/сутки metered, 10MiB/сутки unmetered; отдельно ограниченный recovery reserve 512KiB и 2MiB соответственно. Явная глубокая диагностика имеет свой показанный пользователю бюджет. При исчерпании routine бюджета фоновые пробы откладываются, passive evidence сохраняется. Reserve применяется только для восстановления полезного пути с отдельным учётом и rate limit, без бесконечных retries. Exhausted budget даёт stale/search incomplete, а не proxy failure.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Bounded foreground Wi-Fi attempts and stable IDs on retries.",
+      "remainingScope": "Compression, jitter, shared metered/unmetered probe budgets and recovery reserve."
     },
     {
       "id": "TEL-11",
       "text": "При работающем foreground VPN типовая отправка - раз в 5 минут или при достижении размера пакета; критические события пытаются отправиться раньше. При остановленном VPN используется WorkManager с окном от 15 минут и без гарантии точного расписания. Android может откладывать такие задания. [WorkManager](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work).",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/technical-telemetry.md"
+      ],
+      "implementationScope": "Foreground active VPN scheduler with a five-minute minimum interval and unmetered Wi-Fi.",
+      "remainingScope": "Critical-event expedited delivery, Android WorkManager and end-to-end acceptance."
     },
     {
       "id": "TEL-12",
@@ -1691,7 +1741,9 @@
       "id": "MOB-01",
       "text": "У пользователя с административными правами есть заметная кнопка «Администрирование» на главном экране и в меню. Обычному пользователю она не показывается; прямое открытие admin URL/API всё равно проверяется сервером. Одно приложение совмещает клиентский и административный режимы.",
       "status": "partial",
-      "evidence": ["docs/mobile-administration.md"],
+      "evidence": [
+        "docs/mobile-administration.md"
+      ],
       "implementationScope": "Home screen navigation gated by a short-lived device-bound hint and a trusted HTTPS origin.",
       "remainingScope": "Menu entry, native administration and physical acceptance with the configured control plane."
     },

@@ -18,6 +18,30 @@ import java.util.Base64
 import java.util.Locale
 
 class AuthProtocolTest {
+    @Test fun technicalTelemetryIsProofBoundAndDisabledEndpointDoesNotAcknowledge() {
+        val f=Fixture();val current=f.current()
+        val batch=TechnicalTelemetry.Batch(1,Identity.random(),52,0,1,listOf(
+            TechnicalTelemetry.Event(Identity.random(),now,1,0,"vpn","online","unknown")))
+        var status=200
+        var receipt="""{"schemaVersion":1,"eventIds":["${batch.events.single().id}"]}"""
+        f.handler={method,url,headers,raw,_,maxReply->
+            assertEquals("POST",method);assertEquals(b.apiOrigin+TechnicalTelemetry.PATH,url)
+            assertEquals("application/json",headers["Content-Type"]);assertEquals(2048,maxReply)
+            val bytes=checkNotNull(raw)
+            assertArrayEquals(batch.body(),bytes)
+            val proof=Identity.objectJSON(Policy.utf8(Policy.decode64(headers.getValue("DPoP").split('.')[1])))
+            assertEquals(Identity.hash(bytes),proof.getValue("req_hash").jsonPrimitive.content)
+            json(status,text=receipt)
+        }
+        assertTrue(f.client.uploadTechnicalTelemetry(batch,current,IdentityScope()))
+        receipt="""{"schemaVersion":1,"eventIds":["${Identity.random()}"]}"""
+        assertFalse(f.client.uploadTechnicalTelemetry(batch,current,IdentityScope()))
+        receipt=""
+        status=204
+        assertFalse(f.client.uploadTechnicalTelemetry(batch,current,IdentityScope()))
+        status=404
+        assertFalse(f.client.uploadTechnicalTelemetry(batch,current,IdentityScope()))
+    }
     @Test fun administrationHintIsBoundedAndOlderServersDenyNavigation() {
         val f=Fixture(b.copy(controlPanelOrigin="https://control.example.invalid"));val current=f.current()
         var response=json(text="""{"schemaVersion":1,"untilMs":${now+60_000}}""")

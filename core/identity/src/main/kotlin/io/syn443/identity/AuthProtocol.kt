@@ -44,7 +44,8 @@ class IssuerState internal constructor(internal val keys:Map<String,RSAPublicKey
 data class OverlayDeliveryReply(val envelope:String?,val consumed:Boolean,val time:TrustedTime) {
     override fun toString()="OverlayDeliveryReply([redacted])"
 }
-data class PolicyReply(val envelope:String,val time:TrustedTime,val deviceSourceFetch:Boolean=false,val deviceSourceValidators:Boolean=false) {
+data class PolicyReply(val envelope:String,val time:TrustedTime,val deviceSourceFetch:Boolean=false,val deviceSourceValidators:Boolean=false,
+    val technicalTelemetry:Boolean=false) {
     override fun toString()="PolicyReply([redacted])"
 }
 
@@ -170,6 +171,7 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     private class ActivationReportingUnavailable:Exception()
     private class ControlPanelUnavailable:Exception()
     private class DeviceSubscriptionUnavailable:Exception()
+    private class TelemetryUnavailable:Exception()
     private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int=if(body==null)524_288 else 65_536):Delivered =
         apiBytes(path,body?.toByteArray(Charsets.UTF_8),token,nonce,floor,scope,maxReply)
     private fun apiBytes(path:String,body:ByteArray?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int):Delivered {
@@ -178,7 +180,8 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
         var currentNonce=nonce
         for(attempt in 0..1) {
             val sourceLimit=DeviceSubscription.resultLimit(path)
-            val limit=sourceLimit ?: if(path=="/v1/chat/uploads/part")360_448 else if(path.startsWith("/v1/chat/"))32_768 else 8192
+            val limit=sourceLimit ?: if(path==TechnicalTelemetry.PATH)TechnicalTelemetry.MAX_BYTES
+                else if(path=="/v1/chat/uploads/part")360_448 else if(path.startsWith("/v1/chat/"))32_768 else 8192
             val start=elapsed();val proof=Identity.proof(key.publicKey,key::sign,method,url,floor.proofSecond(boot(),start),token,currentNonce,body,limit)
             val headers=linkedMapOf("Authorization" to "DPoP $token","DPoP" to proof)
             if(body!=null)headers["Content-Type"]=if(sourceLimit!=null)"application/octet-stream" else "application/json"
@@ -193,8 +196,9 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
             if(path=="/v1/device/policy/status" && reply.status==404)throw ActivationReportingUnavailable()
             if(path=="/v1/device/control-panel" && reply.status==404)throw ControlPanelUnavailable()
             if(DeviceSubscription.isClaim(path) && reply.status==404)throw DeviceSubscriptionUnavailable()
+            if(path==TechnicalTelemetry.PATH && reply.status==404)throw TelemetryUnavailable()
             status(reply,if(path.endsWith("/revoke") || path=="/v1/device/policy/status" || sourceLimit!=null ||
-                DeviceSubscription.isClaim(path) && reply.status==204)204 else 200)
+                (path==TechnicalTelemetry.PATH || DeviceSubscription.isClaim(path)) && reply.status==204)204 else 200)
             return Delivered(reply,observed(reply,start,floor),currentNonce)
         }
         throw AuthException(AuthFailure.REAUTHENTICATE)
@@ -274,7 +278,8 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
         Policy.verifyBound(envelope,bootstrap.roots,current.session.deviceId,thumbprint,upper)
         val fetch=runCatching {result.reply.single("x-syn443-device-source-fetch")=="1"}.getOrDefault(false)
         val validators=fetch && runCatching {result.reply.single("x-syn443-device-source-validators")=="1"}.getOrDefault(false)
-        PolicyReply(envelope,result.time,fetch,validators)
+        val telemetry=runCatching {result.reply.single("x-syn443-telemetry")=="1"}.getOrDefault(false)
+        PolicyReply(envelope,result.time,fetch,validators,telemetry)
     }
     fun controlPanelUntilElapsed(current:SessionReply,scope:IdentityScope):Long=checked {
         bound(current)
@@ -323,6 +328,20 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
             if(claim.conditional)it.conditionalFrame(response)
             else {require(response.status==200);it.frame(response.body)}
         }
+    }
+    fun uploadTechnicalTelemetry(batch:TechnicalTelemetry.Batch,current:SessionReply,scope:IdentityScope):Boolean=checked {
+        bound(current)
+        require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val body=batch.body()
+        try {
+            val result=try {
+                apiBytes(TechnicalTelemetry.PATH,body,current.session.accessToken,current.session.nonce,current.time,scope,2048)
+            }catch(_:TelemetryUnavailable){return@checked false}
+            if(result.reply.status==204)return@checked false
+            val receipt=json(result.reply)
+            receipt.keys==setOf("schemaVersion","eventIds") && receipt["schemaVersion"]==JsonPrimitive(1) &&
+                receipt["eventIds"]==JsonArray(batch.events.map {JsonPrimitive(it.id)})
+        }finally {body.fill(0)}
     }
     private fun sendSubscription(claim:DeviceSubscription.Claim,current:SessionReply,scope:IdentityScope,
         encode:(DeviceSubscription.Lease)->ByteArray) {

@@ -82,6 +82,17 @@ class LoginController private constructor(private val context:android.app.Applic
     private var deviceSourcePollAfter=0L
     private data class DeviceSourceAuthority(val generation:Long,val session:Long,val conditional:Boolean)
     private var deviceSourceAuthority:DeviceSourceAuthority?=null
+    private data class TelemetryAuthority(val generation:Long,val sessionGeneration:Long,val scope:String)
+    @Volatile private var telemetryAuthority:TelemetryAuthority?=null
+    private val telemetryCapture by lazy {
+        if(namespace=="device-login-v1")TelemetryCapture(context) else TelemetryCapture(context,"$namespace-consent")
+    }
+    private val telemetryDisk by lazy {
+        if(namespace=="device-login-v1")TechnicalTelemetryDisk(context) else TechnicalTelemetryDisk(context,"$namespace-telemetry")
+    }
+    private val telemetryTransport=java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
+    private val telemetryPurge=java.util.concurrent.atomic.AtomicBoolean()
+    private var nextTelemetryElapsed=0L
     private val deviceSourceScope=java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
     private data class ChatTicket(val id:String,val generation:Long,val expires:Long,var state:String="pending",var body:String="",var reason:String="")
     private var chatTicket:ChatTicket?=null
@@ -159,7 +170,10 @@ class LoginController private constructor(private val context:android.app.Applic
             catch(e:LoginStorageException) {if(e.reason==LoginStorageFailure.STALE)"" else e.reason.name}
             catch(_:Exception) {"LOGIN_UNAVAILABLE"}
             if(!quiet)synchronized(commands) {if(admitted==commandEpoch)error=reason}
-        } finally {complete()}}
+        } finally {
+            complete()
+            if(telemetryPurge.getAndSet(false))runCatching {telemetryDisk.erase()}
+        }}
     }
     private fun submit(block:()->Unit) {
         val task=synchronized(commands) {pendingCommands.incrementAndGet();Command(commandEpoch,block)}
@@ -216,11 +230,16 @@ class LoginController private constructor(private val context:android.app.Applic
     }.getOrDefault(false)
     fun status():JSONObject = runCatching {
         val s=journal.snapshot()
+        val telemetry=telemetryFor(s)
+        val telemetryScope=telemetry?.scope ?: cached?.takeIf {it.first.generation==s.generation &&
+            it.first.sessionGeneration==s.sessionGeneration}?.second?.session?.let(::telemetryKey)
         JSONObject().put("phase",s.phase.name).put("method",s.method).put("generation",s.generation).put("configured",configured)
             .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
             .put("controlPanelConfigured",panelOrigin(s)!=null)
             .put("controlPanelAvailable",adminPanelUrl(s.generation)!=null)
+            .put("telemetryAvailable",telemetry!=null)
+            .put("telemetryEnabled",telemetryScope?.let {runCatching {telemetryCapture.consent(it)!=null}.getOrDefault(false)}==true)
             .put("inviteState",if(s.phase==LoginPhase.INVITING)inviteState else "").put("pairCode",if(s.phase==LoginPhase.INVITING)invitePair else "")
             .put("cleanupPending",s.tombstones.size).put("assignedPolicy",assignedRuntime.status(s))
     }.getOrElse {JSONObject().put("phase","BLOCKED").put("reason","LOGIN_STORE_UNAVAILABLE")
@@ -508,6 +527,10 @@ class LoginController private constructor(private val context:android.app.Applic
             current(accepted)
             deviceSourceAuthority=if(response.deviceSourceFetch)DeviceSourceAuthority(accepted.generation,accepted.sessionGeneration,
                 response.deviceSourceValidators) else null
+            telemetryAuthority=if(response.technicalTelemetry) {
+                val session=checkNotNull(p.session)
+                TelemetryAuthority(accepted.generation,accepted.sessionGeneration,telemetryKey(session))
+            } else null
         }
         prepareOverlays(accepted,p,next,protocol,scope)
     }
@@ -768,7 +791,8 @@ class LoginController private constructor(private val context:android.app.Applic
             val policy=checkNotNull(assignedRuntime.allowed(s,raw))
             (policy.payload.refreshAfterMs-checkNotNull(view.state.time).window(boot(),elapsed()).upperMs).coerceIn(30_000,300_000)
         }.getOrDefault(30_000L)
-        if(elapsed()-lastAssignmentFetch<interval)return !force && (refreshOverlayCredential() || reportActivation() || syncDeviceSubscription())
+        if(elapsed()-lastAssignmentFetch<interval)return !force &&
+            (refreshOverlayCredential() || reportActivation() || syncDeviceSubscription() || syncTechnicalTelemetry())
         if(runCatching {assignedRuntime.read(s).state.journal.phase=="applying"}.getOrDefault(false))return false
         return submitIfIdle(onAdmission={lastAssignmentFetch=elapsed()}) {
             current(s);resumeWorker(s)
@@ -777,6 +801,91 @@ class LoginController private constructor(private val context:android.app.Applic
     /** Piggyback on the existing supervisor tick and physical account transport. */
     private fun reportVpnOn():Boolean = testReportVpnOn?.invoke() ?: state().checkpoint().desiredOn
     internal fun cancelDeviceSubscription() {deviceSourceScope.getAndSet(null)?.cancel()}
+    internal fun cancelTechnicalTelemetry() {telemetryTransport.getAndSet(null)?.cancel()}
+    internal fun cancelOptionalNetworkWork() {cancelDeviceSubscription();cancelTechnicalTelemetry()}
+    private fun purgeTechnicalTelemetryWhenIdle() {
+        telemetryPurge.set(true)
+        // A running/queued command already drains this flag. Do not consume the retirement slot.
+        runCatching {submitIfIdle(quiet=true) {}}
+    }
+    private fun eraseTechnicalTelemetryOnRetirement() {
+        runCatching {telemetryCapture.disable()}
+        runCatching {telemetryDisk.erase()}
+    }
+    private fun telemetryFor(s:LoginIntent)=telemetryAuthority?.takeIf {
+        s.phase==LoginPhase.POLICY_CACHED && it.generation==s.generation && it.sessionGeneration==s.sessionGeneration
+    }
+    private fun telemetryKey(session:SessionReply)=Identity.hash(
+        ("syn443/telemetry/"+session.session.deviceId+"/"+session.keyThumbprint).toByteArray(Charsets.US_ASCII))
+    internal fun chooseTechnicalTelemetry(generation:Long,enabled:Boolean):Boolean=state().serialized {
+        synchronized(commands) {
+            val s=journal.snapshot()
+            if(s.generation!=generation)return@synchronized false
+            if(enabled) {
+                val authority=telemetryFor(s) ?: return@synchronized false
+                telemetryCapture.enable(authority.scope,state().read().optLong("eventSequence"))
+                nextTelemetryElapsed=0
+            } else {
+                cancelTechnicalTelemetry()
+                telemetryCapture.disable()
+                purgeTechnicalTelemetryWhenIdle()
+            }
+            true
+        }
+    }
+    private fun syncTechnicalTelemetry():Boolean {
+        if(!reportVpnOn())return false
+        lateinit var expected:LoginIntent
+        lateinit var authority:TelemetryAuthority
+        lateinit var consent:TelemetryCapture.Consent
+        return submitIfIdle(quiet=true,admit={
+            val state=journal.snapshot()
+            val active=telemetryFor(state)
+            val preference=active?.let {runCatching {telemetryCapture.consent(it.scope)}.getOrNull()}
+            if(active==null || preference==null || elapsed()<nextTelemetryElapsed)false
+            else {expected=state;authority=active;consent=preference;true}
+        },onAdmission={nextTelemetryElapsed=elapsed()+300_000}) {
+            fun currentConsent() {
+                current(expected)
+                require(telemetryFor(expected)==authority && telemetryCapture.consent(authority.scope)?.session==consent.session)
+            }
+            currentConsent()
+            val p=payload(expected)
+            val session=checkNotNull(p.session)
+            val now=session.time.window(boot(),elapsed()).upperMs
+            val queueKey=Identity.hash(("syn443/telemetry-queue/"+authority.scope+"/"+consent.session).toByteArray(Charsets.US_ASCII))
+            val old=telemetryDisk.read(queueKey)
+            var queue=old
+            val (new,through)=telemetryCapture.sample(state().read(),consent,io.syn443.android.BuildConfig.VERSION_CODE)
+            for(event in new)queue=queue.offer(queueKey,event)
+            queue=queue.expired(queueKey,now)
+            currentConsent()
+            if(queue!=old)telemetryDisk.write(queueKey,queue)
+            if(!telemetryCapture.recorded(consent,through))return@submitIfIdle
+            val batch=queue.peek(queueKey) ?: return@submitIfIdle
+            if(!telemetryCapture.attempted(consent,now) || !reportVpnOn())return@submitIfIdle
+            val vpnGeneration=state().checkpoint().generation
+            val physical=PhysicalIdentityRoute.capture(context,wifiOnly=true,unmeteredOnly=true)
+            val route=object:HttpRoute {
+                override fun resolve(host:String)=physical.resolve(host)
+                override fun bind(socket:java.net.Socket)=physical.bind(socket)
+                override fun check() {
+                    currentConsent();require(state().checkpoint().let {it.desiredOn && it.generation==vpnGeneration})
+                    physical.check()
+                }
+            }
+            withProtocol(expected,p.bootstrap,route) {protocol,scope->
+                check(telemetryTransport.compareAndSet(null,scope))
+                try {
+                    route.check()
+                    if(protocol.uploadTechnicalTelemetry(batch,session,scope)) {
+                        route.check()
+                        telemetryDisk.write(queueKey,queue.acknowledged(queueKey,batch))
+                    }
+                } finally {telemetryTransport.compareAndSet(scope,null)}
+            }
+        }
+    }
     private fun syncDeviceSubscription():Boolean {
         if(!reportVpnOn())return false
         lateinit var expected:LoginIntent
@@ -958,11 +1067,12 @@ class LoginController private constructor(private val context:android.app.Applic
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
         commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;activationDelivery=null;panelHint=null;panelPoll=null;deviceSourcePollAfter=0;deviceSourceAuthority=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()
+        telemetryAuthority=null;nextTelemetryElapsed=0;cancelTechnicalTelemetry()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {
             val aliases=listOfNotNull(previous?.first?.keyAlias,workingAlias.takeIf {it.isNotEmpty()}).distinct()
-            if(aliases.isNotEmpty())submit {noVpn();aliases.forEach(DeviceKey::deleteOwned);throw LoginStorageException(LoginStorageFailure.CORRUPT)}
+            if(aliases.isNotEmpty())submit {noVpn();aliases.forEach(DeviceKey::deleteOwned);eraseTechnicalTelemetryOnRetirement();throw LoginStorageException(LoginStorageFailure.CORRUPT)}
             throw e
         }
         val next=LoginRecovery.cancel(s,s.generation)
@@ -970,7 +1080,7 @@ class LoginController private constructor(private val context:android.app.Applic
         val retiring=try {if(next==s)s else journal.commit(s,next)} catch(e:Exception) {
             // If disk persistence failed, the old private key must still become unusable. Keep
             // public recovery metadata; never report a durable successful logout in this case.
-            if(s.keyAlias.isNotEmpty())submit {noVpn();DeviceKey.deleteOwned(s.keyAlias);throw LoginStorageException(LoginStorageFailure.UNAVAILABLE)}
+            if(s.keyAlias.isNotEmpty())submit {noVpn();DeviceKey.deleteOwned(s.keyAlias);eraseTechnicalTelemetryOnRetirement();throw LoginStorageException(LoginStorageFailure.UNAVAILABLE)}
             throw e
         } finally {activeScope?.cancel()}
         if(retiring.phase==LoginPhase.RETIRING)submit {retire(retiring,previous)}
@@ -1007,6 +1117,7 @@ class LoginController private constructor(private val context:android.app.Applic
             current(s);noVpn()
             s=commit(s,LoginRecovery.overlayRetired(s,s.generation,owned,true,true,true))
         }
+        eraseTechnicalTelemetryOnRetirement()
         if(namespace=="device-login-v1")io.syn443.android.chat.ChatOutbox.erase(context)
         check(journal.eraseRetired(s))
         val session=previous?.second?.session

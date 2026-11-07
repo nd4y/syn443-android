@@ -101,6 +101,16 @@ import io.syn443.identity.Identity
                 context.startActivity(Intent(Intent.ACTION_VIEW,url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
             }.onFailure {message="Не удалось открыть панель управления."}
         }},modifier=Modifier.testTag("auth-admin-panel")) {Text("Администрирование")}
+        val telemetryEnabled=status.optBoolean("telemetryEnabled")
+        if(status.optBoolean("telemetryAvailable") || telemetryEnabled) {
+            Text("Техническая телеметрия помогает разбирать сбои VPN. Отправляются коды состояний без истории сайтов, адресов и учётных данных.")
+            Button(enabled=!status.optBoolean("busy"),onClick={scope.launch {
+                val reply=command("auth-telemetry","$generation:${!telemetryEnabled}")
+                if(reply?.getBoolean("ok")!=true)message="Не удалось изменить настройку телеметрии."
+            }},modifier=Modifier.testTag("auth-technical-telemetry")) {
+                Text(if(telemetryEnabled)"Отключить телеметрию" else "Разрешить телеметрию")
+            }
+        }
         if(message.isNotEmpty())Text(message)
     }
 }
