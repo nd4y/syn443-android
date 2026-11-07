@@ -1,6 +1,7 @@
 package io.syn443.identity
 
 import java.io.ByteArrayOutputStream
+import java.io.ByteArrayInputStream
 import java.io.EOFException
 import java.io.InputStream
 import java.net.InetAddress
@@ -10,6 +11,7 @@ import java.net.URI
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.zip.GZIPInputStream
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
@@ -53,8 +55,24 @@ class BoundedHttp:AutoCloseable {
         factory:SSLSocketFactory=SSLSocketFactory.getDefault() as SSLSocketFactory,route:HttpRoute?=null,maxRequestBody:Int=8192,
         connect:(Socket,URI,Int)->Unit={socket,uri,remaining->socket.connect(InetSocketAddress(uri.host,if(uri.port>0)uri.port else 443),remaining)}):Reply {
         require(timeoutMs in 1..20_000 && maxBody in 1..524_288 && method in setOf("GET","POST"))
-        require(maxRequestBody in 1..360_448)
-        val uri=Identity.https(url);require((method=="GET" && body==null) || (method=="POST" && body!=null && body.size<=maxRequestBody))
+        val uri=Identity.https(url)
+        val requestLimit=if(uri.path==DeviceSubscription.RESULT_PATH && route!=null && method=="POST")DeviceSubscription.MAX_FRAME else 360_448
+        require(maxRequestBody in 1..requestLimit)
+        require((method=="GET" && body==null) || (method=="POST" && body!=null && body.size<=maxRequestBody))
+        return exchangeUri(method,uri,headers,body,scope,timeoutMs,maxBody,factory,route,false,connect)
+    }
+
+    internal fun subscription(uri:URI,headers:Map<String,String>,scope:Scope,timeoutMs:Long,route:HttpRoute,
+        factory:SSLSocketFactory):Reply {
+        require(timeoutMs in 1..30_000 && uri.scheme=="https" && uri.host!=null)
+        return exchangeUri("GET",uri,headers,null,scope,timeoutMs,DeviceSubscription.MAX_BODY,factory,route,true) {_,_,_->
+            error("Subscription request requires a captured route")
+        }
+    }
+
+    private fun exchangeUri(method:String,uri:URI,headers:Map<String,String>,body:ByteArray?,scope:Scope,
+        timeoutMs:Long,maxBody:Int,factory:SSLSocketFactory,route:HttpRoute?,gzip:Boolean,
+        connect:(Socket,URI,Int)->Unit):Reply {
         val reserved=setOf("host","content-length","connection","transfer-encoding","accept-encoding")
         require(headers.size<=16 && headers.keys.map {it.lowercase()}.distinct().size==headers.size)
         require(headers.all {(k,v)->k.matches(Regex("[A-Za-z0-9-]{1,64}")) && k.lowercase() !in reserved && v.length<=16_384 && v.all {it.code in 32..126}})
@@ -66,7 +84,7 @@ class BoundedHttp:AutoCloseable {
             scope.active()
             future=workers.submit<Reply> {
                 scope.active()
-                fun remaining():Int {scope.active();val ms=TimeUnit.NANOSECONDS.toMillis(deadline-System.nanoTime());if(ms<=0)throw DeliveryException(DeliveryFailure.DEADLINE);return ms.coerceAtMost(20_000).toInt()}
+                fun remaining():Int {scope.active();val ms=TimeUnit.NANOSECONDS.toMillis(deadline-System.nanoTime());if(ms<=0)throw DeliveryException(DeliveryFailure.DEADLINE);return ms.coerceAtMost(timeoutMs).toInt()}
                 try {
                     val raw=if(route==null)Socket().also {scope.attach(it);connect(it,uri,remaining())} else {
                         route.check()
@@ -91,15 +109,15 @@ class BoundedHttp:AutoCloseable {
                     val tls=factory.createSocket(raw,uri.host,if(uri.port>0)uri.port else 443,true) as SSLSocket
                     tls.soTimeout=remaining();tls.sslParameters=tls.sslParameters.apply {endpointIdentificationAlgorithm="HTTPS";applicationProtocols=arrayOf("http/1.1")}
                     tls.startHandshake();remaining();route?.check()
-                    val path=uri.rawPath.ifEmpty {"/"};val host=uri.rawAuthority
+                    val path=uri.rawPath.ifEmpty {"/"}+(uri.rawQuery?.let {"?$it"}?:"");val host=uri.rawAuthority
                     val request=buildString {
-                        append("$method $path HTTP/1.1\r\nHost: $host\r\nConnection: close\r\nAccept-Encoding: identity\r\n")
+                        append("$method $path HTTP/1.1\r\nHost: $host\r\nConnection: close\r\nAccept-Encoding: ${if(gzip)"gzip, identity" else "identity"}\r\n")
                         safeHeaders.forEach {(name,value)->append("$name: $value\r\n")}
                         if(safeBody!=null)append("Content-Length: ${safeBody.size}\r\n")
                         append("\r\n")
                     }
                     tls.soTimeout=remaining();tls.outputStream.write(request.toByteArray(Charsets.US_ASCII));safeBody?.let {tls.outputStream.write(it)};tls.outputStream.flush()
-                    response(tls.inputStream.buffered(),maxBody) {tls.soTimeout=remaining()}.also {remaining();route?.check()}
+                    response(tls.inputStream.buffered(),maxBody,gzip) {tls.soTimeout=remaining()}.also {remaining();route?.check()}
                 } finally {scope.finish()} // Close the raw FD, without waiting for TLS close-notify.
             }
             scope.bind(future)
@@ -123,7 +141,7 @@ class BoundedHttp:AutoCloseable {
     override fun close() {workers.shutdownNow()}
 }
 
-internal fun response(input:InputStream,maxBody:Int,beforeRead:()->Unit={}):Reply {
+internal fun response(input:InputStream,maxBody:Int,allowGzip:Boolean=false,beforeRead:()->Unit={}):Reply {
     var headerBudget=16_384
     fun line(max:Int=16_384):String {
         val out=StringBuilder()
@@ -146,8 +164,11 @@ internal fun response(input:InputStream,maxBody:Int,beforeRead:()->Unit={}):Repl
     }
     val result=Reply(status,headers,byteArrayOf())
     val length=result.single("content-length");val encoding=result.single("transfer-encoding")
-    if(length!=null && encoding!=null || encoding!=null && encoding.lowercase()!="chunked" || result.single("content-encoding")?.lowercase() !in setOf(null,"identity"))throw DeliveryException(DeliveryFailure.PROTOCOL)
-    val count=length?.let {if(!it.matches(Regex("0|[1-9][0-9]{0,6}")))throw DeliveryException(DeliveryFailure.PROTOCOL);it.toInt().also {n->if(n>maxBody)throw DeliveryException(DeliveryFailure.PROTOCOL)}}
+    val contentEncoding=result.single("content-encoding")?.lowercase()
+    val gzip=allowGzip && contentEncoding=="gzip"
+    if(length!=null && encoding!=null || encoding!=null && encoding.lowercase()!="chunked" ||
+        !gzip && contentEncoding !in setOf(null,"identity"))throw DeliveryException(DeliveryFailure.PROTOCOL)
+    val count=length?.let {if(!it.matches(Regex("0|[1-9][0-9]{0,7}")))throw DeliveryException(DeliveryFailure.PROTOCOL);it.toInt().also {n->if(n>maxBody)throw DeliveryException(DeliveryFailure.PROTOCOL)}}
     val out=ByteArrayOutputStream()
     fun readCount(size:Int) {
         if(size<0 || size>maxBody-out.size())throw DeliveryException(DeliveryFailure.PROTOCOL)
@@ -168,5 +189,19 @@ internal fun response(input:InputStream,maxBody:Int,beforeRead:()->Unit={}):Repl
         val buffer=ByteArray(8192)
         while(true) {beforeRead();val n=input.read(buffer);if(n<0)break;if(n==0 || out.size()+n>maxBody)throw DeliveryException(DeliveryFailure.PROTOCOL);out.write(buffer,0,n)}
     }
-    return result.copy(body=out.toByteArray())
+    val raw=out.toByteArray()
+    if(!gzip)return result.copy(body=raw)
+    try {
+        val decoded=ByteArrayOutputStream()
+        GZIPInputStream(ByteArrayInputStream(raw)).use {compressed->
+            val buffer=ByteArray(8192)
+            while(true) {
+                beforeRead();val n=compressed.read(buffer)
+                if(n<0)break
+                if(n==0 || decoded.size()+n>maxBody)throw DeliveryException(DeliveryFailure.PROTOCOL)
+                decoded.write(buffer,0,n)
+            }
+        }
+        return result.copy(body=decoded.toByteArray())
+    } finally {raw.fill(0)}
 }

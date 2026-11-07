@@ -28,13 +28,13 @@ internal class PhysicalIdentityRoute private constructor(private val source:Phys
         private fun inventory(source:PhysicalNetworks):List<PhysicalSnapshot> = source.snapshots().also {
             if(it.size>64 || it.any {s->s.handle<=0} || it.map {s->s.handle}.distinct().size!=it.size)unavailable()
         }
-        internal fun capture(source:PhysicalNetworks):PhysicalIdentityRoute {
-            val selected=inventory(source).filter {it.eligible}.sortedWith(
+        internal fun capture(source:PhysicalNetworks,wifiOnly:Boolean=false):PhysicalIdentityRoute {
+            val selected=inventory(source).filter {it.eligible && (!wifiOnly || it.wifi && it.validated)}.sortedWith(
                 compareByDescending<PhysicalSnapshot> {it.validated}.thenByDescending {it.wifi}.thenBy {it.handle})
                 .firstOrNull()?:unavailable()
             return PhysicalIdentityRoute(source,selected).also {it.check()}
         }
-        fun capture(context:Context):HttpRoute {
+        fun capture(context:Context,wifiOnly:Boolean=false):HttpRoute {
             check(Looper.myLooper()!=Looper.getMainLooper())
             val manager=checkNotNull(context.getSystemService(ConnectivityManager::class.java))
             return capture(object:PhysicalNetworks {
@@ -53,7 +53,7 @@ internal class PhysicalIdentityRoute private constructor(private val source:Phys
                 }
                 override fun resolve(handle:Long,host:String)=Network.fromNetworkHandle(handle).getAllByName(host).toList()
                 override fun bind(handle:Long,socket:Socket)=Network.fromNetworkHandle(handle).bindSocket(socket)
-            })
+            },wifiOnly)
         }
     }
     override fun check() {if(inventory(source).singleOrNull {it.handle==selected.handle}!=selected)unavailable()}

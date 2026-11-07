@@ -44,7 +44,7 @@ class IssuerState internal constructor(internal val keys:Map<String,RSAPublicKey
 data class OverlayDeliveryReply(val envelope:String?,val consumed:Boolean,val time:TrustedTime) {
     override fun toString()="OverlayDeliveryReply([redacted])"
 }
-data class PolicyReply(val envelope:String,val time:TrustedTime) {
+data class PolicyReply(val envelope:String,val time:TrustedTime,val deviceSourceFetch:Boolean=false) {
     override fun toString()="PolicyReply([redacted])"
 }
 
@@ -169,16 +169,19 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     private class CapabilityApprovalRequired:Exception()
     private class ActivationReportingUnavailable:Exception()
     private class ControlPanelUnavailable:Exception()
-    private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int=if(body==null)524_288 else 65_536):Delivered {
+    private class DeviceSubscriptionUnavailable:Exception()
+    private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int=if(body==null)524_288 else 65_536):Delivered =
+        apiBytes(path,body?.toByteArray(Charsets.UTF_8),token,nonce,floor,scope,maxReply)
+    private fun apiBytes(path:String,body:ByteArray?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int):Delivered {
         require(token.length in 24..16_384 && token.all {it.code in 33..126})
-        val url=bootstrap.apiOrigin+path;val method=if(body==null)"GET" else "POST";val bytes=body?.toByteArray(Charsets.UTF_8)
+        val url=bootstrap.apiOrigin+path;val method=if(body==null)"GET" else "POST"
         var currentNonce=nonce
         for(attempt in 0..1) {
-            val limit=if(path=="/v1/chat/uploads/part")360_448 else if(path.startsWith("/v1/chat/"))32_768 else 8192
-            val start=elapsed();val proof=Identity.proof(key.publicKey,key::sign,method,url,floor.proofSecond(boot(),start),token,currentNonce,bytes,limit)
+            val limit=if(path==DeviceSubscription.RESULT_PATH)DeviceSubscription.MAX_FRAME else if(path=="/v1/chat/uploads/part")360_448 else if(path.startsWith("/v1/chat/"))32_768 else 8192
+            val start=elapsed();val proof=Identity.proof(key.publicKey,key::sign,method,url,floor.proofSecond(boot(),start),token,currentNonce,body,limit)
             val headers=linkedMapOf("Authorization" to "DPoP $token","DPoP" to proof)
-            if(body!=null)headers["Content-Type"]="application/json"
-            val reply=request(scope,method,url,headers,bytes,maxReply)
+            if(body!=null)headers["Content-Type"]=if(path==DeviceSubscription.RESULT_PATH)"application/octet-stream" else "application/json"
+            val reply=request(scope,method,url,headers,body,maxReply)
             if(reply.status==401 && attempt==0 && json(reply)["code"]?.text()=="use_dpop_nonce") {
                 currentNonce=challenge(reply);continue
             }
@@ -188,7 +191,9 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
                 throw CapabilityApprovalRequired()
             if(path=="/v1/device/policy/status" && reply.status==404)throw ActivationReportingUnavailable()
             if(path=="/v1/device/control-panel" && reply.status==404)throw ControlPanelUnavailable()
-            status(reply,if(path.endsWith("/revoke") || path=="/v1/device/policy/status")204 else 200)
+            if(path==DeviceSubscription.CLAIM_PATH && reply.status==404)throw DeviceSubscriptionUnavailable()
+            status(reply,if(path.endsWith("/revoke") || path=="/v1/device/policy/status" || path==DeviceSubscription.RESULT_PATH ||
+                path==DeviceSubscription.CLAIM_PATH && reply.status==204)204 else 200)
             return Delivered(reply,observed(reply,start,floor),currentNonce)
         }
         throw AuthException(AuthFailure.REAUTHENTICATE)
@@ -266,7 +271,8 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
         val envelope=Policy.utf8(result.reply.body)
         val upper=result.time.window(boot(),elapsed()).upperMs
         Policy.verifyBound(envelope,bootstrap.roots,current.session.deviceId,thumbprint,upper)
-        PolicyReply(envelope,result.time)
+        val fetch=runCatching {result.reply.single("x-syn443-device-source-fetch")=="1"}.getOrDefault(false)
+        PolicyReply(envelope,result.time,fetch)
     }
     fun controlPanelUntilElapsed(current:SessionReply,scope:IdentityScope):Long=checked {
         bound(current)
@@ -282,6 +288,32 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
         val upper=result.time.window(boot(),observedElapsed).upperMs
         require(until in 0L..minOf(current.session.accessUntilMs,upper+120_000))
         if(until<=upper)0L else Math.addExact(observedElapsed,until-upper)
+    }
+    fun claimSubscription(current:SessionReply,scope:IdentityScope):DeviceSubscription.Claim=checked {
+        bound(current)
+        require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val reply=try {api(DeviceSubscription.CLAIM_PATH,null,current.session.accessToken,current.session.nonce,current.time,scope,65_536)}
+            catch(_:DeviceSubscriptionUnavailable){return@checked DeviceSubscription.Claim(null,false,current.time)}
+        if(reply.reply.status==204) {
+            require(reply.reply.body.isEmpty())
+            return@checked DeviceSubscription.Claim(null,true,reply.time)
+        }
+        require(reply.reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+        val lease=Canonical.json.decodeFromJsonElement<DeviceSubscription.Lease>(json(reply.reply)).also {it.validate()}
+        val upper=reply.time.window(boot(),elapsed()).upperMs
+        require(lease.until*1000 in (upper+1)..(upper+60_000))
+        DeviceSubscription.Claim(lease,true,reply.time)
+    }
+    fun submitSubscription(claim:DeviceSubscription.Claim,raw:ByteArray,current:SessionReply,scope:IdentityScope)=checked {
+        bound(current)
+        val lease=checkNotNull(claim.lease);require(claim.available)
+        val upper=claim.time.window(boot(),elapsed()).upperMs
+        require(upper<lease.until*1000 && upper<current.session.accessUntilMs)
+        val frame=lease.frame(raw)
+        try {
+            val reply=apiBytes(DeviceSubscription.RESULT_PATH,frame,current.session.accessToken,current.session.nonce,claim.time,scope,1024)
+            require(reply.reply.body.isEmpty())
+        } finally {frame.fill(0)}
     }
     /** Older servers may omit this endpoint. Reporting does not refresh or replace authority. */
     fun reportActivation(report:DeviceActivationReport,current:SessionReply,scope:IdentityScope):Boolean=checked {

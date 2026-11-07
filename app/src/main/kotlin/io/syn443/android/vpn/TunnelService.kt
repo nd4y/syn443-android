@@ -137,7 +137,7 @@ class TunnelService : VpnService() {
             android.os.Build.HARDWARE in setOf("ranchu", "goldfish")) {
             checks.execute { onRevoke() }; return START_NOT_STICKY
         }
-        if (!store.checkpoint().desiredOn) { retire(false); return START_NOT_STICKY }
+        if (!store.checkpoint().desiredOn) { LoginController.get(this).cancelDeviceSubscription();retire(false);return START_NOT_STICKY }
         if (!OsIntentGate.allowed(this, store)) { store.update { it.put("resumeRequired", true) }; phase("NeedsAction", "explicit_resume_required"); retire(false); return START_NOT_STICKY }
         if (intent?.action in setOf("fault-java", "fault-native") && io.syn443.android.BuildConfig.DEBUG && ready && verifiedPid()) {
             token?.let { host?.debugFatal(it, if (intent?.action == "fault-native") "native" else "java") }
@@ -198,6 +198,7 @@ class TunnelService : VpnService() {
             ?: candidates.firstOrNull()
         val signature = selected?.let { connectivity.getLinkProperties(it)?.toString() }
         if (selected == network && signature == linkSignature) return
+        LoginController.get(this).cancelDeviceSubscription()
         // Use the same outer lock as the final enrolled activation commit. A queued
         // encrypted write cannot confirm proof after a newer network epoch publishes.
         store.serialized {
@@ -781,6 +782,7 @@ class TunnelService : VpnService() {
             // Retire an older owner even if a newer Connect now needs permission.
             // A replacement already owned by that newer intent must be preserved.
             if (destroyed || boundGeneration > generation) return@post
+            LoginController.get(this).cancelDeviceSubscription()
             // The default onRevoke calls stopSelf and cancels this drain in
             // onDestroy. completeRetirement stops only after the owner exits.
             retire(false)
@@ -788,6 +790,7 @@ class TunnelService : VpnService() {
     }
     override fun onDestroy() {
         LifecycleAccess.detach(this)
+        LoginController.get(this).cancelDeviceSubscription()
         destroyed = true; token = null; ready = false
         stopPolicyObservation?.invoke();stopPolicyObservation=null
         handler.removeCallbacksAndMessages(null)

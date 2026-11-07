@@ -18,6 +18,53 @@ import java.util.Base64
 import java.util.Locale
 
 class AuthProtocolTest {
+    @Test fun administrationHintIsBoundedAndOlderServersDenyNavigation() {
+        val f=Fixture(b.copy(controlPanelOrigin="https://control.example.invalid"));val current=f.current()
+        var response=json(text="""{"schemaVersion":1,"untilMs":${now+60_000}}""")
+        f.handler={method,url,headers,body,_,maximum->
+            assertEquals("GET",method);assertEquals(b.apiOrigin+"/v1/device/control-panel",url)
+            assertEquals("DPoP "+current.session.accessToken,headers["Authorization"])
+            assertNull(body);assertEquals(1024,maximum);response
+        }
+        val expiry=f.client.controlPanelUntilElapsed(current,IdentityScope())
+        assertTrue(expiry in (f.elapsed+58_000)..(f.elapsed+60_000))
+        response=json(text="""{"schemaVersion":1,"untilMs":0}""")
+        assertEquals(0L,f.client.controlPanelUntilElapsed(current,IdentityScope()))
+        response=json(404)
+        assertEquals(0L,f.client.controlPanelUntilElapsed(current,IdentityScope()))
+        response=json(text="""{"schemaVersion":1,"untilMs":${now+600_000}}""")
+        error(AuthFailure.INVALID_REPLY){f.client.controlPanelUntilElapsed(current,IdentityScope())}
+    }
+    @Test fun sourceFetchUploadBindsTheCompleteBinaryFrameToTheDeviceProof() {
+        val f=Fixture();val session=f.current();val scope=IdentityScope()
+        val lease=DeviceSubscription.Lease(Identity.random(),Identity.random(),now/1000+60,listOf("wifi"),
+            SubscriptionCredential("https://source.example.invalid/list?key=synthetic"))
+        val payload=ByteArray(10_000){(it%7).toByte()}
+        var leaseReply=json(text=Canonical.json.encodeToString(lease))
+        f.handler={method,url,headers,body,_,maximum->
+            val proof=Identity.objectJSON(Policy.utf8(Policy.decode64(headers.getValue("DPoP").split('.')[1])))
+            assertEquals(Identity.hash(session.session.accessToken.toByteArray()),proof.getValue("ath").jsonPrimitive.content)
+            if(method=="GET") {
+                assertEquals(b.apiOrigin+DeviceSubscription.CLAIM_PATH,url)
+                assertNull(body);assertEquals(65_536,maximum);leaseReply
+            } else {
+                assertEquals(b.apiOrigin+DeviceSubscription.RESULT_PATH,url)
+                assertEquals("application/octet-stream",headers["Content-Type"])
+                val raw=checkNotNull(body)
+                assertArrayEquals((lease.jobId+"\n"+lease.lease+"\n").toByteArray()+payload,raw)
+                assertEquals(Identity.hash(raw),proof.getValue("req_hash").jsonPrimitive.content)
+                json(204,text="")
+            }
+        }
+        val claim=f.client.claimSubscription(session,scope)
+        assertEquals(lease,claim.lease)
+        f.client.submitSubscription(claim,payload,session,scope)
+        error(AuthFailure.INVALID_REPLY){f.client.submitSubscription(claim,byteArrayOf(),session,scope)}
+        leaseReply=json(204,text="");assertTrue(f.client.claimSubscription(session,scope).available)
+        leaseReply=json(404);assertFalse(f.client.claimSubscription(session,scope).available)
+        leaseReply=json(text=Canonical.json.encodeToString(lease.copy(until=now/1000)))
+        error(AuthFailure.INVALID_REPLY){f.client.claimSubscription(session,scope)}
+    }
     @Test fun activationReportBindsBodyToCurrentDeviceProofAndSupportsOlderServers() {
         val f=Fixture();val current=f.current()
         val report=DeviceActivationReport(1,2,Identity.random(),3,"rolled_back",1)
@@ -273,7 +320,7 @@ class AuthProtocolTest {
         private fun error(reason:AuthFailure,block:()->Unit) {try {block();fail("invalid protocol accepted")}catch(e:AuthException) {assertEquals(reason,e.reason);assertNull(e.cause)}}
         private fun invalid(block:()->Unit) {try {block();fail("invalid state accepted")}catch(_:IllegalArgumentException) {}}
     }
-    private class Fixture {
+    private class Fixture(bootstrap:Bootstrap=b) {
         var elapsed=1000L;var boot=2
         val pending=Identity.newPending(7,Identity.thumbprint(pub),boot,elapsed)
         val requests=mutableListOf<String>()
@@ -294,7 +341,7 @@ class AuthProtocolTest {
                 else->json(text=sessionWire())
             }
         }
-        val client=AuthProtocol(b,key,IdentityExchange {m,u,h,body,scope,max->requests.add(u);handler(m,u,h,body,scope,max)}, {boot},{elapsed})
+        val client=AuthProtocol(bootstrap,key,IdentityExchange {m,u,h,body,scope,max->requests.add(u);handler(m,u,h,body,scope,max)}, {boot},{elapsed})
         fun time()=TrustedTime(boot,elapsed,now,now+1000)
         fun current(s:DeviceSession=session())=SessionReply(s,time(),client.authority,pending.thumbprint)
         fun user()=UserCredential(jwt(pending,false),"fixture-subject",pending.thumbprint,time(),client.authority)

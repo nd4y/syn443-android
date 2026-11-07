@@ -79,6 +79,9 @@ class LoginController private constructor(private val context:android.app.Applic
     private data class PanelHint(val intent:LoginIntent,val untilElapsed:Long)
     private var panelHint:PanelHint?=null
     private var panelPoll:Pair<Long,Long>?=null
+    private var deviceSourcePollAfter=0L
+    private var deviceSourceAuthority:Pair<Long,Long>?=null
+    private val deviceSourceScope=java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
     private data class ChatTicket(val id:String,val generation:Long,val expires:Long,var state:String="pending",var body:String="",var reason:String="")
     private var chatTicket:ChatTicket?=null
     /** Private UI mailbox: at most one bounded operation; no content enters public status. */
@@ -400,14 +403,14 @@ class LoginController private constructor(private val context:android.app.Applic
         val managers=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply {init(store)}
         return SSLContext.getInstance("TLS").apply {init(null,managers.trustManagers,null)}.socketFactory
     }
-    private fun <T> withProtocol(s:LoginIntent,b:Bootstrap,block:(AuthProtocol,IdentityScope)->T):T {
+    private fun <T> withProtocol(s:LoginIntent,b:Bootstrap,physical:HttpRoute?=null,block:(AuthProtocol,IdentityScope)->T):T {
         val scope=IdentityScope()
         synchronized(commands) {current(s);check(activeScope==null);activeScope=scope}
         try {
-            return block(AuthProtocol(b,DeviceKey.open(s.keyAlias),exchange(s.generation,b,false),::boot,::elapsed),scope)
+            return block(AuthProtocol(b,DeviceKey.open(s.keyAlias),exchange(s.generation,b,false,physical),::boot,::elapsed),scope)
         } finally {scope.cancel();synchronized(commands) {if(activeScope===scope)activeScope=null}}
     }
-    private fun exchange(generation:Long,b:Bootstrap,retiring:Boolean)=IdentityExchange {method,url,headers,body,child,maxBody->
+    private fun exchange(generation:Long,b:Bootstrap,retiring:Boolean,fixedPhysical:HttpRoute?=null)=IdentityExchange {method,url,headers,body,child,maxBody->
         fun admitted() {
             val current=journal.snapshot()
             require(workerEpoch==commandEpoch && current.generation==generation && (current.phase==LoginPhase.RETIRING)==retiring && cancelledGeneration!=generation)
@@ -416,13 +419,13 @@ class LoginController private constructor(private val context:android.app.Applic
         // Established account requests use a physical Network even while its TUN is running.
         admitted();val uri=Identity.https(url)
         if(testExchange!=null)return@IdentityExchange testExchange.request(method,url,headers,body,child,maxBody)
-        val physical=PhysicalIdentityRoute.capture(context)
+        val physical=fixedPhysical?:PhysicalIdentityRoute.capture(context)
         val route=object:HttpRoute {
             override fun resolve(host:String)=physical.resolve(host)
             override fun bind(socket:java.net.Socket)=physical.bind(socket)
             override fun check() {admitted();physical.check()}
         }
-        val requestLimit=if(uri.path=="/v1/chat/uploads/part")360_448 else if(uri.path.startsWith("/v1/chat/"))32_768 else 8192
+        val requestLimit=if(uri.path==DeviceSubscription.RESULT_PATH)DeviceSubscription.MAX_FRAME else if(uri.path=="/v1/chat/uploads/part")360_448 else if(uri.path.startsWith("/v1/chat/"))32_768 else 8192
         http.exchange(method,url,headers,body,child,maxBody=maxBody,factory=tls(b,uri),route=route,maxRequestBody=requestLimit)
     }
     private fun resumeInvitation(initial:LoginIntent,original:LoginPayload) {
@@ -500,6 +503,10 @@ class LoginController private constructor(private val context:android.app.Applic
         val target=if(s.phase==LoginPhase.POLICY_CACHED && s.policyHash==receipt)s
             else LoginRecovery.policyCached(s,s.generation,receipt,s.protectedHash)
         val accepted=persistAssignment(s,p,next,target)
+        synchronized(commands) {
+            current(accepted)
+            deviceSourceAuthority=if(response.deviceSourceFetch)accepted.generation to accepted.sessionGeneration else null
+        }
         prepareOverlays(accepted,p,next,protocol,scope)
     }
     private fun persistAssignment(s:LoginIntent,p:LoginPayload,next:AssignmentState,target:LoginIntent=s,canCommit:()->Boolean={true}):LoginIntent {
@@ -759,7 +766,7 @@ class LoginController private constructor(private val context:android.app.Applic
             val policy=checkNotNull(assignedRuntime.allowed(s,raw))
             (policy.payload.refreshAfterMs-checkNotNull(view.state.time).window(boot(),elapsed()).upperMs).coerceIn(30_000,300_000)
         }.getOrDefault(30_000L)
-        if(elapsed()-lastAssignmentFetch<interval)return !force && (refreshOverlayCredential() || reportActivation())
+        if(elapsed()-lastAssignmentFetch<interval)return !force && (refreshOverlayCredential() || reportActivation() || syncDeviceSubscription())
         if(runCatching {assignedRuntime.read(s).state.journal.phase=="applying"}.getOrDefault(false))return false
         return submitIfIdle(onAdmission={lastAssignmentFetch=elapsed()}) {
             current(s);resumeWorker(s)
@@ -767,6 +774,51 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     /** Piggyback on the existing supervisor tick and physical account transport. */
     private fun reportVpnOn():Boolean = testReportVpnOn?.invoke() ?: state().checkpoint().desiredOn
+    internal fun cancelDeviceSubscription() {deviceSourceScope.getAndSet(null)?.cancel()}
+    private fun syncDeviceSubscription():Boolean {
+        if(!reportVpnOn())return false
+        lateinit var expected:LoginIntent
+        return submitIfIdle(quiet=true,admit={
+            val s=journal.snapshot()
+            if(s.phase!=LoginPhase.POLICY_CACHED || deviceSourceAuthority!=(s.generation to s.sessionGeneration) || elapsed()<deviceSourcePollAfter)false
+            else {expected=s;true}
+        },onAdmission={deviceSourcePollAfter=elapsed()+300_000}) {
+            current(expected);if(!reportVpnOn())return@submitIfIdle
+            val p=payload(expected)
+            val vpnGeneration=state().checkpoint().generation
+            val physical=PhysicalIdentityRoute.capture(context,wifiOnly=true)
+            val route=object:HttpRoute {
+                override fun resolve(host:String)=physical.resolve(host)
+                override fun bind(socket:java.net.Socket)=physical.bind(socket)
+                override fun check() {
+                    current(expected);require(state().checkpoint().let {it.desiredOn && it.generation==vpnGeneration})
+                    physical.check()
+                }
+            }
+            withProtocol(expected,p.bootstrap,route) {protocol,scope->
+                check(deviceSourceScope.compareAndSet(null,scope))
+                try {
+                    route.check()
+                    val session=checkNotNull(p.session)
+                    val claim=protocol.claimSubscription(session,scope)
+                    if(!claim.available) {
+                        synchronized(commands) {current(expected);deviceSourcePollAfter=elapsed()+3_600_000}
+                        return@withProtocol
+                    }
+                    val lease=claim.lease?:return@withProtocol
+                    if("wifi" !in lease.networkModes)return@withProtocol
+                    val blocked=setOf(p.bootstrap.apiOrigin,p.bootstrap.issuer,p.bootstrap.controlPanelOrigin).filter(String::isNotEmpty).toSet()
+                    val response=SubscriptionDownload(http).fetch(lease.credential,route,scope,blocked)
+                    try {
+                        require(response.status==200 && response.body.isNotEmpty())
+                        route.check()
+                        protocol.submitSubscription(claim,response.body,session,scope)
+                    } finally {response.body.fill(0)}
+                    synchronized(commands) {current(expected);deviceSourcePollAfter=elapsed()+60_000}
+                } finally {deviceSourceScope.compareAndSet(scope,null)}
+            }
+        }
+    }
     private fun reportActivation():Boolean {
         if(!reportVpnOn())return false
         lateinit var expected:LoginIntent
@@ -900,7 +952,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }}
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
-        commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;activationDelivery=null;panelHint=null;panelPoll=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()
+        commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;activationDelivery=null;panelHint=null;panelPoll=null;deviceSourcePollAfter=0;deviceSourceAuthority=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {

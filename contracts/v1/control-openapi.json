@@ -135,6 +135,12 @@
             "maxLength": 15,
             "pattern": "^[1-9][0-9]{0,14}$"
           },
+          "fetchDeviceId": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "description": "Required for device mode. The source stays bound to this device and its owner."
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -818,6 +824,48 @@
                 },
                 "required": [
                   "id"
+                ]
+              }
+            },
+            "required": [
+              "version",
+              "action",
+              "requestId",
+              "payload"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "version": {
+                "const": 1
+              },
+              "action": {
+                "const": "job.list"
+              },
+              "requestId": {
+                "type": "string",
+                "maxLength": 128,
+                "pattern": "^[a-zA-Z0-9_-]{16,128}$"
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sourceId": {
+                    "type": "string",
+                    "maxLength": 48,
+                    "pattern": "^[a-zA-Z0-9_-]{1,48}$"
+                  },
+                  "after": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "pattern": "^[a-zA-Z0-9_-]{0,128}$"
+                  }
+                },
+                "required": [
+                  "sourceId"
                 ]
               }
             },

@@ -60,6 +60,12 @@ if mode=="identity":
         (c.get('classname'),c.get('name')) for c in cases}, 'Required installation profile case missing'
     assert ('io.syn443.identity.BootstrapTrustTest','installationUpgradeRequiresClosedVersionAndAdjacentDistinctRoots') in {
         (c.get('classname'),c.get('name')) for c in cases}, 'Required installation upgrade profile case missing'
+    assert {('io.syn443.identity.AuthProtocolTest','administrationHintIsBoundedAndOlderServersDenyNavigation'),
+        ('io.syn443.identity.AuthProtocolTest','sourceFetchUploadBindsTheCompleteBinaryFrameToTheDeviceProof'),
+        ('io.syn443.identity.BoundedHttpTest','subscriptionTlsPreservesQueryAndBoundsDecodedGzip'),
+        ('io.syn443.identity.SubscriptionDownloadTest','privateAddressesRequireExplicitScopeAndNeverAllowMetadataOrLoopback'),
+        ('io.syn443.identity.SubscriptionDownloadTest','redirectRechecksResolvedAddressesAndNeverRestoresRemovedCredentials')} <= {
+        (c.get('classname'),c.get('name')) for c in cases}, 'Required device source transport cases missing'
     assert {('io.syn443.identity.AssignmentsTest','activationReportPersistsOnlyFinalCurrentEnvelopeDecisions'),
         ('io.syn443.identity.AuthProtocolTest','activationReportBindsBodyToCurrentDeviceProofAndSupportsOlderServers')} <= {
         (c.get('classname'),c.get('name')) for c in cases}, 'Required activation reporting cases missing'
@@ -200,6 +206,7 @@ if mode=="emulator":
         "installationUpgradeCommitsBothSignaturesAndKeepsTheRevisionFloor",
         "administrationEntryUsesTrustedMetadataAndCannotOutliveItsLoginGeneration",
         "olderIdentityServerKeepsAdministrationHiddenWithoutChangingLogin",
+        "subscriptionRouteRequiresValidatedWifiAndNeverUsesCellular",
         "manualInvitationStaysLocalUntilConfirmationAndThenUsesOrdinarySession",
         "cancelledClaimCannotCompleteOrResurrectItsRetiredKey",
         "signedServiceCanPrepareKeycloakWithoutClaimingTheInvitation",
