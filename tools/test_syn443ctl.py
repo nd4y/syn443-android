@@ -1,4 +1,5 @@
 import contextlib
+import base64
 import io
 import json
 import subprocess
@@ -51,6 +52,18 @@ class AdbControlTest(unittest.TestCase):
         run.assert_not_called()
         self.assertEqual(code, 2)
         self.assertEqual(json.loads(output.getvalue())["error"], "invalid_arguments")
+
+    def test_config_is_staged_on_stdin_with_hashes_and_unique_cleanup(self):
+        device = syn443ctl.Device("synthetic-device", 3)
+        payload = b'{"outbounds":[{"type":"direct","tag":"fixture"}]}'
+        base, candidate, nonce = "none", "b"*64, "a"*32
+        planned = {"baseRevision": base, "candidateRevision": candidate, "written": False}
+        with patch("syn443ctl.secrets.token_hex", return_value=nonce), \
+             patch.object(device, "_stage", return_value=True) as stage, patch.object(device, "call", return_value=planned) as call:
+            self.assertEqual(device.config("config-plan", payload, base, candidate), planned)
+        self.assertEqual(stage.call_args_list[0].args, (syn443ctl.STAGE.format(nonce), base64.b64encode(payload)+b"\n"))
+        call.assert_called_once_with("config-plan", base+":"+candidate+":"+nonce)
+        self.assertEqual(stage.call_args_list[1].args, (syn443ctl.CLEANUP.format(nonce),))
 
 
 if __name__ == "__main__":

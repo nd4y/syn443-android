@@ -145,6 +145,36 @@ class ControlProvider : ContentProvider() {
                     require(RuntimePolicies(context).managed())
                     if (store.checkpoint().desiredOn) requestReconcile(context, store, method)
                 }
+                "config-plan-file", "config-apply-file" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && caller==2000)
+                    val fields=requireNotNull(arg).split(':')
+                    require(fields.size==3 && (fields[0]=="none" || fields[0].matches(Regex("[0-9a-f]{64}"))) &&
+                        fields[1].matches(Regex("[0-9a-f]{64}")) && fields[2].matches(Regex("[0-9a-f]{32}")))
+                    val file=java.io.File(context.noBackupFilesDir,"operator-local-config-${fields[2]}.json")
+                    val raw=try {
+                        require(file.length() in 1..262_144)
+                        val bytes=ByteArray(262_145)
+                        try {
+                            var size=0
+                            file.inputStream().use {input->
+                                while(size<bytes.size) {
+                                    val count=input.read(bytes,size,bytes.size-size)
+                                    if(count<0)break
+                                    require(count>0);size+=count
+                                }
+                            }
+                            require(size in 1..262_144)
+                            val frame=bytes.copyOf(size)
+                            try {io.syn443.policy.Policy.utf8(frame)} finally {frame.fill(0)}
+                        }finally {bytes.fill(0)}
+                    }finally {check(!file.exists() || file.delete())}
+                    val plan=store.serialized {
+                        val checked=store.localConfig(raw,fields[0],fields[1],method=="config-apply-file")
+                        if(checked.getBoolean("written"))RouteSnapshot.configure(raw,fields[1])
+                        checked
+                    }
+                    return Bundle().apply {putBoolean("ok",true);putString("json",plan.toString())}
+                }
                 "import", "import-file" -> {
                     require(!store.checkpoint().desiredOn) { "stop before importing" }
                     val raw = if (method == "import-file") {
@@ -231,6 +261,7 @@ class ControlProvider : ContentProvider() {
             val result = store.read()
             if (method == "status") {
                 LifecycleAccess.engineStatus(context,result)
+                result.put("localConfigControl",io.syn443.android.BuildConfig.DEBUG)
                 val os=LifecycleAccess.policy(context)
                 result.put("netbird", OverlaySnapshot.read()).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",os)
                 result.put("policyChecks",PolicyChecks.view(result.optLong("generation"),result.optLong("networkEpoch"),

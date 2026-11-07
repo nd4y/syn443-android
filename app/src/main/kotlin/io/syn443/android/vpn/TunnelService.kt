@@ -21,6 +21,9 @@ import android.os.Process
 import android.os.SystemClock
 import io.syn443.android.MainActivity
 import io.syn443.android.R
+import io.syn443.recovery.PhysicalCandidate
+import io.syn443.recovery.PhysicalNetworkSelection
+import io.syn443.recovery.PhysicalTransport
 import io.syn443.recovery.Recovery
 import io.syn443.host.HostFence
 import java.io.File
@@ -204,13 +207,27 @@ class TunnelService : VpnService() {
     }
     private fun refreshNetwork() {
         if (destroyed) return
-        val candidates = connectivity.allNetworks.filter { n ->
-            n !in lostNetworks && connectivity.getNetworkCapabilities(n)?.let { it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
-                it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) } == true &&
-                connectivity.getLinkProperties(n)?.interfaceName != null
-        }
-        val selected = candidates.firstOrNull { connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true }
-            ?: candidates.firstOrNull()
+        val all=connectivity.allNetworks
+        val incumbent=network?.takeIf {it in all}
+        val ordered=sequenceOf(incumbent).filterNotNull()+all.asSequence().filter {it!=incumbent}
+        val candidates = ordered.mapNotNull { n ->
+            if(n in lostNetworks)return@mapNotNull null
+            val caps=connectivity.getNetworkCapabilities(n) ?: return@mapNotNull null
+            if(!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) ||
+                !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                connectivity.getLinkProperties(n)?.interfaceName==null)return@mapNotNull null
+            val transport=when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> PhysicalTransport.WIFI
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> PhysicalTransport.CELLULAR
+                else -> PhysicalTransport.OTHER
+            }
+            n to PhysicalCandidate(n.networkHandle,transport,
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
+                !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED))
+        }.take(PhysicalNetworkSelection.MAX_CANDIDATES).toList()
+        val handle=PhysicalNetworkSelection.choose(candidates.map {it.second},incumbent?.networkHandle,internetHealthy)
+        val selected=candidates.firstOrNull {it.second.handle==handle}?.first
         val signature = selected?.let { connectivity.getLinkProperties(it)?.toString() }
         if (selected == network && signature == linkSignature) return
         LoginController.get(this).cancelOptionalNetworkWork()

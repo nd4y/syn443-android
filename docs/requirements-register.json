@@ -793,8 +793,12 @@
     {
       "id": "MODE-01",
       "text": "Вид транспортной сети и её пригодность - отдельные признаки. LTE/5G не означает наличие белых списков. Ошибка одного сайта не является достаточным основанием для смены режима.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md#physical-network-preference"
+      ],
+      "implementationScope": "Local physical candidate ranking separates platform validation and captive state from the transport.",
+      "remainingScope": "Evidence-backed service modes, independent reachability checks and physical cross-mode acceptance."
     },
     {
       "id": "MODE-02",
@@ -817,8 +821,12 @@
     {
       "id": "MODE-05",
       "text": "В сети с одновременными Wi-Fi/LTE кандидат привязывается к конкретной физической Android Network. Измерения и выбранный путь не смешиваются между сетями. Неизвестные транспорты, например Ethernet, получают отдельное состояние unknown и безопасную политику обычной сети.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md#physical-network-preference"
+      ],
+      "implementationScope": "Physical network handles, selected-owner stickiness and existing network epoch fences.",
+      "remainingScope": "Full unknown-transport policy, actual multi-transport handover and per-mode routing."
     },
     {
       "id": "AUTO-01",
@@ -2046,8 +2054,8 @@
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/adb-control.md"
       ],
-      "implementationScope": "Explicit-device debug CLI for status, events, diagnostics, route and overlay checks, and VPN intent.",
-      "remainingScope": "Configuration export/plan/apply/import/render, network modes and atomic reconnect."
+      "implementationScope": "Explicit-device debug CLI for status, events, diagnostics, route/overlay checks, VPN intent and guarded local configuration preview/apply.",
+      "remainingScope": "Configuration export/render and managed import, network modes and atomic reconnect."
     },
     {
       "id": "ADB-02",

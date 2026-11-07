@@ -13,6 +13,7 @@ through ADB shell. It does not open a management port.
 | `routes-status`, `routes-check`, `routes-cancel` | Current results, request checks, or cancel; add `--route route-2` to check just one route |
 | `netbird-status`, `netbird-diagnose` | Overlay status or request diagnostics |
 | `vpn-start`, `vpn-stop`, `vpn-resume` | Submit a command to the durable VPN intent controller |
+| `config-plan`, `config-apply` | Validate and optionally write an unmanaged local config while the VPN is fully Off |
 
 A successful command submission is not a successful connection. Read
 `status` for the actual state. Every response has `schemaVersion` and
@@ -20,8 +21,17 @@ A successful command submission is not a successful connection. Read
 3 for ADB timeout/transport failure, 4 for a rejected command, 5 for a
 malformed reply, and 130 for interruption.
 
+To update a local config, run `config-plan --file <config.json>`, inspect
+the returned `baseRevision` and `candidateRevision`, then supply both to
+`config-apply --file <config.json> --expected-revision <baseRevision>
+--expected-candidate <candidateRevision>`. The provider validates the file
+again and compares both hashes before any write. The config travels over
+ADB stdin into a private staging file, never as a shell argument. A timeout
+does not imply that the operation failed; read the current revision before
+retrying.
+
 Shell control remains restricted to debug builds. This client does not
 expose fault injection, login credentials, raw configuration export or
-managed policy overrides. Release opt-in, config editing/import, mode
-commands, route job IDs and server audit require separate work. Keep device
-output private.
+managed policy overrides. Release opt-in, managed configuration editing,
+mode commands, route job IDs and server audit require separate work. Keep
+device output private.

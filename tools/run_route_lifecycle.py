@@ -2,6 +2,7 @@
 All targets and the disposable emulator PIN are synthetic. No physical credential changes.
 """
 import base64
+import hashlib
 import json
 import re
 import socketserver
@@ -11,6 +12,7 @@ import xml.etree.ElementTree as ET
 from run_vpn_process_faults import ROOT, PACKAGE, Server, Proxy, adb, call, pid, await_condition
 from emulator_policy_ui import open_policy, toggle, unlock_test_pin
 from emulator_boot import reboot_preserved
+from syn443ctl import ControlError, Device
 
 
 class RouteProxy(socketserver.BaseRequestHandler):
@@ -72,6 +74,28 @@ def main():
         reboot_preserved(adb);forward()
     def new_case(name):return ET.SubElement(suite,'testcase',classname='io.syn443.android.RouteLifecycleTest',name=name)
     try:
+        case=new_case('adbLocalConfigPreviewDoesNotWriteAndApplyFencesStaleBase')
+        stop();call('policy-test-reset')
+        device=Device(adb('get-serialno').decode().strip(),15)
+        before=call('status')
+        base=before.get('configRevision') or 'none'
+        payload=raw.encode()
+        candidate=hashlib.sha256(payload).hexdigest()
+        if candidate==base:
+            payload+=b'\n';candidate=hashlib.sha256(payload).hexdigest()
+        plan=device.config('config-plan',payload,base,candidate)
+        assert plan['different'] and not plan['written'] and plan['currentRevision']==base
+        assert (call('status').get('configRevision') or 'none')==base
+        receipt=device.config('config-apply',payload,base,candidate)
+        assert receipt['written'] and receipt['currentRevision']==candidate
+        for expected,digest in [(base,candidate),(candidate,'f'*64)]:
+            try:device.config('config-apply',payload,expected,digest)
+            except ControlError as error:assert error.code=='command_rejected'
+            else:raise AssertionError('stale or mismatched local configuration was accepted')
+        after=call('status')
+        assert after['configRevision']==candidate and after['generation']==before['generation'] and not after['desiredOn']
+        print(case.get('name')+': passed',flush=True)
+
         case=new_case('routeChecksUseActualOutboundsAndSelectedProxy')
         prepare();assert row(0)['state']=='working' and row(1)['state']=='failed' and row(2)['state']=='working'
         assert row(2)['measuredPath']==['route-3','route-1'] and all(s.route_probes>0 for s in servers)

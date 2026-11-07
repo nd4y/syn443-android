@@ -101,6 +101,23 @@ class StateStore private constructor(context: Context) {
         catch (e: Exception) { config.failWrite(output); throw e }
         update { it.put("configRevision", revision(raw)) }
     }
+    @Synchronized fun localConfig(raw:String,expected:String,candidate:String,apply:Boolean):JSONObject {
+        require(!policyStore.managed() && !checkpoint().desiredOn && !read().optBoolean("engineActive"))
+        val previous=originalConfig()?.let(::revision) ?: "none"
+        require(previous==expected && revision(raw)==candidate)
+        EngineConfig.validate(raw)
+        val changed=previous!=candidate
+        if(apply && changed) {
+            importConfig(raw)
+            require(originalConfig()?.let(::revision)==candidate)
+        }
+        val parsed=JSONObject(raw)
+        return JSONObject().put("schemaVersion",1).put("baseRevision",previous).put("candidateRevision",candidate)
+            .put("generation",checkpoint().generation).put("different",changed).put("written",apply && changed)
+            .put("currentRevision",if(apply)candidate else previous)
+            .put("outboundCount",parsed.getJSONArray("outbounds").length())
+            .put("configuredCheckCount",parsed.optJSONArray("route_checks")?.length() ?: 0)
+    }
     @Synchronized fun originalConfig(): String? {
         if (!config.baseFile.exists()) return null
         val bytes = config.openRead().use { it.readBytes() }

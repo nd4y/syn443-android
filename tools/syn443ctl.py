@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Bounded JSON client for the SYN443 debug ADB control provider."""
 import argparse
+import base64
+import hashlib
 import json
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -14,10 +17,15 @@ METHODS = {
     "netbird-status": "status", "netbird-diagnose": "netbird-diagnose",
     "vpn-start": "connect", "vpn-stop": "disconnect", "vpn-resume": "resume",
     "resources": "resources", "engine-exits": "engine-exits", "health-workers": "health-workers",
+    "config-plan": "config-plan-file", "config-apply": "config-apply-file",
 }
 OPERATIONS = ("capabilities", "status", "logs", "diagnostic-bundle", "routes-status",
               "routes-check", "routes-cancel", "netbird-status", "netbird-diagnose",
-              "vpn-start", "vpn-stop", "vpn-resume")
+              "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply")
+CONFIG = {"config-plan", "config-apply"}
+MAX_CONFIG = 262_144
+STAGE = "run-as io.syn443.android sh -c 'umask 077; base64 -d > no_backup/operator-local-config-{}.json'"
+CLEANUP = "run-as io.syn443.android rm -f no_backup/operator-local-config-{}.json"
 REJECTED = {"needs_unlock": 4, "command_rejected": 4, "unauthorized": 4}
 NUMBERS = ("generation", "networkEpoch", "activationGeneration", "eventSequence")
 PHASES = {"Off", "NeedsLogin", "NeedsPermission", "NeedsUnlock", "NeedsAction", "NoNetwork",
@@ -53,13 +61,15 @@ class Device:
             raise ControlError("invalid_serial", 2)
         self.serial, self.timeout = serial, timeout
 
-    def call(self, operation, route=None):
+    def call(self, operation, argument=None):
         method = METHODS[operation]
         command = ["adb", "-s", self.serial, "shell", "content", "call", "--uri", URI, "--method", method]
-        if route is not None:
-            if operation != "routes-check" or not re.fullmatch(r"route-[1-9][0-9]?", route):
-                raise ControlError("invalid_route", 2)
-            command.extend(["--arg", route])
+        if argument is not None:
+            route = operation == "routes-check" and re.fullmatch(r"route-[1-9][0-9]?", argument)
+            ticket = operation in CONFIG and re.fullmatch(r"(?:none|[0-9a-f]{64}):[0-9a-f]{64}:[0-9a-f]{32}", argument)
+            if not route and not ticket:
+                raise ControlError("invalid_arguments", 2)
+            command.extend(["--arg", argument])
         try:
             result = subprocess.run(command, capture_output=True, timeout=self.timeout, check=False)
         except subprocess.TimeoutExpired as err:
@@ -95,6 +105,26 @@ class Device:
         if not isinstance(data, dict):
             raise ControlError("invalid_reply", 5)
         return data
+
+    def _stage(self, script, data=None):
+        command = ["adb", "-s", self.serial, "shell", "-T", script]
+        try:
+            return subprocess.run(command, input=data, capture_output=True, timeout=self.timeout, check=False).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    def config(self, operation, payload, base, candidate):
+        nonce = secrets.token_hex(16)
+        try:
+            if not self._stage(STAGE.format(nonce), base64.b64encode(payload) + b"\n"):
+                raise ControlError("config_stage_failed", 3)
+            result = self.call(operation, base + ":" + candidate + ":" + nonce)
+            if result.get("baseRevision") != base or result.get("candidateRevision") != candidate:
+                raise ControlError("invalid_reply", 5)
+            return result
+        finally:
+            if not self._stage(CLEANUP.format(nonce)):
+                raise ControlError("config_cleanup_unverified", 3)
 
 
 def numbers(value, names):
@@ -147,6 +177,20 @@ def follow(device, duration, interval):
             time.sleep(min(remaining, interval))
 
 
+def config_input(path):
+    try:
+        with open(path, "rb") as source:
+            payload = source.read(MAX_CONFIG + 1)
+        if not 1 <= len(payload) <= MAX_CONFIG:
+            raise ValueError("size")
+        document = json.loads(payload.decode("utf-8"), parse_constant=invalid_constant)
+        if not isinstance(document, dict):
+            raise ValueError("shape")
+    except (OSError, ValueError, RecursionError) as err:
+        raise ControlError("invalid_config_file", 2) from err
+    return payload, hashlib.sha256(payload).hexdigest()
+
+
 class Arguments(argparse.ArgumentParser):
     def error(self, message):
         raise ControlError("invalid_arguments", 2)
@@ -158,6 +202,9 @@ def main(argv=None):
     parser.add_argument("--timeout", type=int, choices=range(1, 61), default=12, metavar="1..60")
     parser.add_argument("operation", choices=OPERATIONS)
     parser.add_argument("--route")
+    parser.add_argument("--file")
+    parser.add_argument("--expected-revision")
+    parser.add_argument("--expected-candidate")
     parser.add_argument("--follow-seconds", type=int, choices=range(0, 301), default=0, metavar="0..300")
     try:
         args = parser.parse_args(argv)
@@ -167,16 +214,32 @@ def main(argv=None):
     try:
         if (args.route is not None and args.operation != "routes-check") or (args.follow_seconds and args.operation != "logs"):
             raise ControlError("invalid_arguments", 2)
+        if (args.file is not None) != (args.operation in CONFIG) or (
+            args.operation != "config-apply" and (args.expected_revision is not None or args.expected_candidate is not None)
+        ):
+            raise ControlError("invalid_arguments", 2)
         device = Device(args.serial, args.timeout)
         if args.operation == "capabilities":
             state = device.call("status")
-            data = {"operations": OPERATIONS, "access": "debug_adb_shell",
+            operations = [op for op in OPERATIONS if op not in CONFIG or state.get("localConfigControl") is True]
+            data = {"operations": operations, "access": "debug_adb_shell",
                     "device": {**numbers(state, NUMBERS), "unlocked": state.get("phase") != "NeedsUnlock"}}
         elif args.operation == "diagnostic-bundle":
             data = bundle(device)
         elif args.operation == "logs" and args.follow_seconds:
             follow(device, args.follow_seconds, 2.0)
             return 0
+        elif args.operation in CONFIG:
+            payload, candidate = config_input(args.file)
+            if args.operation == "config-apply":
+                base = args.expected_revision
+                if base is None or not re.fullmatch(r"none|[0-9a-f]{64}", base) or candidate != args.expected_candidate:
+                    raise ControlError("config_plan_required", 2)
+            else:
+                base = device.call("status").get("configRevision") or "none"
+                if not isinstance(base, str) or not re.fullmatch(r"none|[0-9a-f]{64}", base):
+                    raise ControlError("invalid_reply", 5)
+            data = device.config(args.operation, payload, base, candidate)
         else:
             data = device.call(args.operation, args.route)
             if args.operation == "logs":
