@@ -78,6 +78,9 @@ def main():
            'enrolledAssignedRoutesCommitWithOptionalFailure',
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
            'enrolledStopFencesPendingCandidateRouteSuccess']
+    def observed_report(revision,outcome,selected):
+        return any(r['policyRevision']==revision and r['outcome']==outcome and r['activePolicyRevision']==selected
+                   for r in list(fixture.activation_reports.values()))
     try:
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
@@ -88,6 +91,7 @@ def main():
                     assert call('status')['policy']['activeRevision']==1
                 elif name=='enrolledSignedAssignmentStartsRealTun':
                     assert call('status')['policy']['activeRevision']==1 and fixture.policy_requests>=1
+                    await_condition(lambda:observed_report(1,'committed',1),45)
                     call('disconnect');await_condition(stopped)
                     try:call('import',base64.b64encode(json.dumps(config).encode()).decode());raise RuntimeError('managed import unexpectedly accepted')
                     except AssertionError:pass
@@ -105,6 +109,7 @@ def main():
                     call('policy-refresh')
                     await_condition(lambda:call('status').get('policy',{}).get('phase')=='rolled_back' and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert call('status')['policy']['activeRevision']==1
+                    await_condition(lambda:observed_report(2,'rolled_back',1),45)
                 elif name in ('enrolledAssignedRoutesCommitWithOptionalFailure','enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet','enrolledStopFencesPendingCandidateRouteSuccess'):
                     changed=copy.deepcopy(config)
                     changed['outbounds'].append({'type':'http','tag':'unavailable-route','server':'127.0.0.1','server_port':1})

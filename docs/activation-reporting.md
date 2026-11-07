@@ -24,3 +24,7 @@ the journal boundary, stale or renewed envelopes, bound request body, older
 servers, Off, failure isolation and a subsequent rollback report. All builds
 and tests run in GitHub Actions. The complete Android-to-panel path still needs
 physical acceptance.
+
+The existing enrolled native TUN and rollback scenarios also wait for the exact
+signed decision over the emulator's loopback TLS transport. The fixture checks
+the current envelope hash, session, nonce, ES256 proof and request-body digest.
