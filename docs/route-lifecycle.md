@@ -174,3 +174,19 @@ the normal cadence once. It waits for a batch already in progress and
 does not reuse its unvalidated measurements as a new receipt. Later
 validation callbacks for the same scope cannot repeatedly accelerate
 probing. Two independent receipts and a verified reserve remain required.
+
+### Captive portal wait
+
+When Android reports a captive portal, that physical Network is excluded
+from VPN admission, even if the VPN previously had good evidence on it.
+Other usable physical networks remain eligible. With only captive
+networks, the controller keeps the user's intent and waits for Android
+network callbacks without issuing route checks or starting a native
+owner. A running owner is handled as on ordinary network loss, with new
+socket protection fenced to the current eligible network.
+
+The VPN screen shows the system sign-in instruction and a distinct
+message under lockdown. The app never opens a bypass socket or changes
+Android lockdown. Unknown reachability without Android's captive flag is
+not treated as a portal or as a restricted cellular mode. A real portal
+and lockdown still need separate acceptance.

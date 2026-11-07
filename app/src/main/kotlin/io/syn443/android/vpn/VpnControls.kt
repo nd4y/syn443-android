@@ -113,17 +113,24 @@ fun VpnControls(consentGeneration: Long = -1) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("VPN: " + if (status.optBoolean("desiredOn")) "включён пользователем" else "выключен", Modifier.testTag("vpn-intent"))
         if (status.optBoolean("testHealth")) Text("ТЕСТОВЫЙ СТЕНД: синтетический HTTP, проверка TLS не выполняется")
+        val portal=status.optString("phase")=="NoNetwork" && status.optString("reason")=="captive_portal"
         Text(when (status.optString("phase")) {
             "Online" -> "Работает"
             "Degraded" -> "Частично работает"
             "BlockedByPolicy" -> "Доступ ограничен политикой"
-            "NoNetwork" -> "Ожидание сети"
+            "NoNetwork" -> if(portal) "Войдите в сеть Wi-Fi" else "Ожидание сети"
             "Recovering" -> "Восстанавливаем соединение"
             "Connecting" -> "Подключаемся"
             "NeedsPermission", "NeedsAction" -> "Требуется действие пользователя"
             "NeedsUnlock" -> "Нужно разблокировать телефон"
             else -> "Отключён"
         }, Modifier.testTag("vpn-status"))
+        if(portal) {
+            Text(if(status.optJSONObject("osPolicy")?.optBoolean("lockdown")==true)
+                "Android блокирует подключения без VPN. Если системный вход в Wi-Fi недоступен, выберите другую сеть или обратитесь к администратору."
+            else "Откройте системное уведомление о входе в Wi-Fi. SYN443 продолжит подключение после входа.",
+                Modifier.testTag("wifi-portal-help"))
+        }
         if (status.optString("reason").isNotEmpty()) Text("Диагностика: " + status.optString("reason"))
         val policy = status.optJSONObject("policy")
         if (policy?.optBoolean("managed") == true) {

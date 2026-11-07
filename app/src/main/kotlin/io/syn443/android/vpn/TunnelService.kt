@@ -76,6 +76,7 @@ class TunnelService : VpnService() {
     @Volatile private var boundGeneration = -1L
     private var lastProbe = 0L
     private var internetHealthy = false
+    private var networkWaitReason = "network_unavailable"
     private var pendingFailover:Pair<io.syn443.recovery.RouteScope,String>?=null
     private fun routeScope() = token?.let {io.syn443.recovery.RouteScope(boundGeneration,epoch,policies.read().journal.activationGeneration,it,runningConfigHash)}
     private fun failoverWifi():Boolean=network?.let(connectivity::getNetworkCapabilities)?.let {
@@ -192,7 +193,7 @@ class TunnelService : VpnService() {
         }
         val text = when (name) {
             "Online" -> "Работает"
-            "NoNetwork" -> "Ожидание сети"
+            "NoNetwork" -> if(reason=="captive_portal") "Войдите в сеть Wi-Fi" else "Ожидание сети"
             "Recovering" -> "Восстанавливаем соединение"
             "NeedsPermission", "NeedsAction", "BlockedByPolicy" -> "Требуется действие пользователя"
             "Degraded" -> "Частично работает"
@@ -234,13 +235,21 @@ class TunnelService : VpnService() {
         }.take(PhysicalNetworkSelection.MAX_CANDIDATES).toList()
         val handle=PhysicalNetworkSelection.choose(candidates.map {it.second},incumbent?.networkHandle,internetHealthy)
         val selected=candidates.firstOrNull {it.second.handle==handle}?.first
+        val waiting=if(selected==null && candidates.any {it.second.captive})"captive_portal" else "network_unavailable"
         val signature = selected?.let { connectivity.getLinkProperties(it)?.toString() }
-        if (selected == network && signature == linkSignature) return
+        if (selected == network && signature == linkSignature) {
+            if(selected==null && networkWaitReason!=waiting) {
+                networkWaitReason=waiting
+                if(store.checkpoint().desiredOn)phase("NoNetwork",waiting)
+            }
+            return
+        }
         LoginController.get(this).cancelOptionalNetworkWork()
         // Use the same outer lock as the final enrolled activation commit. A queued
         // encrypted write cannot confirm proof after a newer network epoch publishes.
         store.serialized {
             linkSignature = signature
+            networkWaitReason=waiting
             network = selected
             epoch++
             internetHealthy=false
@@ -251,7 +260,7 @@ class TunnelService : VpnService() {
             stableSince = 0; successes = 0
             store.update { value -> value.put("networkEpoch", epoch); store.put(value, Recovery.networkOpportunity(store.checkpoint(value), System.currentTimeMillis())) }
         }
-        if (selected == null) { RouteSnapshot.owner(null);phase("NoNetwork", "network_unavailable"); return }
+        if (selected == null) { RouteSnapshot.owner(null);phase("NoNetwork", networkWaitReason); return }
         setUnderlyingNetworks(arrayOf(selected))
         val properties = connectivity.getLinkProperties(selected)
         val name = properties?.interfaceName
@@ -295,7 +304,7 @@ class TunnelService : VpnService() {
         if (store.read().optBoolean("resumeRequired")) { phase("NeedsAction", "explicit_resume_required"); return }
         if (host != null && boundGeneration != cp.generation) { retire(false); return }
         if (host != null || binding || retiring) return
-        if (network == null) { phase("NoNetwork", "network_unavailable"); return }
+        if (network == null) { phase("NoNetwork", networkWaitReason); return }
         if (prepare(this) != null) { phase("NeedsPermission", "vpn_permission_required"); return }
         if (store.read().optString("phase") == "NeedsAction") return
         if (!ownerReleased()) {
