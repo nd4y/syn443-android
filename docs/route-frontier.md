@@ -27,3 +27,16 @@ failure waits for a new context. The table holds at most 64 records.
 The planner does not establish tunnels or treat eligibility as evidence of
 reachability. Signed graph delivery, runtime probe admission, fault attribution
 and application of a freshly verified path are separate gates.
+
+The native bridge has a guarded selector operation for a configured
+noninterrupting group. It requires a current successful check on the exact
+concrete member path, a matching previous member, and an unused receipt.
+Network changes invalidate receipts. The wire fixture exercises an existing
+connection and a new connection across a switch. Android does not call this
+operation until policy and controller admission are wired.
+
+For signed provisioning, `route.health.v1` advertises support for the
+per-outbound `route_checks` metadata that the client already consumes.
+The control plane compiler checks scope, bounds, method and TCP capability
+before signing it. Required checks are part of activation; an optional
+outbound failure does not block an otherwise authorized configuration.

@@ -10,6 +10,19 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class PolicyTest {
+    @Test fun managedRouteChecksKeepTheirSignedBindingAndCapability() {
+        val thumb=enc(java.security.MessageDigest.getInstance("SHA-256").digest("synthetic-device-key".toByteArray()))
+        val config="""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"},"route_checks":[{"outbound":"direct","required":true,"checks":[{"method":"tcp","target":"home.example.invalid:22"}]}]}"""
+        val base=payload()
+        val p=base.copy(schemaVersion=2,keyThumbprint=thumb,
+            requiredCapabilities=base.requiredCapabilities+listOf("policy.keybound.v2","route.health.v1"),
+            engineConfigB64=enc(config.toByteArray()),contentHash=Policy.hash(config))
+        val verified=Policy.verifyBound(sign(p),roots,"device-example",thumb,now)
+        assertEquals(config,verified.engineConfig)
+        assertTrue("route.health.v1" in verified.payload.requiredCapabilities)
+        val changed=config.replace(":22",":443")
+        invalid{Policy.verifyBound(sign(p.copy(engineConfigB64=enc(changed.toByteArray()))),roots,"device-example",thumb,now)}
+    }
     @Test fun signedManagedOverlayCapabilityRetainsKeySignatureExpiryAndUnknownFeatureFences() {
         fun digest(text:String)=enc(java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()))
         val thumb=digest("synthetic-device-key")

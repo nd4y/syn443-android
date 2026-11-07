@@ -110,14 +110,25 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 	}
 	var routeConfig struct {
 		Outbounds []struct {
-			Tag    string `json:"tag"`
-			Detour string `json:"detour"`
+			Tag       string   `json:"tag"`
+			Detour    string   `json:"detour"`
+			Kind      string   `json:"type"`
+			Members   []string `json:"outbounds"`
+			Interrupt bool     `json:"interrupt_exist_connections"`
 		} `json:"outbounds"`
 	}
 	_ = json.Unmarshal([]byte(config), &routeConfig)
 	r.routes.nodes = map[string]routeNode{}
+	r.routes.selectors = map[string]map[string]bool{}
 	for i, node := range routeConfig.Outbounds {
-		r.routes.nodes[node.Tag] = routeNode{ID: fmt.Sprintf("route-%d", i+1), Detour: node.Detour}
+		r.routes.nodes[node.Tag] = routeNode{ID: fmt.Sprintf("route-%d", i+1), Detour: node.Detour, Kind: node.Kind}
+		if node.Kind == "selector" && !node.Interrupt && len(node.Members) <= 64 {
+			members := make(map[string]bool, len(node.Members))
+			for _, member := range node.Members {
+				members[member] = true
+			}
+			r.routes.selectors[node.Tag] = members
+		}
 	}
 	return r, nil
 }
@@ -129,6 +140,9 @@ func (e *Runtime) Close() error { e.Cancel(); return e.box.Close() }
 func (e *Runtime) StartRouteChecks(request string) bool { return e.routes.start(request) }
 func (e *Runtime) RouteCheckStatus() string             { return e.routes.snapshot() }
 func (e *Runtime) CancelRouteChecks()                   { e.routes.stop() }
+func (e *Runtime) SelectVerifiedRoute(request, checkID, group, previous, candidate string) bool {
+	return e.routes.selectVerified(request, checkID, group, previous, candidate)
+}
 
 // The supervisor additionally checks actual HTTPS data-path progress; this is only runtime liveness.
 func (e *Runtime) Pulse() int64 { return 1 }
@@ -150,6 +164,7 @@ func (e *Runtime) NetBirdIdentityProof() string {
 }
 func (e *Runtime) DiagnoseNetBird() bool { return netbird.RequestDiagnostics() }
 func (e *Runtime) UpdateNetwork(name string, index int32) {
+	e.routes.stop()
 	e.platform.mu.Lock()
 	e.platform.iface.Name = name
 	e.platform.iface.Index = int(index)
