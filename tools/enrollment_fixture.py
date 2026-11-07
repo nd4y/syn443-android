@@ -13,7 +13,7 @@ import subprocess
 import threading
 import time
 from urllib.parse import parse_qs, urlencode, urlsplit
-from policy_fixture import Publisher, b64
+from policy_fixture import OPENSSL, Publisher, b64
 
 def canonical(value):return json.dumps(value,sort_keys=True,separators=(',',':')).encode()
 def digest(value):return b64(hashlib.sha256(value).digest())
@@ -27,13 +27,13 @@ class Fixture:
     def __init__(self,config):
         self.publisher=Publisher();self.root=Path(self.publisher.temp.name)
         self.rsa=self.root/'issuer.pem';self.cert=self.root/'tls.pem';self.tls_key=self.root/'tls-key.pem'
-        subprocess.run(['openssl','genpkey','-algorithm','RSA','-pkeyopt','rsa_keygen_bits:2048','-out',str(self.rsa)],check=True,capture_output=True)
-        subprocess.run(['openssl','req','-x509','-newkey','ec','-pkeyopt','ec_paramgen_curve:P-256','-nodes',
+        subprocess.run([OPENSSL,'genpkey','-algorithm','RSA','-pkeyopt','rsa_keygen_bits:2048','-out',str(self.rsa)],check=True,capture_output=True)
+        subprocess.run([OPENSSL,'req','-x509','-newkey','ec','-pkeyopt','ec_paramgen_curve:P-256','-nodes',
                         '-keyout',str(self.tls_key),'-out',str(self.cert),'-days','1','-subj','/CN=127.0.0.1',
                         '-addext','subjectAltName=IP:127.0.0.1'],check=True,capture_output=True)
-        modulus=subprocess.check_output(['openssl','rsa','-in',str(self.rsa),'-noout','-modulus']).decode().strip().split('=',1)[1]
+        modulus=subprocess.check_output([OPENSSL,'rsa','-in',str(self.rsa),'-noout','-modulus']).decode().strip().split('=',1)[1]
         self.jwk={'kid':'test-issuer','kty':'RSA','use':'sig','alg':'RS256','n':b64(bytes.fromhex(modulus)),'e':'AQAB'}
-        self.ca=base64.b64encode(subprocess.check_output(['openssl','x509','-in',str(self.cert),'-outform','DER'])).decode()
+        self.ca=base64.b64encode(subprocess.check_output([OPENSSL,'x509','-in',str(self.cert),'-outform','DER'])).decode()
         self.server=HTTPServer(('127.0.0.1',0),Handler);self.server.fixture=self
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(str(self.cert),str(self.tls_key))
         self.server.socket=context.wrap_socket(self.server.socket,server_side=True)
@@ -51,7 +51,7 @@ class Fixture:
         if nonce:claims['nonce']=nonce
         else:claims['cnf']={'jkt':thumb}
         raw=b64(canonical({'alg':'RS256','kid':'test-issuer','typ':'JWT'}))+'.'+b64(canonical(claims))
-        return raw+'.'+b64(subprocess.check_output(['openssl','dgst','-sha256','-sign',str(self.rsa)],input=raw.encode()))
+        return raw+'.'+b64(subprocess.check_output([OPENSSL,'dgst','-sha256','-sign',str(self.rsa)],input=raw.encode()))
     def proof(self,method,path,headers,body):
         parts=headers['DPoP'].split('.');assert len(parts)==3 and all(len(v)<8192 for v in parts)
         header=json.loads(decode(parts[0]));claims=json.loads(decode(parts[1]));jwk=header['jwk']
@@ -61,7 +61,7 @@ class Fixture:
         public=self.root/'request-public.der';sig=self.root/'request-signature.der'
         public.write_bytes(bytes.fromhex('3059301306072a8648ce3d020106082a8648ce3d03010703420004')+x+y)
         pair=integer(signature[:32])+integer(signature[32:]);sig.write_bytes(bytes([48,len(pair)])+pair)
-        result=subprocess.run(['openssl','dgst','-sha256','-verify',str(public),'-keyform','DER','-signature',str(sig)],input=(parts[0]+'.'+parts[1]).encode(),capture_output=True)
+        result=subprocess.run([OPENSSL,'dgst','-sha256','-verify',str(public),'-keyform','DER','-signature',str(sig)],input=(parts[0]+'.'+parts[1]).encode(),capture_output=True)
         assert result.returncode==0 and claims['htm']==method and claims['htu']==self.origin+path
         assert abs(int(time.time())-claims['iat'])<=60 and claims['jti'] not in self.proofs and len(self.proofs)<1024
         self.proofs.add(claims['jti'])
@@ -135,7 +135,10 @@ class Fixture:
         if self.policy_status!=200:return self.policy_status,{'code':'fixture_unavailable'},{}
         key=(thumb,self.revision)
         if key not in self.envelopes:
-            self.publisher.device=session['deviceId'];self.envelopes[key]=self.publisher.sign(self.config,revision=self.revision,key_thumbprint=thumb,degraded=getattr(self,'allow_degraded',False))
+            self.publisher.device=session['deviceId']
+            self.envelopes[key]=self.publisher.sign(self.config,revision=self.revision,key_thumbprint=thumb,
+                degraded=getattr(self,'allow_degraded',False),checks=getattr(self,'policy_checks',None),
+                extra_capabilities=getattr(self,'extra_capabilities',()))
         return 200,self.envelopes[key],{'Content-Type':'application/jose'}
 
 class Handler(BaseHTTPRequestHandler):

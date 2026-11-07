@@ -5,11 +5,14 @@ No private key or bearer is stored in the repository or emitted into test report
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 import secrets
 import subprocess
 import tempfile
 import time
+
+OPENSSL = os.environ.get("SYN443_FIXTURE_OPENSSL", "openssl")
 
 def b64(raw):
     return base64.urlsafe_b64encode(raw).decode().rstrip('=')
@@ -18,9 +21,9 @@ class Publisher:
     def __init__(self):
         self.temp = tempfile.TemporaryDirectory(prefix='syn443-policy-')
         self.key = Path(self.temp.name) / 'ephemeral.pem'
-        subprocess.run(['openssl', 'genpkey', '-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:P-256',
+        subprocess.run([OPENSSL, 'genpkey', '-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:P-256',
                         '-out', str(self.key)], check=True, capture_output=True)
-        public = subprocess.check_output(['openssl', 'pkey', '-in', str(self.key), '-pubout', '-outform', 'DER'])
+        public = subprocess.check_output([OPENSSL, 'pkey', '-in', str(self.key), '-pubout', '-outform', 'DER'])
         self.spki = base64.b64encode(public).decode()
         self.device = 'device-ci-' + secrets.token_hex(8)
         self.bearer = secrets.token_urlsafe(32)
@@ -28,7 +31,8 @@ class Publisher:
     def close(self):
         self.temp.cleanup()
 
-    def sign(self, config, revision=1, checks=None, degraded=False, ttl=600, floor=0, epoch=0, operation='configure', key_thumbprint=None):
+    def sign(self, config, revision=1, checks=None, degraded=False, ttl=600, floor=0, epoch=0, operation='configure', key_thumbprint=None,
+             extra_capabilities=()):
         now = int(time.time() * 1000)
         engine = json.dumps(config, separators=(',', ':'), ensure_ascii=True).encode()
         payload = {'schemaVersion': 1, 'revision': revision, 'securityEpoch': epoch, 'revocationFloor': floor, 'operation': operation,
@@ -46,9 +50,12 @@ class Publisher:
             assert len(key_thumbprint)==43
             payload['schemaVersion']=2;payload['keyThumbprint']=key_thumbprint
             payload['requiredCapabilities'].append('policy.keybound.v2')
+        assert len(set(extra_capabilities)) == len(extra_capabilities)
+        assert set(extra_capabilities) <= {'route.health.v1', 'route.failover.v1'}
+        payload['requiredCapabilities'].extend(extra_capabilities)
         canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
         content = b64(canonical(header)) + '.' + b64(canonical(payload))
-        der = subprocess.check_output(['openssl', 'dgst', '-sha256', '-sign', str(self.key)], input=content.encode())
+        der = subprocess.check_output([OPENSSL, 'dgst', '-sha256', '-sign', str(self.key)], input=content.encode())
         assert der[0] == 0x30 and der[1] == len(der)-2 and der[2] == 2
         rlen = der[3]; r = int.from_bytes(der[4:4+rlen], 'big'); pos = 4+rlen
         assert der[pos] == 2 and pos+2+der[pos+1] == len(der)
