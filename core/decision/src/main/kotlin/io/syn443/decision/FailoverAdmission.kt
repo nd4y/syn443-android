@@ -62,6 +62,13 @@ class FailoverAdmission(
         return health.record(context, key, sequence, nowMs, sample.verdict)
     }
 
+    @Synchronized
+    fun cooldown(pathId: String, nowMs: Long): PathHealth? {
+        if (pathId !in members) return null
+        return health.view(context, PathHealthKey(pathId, ExitClass.privateRoute, metricGroup), nowMs)
+            .takeIf { it.retryAtMs != null }
+    }
+
     /** A repeated heartbeat cannot count the same batch as two failures. */
     @Synchronized
     fun decide(

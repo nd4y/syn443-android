@@ -208,6 +208,12 @@ object RouteSnapshot {
                 .put("reason",if(sample?.scope==scope)codes[row.id] ?: "not_checked" else "not_checked")
                 .put("ageMs",if(sample!=null && sample.scope==scope && now>=sample.elapsedMs)now-sample.elapsedMs else JSONObject.NULL)
                 .put("latencyMs",if(sample?.scope==scope)timings[row.id] ?: JSONObject.NULL else JSONObject.NULL)
+                .also {value->
+                    if(scope!=null && scope==live)failoverAdmission?.cooldown(row.tag,now)?.let {cooldown->
+                        value.put("selectionState",cooldown.readiness.name.lowercase(java.util.Locale.ROOT))
+                            .put("retryInMs",(checkNotNull(cooldown.retryAtMs)-now).coerceAtLeast(0))
+                    }
+                }
         }
         return JSONObject().put("routes",JSONArray(values)).put("running",pending.isNotEmpty()).put("requiredReady",RouteEvidence.requiredReady(values.map {it.getBoolean("required") to RouteState.valueOf(it.getString("state").uppercase(java.util.Locale.ROOT))}))
     }
