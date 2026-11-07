@@ -30,6 +30,24 @@ class ManagedFailoverTest {
     @Test fun conservativeRevisionRequiresThirdCurrentRouteBatch() =
         assertSelection(FailoverAlgorithm.CONFIRMED)
 
+    @Test fun nativeSelectionPlanContainsOnlyConcreteChecksForTheExactConfig() {
+        val hash = Policy.hash(config)
+        RouteSnapshot.configure(config, hash)
+        try {
+            assertEquals("", RouteSnapshot.nativeSelectionPlan("different-config"))
+            val plan = JSONObject(RouteSnapshot.nativeSelectionPlan(hash))
+            assertEquals("internal", plan.getString("selector"))
+            val paths = plan.getJSONArray("paths")
+            assertEquals(2, paths.length())
+            for ((index, tag) in listOf("primary", "reserve").withIndex()) {
+                val path = paths.getJSONObject(index)
+                assertEquals("route-"+(index+1), path.getString("id"))
+                assertEquals(tag, path.getString("outbound"))
+                assertEquals("home.example.invalid:22", path.getJSONArray("checks").getJSONObject(0).getString("target"))
+            }
+        } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
+    }
+
     private fun assertSelection(algorithm: FailoverAlgorithm) {
         EngineConfig.validate(config)
         val scope=RouteScope(10,20,30,"synthetic-engine",Policy.hash(config))

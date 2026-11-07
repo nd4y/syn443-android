@@ -107,6 +107,15 @@ object RouteSnapshot {
         }
         revision=hash;invalidate()
     }
+    /** Only the active configuration's concrete checks can authorize a native switch. */
+    @Synchronized internal fun nativeSelectionPlan(configHash: String): String {
+        val plan = failover?.takeIf { revision == configHash } ?: return ""
+        val paths = rows.filter { it.tag in plan.members }.map { row ->
+            JSONObject().put("id", row.id).put("outbound", row.tag).put("checks", row.checks)
+        }
+        return JSONObject().put("selector", plan.selector).put("paths", JSONArray(paths)).toString()
+    }
+
     @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000;activationAttempt=null
         completedReceipt="";failoverAdmission=null;batchSequence=0;confirmingFailure=false}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {

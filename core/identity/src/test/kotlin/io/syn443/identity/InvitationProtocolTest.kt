@@ -65,6 +65,26 @@ class InvitationProtocolTest {
         f.client.abandon(InvitationOperation.mutation("abandon",ready.state.id),ready,time,scope)
         for(value in listOf(f.operation,claimed,claimed.state,result,InvitationPending(f.operation,time,claimed,completion)))assertFalse(value.toString().contains(f.state.nonce))
     }
+    @Test fun pendingClaimSurvivesNewCapabilityWithoutChangingSignedRequestBytes() {
+        val f = Fixture()
+        val original = Identity.objectJSON(f.operation.body)
+        val legacy = IdentityOperation.supportedCapabilities - io.syn443.policy.Policy.ROUTE_DECISION
+        fun body(values: List<String>) = Canonical.encode(JsonObject(original +
+            ("capabilities" to JsonArray(values.map(::JsonPrimitive)))))
+        val persisted = f.operation.copy(body = body(legacy))
+        val recovered = Canonical.json.decodeFromString<InvitationOperation>(Canonical.json.encodeToString(persisted))
+        assertEquals(persisted.body, recovered.body)
+        val exchange = f.handler
+        f.handler = { method, url, headers, sent ->
+            assertArrayEquals(persisted.body.toByteArray(Charsets.UTF_8), sent)
+            exchange(method, url, headers, sent)
+        }
+        assertEquals(f.state, f.client.claim(recovered, f.time, IdentityScope()).state)
+        invalid { f.operation.copy(body = body(legacy + "external.program")) }
+        invalid { f.operation.copy(body = body(legacy + legacy.first())) }
+        invalid { f.operation.copy(body = body(legacy - IdentityOperation.requiredCapabilities.first())) }
+    }
+
     @Test fun sameProtectedPendingCanResumeAndThenUseExistingLoginPolicyLifecycle(){
         val f=Fixture();val pending=InvitationPending(f.operation,f.time,InvitationReply(f.ready,f.time),InvitationOperation.mutation("complete",f.ready.id))
         val alias="syn443-dpop-"+Identity.random();val reserved=LoginRecovery.reserve(LoginIntent(),0,f.bootstrap,alias,"invite")

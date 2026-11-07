@@ -25,8 +25,11 @@ private fun inviteOpaque(raw:String)=raw.matches(Regex("[A-Za-z0-9_-]{43}")) && 
                 val key=value.getValue("key").jsonObject
                 require(key.keys==setOf("crv","kty","x","y") && key.getValue("crv").inviteText()=="P-256" && key.getValue("kty").inviteText()=="EC")
                 require(inviteOpaque(key.getValue("x").inviteText()) && inviteOpaque(key.getValue("y").inviteText()))
-                require(listOf(IdentityOperation.requiredCapabilities,IdentityOperation.supportedCapabilities).any{
-                    value.getValue("capabilities")==JsonArray(it.map(::JsonPrimitive))})
+                // Pending claims retain their original bytes and idempotency key across APK updates.
+                val capabilities = value.getValue("capabilities").jsonArray.map(JsonElement::inviteText)
+                require(capabilities.toSet().size == capabilities.size &&
+                    capabilities.containsAll(IdentityOperation.requiredCapabilities) &&
+                    IdentityOperation.supportedCapabilities.containsAll(capabilities))
             }
             "/v1/invitations/status","/v1/invitations/complete","/v1/invitations/abandon" ->
                 require(value.keys==setOf("requestId","id") && inviteOpaque(value.getValue("id").inviteText()))

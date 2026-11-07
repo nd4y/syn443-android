@@ -59,6 +59,11 @@ variant only changes switching thresholds within the approved selector. With
 telemetry consent, a confirmed reselection records the applied policy revision
 and numeric algorithm code (1 baseline, 2 conservative).
 
+The engine receives the concrete probe plan with the leased configuration.
+A selector switch consumes a fresh receipt for that exact candidate and
+approved set of checks. Successful diagnostic probes for different checks
+do not grant selection authority.
+
 Failover evidence carries the exit class from the authorized plan. A batch
 labelled for a different exit cannot influence selection, failure count, or
 quarantine, even when its probe target and latency are otherwise comparable.

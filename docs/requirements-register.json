@@ -1059,8 +1059,13 @@
     {
       "id": "ALG-15",
       "text": "До выключения исправного основного пути проверяется замена, если сеть допускает подготовку. Применяются hold-down, hysteresis и раздельные привязки новых/существующих потоков. Тест нового алгоритма или latency-кандидата не обрывает исправные пользовательские сессии без необходимости.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md",
+        "native/bridge/route_selection_wire_test.go"
+      ],
+      "implementationScope": "Internal Wi-Fi selector requires a fresh concrete probe from the approved plan and switches new connections without interrupting established flows.",
+      "remainingScope": "Other traffic classes and physical modes, full hysteresis and end-to-end device acceptance."
     },
     {
       "id": "ALG-16",
@@ -1203,8 +1208,13 @@
     {
       "id": "RLP-02",
       "text": "В evaluator v1 supervisor, lifecycle, admission scheduler, классы ошибок, допустимые переходы и safety recovery остаются в APK. Policy выбирает из конечного набора действий/шаблонов, задаёт типизированные predicates, пороги и ограниченные DAG-планы проверок. Нет рекурсии, произвольных циклов, JS/Python/shell/native code. Изменение semantics либо нового primitive требует APK/capability; комбинации поддержанных правил обновляются отдельно.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md",
+        "core/decision/src/main/kotlin/io/syn443/decision/FailoverAdmission.kt"
+      ],
+      "implementationScope": "Signed policy selects one of two local algorithms for an approved internal Wi-Fi selector.",
+      "remainingScope": "Declarative bounded predicates, thresholds and DAG plans with broader evaluator compatibility."
     },
     {
       "id": "RLP-03",
@@ -1221,8 +1231,13 @@
     {
       "id": "RLP-05",
       "text": "Назначение версии выполняется по стабильным группам: admin/test devices, opt-in pilot, canary, broad rollout и control. Cohort имеет список/правило назначения, долю и eligibility по версиям/возможностям устройства; random assignment стабилен и не меняется при каждом запуске.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md",
+        "core/policy/src/test/kotlin/io/syn443/policy/PolicyTest.kt"
+      ],
+      "implementationScope": "Android verifies the device-bound revision selected by Control Plane for the eligible cohort.",
+      "remainingScope": "Full rollout stages, stable operator-visible cohort attribution, metric gates and broad operational acceptance."
     },
     {
       "id": "RLP-06",
