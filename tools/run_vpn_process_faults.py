@@ -24,7 +24,7 @@ def adb(*args, timeout=30):
 
 
 class ControlUnavailable(RuntimeError):
-    """The provider may briefly disappear while its process is being killed."""
+    """A read may briefly lack an authoritative result during process recovery."""
 
 
 def call(method, arg=None):
@@ -42,23 +42,33 @@ def call(method, arg=None):
 
 def pid(suffix):
     raw = adb('shell', 'sh', '-c', "'pidof " + PACKAGE + suffix + " || true'").strip()
-    if raw and not raw.isdigit():
-        raise AssertionError('Unexpected process identity')
-    return raw.decode()
+    if not raw:
+        return ''
+    owners = raw.split()
+    if (len(raw) > 128 or not all(owner.isdigit() and owner[:1] != b'0' for owner in owners)
+            or len(set(owners)) != len(owners)):
+        raise AssertionError(f'Unexpected process identity format ({len(raw)} bytes, {len(owners)} fields)')
+    if len(owners) != 1:
+        # During a restart, wait for an unambiguous owner. Treating this as
+        # absence or selecting an arbitrary PID would invalidate crash evidence.
+        raise ControlUnavailable('Multiple process identities observed during recovery')
+    return owners[0].decode('ascii')
 
 
 def await_condition(predicate, timeout=110):
     end = time.monotonic() + timeout
+    unavailable = None
     while time.monotonic() < end:
         try:
             if predicate():
                 return
-        except ControlUnavailable:
+            unavailable = None
+        except ControlUnavailable as error:
             # Poll only. Never replay a Connect/Stop/fault command after an
             # ambiguous acknowledgement; the deadline and final assertions stay.
-            pass
+            unavailable = error
         time.sleep(1)
-    raise AssertionError('Process recovery deadline exceeded')
+    raise AssertionError('Process recovery deadline exceeded') from unavailable
 
 
 class Proxy(socketserver.BaseRequestHandler):
