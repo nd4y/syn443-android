@@ -67,12 +67,14 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
                 }
             }
             val id=Identity.hash(("${consent.session}/$sequence").toByteArray(Charsets.US_ASCII))
+            val algorithm=if(kind=="route" && code=="reselected")
+                FailoverAlgorithm.fromRevision(row.optString("algorithmRevision")) else null
+            val policyRevision=if(algorithm!=null)row.optLong("policyRevision").takeIf {it in 1..9_007_199_254_740_991L} ?: 0 else 0
+            val algorithmRevision=if(policyRevision>0 && algorithm==FailoverAlgorithm.CONFIRMED)2 else 1
+            // A stamped managed reselection is currently admitted only on validated Wi-Fi.
+            val mode=if(policyRevision>0)"wifi" else "unknown"
             val event=TechnicalTelemetry.Event(id,row.optLong("at"),row.optLong("elapsed",-1),
-                row.optLong("networkEpoch",-1),kind,code,"unknown")
-            val isRouteSelection=kind=="route" && code=="reselected"
-            val policyRevision=if(isRouteSelection)row.optLong("policyRevision").takeIf {it in 1..9_007_199_254_740_991L} ?: 0 else 0
-            val algorithmRevision=if(policyRevision>0 &&
-                FailoverAlgorithm.fromRevision(row.optString("algorithmRevision"))==FailoverAlgorithm.CONFIRMED)2 else 1
+                row.optLong("networkEpoch",-1),kind,code,mode)
             if(runCatching {event.validate()}.isSuccess)output+=TechnicalTelemetry.Queued(
                 TechnicalTelemetry.Key(consent.session,build,policyRevision,algorithmRevision),event)
         }

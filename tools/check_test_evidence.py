@@ -74,6 +74,7 @@ if mode=="emulator":
         "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
         "conservativeRevisionRequiresThirdCurrentRouteBatch",
         "nativeSelectionPlanContainsOnlyConcreteChecksForTheExactConfig",
+        "meteredMaintenanceKeepsRequiredChecksAndOnlyFullComparisonsCountTowardSwitch",
         "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
         "routineBatchesDeferOnlyCoolingReserveAndKeepRequiredSelector",
         "firstValidatedManagedBatchBypassesCadenceOnceWithoutCancellingInFlightWork",

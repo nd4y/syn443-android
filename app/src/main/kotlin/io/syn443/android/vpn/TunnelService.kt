@@ -103,11 +103,17 @@ class TunnelService : VpnService() {
         val awaitingValidated=only==null && !activation && RouteSnapshot.awaitingValidatedBatch(scope)
         val validatedPolicy=if(awaitingValidated)managedFailoverPolicy() else null
         if(!force && validatedPolicy==null && !RouteSnapshot.due(if(activation||confirmation)10_000 else 60_000))return
-        val deferCoolingReserves=!manual && !activation &&
-            (validatedPolicy ?: if(awaitingValidated)null else managedFailoverPolicy())
-                ?.requiredCapabilities?.contains(Policy.RESERVE_PROBE_COOLDOWN)==true
+        val activePolicy=when {
+            manual || activation -> null
+            awaitingValidated -> validatedPolicy
+            else -> managedFailoverPolicy()
+        }
+        val deferCoolingReserves=activePolicy?.requiredCapabilities?.contains(Policy.RESERVE_PROBE_COOLDOWN)==true
+        val meteredMaintenance=activePolicy!=null && network?.let(connectivity::getNetworkCapabilities)
+            ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)!=true
         RouteSnapshot.request(scope,only,force || activation || confirmation,deferCoolingReserves,
-            validatedManagedWifi=validatedPolicy!=null)?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
+            validatedManagedWifi=validatedPolicy!=null,meteredMaintenance=meteredMaintenance)
+            ?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
     }
     private var registered = false
     private var foreground = false

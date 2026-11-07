@@ -64,6 +64,13 @@ A selector switch consumes a fresh receipt for that exact candidate and
 approved set of checks. Successful diagnostic probes for different checks
 do not grant selection authority.
 
+A routine managed survey on metered Wi-Fi keeps the required selector check
+and skips optional reserves. A fresh selector failure triggers a complete
+comparison with eligible reserves. The reduced survey itself never counts
+toward switching. Manual diagnostics, activation and the first validated
+survey retain their full scope. A failed comparison falls back to the
+normal cadence without a faster loop.
+
 Failover evidence carries the exit class from the authorized plan. A batch
 labelled for a different exit cannot influence selection, failure count, or
 quarantine, even when its probe target and latency are otherwise comparable.
