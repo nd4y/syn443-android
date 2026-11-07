@@ -60,6 +60,7 @@ if mode=="jvm":
         "targetFailureAndWrongScopeDoNotCountTowardFailover",
         "staleOrDifferentCheckGroupCannotAuthorizeReplacement",
         "stabilityThenEnergyTakePriorityOverLatency",
+        "evidenceFromAnotherExitCannotAuthorizeAReplacementOrAdvanceFailureCount",
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":

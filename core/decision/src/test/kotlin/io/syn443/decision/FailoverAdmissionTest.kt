@@ -9,9 +9,9 @@ import org.junit.Test
 class FailoverAdmissionTest {
     private val context = Context(1, 2, "config", "policy", 3, "a".repeat(64))
     private val members = setOf("primary", "reserve-a", "reserve-b")
-    private fun make() = FailoverAdmission(context, members, "comparison")
-    private fun sample(id: String, n: Int, verdict: ProbeVerdict, latency: Long = 10) =
-        VerifiedPathSample(id, "probe-$n", "comparison", n * 1_000L, verdict, latency)
+    private fun make() = FailoverAdmission(context, ExitClass.privateRoute, members, "comparison")
+    private fun sample(id: String, n: Int, verdict: ProbeVerdict, latency: Long = 10, exit: ExitClass = ExitClass.privateRoute) =
+        VerifiedPathSample(id, exit, "probe-$n", "comparison", n * 1_000L, verdict, latency)
 
     @Test fun independentFailuresAndCurrentVerifiedReservePermitOneSwitch() {
         val d = make()
@@ -51,7 +51,7 @@ class FailoverAdmissionTest {
     @Test fun stabilityThenEnergyTakePriorityOverLatency() {
         val energy = mapOf("reserve-a" to 0, "reserve-b" to 2)
         fun choose(history: Boolean): String? {
-            val d = FailoverAdmission(context, members, "comparison", energy)
+            val d = FailoverAdmission(context, ExitClass.privateRoute, members, "comparison", energy)
             fun step(n: Int, active: ProbeVerdict, a: ProbeVerdict) =
                 d.decide(context, n.toLong(), "probe-$n", n * 1_000L, "primary", sample("primary", n, active),
                     listOf(sample("reserve-a", n, a, 300), sample("reserve-b", n, ProbeVerdict.VERIFIED, 10)))
@@ -63,13 +63,27 @@ class FailoverAdmissionTest {
         assertEquals("reserve-a", choose(history = false))
     }
 
+    @Test fun evidenceFromAnotherExitCannotAuthorizeAReplacementOrAdvanceFailureCount() {
+        for ((required, wrong) in listOf(ExitClass.RU to ExitClass.NON_RU, ExitClass.NON_RU to ExitClass.RU)) {
+            val d = FailoverAdmission(context, required, members, "comparison")
+            fun step(n: Int, activeExit: ExitClass, reserveExit: ExitClass, latency: Long) =
+                d.decide(context, n.toLong(), "probe-$n", n * 1_000L, "primary",
+                    sample("primary", n, ProbeVerdict.CONFIRMED_PATH_FAILURE, exit = activeExit),
+                    listOf(sample("reserve-a", n, ProbeVerdict.VERIFIED, latency, reserveExit)))
+            assertNull(step(1, required, wrong, 1))
+            assertNull(step(2, wrong, required, 1))
+            assertNull(step(3, required, required, 120))
+            assertEquals(FailoverChoice("primary", "reserve-a", "probe-4"), step(4, required, required, 120))
+        }
+    }
+
     @Test fun failedMemberCannotReturnUsingEvidenceFromBeforeCooldown() {
         val decision = make()
         fun batch(n: Long, now: Long, active: String, reserve: String, sampled: Long = now): FailoverChoice? {
             val receipt = "probe-$n"
             return decision.decide(context, n, receipt, now, active,
-                VerifiedPathSample(active, receipt, "comparison", now, ProbeVerdict.CONFIRMED_PATH_FAILURE, 30),
-                listOf(VerifiedPathSample(reserve, receipt, "comparison", sampled, ProbeVerdict.VERIFIED, 5)))
+                VerifiedPathSample(active, ExitClass.privateRoute, receipt, "comparison", now, ProbeVerdict.CONFIRMED_PATH_FAILURE, 30),
+                listOf(VerifiedPathSample(reserve, ExitClass.privateRoute, receipt, "comparison", sampled, ProbeVerdict.VERIFIED, 5)))
         }
         assertNull(batch(1, 1_000, "primary", "reserve-a"))
         assertEquals(FailoverChoice("primary", "reserve-a", "probe-2"),

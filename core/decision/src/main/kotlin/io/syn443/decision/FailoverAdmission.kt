@@ -2,6 +2,7 @@ package io.syn443.decision
 
 data class VerifiedPathSample(
     val pathId: String,
+    val exitClass: ExitClass,
     val receipt: String,
     val metricGroup: String,
     val sampledAtMs: Long,
@@ -18,6 +19,7 @@ data class FailoverChoice(val previous: String, val candidate: String, val recei
  */
 class FailoverAdmission(
     private val context: Context,
+    private val exitClass: ExitClass,
     authorized: Set<String>,
     private val metricGroup: String,
     energyClasses: Map<String, Int> = emptyMap(),
@@ -41,7 +43,7 @@ class FailoverAdmission(
     }
 
     private fun valid(sample: VerifiedPathSample, receipt: String, nowMs: Long) =
-        sample.pathId in members && sample.receipt == receipt && sample.metricGroup == metricGroup &&
+        sample.pathId in members && sample.exitClass == exitClass && sample.receipt == receipt && sample.metricGroup == metricGroup &&
             sample.sampledAtMs in 0..nowMs && nowMs - sample.sampledAtMs < 15_000 && sample.latencyMs in 0..30_000
 
     private fun clearFailure() {
@@ -50,7 +52,7 @@ class FailoverAdmission(
     }
 
     private fun track(sample: VerifiedPathSample, sequence: Long, nowMs: Long): Boolean {
-        val key = PathHealthKey(sample.pathId, ExitClass.privateRoute, metricGroup)
+        val key = PathHealthKey(sample.pathId, exitClass, metricGroup)
         val before = health.view(context, key, nowMs)
         when (before.readiness) {
             PathReadiness.CONFIG_CHANGE_REQUIRED, PathReadiness.QUARANTINED, PathReadiness.HALF_OPEN -> return false
@@ -65,7 +67,7 @@ class FailoverAdmission(
     @Synchronized
     fun cooldown(pathId: String, nowMs: Long): PathHealth? {
         if (pathId !in members) return null
-        return health.view(context, PathHealthKey(pathId, ExitClass.privateRoute, metricGroup), nowMs)
+        return health.view(context, PathHealthKey(pathId, exitClass, metricGroup), nowMs)
             .takeIf { it.retryAtMs != null }
     }
 
@@ -73,7 +75,7 @@ class FailoverAdmission(
     @Synchronized
     fun deferReserveProbe(current: Context, pathId: String, nowMs: Long): Boolean {
         if (current != context || pathId !in members) return false
-        return when (health.view(context, PathHealthKey(pathId, ExitClass.privateRoute, metricGroup), nowMs).readiness) {
+        return when (health.view(context, PathHealthKey(pathId, exitClass, metricGroup), nowMs).readiness) {
             PathReadiness.QUARANTINED, PathReadiness.HALF_OPEN, PathReadiness.CONFIG_CHANGE_REQUIRED -> true
             else -> false
         }

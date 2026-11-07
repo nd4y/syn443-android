@@ -1,10 +1,11 @@
 package io.syn443.android.vpn
 
+import io.syn443.decision.ExitClass
 import org.json.JSONArray
 import org.json.JSONObject
 
 /** A first managed failover scope: one explicit internal route on Wi-Fi. */
-internal data class ManagedFailoverPlan(val selector:String,val members:List<String>) {
+internal data class ManagedFailoverPlan(val selector:String,val intent:ExitClass,val members:List<String>) {
     companion object {
         private val tag=Regex("[a-z0-9][a-z0-9._-]{0,63}")
         private fun rows(list:JSONArray)=(0 until list.length()).map(list::getJSONObject)
@@ -13,7 +14,9 @@ internal data class ManagedFailoverPlan(val selector:String,val members:List<Str
             if(!config.has("route_failover"))return null
             val plan=config.getJSONObject("route_failover")
             require(plan.keys().asSequence().toSet()==setOf("selector","network_mode","intent","members"))
-            require(plan.getString("network_mode")=="wifi" && plan.getString("intent")=="INTERNAL")
+            val declaredIntent=plan.getString("intent")
+            require(plan.getString("network_mode")=="wifi" && declaredIntent=="INTERNAL")
+            val intent=ExitClass.valueOf(declaredIntent)
             val selector=plan.getString("selector")
             val members=strings(plan.getJSONArray("members"))
             require(tag.matches(selector) && members.size in 2..8 && members.toSet().size==members.size &&
@@ -59,7 +62,7 @@ internal data class ManagedFailoverPlan(val selector:String,val members:List<Str
                     current=hop.optString("detour")
                 }
             }
-            return ManagedFailoverPlan(selector,members)
+            return ManagedFailoverPlan(selector,intent,members)
         }
     }
 }
