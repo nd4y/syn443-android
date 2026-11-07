@@ -30,7 +30,13 @@ internal data class ManagedFailoverPlan(val selector:String,val members:List<Str
             require(route.getString("final")!=selector)
             val matching=rows(route.getJSONArray("rules")).filter {it.optString("outbound")==selector}
             require(matching.size==1 && matching.single().let {
-                it.optString("action")=="route" && listOf("domain","domain_suffix","ip_cidr").any(it::has) &&
+                it.optString("action")=="route" && listOf("domain","domain_suffix","ip_cidr").any {field->
+                    when(val value=it.opt(field)) {
+                        is String -> value.isNotEmpty()
+                        is JSONArray -> value.length()>0 && strings(value).all(String::isNotEmpty)
+                        else -> false
+                    }
+                } &&
                     !it.has("domain_keyword") && !it.has("domain_regex")
             })
             require(config.optJSONObject("dns")?.optJSONArray("servers")?.let {dns->

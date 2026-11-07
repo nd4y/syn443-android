@@ -58,6 +58,7 @@ class ManagedFailoverTest {
     @Test fun wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback() {
         assertThrows(IllegalArgumentException::class.java){EngineConfig.validate(config.replace("\"wifi\"","\"cellular\""))}
         assertThrows(IllegalArgumentException::class.java){EngineConfig.validate(config.replace("\"socks\"","\"direct\""))}
+        assertThrows(IllegalArgumentException::class.java){EngineConfig.validate(config.replace("[\"home.example.invalid\"]","[]"))}
         val json=JSONObject(config)
         json.getJSONArray("route_checks").getJSONObject(2).getJSONArray("checks").getJSONObject(0)
             .put("target","other.example.invalid:22")
