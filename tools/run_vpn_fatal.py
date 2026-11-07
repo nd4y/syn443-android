@@ -19,6 +19,14 @@ def native_crash_matches(crash, owner):
     return False
 
 
+def scoped_libc_abort_matches(logs, owner):
+    """API 29 may emit libc's fatal signal without a complete tombstone."""
+    assert len(logs)<=2*1024*1024 and owner.isascii() and owner.isdecimal()
+    exact=re.escape(owner.encode('ascii'))
+    return re.search(rb'^\S+\s+\S+\s+'+exact+rb'\s+\d+\s+F\s+libc\s*:\s+'
+        rb'Fatal signal 6 \(SIGABRT\), [^\r\n]*\bpid '+exact+rb' \([^\r\n]*\)\s*$',logs,re.M) is not None
+
+
 def await_native_crash(owner,read,wait=await_condition):
     # Process disappearance can precede crash_dump's asynchronous log publication.
     # Absence still fails within the existing 30-second exit-evidence budget.
@@ -51,14 +59,14 @@ def main():
         if api>=30:
             expected=('java_crash',) if kind=='java' else ('native_crash','signal')
             await_condition(lambda:any(x['kind'] in expected and (kind=='java' or x.get('status')==6) for x in call('engine-exits',old)['exits']),30)
-        logs=adb('logcat','-b','all','-d','--pid='+old,'-t','2000',timeout=20)
+        logs=adb('logcat','-v','threadtime','-b','all','-d','--pid='+old,'-t','2000',timeout=20)
         assert len(logs)<=2*1024*1024
         marker=b'SYN443 synthetic Java failure' if kind=='java' else b'SYN443 synthetic native failure'
         assert marker in logs,'The actual uncaught fault marker was not observed'
         if api<30:
             # API29 has no ApplicationExitInfo. Match the crashed owner in OS crash output.
             if kind=='java':assert b'FATAL EXCEPTION' in logs
-            else:
+            elif not scoped_libc_abort_matches(logs,old):
                 await_native_crash(old,lambda:adb('logcat','-b','crash','-d','-t','2000',timeout=20))
     try:
         adb('reverse','tcp:'+port,'tcp:'+port)

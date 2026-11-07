@@ -26,6 +26,16 @@ val prototypeAssets = tasks.register<PrototypeAssets>("preparePrototypeAssets") 
 androidComponents.onVariants { variant ->
     variant.sources.assets?.addGeneratedSourceDirectory(prototypeAssets, PrototypeAssets::outputDirectory)
 }
+val enrollmentLinkHost = providers.environmentVariable("SYN443_ENROLLMENT_LINK_HOST").orElse("").get()
+    .ifBlank { "links.example.invalid" }
+val installationProfile = providers.environmentVariable("SYN443_INSTALLATION_PROFILE").orElse("").get()
+require(installationProfile.length <= 12_000 && installationProfile.matches(Regex("[A-Za-z0-9_-]*"))) {
+    "SYN443_INSTALLATION_PROFILE must be a bounded base64url profile"
+}
+val dnsLabel = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+require(enrollmentLinkHost.length <= 253 && enrollmentLinkHost.matches(Regex("(?:$dnsLabel\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"))) {
+    "SYN443_ENROLLMENT_LINK_HOST must be a lowercase public DNS hostname"
+}
 android {
     namespace = "io.syn443.android"
     compileSdk = 37
@@ -33,9 +43,12 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 27
-        versionName = "0.8.0-assigned-routes"
+        versionCode = 48
+        versionName = "0.9.20-device-subscription-wifi"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
+        manifestPlaceholders["enrollmentLinkHost"] = enrollmentLinkHost
+        buildConfigField("String", "ENROLLMENT_LINK_HOST", "\"$enrollmentLinkHost\"")
+        buildConfigField("String", "INSTALLATION_PROFILE", "\"$installationProfile\"")
     }
     buildFeatures { compose = true; aidl = true; buildConfig = true }
     compileOptions {
@@ -57,6 +70,7 @@ dependencies {
     implementation(project(":core:decision"))
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("com.google.zxing:core:3.5.4")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")

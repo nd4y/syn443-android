@@ -40,6 +40,7 @@ class Fixture:
         self.origin='https://127.0.0.1:'+str(self.server.server_port);self.issuer=self.origin+'/realms/test'
         self.authorization={};self.codes={};self.tokens={};self.sessions={};self.receipts={};self.refresh_receipts={};self.proofs=set()
         self.config=config;self.revision=1;self.policy_status=200;self.envelopes={};self.policy_requests=0;self.registrations=0
+        self.activation_reports={}
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
     def close(self):
         self.server.shutdown();self.server.server_close();self.thread.join(timeout=3);self.publisher.close()
@@ -111,6 +112,24 @@ class Fixture:
             return 200,session,{}
         assert token==session['accessToken']
         if parsed.path=='/v1/device/revoke':self.sessions.pop(thumb);return 204,None,{}
+        if parsed.path=='/v1/device/policy/status':
+            assert method=='POST' and len(body)<=1024 and session['accessUntilMs']>int(time.time()*1000)
+            if self.policy_status!=200:return self.policy_status,{'code':'fixture_unavailable'},{}
+            report=json.loads(body)
+            assert set(report)=={'version','policyRevision','envelopeHash','activationGeneration','outcome','activePolicyRevision'}
+            for field in ('version','policyRevision','activationGeneration','activePolicyRevision'):assert type(report[field]) is int
+            revision,active=report['policyRevision'],report['activePolicyRevision']
+            assert report['version']==1 and report['activationGeneration']>0
+            assert report['outcome'] in ('committed','degraded','rolled_back')
+            assert 0<=active<revision if report['outcome']=='rolled_back' else active==revision
+            key=(thumb,revision);envelope=self.envelopes.get(key)
+            if revision!=self.revision or not envelope or report['envelopeHash']!=digest(envelope.encode()):
+                return 409,{'code':'idempotency_conflict'},{}
+            previous=self.activation_reports.get(key)
+            if previous is not None and previous!=report:return 409,{'code':'idempotency_conflict'},{}
+            assert len(self.activation_reports)<32 or key in self.activation_reports
+            self.activation_reports[key]=report
+            return 204,None,{}
         assert method=='GET' and parsed.path=='/v1/device/policy';self.policy_requests+=1
         if self.policy_requests<=getattr(self,'pending_policy_requests',0):return 202,{'code':'provisioning_pending'},{}
         if self.policy_status!=200:return self.policy_status,{'code':'fixture_unavailable'},{}

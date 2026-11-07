@@ -57,6 +57,14 @@ class ControlProvider : ContentProvider() {
                     return Bundle().apply {putString("json",LoginController.get(context).chatResult(requireNotNull(arg),requireNotNull(extras).getLong("generation",-1)).toString())}
                 }
                 "chat-cancel" -> {require(caller==Process.myUid());LoginController.get(context).chatCancel(requireNotNull(arg))}
+                "auth-invite-preview" -> {
+                    require(caller==Process.myUid())
+                    return Bundle().apply {putBoolean("admitted",LoginController.get(context).previewInvitation(requireNotNull(arg),requireNotNull(extras?.getString("link"))))}
+                }
+                "auth-invite-result" -> {require(caller==Process.myUid());return Bundle().apply {putString("json",LoginController.get(context).invitationPreview(requireNotNull(arg)).toString())}}
+                "auth-invite-start" -> {require(caller==Process.myUid());LoginController.get(context).startInvitation(requireNotNull(arg))}
+                "auth-service-start" -> {require(caller==Process.myUid());LoginController.get(context).startInvitation(requireNotNull(arg),false)}
+                "auth-trust-rotation" -> {require(caller==Process.myUid());LoginController.get(context).rotateBootstrap(requireNotNull(arg))}
                 "auth-status" -> return Bundle().apply {putBoolean("ok",true);putString("json",LoginController.get(context).status().toString())}
                 "auth-bootstrap-file" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller==2000)
@@ -73,6 +81,18 @@ class ControlProvider : ContentProvider() {
                 "auth-browser" -> {
                     require(caller==Process.myUid())
                     return Bundle().apply {putBoolean("ok",true);putString("url",LoginController.get(context).browserUrl(requireNotNull(arg?.toLongOrNull())))}
+                }
+                "auth-admin-panel" -> {
+                    require(caller==Process.myUid())
+                    val url=LoginController.get(context).adminPanelUrl(requireNotNull(arg?.toLongOrNull()))
+                    return Bundle().apply {putBoolean("ok",url!=null);putString("url",url)}
+                }
+                "auth-admin-poll" -> {
+                    require(caller==Process.myUid())
+                    return Bundle().apply {
+                        putBoolean("ok",true)
+                        putBoolean("admitted",LoginController.get(context).pollAdminPanel(requireNotNull(arg?.toLongOrNull())))
+                    }
                 }
                 "auth-callback" -> {
                     require(caller==Process.myUid());LoginController.get(context).callback(requireNotNull(arg))
@@ -206,6 +226,8 @@ class ControlProvider : ContentProvider() {
                 LifecycleAccess.engineStatus(context,result)
                 val os=LifecycleAccess.policy(context)
                 result.put("netbird", OverlaySnapshot.read()).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",os)
+                result.put("policyChecks",PolicyChecks.view(result.optLong("generation"),result.optLong("networkEpoch"),
+                    result.getJSONObject("policy").optLong("activationGeneration"),result.optBoolean("engineActive")))
                 // Legacy fields must not expose the old persisted sample as current.
                 for(key in listOf("alwaysOn","lockdown"))result.put(key,if(os.optBoolean("known"))os.getBoolean(key) else org.json.JSONObject.NULL)
             }

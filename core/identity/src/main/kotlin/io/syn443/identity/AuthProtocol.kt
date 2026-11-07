@@ -41,13 +41,20 @@ class IssuerState internal constructor(internal val keys:Map<String,RSAPublicKey
 @Serializable data class SessionReply(val session:DeviceSession,val time:TrustedTime,val authority:String,val keyThumbprint:String) {
     override fun toString()="SessionReply([redacted])"
 }
-data class PolicyReply(val envelope:String,val time:TrustedTime) {
+data class OverlayDeliveryReply(val envelope:String?,val consumed:Boolean,val time:TrustedTime) {
+    override fun toString()="OverlayDeliveryReply([redacted])"
+}
+data class PolicyReply(val envelope:String,val time:TrustedTime,val deviceSourceFetch:Boolean=false) {
     override fun toString()="PolicyReply([redacted])"
 }
 
 /** Immutable request must be persisted before dispatch; retries retain the exact body and ID. */
 @Serializable data class IdentityOperation(val path:String,val body:String) {
     override fun toString()="IdentityOperation([redacted])"
+    fun enrollmentCapabilities():List<String> {
+        require(path=="/v1/devices/enroll")
+        return Identity.objectJSON(body).getValue("capabilities").jsonArray.map {it.text()}
+    }
     init {
         require(path in setOf("/v1/devices/enroll","/v1/identity/devices/revoke","/v1/device/session/refresh","/v1/device/revoke"))
         require(body.toByteArray(Charsets.UTF_8).size<=8192)
@@ -72,8 +79,11 @@ data class PolicyReply(val envelope:String,val time:TrustedTime) {
     }
     companion object {
         val requiredCapabilities=listOf("engine-config.v1","tun.lease.v1","policy.keybound.v2")
+        // The base remains valid for old immutable retry bodies. New installs
+        // advertise implemented optional modules without rewriting old requests.
+        val supportedCapabilities=requiredCapabilities+"overlay.credentials.v1"
         fun enroll(key:ECPublicKey)=IdentityOperation("/v1/devices/enroll",Canonical.encode(buildJsonObject {
-            put("requestId",Identity.random());put("key",Identity.jwk(key));put("capabilities",JsonArray(requiredCapabilities.map(::JsonPrimitive)))
+            put("requestId",Identity.random());put("key",Identity.jwk(key));put("capabilities",JsonArray(supportedCapabilities.map(::JsonPrimitive)))
         }))
         fun cleanup(thumbprints:List<String>)=IdentityOperation("/v1/identity/devices/revoke",Canonical.encode(buildJsonObject {
             put("requestId",Identity.random());put("thumbprints",JsonArray(thumbprints.map(::JsonPrimitive)))
@@ -155,31 +165,79 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     private fun challenge(reply:Reply):String = requireNotNull(reply.single("dpop-nonce")).also {
         require(it.length in 1..256 && it.all {c->c.code in 33..126})
     }
-    private data class Delivered(val reply:Reply,val time:TrustedTime)
-    private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int=if(body==null)524_288 else 65_536):Delivered {
+    private data class Delivered(val reply:Reply,val time:TrustedTime,val nonce:String)
+    private class CapabilityApprovalRequired:Exception()
+    private class ActivationReportingUnavailable:Exception()
+    private class ControlPanelUnavailable:Exception()
+    private class DeviceSubscriptionUnavailable:Exception()
+    private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int=if(body==null)524_288 else 65_536):Delivered =
+        apiBytes(path,body?.toByteArray(Charsets.UTF_8),token,nonce,floor,scope,maxReply)
+    private fun apiBytes(path:String,body:ByteArray?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int):Delivered {
         require(token.length in 24..16_384 && token.all {it.code in 33..126})
-        val url=bootstrap.apiOrigin+path;val method=if(body==null)"GET" else "POST";val bytes=body?.toByteArray(Charsets.UTF_8)
+        val url=bootstrap.apiOrigin+path;val method=if(body==null)"GET" else "POST"
         var currentNonce=nonce
         for(attempt in 0..1) {
-            val limit=if(path=="/v1/chat/uploads/part")360_448 else if(path.startsWith("/v1/chat/"))32_768 else 8192
-            val start=elapsed();val proof=Identity.proof(key.publicKey,key::sign,method,url,floor.proofSecond(boot(),start),token,currentNonce,bytes,limit)
+            val limit=if(path==DeviceSubscription.RESULT_PATH)DeviceSubscription.MAX_FRAME else if(path=="/v1/chat/uploads/part")360_448 else if(path.startsWith("/v1/chat/"))32_768 else 8192
+            val start=elapsed();val proof=Identity.proof(key.publicKey,key::sign,method,url,floor.proofSecond(boot(),start),token,currentNonce,body,limit)
             val headers=linkedMapOf("Authorization" to "DPoP $token","DPoP" to proof)
-            if(body!=null)headers["Content-Type"]="application/json"
-            val reply=request(scope,method,url,headers,bytes,maxReply)
+            if(body!=null)headers["Content-Type"]=if(path==DeviceSubscription.RESULT_PATH)"application/octet-stream" else "application/json"
+            val reply=request(scope,method,url,headers,body,maxReply)
             if(reply.status==401 && attempt==0 && json(reply)["code"]?.text()=="use_dpop_nonce") {
                 currentNonce=challenge(reply);continue
             }
             if(reply.status==409 && json(reply)["code"]?.text()=="reauthentication_required")
                 throw AuthException(AuthFailure.REAUTHENTICATE)
-            status(reply,if(path.endsWith("/revoke"))204 else 200)
-            return Delivered(reply,observed(reply,start,floor))
+            if(path=="/v1/devices/enroll" && reply.status==409 && json(reply)["code"]?.text()=="capabilities_update_required")
+                throw CapabilityApprovalRequired()
+            if(path=="/v1/device/policy/status" && reply.status==404)throw ActivationReportingUnavailable()
+            if(path=="/v1/device/control-panel" && reply.status==404)throw ControlPanelUnavailable()
+            if(path==DeviceSubscription.CLAIM_PATH && reply.status==404)throw DeviceSubscriptionUnavailable()
+            status(reply,if(path.endsWith("/revoke") || path=="/v1/device/policy/status" || path==DeviceSubscription.RESULT_PATH ||
+                path==DeviceSubscription.CLAIM_PATH && reply.status==204)204 else 200)
+            return Delivered(reply,observed(reply,start,floor),currentNonce)
         }
         throw AuthException(AuthFailure.REAUTHENTICATE)
     }
     fun enroll(op:IdentityOperation,user:UserCredential,scope:IdentityScope):SessionReply=checked {
         require(op.path=="/v1/devices/enroll" && user.keyThumbprint==thumbprint && user.authority==authority && Identity.objectJSON(op.body).getValue("key")==Identity.jwk(key.publicKey))
-        val result=api(op.path,op.body,user.accessToken,"",user.time,scope)
+        val result=try {api(op.path,op.body,user.accessToken,"",user.time,scope)} catch(_:CapabilityApprovalRequired) {
+            val path="/v1/devices/capabilities"
+            val snapshot=api(path,null,user.accessToken,"",user.time,scope,8192)
+            val before=CapabilityNegotiation.snapshot(Policy.utf8(snapshot.reply.body))
+            val wanted=op.enrollmentCapabilities()
+            val operation=CapabilityNegotiation.operation("oidc/$authority/$thumbprint/"+Identity.hash(op.body.toByteArray(Charsets.UTF_8)),before,wanted)
+            if(operation!=null) {
+                val queued=api(path,operation.body,user.accessToken,snapshot.nonce,snapshot.time,scope,8192)
+                when(CapabilityNegotiation.response(Policy.utf8(queued.reply.body),operation)) {
+                    CapabilityRequestState.QUEUED->throw AuthException(AuthFailure.PENDING)
+                    CapabilityRequestState.REJECTED->throw AuthException(AuthFailure.CONFLICT)
+                    CapabilityRequestState.APPROVED->Unit
+                }
+            }
+            // A successful independent approval never replaces this original
+            // durable enrollment operation or accepts a device session itself.
+            api(op.path,op.body,user.accessToken,"",user.time,scope)
+        }
         SessionReply(session(result),result.time,authority,thumbprint)
+    }
+    fun negotiateCapabilities(current:SessionReply,implemented:List<String>,scope:IdentityScope):List<String> = checked {
+        bound(current)
+        if(current.time.window(boot(),elapsed()).upperMs>=current.session.accessUntilMs)throw AuthException(AuthFailure.REAUTHENTICATE)
+        val path="/v1/device/capabilities"
+        val observed=api(path,null,current.session.accessToken,current.session.nonce,current.time,scope,8192)
+        val before=CapabilityNegotiation.snapshot(Policy.utf8(observed.reply.body))
+        val operation=CapabilityNegotiation.operation("device/$authority/$thumbprint/${current.session.deviceId}/${current.session.generation}",before,implemented)
+            ?:return@checked before.capabilities
+        val reply=api(path,operation.body,current.session.accessToken,observed.nonce,observed.time,scope,8192)
+        when(CapabilityNegotiation.response(Policy.utf8(reply.reply.body),operation)) {
+            CapabilityRequestState.QUEUED->throw AuthException(AuthFailure.PENDING)
+            CapabilityRequestState.REJECTED->throw AuthException(AuthFailure.CONFLICT)
+            CapabilityRequestState.APPROVED->Unit
+        }
+        val confirmed=api(path,null,current.session.accessToken,reply.nonce,reply.time,scope,8192)
+        val after=CapabilityNegotiation.snapshot(Policy.utf8(confirmed.reply.body))
+        require(after.capabilities==CapabilityNegotiation.canonical(implemented))
+        after.capabilities
     }
     fun cleanup(op:IdentityOperation,user:UserCredential,scope:IdentityScope):TrustedTime=checked {
         require(op.path=="/v1/identity/devices/revoke" && user.keyThumbprint==thumbprint && user.authority==authority)
@@ -197,7 +255,13 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     }
     fun revoke(op:IdentityOperation,current:SessionReply,scope:IdentityScope):TrustedTime=checked {
         require(op.path=="/v1/device/revoke");bound(current)
-        api(op.path,op.body,current.session.accessToken,current.session.nonce,current.time,scope).time
+        // Logout can happen long after VPN Stop. A still-valid refresh lease
+        // permits one bounded RAM-only rotation before revocation. Retirement
+        // already erased protected storage; a lost response retains its owner
+        // tombstone instead of persisting or resurrecting new credentials.
+        val live=if(current.time.window(boot(),elapsed()).upperMs>=current.session.accessUntilMs)
+            refresh(IdentityOperation.refresh(),current,scope) else current
+        api(op.path,op.body,live.session.accessToken,live.session.nonce,live.time,scope).time
     }
     fun policy(current:SessionReply,scope:IdentityScope):PolicyReply=checked {
         bound(current)
@@ -207,7 +271,83 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
         val envelope=Policy.utf8(result.reply.body)
         val upper=result.time.window(boot(),elapsed()).upperMs
         Policy.verifyBound(envelope,bootstrap.roots,current.session.deviceId,thumbprint,upper)
-        PolicyReply(envelope,result.time)
+        val fetch=runCatching {result.reply.single("x-syn443-device-source-fetch")=="1"}.getOrDefault(false)
+        PolicyReply(envelope,result.time,fetch)
+    }
+    fun controlPanelUntilElapsed(current:SessionReply,scope:IdentityScope):Long=checked {
+        bound(current)
+        require(bootstrap.controlPanelOrigin.isNotEmpty() && current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val result=try {
+            api("/v1/device/control-panel",null,current.session.accessToken,current.session.nonce,current.time,scope,1024)
+        }catch(_:ControlPanelUnavailable){return@checked 0L}
+        require(result.reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+        val value=json(result.reply)
+        require(value.keys==setOf("schemaVersion","untilMs") && value.getValue("schemaVersion").number()==1L)
+        val until=value.getValue("untilMs").number()
+        val observedElapsed=elapsed()
+        val upper=result.time.window(boot(),observedElapsed).upperMs
+        require(until in 0L..minOf(current.session.accessUntilMs,upper+120_000))
+        if(until<=upper)0L else Math.addExact(observedElapsed,until-upper)
+    }
+    fun claimSubscription(current:SessionReply,scope:IdentityScope):DeviceSubscription.Claim=checked {
+        bound(current)
+        require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val reply=try {api(DeviceSubscription.CLAIM_PATH,null,current.session.accessToken,current.session.nonce,current.time,scope,65_536)}
+            catch(_:DeviceSubscriptionUnavailable){return@checked DeviceSubscription.Claim(null,false,current.time)}
+        if(reply.reply.status==204) {
+            require(reply.reply.body.isEmpty())
+            return@checked DeviceSubscription.Claim(null,true,reply.time)
+        }
+        require(reply.reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+        val lease=Canonical.json.decodeFromJsonElement<DeviceSubscription.Lease>(json(reply.reply)).also {it.validate()}
+        val upper=reply.time.window(boot(),elapsed()).upperMs
+        require(lease.until*1000 in (upper+1)..(upper+60_000))
+        DeviceSubscription.Claim(lease,true,reply.time)
+    }
+    fun submitSubscription(claim:DeviceSubscription.Claim,raw:ByteArray,current:SessionReply,scope:IdentityScope)=checked {
+        bound(current)
+        val lease=checkNotNull(claim.lease);require(claim.available)
+        val upper=claim.time.window(boot(),elapsed()).upperMs
+        require(upper<lease.until*1000 && upper<current.session.accessUntilMs)
+        val frame=lease.frame(raw)
+        try {
+            val reply=apiBytes(DeviceSubscription.RESULT_PATH,frame,current.session.accessToken,current.session.nonce,claim.time,scope,1024)
+            require(reply.reply.body.isEmpty())
+        } finally {frame.fill(0)}
+    }
+    /** Older servers may omit this endpoint. Reporting does not refresh or replace authority. */
+    fun reportActivation(report:DeviceActivationReport,current:SessionReply,scope:IdentityScope):Boolean=checked {
+        bound(current)
+        require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val result=try {
+            api("/v1/device/policy/status",report.body(),current.session.accessToken,current.session.nonce,current.time,scope,8192)
+        } catch(_:ActivationReportingUnavailable) {return@checked false}
+        require(result.reply.body.isEmpty())
+        true
+    }
+    /** A stable protected operation is persisted before dispatch. Every retry has
+     * a fresh proof; account, key, namespace and conservative time are local. */
+    fun overlay(operation:OverlayOperation,consume:Boolean,binding:OverlayCredentialBinding,
+        current:SessionReply,scope:IdentityScope):OverlayDeliveryReply=checked {
+        bound(current)
+        if(consume)require(operation.namespace==ManagedOverlay.namespace(binding.address))
+        else operation.requireBound(binding)
+        require(binding.address.serviceId==bootstrap.serviceId && binding.address.deviceId==current.session.deviceId && binding.keyThumbprint==thumbprint)
+        require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val result=api("/v1/device/overlay/"+(if(consume)"consume" else "fetch"),operation.body(),current.session.accessToken,current.session.nonce,current.time,scope,24_576)
+        require(result.reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+        val value=json(result.reply)
+        val consumed=value.getValue("consumed").jsonPrimitive.let {require(!it.isString);it.boolean}
+        if(consume) {
+            require(consumed && value.keys==setOf("consumed"))
+            OverlayDeliveryReply(null,true,result.time)
+        } else {
+            require(!consumed && value.keys==setOf("envelope","consumed"))
+            val envelope=value.getValue("envelope").text()
+            val time=result.time.window(boot(),elapsed())
+            OverlayCredentials.verify(envelope,bootstrap.roots,binding,time.lowerMs,time.upperMs).close()
+            OverlayDeliveryReply(envelope,false,result.time)
+        }
     }
     /** One bounded chunk/operation; the controller rechecks the account before every call. */
     fun chat(action:String,body:String,current:SessionReply,scope:IdentityScope):String=checked {

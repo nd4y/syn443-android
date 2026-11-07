@@ -19,9 +19,17 @@ tasks.jacocoTestCoverageVerification {
             "io.syn443.identity.TrustedTime", "io.syn443.identity.TrustedTime.Companion",
             "io.syn443.identity.IdentityOperation", "io.syn443.identity.IdentityOperation.Companion",
             "io.syn443.identity.LoginRecovery", "io.syn443.identity.LoginIntent", "io.syn443.identity.RegistrationTombstone",
-            "io.syn443.identity.LoginPayload", "io.syn443.identity.LoginPayload.Companion",
-            "io.syn443.identity.Assignments", "io.syn443.identity.AssignmentIdentity", "io.syn443.identity.AssignmentState", "io.syn443.identity.AssignmentPermit", "io.syn443.identity.ProvisioningRetry")
+            "io.syn443.identity.LoginPayload", "io.syn443.identity.LoginPayload.Companion", "io.syn443.identity.CapabilityNegotiation",
+            "io.syn443.identity.Assignments", "io.syn443.identity.AssignmentIdentity", "io.syn443.identity.AssignmentState", "io.syn443.identity.AssignmentPermit", "io.syn443.identity.ProvisioningRetry",
+            "io.syn443.identity.BootstrapTrust", "io.syn443.identity.AuthenticatedInvite",
+            "io.syn443.identity.InvitationProtocol", "io.syn443.identity.InvitationOperation", "io.syn443.identity.InvitationOperation.Companion",
+            "io.syn443.identity.InvitationState", "io.syn443.identity.InvitationPending",
+            "io.syn443.identity.ManagedOverlay", "io.syn443.identity.OverlayAddress",
+            "io.syn443.identity.OverlayCredentials", "io.syn443.identity.OverlayCredentialBinding", "io.syn443.identity.OverlaySetupSecret", "io.syn443.identity.OverlayOperation", "io.syn443.identity.OverlayEnrollment", "io.syn443.identity.OverlayEnrollments", "io.syn443.identity.OverlayAssignments")
         limit { counter = "LINE"; minimum = "0.90".toBigDecimal() }
     } }
 }
 tasks.check { dependsOn(tasks.jacocoTestReport, tasks.jacocoTestCoverageVerification) }
+
+// Keep evidence available even when the unchanged coverage gate rejects a build.
+tasks.jacocoTestCoverageVerification { mustRunAfter(tasks.jacocoTestReport) }

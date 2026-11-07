@@ -4,23 +4,47 @@ import io.syn443.policy.Check
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URI
+import java.net.InetAddress
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
 /** No redirects, credentials, response body or unbounded header storage. Default platform TLS trust. */
 class NetworkProbe(private val synthetic: Boolean = false,
     private val tls: SSLSocketFactory? = null,
-    private val resolve: (String) -> java.net.InetAddress = java.net.InetAddress::getByName) : Probe {
+    private val resolve: (String) -> List<InetAddress> = {InetAddress.getAllByName(it).toList()},
+    private val socketFactory: () -> Socket = {Socket()}) : Probe {
+    private fun connect(host:String,port:Int,scope:ProbeScope):Socket {
+        scope.enter(Stage.RESOLVE)
+        val answers=resolve(host).take(16).distinct()
+        if(answers.isEmpty())throw UnknownHostException()
+        val first=answers.first()
+        // Give the other family a chance before spending the bounded budget on
+        // several addresses from the unavailable family. No extra worker/thread.
+        val addresses=(listOfNotNull(first,answers.firstOrNull {it.address.size!=first.address.size})+answers).distinct().take(4)
+        for((index,address) in addresses.withIndex()) {
+            scope.requireActive()
+            val socket=socketFactory()
+            try {scope.attach(socket)} catch(error:Throwable) {runCatching {socket.close()};throw error}
+            try {
+                socket.soTimeout=3_000;scope.enter(Stage.CONNECT)
+                socket.connect(InetSocketAddress(address,port),if(index==addresses.lastIndex)3_000 else 500)
+                scope.requireActive();return socket
+            } catch(error:Throwable) {
+                scope.release(socket)
+                if(error !is java.io.IOException || index==addresses.lastIndex)throw error
+            }
+        }
+        throw SocketTimeoutException()
+    }
     override fun run(check: Check, scope: ProbeScope): Boolean {
-        val socket = Socket(); scope.attach(socket)
+        var socket:Socket?=null
         try {
-            scope.requireActive(); socket.soTimeout = 3_000
+            scope.requireActive()
             return when (check.type) {
                 "tcp_banner" -> {
-                    scope.enter(Stage.RESOLVE)
-                    val address = InetSocketAddress(resolve(check.target), check.port)
-                    scope.enter(Stage.CONNECT)
-                    socket.connect(address, 3_000)
+                    val transport=connect(check.target,check.port,scope);socket=transport
                     scope.requireActive()
                     val expected = check.expected.toByteArray(Charsets.US_ASCII)
                     val received = ByteArray(expected.size)
@@ -28,7 +52,7 @@ class NetworkProbe(private val synthetic: Boolean = false,
                     scope.enter(Stage.RESPONSE)
                     while (size < received.size) {
                         scope.requireActive()
-                        val n = socket.getInputStream().read(received, size, received.size - size)
+                        val n = transport.getInputStream().read(received, size, received.size - size)
                         if (n < 0) return false
                         size += n
                     }
@@ -39,14 +63,11 @@ class NetworkProbe(private val synthetic: Boolean = false,
                     val uri = URI(if (fake) "http://203.0.113.10/generate_204" else check.target)
                     require(uri.scheme == "https" || fake)
                     val port = if (uri.port > 0) uri.port else if (fake) 80 else 443
-                    scope.enter(Stage.RESOLVE)
-                    val address = InetSocketAddress(resolve(uri.host), port)
-                    scope.enter(Stage.CONNECT)
-                    socket.connect(address, 3_000)
+                    val connected=connect(uri.host,port,scope);socket=connected
                     scope.requireActive()
                     scope.enter(Stage.TLS)
-                    val transport = if (fake) socket else ((tls ?: SSLSocketFactory.getDefault() as SSLSocketFactory)
-                        .createSocket(socket, uri.host, port, true) as SSLSocket).apply {
+                    val transport = if (fake) connected else ((tls ?: SSLSocketFactory.getDefault() as SSLSocketFactory)
+                        .createSocket(connected, uri.host, port, true) as SSLSocket).apply {
                         soTimeout = 3_000
                         sslParameters = sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
                         startHandshake()
@@ -61,7 +82,7 @@ class NetworkProbe(private val synthetic: Boolean = false,
                 }
                 else -> false
             }
-        } finally { socket.close() }
+        } finally { socket?.let(scope::release) }
     }
 }
 

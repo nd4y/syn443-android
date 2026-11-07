@@ -16,3 +16,8 @@ Coordinator model: Start/Stop/NetworkChanged/Activate/EngineChanged increment re
 Stop wins later completion; comparison/commit is synchronized. Overflow rejects numeric changes; no counter wraps. Explicit Stop always clears desiredOn and active path, including at maximum generation; Start remains blocked.
 
 The implemented preview API is specified in v1/openapi.json and its result schema. In-process transitions are specified in ../docs/coordinator-transitions.md. All transport and schema limits apply together.
+
+`overlay-namespace-vectors.json` binds the server/Android isolated identity hash
+and canonical management origin. All inputs are public synthetic metadata; no
+setup key, SDK private key or live provider identifier is included. The vectors
+do not grant enrollment or implement managed NetBird activation.

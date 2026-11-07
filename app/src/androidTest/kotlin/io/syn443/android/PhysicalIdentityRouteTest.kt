@@ -57,6 +57,16 @@ class PhysicalIdentityRouteTest {
         rejected {route.resolve("synthetic.example.invalid")};rejected {route.check()}
         assertEquals(listOf("dns" to 2L),source.actions)
     }
+    @Test fun subscriptionRouteRequiresValidatedWifiAndNeverUsesCellular() {
+        val source=Networks()
+        val wifi=PhysicalIdentityRoute.capture(source,wifiOnly=true)
+        wifi.resolve("subscription.example.invalid")
+        assertEquals(listOf("dns" to 2L),source.actions)
+        source.values=source.values.map {if(it.handle==2L)it.copy(validated=false) else it}
+        rejected {wifi.check()}
+        rejected {PhysicalIdentityRoute.capture(source,wifiOnly=true)}
+        assertEquals(listOf("dns" to 2L),source.actions)
+    }
     @Test fun physicalIdentityRejectsMissingDuplicateAndOversizedInventory() {
         val source=Networks()
         for(values in listOf(emptyList(),source.values.map {it.copy(eligible=false)},

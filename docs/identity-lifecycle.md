@@ -60,3 +60,18 @@ Cancel immediately invalidates an in-memory command epoch in addition to the dur
 `LoginPayload` admits one phase-specific pending transaction, user credential or device session, bound to the public intent's generation/key/owner/device/session revision and trusted bootstrap. Its canonical encoding rejects omitted fields and type coercion. Android controller tests use isolated synthetic namespaces and real Keystore/RS256/ES256 verification. They exercise successful registration, same-device restart, exact retry after a lost enrollment reply, cancellation after a simulated server commit, fresh-owner orphan cleanup and online revoke. Separate emulator tests use the actual provider and callback Activity for browser reservation, controller death, invalid/error callback handling and unchanged VPN intent. The test transport factory has no IPC route and is limited to debug disposable emulators. These are not real external-browser or deployed control-plane evidence.
 
 The next cache stage connects registration to signed policy receipt and exact session refresh while VPN is Off. Its separate encrypted assignment journal, two-write receipt fence and remaining native handoff gates are described in [assigned-policy-handoff.md](assigned-policy-handoff.md).
+
+Additive module declarations after an APK update use [independently approved capability negotiation](capability-negotiation.md). Protected metadata preserves legacy bytes, refresh and assigned-policy ownership. Pending approval retains an existing lease; it does not grant a policy or restart the engine.
+
+## Logout after idle access expiry (new source, acceptance pending)
+
+An explicit logout may occur after the short device access token expired while
+its refresh lease remains valid. The bounded online retirement attempt first
+rotates that session in RAM, then sends the same revoke operation with the new
+access token, nonce and sender proof. Fresh access needs no extra rotation.
+Protected storage was already erased; renewed credentials are never persisted
+or published as a usable login/runtime view. A cancelled, expired, substituted
+or uncertain refresh cannot re-enroll or restore credentials. The private key is
+retired and the public recovery tombstone remains until an authorized outcome.
+Required JVM/Android cases cover both confirmed and lost-response retirement;
+actual server/device/provider cleanup remains a physical acceptance requirement.
