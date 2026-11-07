@@ -9,7 +9,7 @@ through ADB shell. It does not open a management port.
 | --- | --- |
 | `status` | VPN intent, current runtime and route status |
 | `logs` | Bounded technical event history; `--follow-seconds 60` emits changed snapshots as JSON Lines |
-| `diagnostic-bundle` | Redacted state, activation-check freshness and events; no peer names, profiles, config or credentials |
+| `diagnostic-bundle` | Redacted state, activation-check freshness, events, route totals and process counters; no peer names, profiles, config or credentials |
 | `routes-status`, `routes-check`, `routes-cancel` | Current results, request checks, or cancel; add `--route route-2` to check just one route |
 | `netbird-status`, `netbird-diagnose` | Overlay status or request diagnostics |
 | `vpn-start`, `vpn-stop`, `vpn-resume` | Submit a command to the durable VPN intent controller |

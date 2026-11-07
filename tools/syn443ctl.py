@@ -43,6 +43,7 @@ EVENT_CODES = {
     "required_route_unverified_or_failed", "retry_scheduled", "start_failed", "tcp_timeout", "tls_failed",
     "tls_timeout", "transport_eof", "user_stop", "vpn_permission_required", "vpn_permission_revoked",
 }
+ROUTE_STATES = {"off", "unavailable", "unverified", "checking", "working", "failed", "stale", "incomplete"}
 
 
 def invalid_constant(_):
@@ -156,7 +157,28 @@ def bundle(device):
     if isinstance(checks, dict) and type(checks.get("current")) is bool:
         safe["policyChecks"] = {"current": checks["current"], **numbers(checks, ("ageMs",))}
     # Do not copy status wholesale: it can include route labels and peer names.
-    return {"state": safe, "events": events(state), "collection": "bounded_debug_snapshot"}
+    health = state.get("routeHealth")
+    route_counts = {}
+    if isinstance(health, dict) and isinstance(health.get("routes"), list):
+        for row in health["routes"][:64]:
+            outcome = row.get("state") if isinstance(row, dict) else None
+            if isinstance(outcome, str) and outcome in ROUTE_STATES:
+                route_counts[outcome] = route_counts.get(outcome, 0) + 1
+    report = {"state": safe, "events": events(state), "routeCounts": route_counts,
+              "collection": "bounded_debug_snapshot"}
+    try:
+        resource = device.call("resources")
+        processes = resource.get("processes")
+        samples = []
+        if isinstance(processes, list):
+            for row in processes[:3]:
+                role = row.get("role") if isinstance(row, dict) else None
+                if role in ("ui", "controller", "engine"):
+                    samples.append({"role": role, **numbers(row, ("cpuTimeMs", "rssBytes", "threads", "fileDescriptors"))})
+        report["resources"] = {"processes": samples, **numbers(resource, ("sampleAgeMs", "sampledElapsedMs"))}
+    except ControlError as error:
+        report["resources"] = {"unavailable": error.code}
+    return report
 
 
 def emit(obj):

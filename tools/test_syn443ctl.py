@@ -34,17 +34,20 @@ class AdbControlTest(unittest.TestCase):
 
     def test_bundle_omits_peers_labels_and_free_form_fields(self):
         state = {"generation": 5, "phase": "Recovering", "desiredOn": True,
-                 "routeHealth": {"routes": [{"label": "synthetic route"}]}, "netbird": {"peers": ["synthetic peer"]},
+                 "routeHealth": {"routes": [{"label": "synthetic route", "state": "working"}]}, "netbird": {"peers": ["synthetic peer"]},
                  "policyChecks": {"current": True, "ageMs": 3, "target": "example.invalid"},
                  "events": [{"phase": "Recovering", "code": "network_changed", "sequence": 1, "note": "example.invalid"},
                             {"phase": "Online", "code": "private_unknown_value"}]}
-        with patch.object(syn443ctl.Device, "call", return_value=state):
+        resources = {"sampleAgeMs": 3, "processes": [{"role": "engine", "rssBytes": 4096, "command": "example.invalid"}]}
+        with patch.object(syn443ctl.Device, "call", side_effect=[state,resources]):
             bundle = syn443ctl.bundle(syn443ctl.Device("synthetic-device", 3))
         serialized = json.dumps(bundle)
         for excluded in ("example.invalid", "synthetic route", "synthetic peer", "private_unknown_value"):
             self.assertNotIn(excluded, serialized)
         self.assertEqual(bundle["events"][1]["code"], "redacted")
         self.assertTrue(bundle["state"]["policyChecks"]["current"])
+        self.assertEqual(bundle["routeCounts"], {"working": 1})
+        self.assertEqual(bundle["resources"]["processes"], [{"role": "engine", "rssBytes": 4096}])
 
     def test_bad_arguments_never_call_adb_and_output_a_json_error(self):
         with patch("syn443ctl.subprocess.run") as run, contextlib.redirect_stdout(io.StringIO()) as output:
