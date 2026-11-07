@@ -160,6 +160,31 @@ class ChecksTest {
             } finally { release.countDown() }
         }
     }
+    @Test fun oneAdmissionRetryUsesFreedCapacityAndRunsTheProbeOnlyOnce() {
+        ProbePool().use { pool ->
+            val entered = CountDownLatch(2)
+            val release = CountDownLatch(1)
+            val leftQueue = CountDownLatch(1)
+            val rejections = java.util.concurrent.atomic.AtomicInteger()
+            val probes = java.util.concurrent.atomic.AtomicInteger()
+            repeat(2) { pool.executor.submit { entered.countDown(); release.await() } }
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS))
+                pool.executor.submit { leftQueue.countDown() }
+                pool.executor.rejectedExecutionHandler = RejectedExecutionHandler { _, _ ->
+                    rejections.incrementAndGet()
+                    release.countDown()
+                    assertTrue(leftQueue.await(2, TimeUnit.SECONDS))
+                    throw RejectedExecutionException()
+                }
+                val job = CheckJob(pool, Probe { _, _ -> probes.incrementAndGet(); true })
+                assertEquals(listOf(true), job.run(listOf(check)).values())
+                assertEquals(1, rejections.get())
+                assertEquals(1, probes.get())
+                assertTrue(pool.executor.largestPoolSize <= 2)
+            } finally { release.countDown() }
+        }
+    }
     @Test fun cancellingQueuedProbeRemovesItWithoutNetworkAttribution() {
         ProbePool().use { pool ->
             val entered = CountDownLatch(2); val release = CountDownLatch(1)

@@ -45,6 +45,7 @@ class TunnelService : VpnService() {
     private var policyFetchRunning = false
     private var forcePolicyFetch = false
     private var lastPolicyCheck = -10_000L
+    private var nextFastPolicyAdmission = 0L
     @Volatile private var runningConfigHash = ""
     private var runningHasSetup=false
     private var runningOverlayMode=""
@@ -513,6 +514,7 @@ class TunnelService : VpnService() {
         retire(true)
     }
     private fun probe() {
+        if (policyJob != null && internetHealthy) return
         if (healthJob != null || !ready || network == null || System.currentTimeMillis() < store.checkpoint().nextWallMs) return
         val remaining = 5_000 - (SystemClock.uptimeMillis() - lastProbe)
         if (lastProbe > 0 && remaining > 0) {
@@ -711,6 +713,7 @@ class TunnelService : VpnService() {
         }
         if (android.os.SystemClock.elapsedRealtime() - lastPolicyCheck < 10_000) return
         lastPolicyCheck = android.os.SystemClock.elapsedRealtime()
+        if (internetHealthy) { healthJob?.cancel(); healthJob = null }
         val job = PolicyChecks(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish") && store.read().optBoolean("testHealth")); policyJob = job
         val generation = store.checkpoint().generation; val activation = d.journal.activationGeneration
         val currentEpoch = epoch; val session = token
@@ -722,6 +725,15 @@ class TunnelService : VpnService() {
                 PolicyChecks.record(batch,generation,currentEpoch,activation)
                 if (!batch.complete) {
                     store.event(store.read().optString("phase"), "policy_checks_" + checkNotNull(batch.incompleteOutcome).name.lowercase(java.util.Locale.ROOT), epoch)
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now >= nextFastPolicyAdmission && batch.observations.any {
+                        it.failure == io.syn443.health.Failure.WORKER_REJECTED || it.failure == io.syn443.health.Failure.WORKER_START_TIMEOUT
+                    }) {
+                        // One earlier admission attempt per normal interval. The
+                        // candidate still needs all checks before its original deadline.
+                        nextFastPolicyAdmission = now + 10_000
+                        lastPolicyCheck = minOf(lastPolicyCheck, now - 8_000)
+                    }
                     return@post
                 }
                 val results = batch.values()

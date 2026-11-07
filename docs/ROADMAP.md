@@ -33,10 +33,11 @@ native route gates and final storage fencing; physical acceptance remains separa
 
 ## M3 - engines, sources and administration (partial foundation)
 Embedded engine adapters exist. The control plane has one scoped Remnawave API
-resource and can compile approved network layers into device policy. Device
-subscription fetch, complete protocol/chain acceptance, full managed settings,
-native editing and full administration remain open. Multiple Remnawave/x-ui/3x-ui
-remain extension contracts.
+resource and can compile approved network layers into device policy. Addressed
+device subscription fetch has a Wi-Fi implementation; end-to-end and physical
+acceptance remain open. Complete protocol/chain acceptance, full managed
+settings, native editing and full administration remain open. Multiple
+Remnawave/x-ui/3x-ui remain extension contracts.
 
 ## M4 - autonomous routing and support (partial)
 Reference ranking, bounded per-target checks and a lazy graph frontier exist.

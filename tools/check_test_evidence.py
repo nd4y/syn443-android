@@ -57,7 +57,8 @@ if mode=="policy":
 if mode=="health":
     assert {('io.syn443.health.ChecksTest',name) for name in {
         'positionalDiagnosticsKeepEachFailureSeparateFromLaterSuccessOrMismatch',
-        'checksNeverStartedDoNotInheritAStageOrNetworkFailure'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required per-check diagnostic cases missing'
+        'checksNeverStartedDoNotInheritAStageOrNetworkFailure',
+        'oneAdmissionRetryUsesFreedCapacityAndRunsTheProbeOnlyOnce'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required per-check diagnostic cases missing'
     required={('io.syn443.health.AddressFallbackTest',name) for name in {
         'unavailableFirstFamilyFallsBackWithoutExtraWorkersOrLeakedSockets',
         'connectionFailureTriesOnlyFourDistinctAddressesAndKeepsFailureAttribution',

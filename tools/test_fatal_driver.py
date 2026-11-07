@@ -1,8 +1,17 @@
 import unittest
-from run_vpn_fatal import native_crash_matches, await_native_crash
+from run_vpn_fatal import native_crash_matches, await_native_crash, scoped_libc_abort_matches
 
 
 class NativeCrashEvidenceTest(unittest.TestCase):
+    def test_api29_libc_record_requires_its_real_owner_and_exact_signal(self):
+        raw=(b'11-07 13:58:41.558  42  99 F libc    : Fatal signal 6 (SIGABRT), '
+             b'code -6 (SI_TKILL) in tid 99 (native-engine), pid 42 (.android:engine)\n')
+        self.assertTrue(scoped_libc_abort_matches(raw,'42'))
+        self.assertFalse(scoped_libc_abort_matches(raw,'99'))
+        self.assertFalse(scoped_libc_abort_matches(raw.replace(b'pid 42',b'pid 21'),'42'))
+        self.assertFalse(scoped_libc_abort_matches(raw.replace(b'F libc',b'I libc'),'42'))
+        self.assertFalse(scoped_libc_abort_matches(raw.replace(b'SIGABRT',b'SIGSEGV'),'42'))
+
     def test_exact_owner_and_abort_signal_are_required(self):
         raw=b'DEBUG: pid: 42, tid: 42 >>> synthetic <<<\nDEBUG: signal 6 (SIGABRT)\n'
         self.assertTrue(native_crash_matches(raw,'42'))

@@ -91,6 +91,21 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
         }
         return Batch(observations.map { it.outcome }, observations)
     }
+    private fun submit(check: Check, scope: ProbeScope, deadline: Long): Future<Boolean> {
+        val task = Callable { scope.begin(); probe.run(check, scope) }
+        return try {
+            pool.executor.submit(task)
+        } catch (first: RejectedExecutionException) {
+            // A retiring task may release a slot immediately after rejection.
+            // Retry only admission, before any probe has run, within this check's time.
+            if (cancelled.get()) throw CancellationException()
+            if (pool.executor.isShutdown || deadline - clockMillis() <= 50) throw first
+            Thread.sleep(50)
+            if (cancelled.get()) throw CancellationException()
+            if (clockMillis() >= deadline) throw first
+            pool.executor.submit(task)
+        }
+    }
     private fun execute(check: Check, waitMillis: Long, deadline: Long): CheckObservation {
         if (waitMillis <= 0) return CheckObservation(Outcome.DEADLINE)
         val checkDeadline = clockMillis() + waitMillis
@@ -100,10 +115,10 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
         fun failed(value: Failure) { checkFailure = value; failure = value; failureStage = scope.stage }
         var future: Future<Boolean>? = null
         val outcome = try {
-            future = pool.executor.submit<Boolean> { scope.begin(); probe.run(check, scope) }
+            future = submit(check, scope, minOf(checkDeadline, deadline))
             pending.set(future)
             if (cancelled.get()) { scope.cancel(); future.cancel(true) }
-            val value = future.get(waitMillis, TimeUnit.MILLISECONDS)
+            val value = future.get((minOf(checkDeadline, deadline) - clockMillis()).coerceAtLeast(0), TimeUnit.MILLISECONDS)
             when {
                 cancelled.get() -> Outcome.CANCELLED
                 clockMillis() >= deadline -> Outcome.DEADLINE
