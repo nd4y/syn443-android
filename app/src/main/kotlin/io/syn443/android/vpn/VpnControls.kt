@@ -213,15 +213,18 @@ fun VpnControls(consentGeneration: Long = -1) {
             }
         }
         Button(onClick = {
-            exitsBusy = true
-            scope.launch {
-                exits = withContext(Dispatchers.IO) { runCatching {
-                    val result = context.contentResolver.call(controlUri, "engine-exits", null, null)
-                    check(result?.getBoolean("ok") == true)
-                    JSONObject(checkNotNull(result?.getString("json")))
-                }.getOrNull() }
-                exitsBusy = false
-                if (exits == null) message = "Не удалось получить причины завершения"
+            if (Build.VERSION.SDK_INT < 30) {
+                exits = EngineExitDiagnostics.snapshot(context)
+            } else {
+                exitsBusy = true
+                scope.launch {
+                    exits = withContext(Dispatchers.IO) { runCatching {
+                        val result = context.contentResolver.call(controlUri, "engine-exits", null, null)
+                        check(result?.getBoolean("ok") == true)
+                        JSONObject(checkNotNull(result?.getString("json")))
+                    }.getOrElse { EngineExitDiagnostics.unavailable() } }
+                    exitsBusy = false
+                }
             }
         }, enabled = !exitsBusy, modifier = Modifier.testTag("exit-refresh")) { Text("Причины завершения VPN") }
         exits?.let { report ->

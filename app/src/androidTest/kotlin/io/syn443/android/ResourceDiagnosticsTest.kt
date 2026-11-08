@@ -27,7 +27,10 @@ class ResourceDiagnosticsTest {
     @Test fun engineExitHistoryHasVisibleOnDemandControls() {
         compose.onNodeWithTag("exit-refresh").performScrollTo().performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("exit-status").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("exit-status").performScrollTo().assertIsDisplayed()
+        val result = compose.onNodeWithTag("exit-status").performScrollTo().assertIsDisplayed()
+        if (android.os.Build.VERSION.SDK_INT < 30) {
+            result.assertTextEquals("Эта версия Android не предоставляет историю завершений")
+        }
     }
     @Test fun resourceRequestsAreBoundedRedactedAndDoNotChangeIntent() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

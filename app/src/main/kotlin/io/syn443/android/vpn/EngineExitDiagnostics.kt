@@ -19,6 +19,7 @@ object EngineExitDiagnostics {
         }
     }
     private fun empty(state: String) = JSONObject().put("schemaVersion", 1).put("state", state).put("exits", JSONArray())
+    internal fun unavailable() = empty("unavailable")
     internal fun render(process: String, now: Long, queryPid: Int? = null, source: () -> List<Observation>): JSONObject {
         val result = empty("available")
         return try {
@@ -45,6 +46,6 @@ object EngineExitDiagnostics {
                 output.put(entry)
             }
             result
-        } catch (_: Exception) { empty("unavailable") }
+        } catch (_: Exception) { unavailable() }
     }
 }
