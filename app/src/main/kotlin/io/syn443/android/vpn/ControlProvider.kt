@@ -268,6 +268,9 @@ class ControlProvider : ContentProvider() {
             if (method == "status") {
                 LifecycleAccess.engineStatus(context,result)
                 result.put("localConfigControl",io.syn443.android.BuildConfig.DEBUG)
+                if (result.optString("reason") == "policy_waiting_restart_budget" && result.optBoolean("desiredOn")) {
+                    result.put("policyRetryAt", Recovery.replacementReadyAt(store.checkpoint(result), System.currentTimeMillis()))
+                }
                 val os=LifecycleAccess.policy(context)
                 result.put("netbird", OverlaySnapshot.read()).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",os)
                 result.put("policyChecks",PolicyChecks.view(result.optLong("generation"),result.optLong("networkEpoch"),

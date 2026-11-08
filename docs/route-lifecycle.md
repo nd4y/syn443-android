@@ -122,6 +122,15 @@ verify supported reboot/update/force-stop/system-policy behavior and real extern
 internal traffic. LTE, natural unplugged battery/Doze/endurance and complete M1-M5
 acceptance are explicitly outside this stage. Green CI is not physical acceptance.
 
+### First policy while restart budget is occupied
+
+The first enrolled assignment keeps the TUN closed to user traffic until a
+valid activation permit is ready. If local recovery history cannot reserve
+both a start and rollback, the controller reports the earliest retry time and
+uses the bounded hostless wake interval. The durable budget and the required
+checks are preserved. A prepared assignment with an expired or withdrawn
+lease remains blocked.
+
 ### Physical network preference
 
 The network candidate compares the platform's validation and captive-portal
