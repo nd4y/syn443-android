@@ -182,9 +182,12 @@ class RouteSnapshotTest {
     @Test fun savedEngineCheckpointCannotClaimAnUnownedLiveProcess() {
         fun saved()=JSONObject().put("engineActive",true).put("desiredOn",true)
             .put("generation",7).put("phase","Recovering")
-        val absent=LifecycleAccess.engineStatus(saved(),false,false)
+        val stopped=JSONObject().put("engineActive",false).put("desiredOn",false)
+        val absent=LifecycleAccess.engineStatus(stopped,false,false)
         assertFalse(absent.getBoolean("engineActive"));assertTrue(absent.getBoolean("engineStateKnown"))
-        for(present in listOf(true,null)) {
+        // A saved start remains unresolved until retirement clears its checkpoint,
+        // even if the old process has already disappeared.
+        for(present in listOf(true,false,null)) {
             val unknown=LifecycleAccess.engineStatus(saved(),false,present)
             assertTrue(unknown.isNull("engineActive"));assertFalse(unknown.getBoolean("engineStateKnown"))
             assertTrue(unknown.getBoolean("desiredOn"));assertEquals(7,unknown.getInt("generation"))

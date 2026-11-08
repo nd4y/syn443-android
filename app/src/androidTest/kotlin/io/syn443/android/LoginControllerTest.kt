@@ -326,7 +326,10 @@ class LoginControllerTest {
         context.contentResolver.call("content://io.syn443.control".toUri(),"disconnect",null,null)
         until {
             val raw=context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null)?.getString("json")
-            raw!=null && org.json.JSONObject(raw).let {!it.optBoolean("desiredOn") && !it.optBoolean("engineActive")}
+            raw!=null && org.json.JSONObject(raw).let {
+                it.optString("phase")=="Off" && !it.optBoolean("desiredOn") &&
+                    it.optBoolean("engineStateKnown") && !it.getBoolean("engineActive")
+            }
         }
         val f=Fixture(server=Server(controlPanelOrigin),beforeQueue=beforeQueue,reportVpnOn=reportVpnOn)
         var failure:Throwable?=null
