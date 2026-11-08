@@ -6,7 +6,7 @@ from run_route_lifecycle import direct_boot_diagnostics, locked_boot_boundary, r
 class ForegroundResumeBoundaryTest(unittest.TestCase):
     before={'configRevision':'synthetic','generation':7}
     def check(self,changes=None,native=''):
-        snapshot=dict(self.before,engineActive=False,desiredOn=True,resumeRequired=False)
+        snapshot=dict(self.before,engineActive=False,engineStateKnown=True,desiredOn=True,resumeRequired=False)
         snapshot.update(changes or {})
         with patch('run_route_lifecycle.call',return_value=snapshot),patch('run_route_lifecycle.pid',return_value=native):
             return resume_blocked(self.before)
@@ -14,6 +14,9 @@ class ForegroundResumeBoundaryTest(unittest.TestCase):
         self.assertFalse(self.check())
     def test_explicit_resume_gate_completes_without_connect(self):
         self.assertTrue(self.check({'resumeRequired':True}))
+    def test_unresolved_engine_does_not_complete_the_resume_boundary(self):
+        for resume in (False, True):
+            self.assertFalse(self.check({'engineActive':None,'engineStateKnown':False,'resumeRequired':resume}))
     def test_native_owner_during_wait_is_an_immediate_failure(self):
         for changes,native in [({},'123'),({'engineActive':True},'')]:
             with self.subTest(changes=changes,native=native),self.assertRaisesRegex(AssertionError,'native owner|engine checkpoint'):

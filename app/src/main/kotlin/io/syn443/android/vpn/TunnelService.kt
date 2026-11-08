@@ -329,6 +329,15 @@ class TunnelService : VpnService() {
         try {
             val n = checkNotNull(network)
             val properties = checkNotNull(connectivity.getLinkProperties(n))
+            // The worker has validated a first assignment but has not published
+            // its activation permit yet. Keep traffic blocked without treating
+            // this bounded preparation as an invalid lease.
+            if (policies.awaitingInitialPermit()) {
+                if (store.effectCurrent(cp.generation) { blackhole() }) {
+                    phase("Connecting", "policy_gate_pending", cp.generation)
+                }
+                return
+            }
             val raw = try { store.config() } catch (_: Exception) {
                 blackhole(); phase("BlockedByPolicy", "policy_lease_time_or_scope_invalid", cp.generation); return
             }

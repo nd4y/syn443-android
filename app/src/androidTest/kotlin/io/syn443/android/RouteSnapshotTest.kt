@@ -193,6 +193,15 @@ class RouteSnapshotTest {
             assertTrue(unknown.getBoolean("desiredOn"));assertEquals(7,unknown.getInt("generation"))
             assertEquals("Recovering",unknown.getString("phase"))
         }
+        // Explicit resume fences new starts. A stale checkpoint no longer
+        // prevents reporting inactive once the process is confirmed absent.
+        val fenced = LifecycleAccess.engineStatus(saved().put("resumeRequired", true), false, false)
+        assertFalse(fenced.getBoolean("engineActive"));assertTrue(fenced.getBoolean("engineStateKnown"))
+        assertTrue(fenced.getBoolean("desiredOn"))
+        for (present in listOf(true, null)) {
+            val unresolved = LifecycleAccess.engineStatus(saved().put("resumeRequired", true), false, present)
+            assertTrue(unresolved.isNull("engineActive"));assertFalse(unresolved.getBoolean("engineStateKnown"))
+        }
         val live=LifecycleAccess.engineStatus(saved(),true,true)
         assertTrue(live.getBoolean("engineActive"));assertTrue(live.getBoolean("engineStateKnown"))
         val readyAfterHandshake=LifecycleAccess.engineStatus(JSONObject().put("engineActive",false),true,null)

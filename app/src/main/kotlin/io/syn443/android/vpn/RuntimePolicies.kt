@@ -28,6 +28,12 @@ internal class RuntimePolicies(private val context:Context,
             Snapshot(true,true,view.state.journal,view.state.applyDeadlineElapsed,ticket=login.assignedRuntime.ticket(s))
         }}.getOrElse {Snapshot(true,true,Journal(phase="blocked",reason="assigned_policy_unavailable"))}
     }
+    fun awaitingInitialPermit(): Boolean {
+        val state = read()
+        return state.enrolled && state.journal.phase == "prepared" && state.journal.active == null &&
+            allowed(state.journal.candidate, state) != null
+    }
+
     fun config(original:()->String?):String? = if(login.ownsPolicy())login.assignedRead {login.assignedRuntime.config(it)} else legacy.config(original())
     fun internetChecks(hash:String,synthetic:Boolean=false):List<io.syn443.policy.Check> {
         val d=read()

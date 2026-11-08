@@ -37,11 +37,13 @@ def resume_blocked(before):
     # Observe that completion, while failing immediately on any unsafe state.
     snapshot=call('status')
     assert not pid(':engine'),'Unexpected native owner after Force stop/update'
-    assert snapshot['engineActive'] is False,'Saved engine checkpoint leaked into current status'
+    assert snapshot['engineActive'] is not True, 'Saved engine checkpoint leaked into current status'
     assert snapshot['configRevision']==before['configRevision'],'Configuration changed after Force stop/update'
     assert snapshot['generation']==before['generation'],'Intent generation changed after Force stop/update'
     assert snapshot['desiredOn'] is True,'Desired intent changed after Force stop/update'
-    return snapshot.get('resumeRequired') is True
+    if snapshot.get('resumeRequired') is not True:
+        return False
+    return snapshot['engineActive'] is False and snapshot.get('engineStateKnown') is True
 
 
 def locked_boot_boundary():
