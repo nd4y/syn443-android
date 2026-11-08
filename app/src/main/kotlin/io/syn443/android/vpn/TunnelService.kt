@@ -23,6 +23,7 @@ import io.syn443.android.MainActivity
 import io.syn443.android.R
 import io.syn443.recovery.PhysicalCandidate
 import io.syn443.recovery.PhysicalNetworkSelection
+import io.syn443.recovery.PhysicalProbeContext
 import io.syn443.recovery.PhysicalTransport
 import io.syn443.recovery.Recovery
 import io.syn443.host.HostFence
@@ -83,10 +84,9 @@ class TunnelService : VpnService() {
     private data class PendingFailover(val scope: RouteScope, val receipt: String, val decision: RouteDecisionStamp)
     private var pendingFailover: PendingFailover? = null
     private fun routeScope() = token?.let {RouteScope(boundGeneration,epoch,policies.read().journal.activationGeneration,it,runningConfigHash)}
-    private fun failoverWifi():Boolean=network?.let(connectivity::getNetworkCapabilities)?.let {
-        it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
-            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-    }==true
+    private fun failoverWifi(): Boolean = probeContext?.network?.let {
+        it.transport == PhysicalTransport.WIFI && it.validated
+    } == true
     private fun managedFailoverPolicy():Payload? {
         if(!failoverWifi())return null
         val state=policies.read()
@@ -109,8 +109,7 @@ class TunnelService : VpnService() {
             else -> managedFailoverPolicy()
         }
         val deferCoolingReserves=activePolicy?.requiredCapabilities?.contains(Policy.RESERVE_PROBE_COOLDOWN)==true
-        val meteredMaintenance=activePolicy!=null && network?.let(connectivity::getNetworkCapabilities)
-            ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)!=true
+        val meteredMaintenance = activePolicy != null && probeContext?.network?.metered != false
         RouteSnapshot.request(scope,only,force || activation || confirmation,deferCoolingReserves,
             validatedManagedWifi=validatedPolicy!=null,meteredMaintenance=meteredMaintenance)
             ?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
@@ -128,20 +127,48 @@ class TunnelService : VpnService() {
     private var retirementAt = 0L
     private var latestStartId = 0
     private var startNetworkEpoch = -1L
-    // onLost can precede removal from ConnectivityManager.allNetworks/capabilities.
-    // Never select a network after its explicit loss notification.
-    private val lostNetworks = linkedSetOf<Network>()
+    private class NetworkObservation {
+        var candidate: PhysicalCandidate? = null
+        var linkSignature: String? = null
+    }
+    private val networkObservations = linkedMapOf<Network, NetworkObservation>()
+    private var probeContext: PhysicalProbeContext? = null // RAM only. Never log link properties.
 
+    // Use the ordered callback values. A synchronous snapshot can skip a
+    // validation loss and reuse pre-loss evidence after validation returns.
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) { handler.post { lostNetworks.remove(network); refreshNetwork() } }
-        override fun onLost(network: Network) { handler.post {
-            lostNetworks.add(network)
-            while (lostNetworks.size > 64) lostNetworks.remove(lostNetworks.first())
+        override fun onAvailable(network: Network) {
+            if (networkObservations.size < 2 * PhysicalNetworkSelection.MAX_CANDIDATES) {
+                networkObservations.putIfAbsent(network, NetworkObservation())
+            }
+        }
+        override fun onLost(network: Network) {
+            if (networkObservations.remove(network) != null) refreshNetwork()
+        }
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+            val observation = networkObservations[network] ?: return
+            observation.candidate = physicalCandidate(network, caps)
             refreshNetwork()
-        } }
-        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = changed()
-        override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) = changed()
-        private fun changed() { handler.post { refreshNetwork() } }
+        }
+        override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
+            val observation = networkObservations[network] ?: return
+            observation.linkSignature = properties.interfaceName?.let { properties.toString() }
+            refreshNetwork()
+        }
+    }
+
+    private fun physicalCandidate(network: Network, caps: NetworkCapabilities): PhysicalCandidate? {
+        if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) ||
+            !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return null
+        val transport = when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> PhysicalTransport.WIFI
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> PhysicalTransport.CELLULAR
+            else -> PhysicalTransport.OTHER
+        }
+        return PhysicalCandidate(network.networkHandle, transport,
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
+            !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED))
     }
     override fun onCreate() {
         super.onCreate()
@@ -161,7 +188,7 @@ class TunnelService : VpnService() {
         retryHeavy = store.read().optBoolean("engineActive") || store.checkpoint().attempt > 0
         terminateOwned() // A previous controller may have died with its host frozen.
         connectivity.registerNetworkCallback(NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(), networkCallback)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(), networkCallback, handler)
         registered = true
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -227,60 +254,56 @@ class TunnelService : VpnService() {
     }
     private fun refreshNetwork() {
         if (destroyed) return
-        val all=connectivity.allNetworks
-        val incumbent=network?.takeIf {it in all}
-        val ordered=sequenceOf(incumbent).filterNotNull()+all.asSequence().filter {it!=incumbent}
-        val candidates = ordered.mapNotNull { n ->
-            if(n in lostNetworks)return@mapNotNull null
-            val caps=connectivity.getNetworkCapabilities(n) ?: return@mapNotNull null
-            if(!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) ||
-                !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
-                connectivity.getLinkProperties(n)?.interfaceName==null)return@mapNotNull null
-            val transport=when {
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> PhysicalTransport.WIFI
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> PhysicalTransport.CELLULAR
-                else -> PhysicalTransport.OTHER
-            }
-            n to PhysicalCandidate(n.networkHandle,transport,
-                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
-                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
-                !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED))
+        val incumbent = network
+        val ordered = sequenceOf(incumbent).filterNotNull() + networkObservations.keys.asSequence().filter { it != incumbent }
+        val candidates = ordered.mapNotNull { candidateNetwork ->
+            val observation = networkObservations[candidateNetwork] ?: return@mapNotNull null
+            val candidate = observation.candidate ?: return@mapNotNull null
+            val signature = observation.linkSignature ?: return@mapNotNull null
+            candidateNetwork to PhysicalProbeContext(candidate, signature)
         }.take(PhysicalNetworkSelection.MAX_CANDIDATES).toList()
-        val handle=PhysicalNetworkSelection.choose(candidates.map {it.second},incumbent?.networkHandle,internetHealthy)
-        val selected=candidates.firstOrNull {it.second.handle==handle}?.first
-        val waiting=if(selected==null && candidates.any {it.second.captive})"captive_portal" else "network_unavailable"
-        val signature = selected?.let { connectivity.getLinkProperties(it)?.toString() }
-        if (selected == network && signature == linkSignature) {
+        val handle = PhysicalNetworkSelection.choose(candidates.map { it.second.network }, incumbent?.networkHandle, internetHealthy)
+        val (selected, context) = candidates.firstOrNull { it.second.network.handle == handle } ?: (null to null)
+        val waiting = if (selected == null && candidates.any { it.second.network.captive }) "captive_portal" else "network_unavailable"
+        if (context == probeContext) {
             if(selected==null && networkWaitReason!=waiting) {
                 networkWaitReason=waiting
                 if(store.checkpoint().desiredOn)phase("NoNetwork",waiting)
             }
             return
         }
+        val pathChanged = PhysicalProbeContext.pathChanged(probeContext, context)
         LoginController.get(this).cancelOptionalNetworkWork()
         // Use the same outer lock as the final enrolled activation commit. A queued
         // encrypted write cannot confirm proof after a newer network epoch publishes.
         store.serialized {
-            linkSignature = signature
+            probeContext = context
             networkWaitReason=waiting
             network = selected
             epoch++
             internetHealthy=false
+            pendingFailover = null
             RouteSnapshot.cancelled(true)
             token?.let {runCatching {host?.cancelRouteChecks(it)}}
             policyJob?.cancel()
             healthJob?.cancel(); healthJob = null
             stableSince = 0; successes = 0
-            store.update { value -> value.put("networkEpoch", epoch); store.put(value, Recovery.networkOpportunity(store.checkpoint(value), System.currentTimeMillis())) }
+            store.update { value ->
+                value.put("networkEpoch", epoch)
+                if (pathChanged) store.put(value, Recovery.networkOpportunity(store.checkpoint(value), System.currentTimeMillis()))
+            }
         }
         if (selected == null) { RouteSnapshot.owner(null);phase("NoNetwork", networkWaitReason); return }
-        setUnderlyingNetworks(arrayOf(selected))
-        val properties = connectivity.getLinkProperties(selected)
-        val name = properties?.interfaceName
-        val index = name?.let { runCatching { NetworkInterface.getByName(it)?.index }.getOrNull() }
-        if (ready && name != null && index != null) {
-            runCatching { host?.networkChanged(checkNotNull(token), name, index) }.onFailure { failed("network_update_failed") }
-            phase("Recovering", "network_changed")
+        if (pathChanged) {
+            setUnderlyingNetworks(arrayOf(selected))
+            val name = connectivity.getLinkProperties(selected)?.interfaceName
+            val index = name?.let { runCatching { NetworkInterface.getByName(it)?.index }.getOrNull() }
+            if (ready && name != null && index != null) {
+                runCatching { host?.networkChanged(checkNotNull(token), name, index) }.onFailure { failed("network_update_failed") }
+            }
+        }
+        if (ready) {
+            phase("Recovering", if (pathChanged) "network_changed" else "network_capabilities_changed")
             RouteSnapshot.owner(routeScope())
             checkRoutes()
             probe()
@@ -384,7 +407,6 @@ class TunnelService : VpnService() {
     private var pendingConfig: PendingConfig? = null
     private var pendingLeaseDeadline = 0L
     private var appliedLeaseDeadline = -1L
-    private var linkSignature: String? = null // RAM only; never log physical addresses.
     private val platform = object : IPlatform.Stub() {
         override fun physicalInterfaces(session: String): String {
             check(session == token && Recovery.current(store.checkpoint(), boundGeneration))

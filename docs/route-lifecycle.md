@@ -130,8 +130,13 @@ does not replace a validated network or the current VPN path with successful
 checks. Validated Wi-Fi is preferred, equal choices retain their current
 owner, and lost networks cannot lend their evidence to a replacement. The
 selector does not infer trusted home Wi-Fi or restricted cellular access
-from a transport. JVM cases cover candidate order and loss; physical
-handover and the four-mode policy matrix require separate acceptance.
+from a transport. The controller consumes ordered Android callback values for
+capabilities and link properties. Loss of validation or a metering change on
+the same network advances the probe epoch and cancels pending measurements.
+If the handle and link properties are unchanged, the controller keeps the
+native network binding and does not advance the recovery budget. JVM cases
+cover ranking, loss and the distinction between capability and path changes.
+Physical handover and the four-mode policy matrix require separate acceptance.
 
 ### Route report delivery
 

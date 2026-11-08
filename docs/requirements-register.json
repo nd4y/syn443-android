@@ -829,7 +829,7 @@
       "evidence": [
         "docs/route-lifecycle.md#physical-network-preference"
       ],
-      "implementationScope": "Physical network handles, selected-owner stickiness and existing network epoch fences.",
+      "implementationScope": "Physical network handles, selected-owner stickiness and probe epoch fences for handle, link, validation and metering changes.",
       "remainingScope": "Full unknown-transport policy, actual multi-transport handover and per-mode routing."
     },
     {
