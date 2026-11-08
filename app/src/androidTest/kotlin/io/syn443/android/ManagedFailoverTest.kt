@@ -30,6 +30,32 @@ class ManagedFailoverTest {
     @Test fun conservativeRevisionRequiresThirdCurrentRouteBatch() =
         assertSelection(FailoverAlgorithm.CONFIRMED)
 
+    @Test fun internalSelectorAcceptsExplicitDestinationsAndRejectsScopeWidening() {
+        fun settings(): JSONObject = JSONObject(config)
+        fun rule(value: JSONObject): JSONObject = value.getJSONObject("route").getJSONArray("rules").getJSONObject(0)
+        val scoped = settings()
+        rule(scoped).put("invert", false).put("domain_suffix", ".home.example.invalid")
+            .put("ip_cidr", JSONArray(listOf("192.0.2.0/24", "2001:db8::/32"))).put("port", 22)
+        EngineConfig.validate(scoped.toString())
+
+        val unsafe: List<(JSONObject) -> Unit> = listOf(
+            { rule(it).put("invert", true) },
+            { rule(it).put("type", "logical").put("mode", "or") },
+            { rule(it).put("ip_is_private", true) },
+            { rule(it).put("ip_cidr", "0.0.0.0/0") },
+            { rule(it).put("ip_cidr", "::/0") },
+            { rule(it).put("domain_suffix", ".") },
+            { it.getJSONObject("route").put("final", "") },
+            { it.getJSONObject("route").put("Final", "internal") },
+            { rule(it).put("Outbound", "internal") },
+            { it.put("dns", JSONObject().put("servers", JSONArray().put(JSONObject().put("outbound", "internal")))) },
+        )
+        for ((index, change) in unsafe.withIndex()) {
+            val invalid = settings().also(change)
+            assertTrue("widened selector scope $index was accepted", runCatching { EngineConfig.validate(invalid.toString()) }.isFailure)
+        }
+    }
+
     @Test fun nativeSelectionPlanContainsOnlyConcreteChecksForTheExactConfig() {
         val hash = Policy.hash(config)
         RouteSnapshot.configure(config, hash)
