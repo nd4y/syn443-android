@@ -5,7 +5,7 @@ import re
 import threading
 import time
 import xml.etree.ElementTree as ET
-from run_vpn_process_faults import ROOT, PACKAGE, Server, Proxy, adb, call, pid, await_condition
+from run_vpn_process_faults import ROOT, PACKAGE, Server, Proxy, adb, call, pid, await_condition, vpn_stopped
 
 
 def native_crash_matches(crash, owner):
@@ -44,7 +44,7 @@ def main():
     def new_case(name):
         return ET.SubElement(suite,'testcase',classname='io.syn443.android.FatalOwnerTest',name=name)
     def stop():
-        call('disconnect');await_condition(lambda:not pid(':engine') and not call('status')['engineActive'],30)
+        call('disconnect');await_condition(vpn_stopped,30)
     def prepare():
         stop();call('policy-test-reset');call('test-reset')
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')

@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
-from run_vpn_process_faults import ROOT, PACKAGE, URI, Server, Proxy, adb, call, pid, await_condition
+from run_vpn_process_faults import ROOT, PACKAGE, URI, Server, Proxy, adb, call, pid, await_condition, vpn_stopped
 from emulator_policy_ui import open_policy, toggle, unlock_test_pin
 from emulator_boot import reboot_preserved
 from syn443ctl import ControlError, Device
@@ -99,7 +99,7 @@ def main():
     def forward():
         for port in ports:adb('reverse','tcp:'+port,'tcp:'+port)
     def stop():
-        call('disconnect');await_condition(lambda:not pid(':engine') and not call('status')['engineActive'],30)
+        call('disconnect');await_condition(vpn_stopped,30)
     def prepare():
         stop();call('policy-test-reset');call('test-reset');servers[0].ssh_ok=True;servers[0].delay=0;servers[0].health_ok=True
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')

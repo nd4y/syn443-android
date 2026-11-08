@@ -47,6 +47,15 @@ def pid(suffix):
     return raw.decode()
 
 
+def vpn_stopped():
+    """A missing process is insufficient until the controller settles Off."""
+    if pid(':engine'):
+        return False
+    state = call('status')
+    return (state.get('phase') == 'Off' and state.get('desiredOn') is False and
+            state.get('engineStateKnown') is True and state.get('engineActive') is False)
+
+
 def await_condition(predicate, timeout=110):
     end = time.monotonic() + timeout
     while time.monotonic() < end:
@@ -131,7 +140,7 @@ def main():
         adb('shell', 'appops', 'set', PACKAGE, 'ACTIVATE_VPN', 'allow')
         adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
         call('disconnect')
-        await_condition(lambda: not pid(':engine') and not call('status')['engineActive'], timeout=30)
+        await_condition(vpn_stopped, timeout=30)
         # Independent emulator suite: do not inherit the preceding lifecycle
         # suite's legitimate restart spending. Never reset within this suite:
         # its controller/native death sequence must exhaust the real limit.

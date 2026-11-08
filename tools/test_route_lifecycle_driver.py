@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 from run_route_lifecycle import direct_boot_diagnostics, locked_boot_boundary, resume_blocked
+from run_vpn_process_faults import vpn_stopped
 
 
 class ForegroundResumeBoundaryTest(unittest.TestCase):
@@ -24,6 +25,25 @@ class ForegroundResumeBoundaryTest(unittest.TestCase):
     def test_config_generation_or_desired_intent_cannot_drift_during_wait(self):
         for changes in [{'configRevision':'other'},{'generation':8},{'desiredOn':False}]:
             with self.subTest(changes=changes),self.assertRaises(AssertionError):self.check(changes)
+
+
+class SettledStopTest(unittest.TestCase):
+    def test_requires_known_inactive_status_and_no_native_process(self):
+        off = dict(phase='Off', desiredOn=False, engineActive=False, engineStateKnown=True)
+        with (
+            patch('run_vpn_process_faults.pid', return_value='') as pid,
+            patch('run_vpn_process_faults.call', return_value=off) as call,
+        ):
+            self.assertTrue(vpn_stopped())
+            for change in (dict(engineActive=None, engineStateKnown=False), dict(engineActive=True),
+                           dict(desiredOn=True), dict(phase='Recovering')):
+                with self.subTest(change=change):
+                    call.return_value = {**off, **change}
+                    self.assertFalse(vpn_stopped())
+            call.reset_mock()
+            pid.return_value = '123'
+            self.assertFalse(vpn_stopped())
+            call.assert_not_called()
 
 
 class LockedBootBoundaryTest(unittest.TestCase):

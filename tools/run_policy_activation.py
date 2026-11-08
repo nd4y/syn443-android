@@ -14,7 +14,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from policy_fixture import Publisher
-from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition
+from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
 from syn443ctl import ControlError, Device
 
 class Delivery(BaseHTTPRequestHandler):
@@ -60,7 +60,7 @@ def main():
     config = {'outbounds': [{'type': 'http', 'tag': 'test-proxy', 'server': '127.0.0.1', 'server_port': ports[0]}],
               'route': {'final': 'test-proxy'}}
     def stop():
-        call('disconnect'); await_condition(lambda: not pid(':engine') and not call('status').get('engineActive'), 30)
+        call('disconnect'); await_condition(vpn_stopped, 30)
     def setup(ttl=600):
         nonlocal publisher
         stop(); call('policy-test-reset'); call('test-reset')
