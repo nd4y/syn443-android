@@ -164,6 +164,19 @@ jobs:
           path: app/build/outputs/apk/
           if-no-files-found: error
           retention-days: 14
+      - name: Record and scan the exact build manifest
+        env:
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 tools/build_manifest.py "$SOURCE_COMMIT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" public-evidence/build-manifest.json
+          python3 tools/check_public_data.py public-evidence/build-manifest.json
+          bash tools/scan_secrets.sh public-evidence/build-manifest.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: syn443-build-manifest
+          path: public-evidence/build-manifest.json
+          if-no-files-found: error
+          retention-days: 14
   workflow-lint:
     needs: public-data
     runs-on: ubuntu-24.04
