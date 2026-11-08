@@ -14,6 +14,7 @@ class ResourceDiagnosticsTest {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val uri="content://io.syn443.control".toUri()
         val before=JSONObject(checkNotNull(context.contentResolver.call(uri,"status",null,null)?.getString("json")))
+        compose.onNodeWithTag("vpn-details").performScrollTo().performClick()
         compose.onNodeWithTag("routes-title").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("routes-check").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("os-vpn-policy").performScrollTo().assertIsDisplayed()
@@ -25,6 +26,7 @@ class ResourceDiagnosticsTest {
         else {assertTrue(after.isNull("alwaysOn"));assertTrue(after.isNull("lockdown"))}
     }
     @Test fun engineExitHistoryHasVisibleOnDemandControls() {
+        compose.onNodeWithTag("vpn-details").performScrollTo().performClick()
         compose.onNodeWithTag("exit-refresh").performScrollTo().performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("exit-status").fetchSemanticsNodes().isNotEmpty() }
         val result = compose.onNodeWithTag("exit-status").performScrollTo().assertIsDisplayed()
