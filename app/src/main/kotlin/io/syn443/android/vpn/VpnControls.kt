@@ -179,7 +179,7 @@ fun VpnControls(consentGeneration: Long = -1) {
                 }
             }
         }
-        val next = status.optLong("nextWallMs")
+        val next = maxOf(status.optLong("nextWallMs"), status.optLong("policyRetryAt"))
         if (status.optBoolean("desiredOn") && next > System.currentTimeMillis()) Text("Повтор не ранее чем через ${(next - System.currentTimeMillis()) / 1_000} с, при доступной сети")
         Button(onClick = { requestConnect() }, modifier = Modifier.testTag("vpn-connect")) { Text("Подключиться") }
         Button(onClick = { command("disconnect") }, modifier = Modifier.testTag("vpn-disconnect")) { Text("Отключить") }

@@ -53,6 +53,7 @@ class TunnelService : VpnService() {
     private var forcePolicyFetch = false
     private var lastPolicyCheck = -10_000L
     private var nextFastPolicyAdmission = 0L
+    private var firstPolicyWakeAt = 0L
     @Volatile private var runningConfigHash = ""
     private var runningHasSetup=false
     private var runningOverlayMode=""
@@ -328,13 +329,21 @@ class TunnelService : VpnService() {
                 if(ready && network!=null)checkRoutes()
             } else reconcile()
             if (host == null && (network == null || store.read().optString("phase") in setOf("NeedsAction", "NeedsPermission"))) return
-            val delay = if (host == null && store.read().optString("phase") == "BlockedByPolicy") 60_000L else if (host == null) (store.checkpoint().nextWallMs - System.currentTimeMillis()).coerceIn(1_000, 60_000) else if (network == null) 10_000 else 1_000
+            val delay = when {
+                host == null && store.read().optString("phase") == "BlockedByPolicy" -> 60_000L
+                host == null -> (maxOf(store.checkpoint().nextWallMs, firstPolicyWakeAt) -
+                    System.currentTimeMillis()).coerceIn(1_000, 60_000)
+                network == null -> 10_000L
+                else -> 1_000L
+            }
             handler.postDelayed(this, delay)
         }
     }
     private fun reconcile() {
+        firstPolicyWakeAt = 0L
         if (destroyed) return
-        val cp = store.adjustCheckpoint { Recovery.normalizeClock(it, System.currentTimeMillis()) }
+        val now = System.currentTimeMillis()
+        val cp = store.adjustCheckpoint { Recovery.normalizeClock(it, now) }
         if (!cp.desiredOn) return
         if (!OsIntentGate.allowed(this, store)) { store.update { it.put("resumeRequired", true) }; phase("NeedsAction", "explicit_resume_required"); return }
         if (store.read().optBoolean("resumeRequired")) { phase("NeedsAction", "explicit_resume_required"); return }
@@ -356,8 +365,12 @@ class TunnelService : VpnService() {
             // its activation permit yet. Keep traffic blocked without treating
             // this bounded preparation as an invalid lease.
             if (policies.awaitingInitialPermit()) {
+                val retryAt = Recovery.replacementReadyAt(cp, now)
                 if (store.effectCurrent(cp.generation) { blackhole() }) {
-                    phase("Connecting", "policy_gate_pending", cp.generation)
+                    if (retryAt > now) {
+                        firstPolicyWakeAt = retryAt
+                        phase("Recovering", "policy_waiting_restart_budget", cp.generation)
+                    } else phase("Connecting", "policy_gate_pending", cp.generation)
                 }
                 return
             }
