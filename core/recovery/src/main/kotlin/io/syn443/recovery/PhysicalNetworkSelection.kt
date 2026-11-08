@@ -10,6 +10,14 @@ data class PhysicalCandidate(
     val metered: Boolean,
 )
 
+data class PhysicalProbeContext(val network: PhysicalCandidate, val linkSignature: String) {
+    companion object {
+        fun pathChanged(previous: PhysicalProbeContext?, current: PhysicalProbeContext?): Boolean =
+            previous?.network?.handle != current?.network?.handle ||
+                previous?.linkSignature != current?.linkSignature
+    }
+}
+
 /** Rank only physical Network capabilities. No home identity or LTE allowlist is inferred. */
 object PhysicalNetworkSelection {
     const val MAX_CANDIDATES = 32
