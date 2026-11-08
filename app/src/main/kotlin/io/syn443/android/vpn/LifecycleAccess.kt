@@ -18,9 +18,10 @@ object LifecycleAccess {
     fun engineStatus(status:JSONObject,engineReady:Boolean,processPresent:Boolean?):JSONObject {
         // A newly attached controller can still be waiting for an old owner or
         // a restart budget. Only the current engine handshake is positive evidence.
-        val active=when {
+        val awaitingResume = status.optBoolean("resumeRequired")
+        val active = when {
             engineReady -> true
-            processPresent==false && !status.optBoolean("engineActive") -> false
+            processPresent == false && (awaitingResume || !status.optBoolean("engineActive")) -> false
             else -> null
         }
         return status.put("engineActive",active ?: JSONObject.NULL).put("engineStateKnown",active!=null)
