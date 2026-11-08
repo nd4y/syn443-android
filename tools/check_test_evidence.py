@@ -69,6 +69,7 @@ if mode=="emulator":
         "sshWithoutServerPinCannotBeImportedAssignedOrRendered",
         "insecureProxyAndDnsTlsCannotBeImportedAssignedOrRendered",
         "routeExitProofIsRequiredAndReportsMismatchWithoutExposingAddresses",
+        "savedEngineCheckpointCannotClaimAnUnownedLiveProcess",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required peer verification cases missing"
     assert {("io.syn443.android.ManagedFailoverTest",name) for name in {
         "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",

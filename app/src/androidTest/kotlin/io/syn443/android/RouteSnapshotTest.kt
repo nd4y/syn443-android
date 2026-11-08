@@ -180,16 +180,19 @@ class RouteSnapshotTest {
         assertEquals(setOf("phase","reason","desiredOn","desiredOnKnown","generation","engineActive","osPolicy"),locked.keys().asSequence().toSet())
     }
     @Test fun savedEngineCheckpointCannotClaimAnUnownedLiveProcess() {
-        fun saved()=JSONObject().put("engineActive",true).put("desiredOn",true).put("generation",7)
+        fun saved()=JSONObject().put("engineActive",true).put("desiredOn",true)
+            .put("generation",7).put("phase","Recovering")
         val absent=LifecycleAccess.engineStatus(saved(),false,false)
         assertFalse(absent.getBoolean("engineActive"));assertTrue(absent.getBoolean("engineStateKnown"))
         for(present in listOf(true,null)) {
             val unknown=LifecycleAccess.engineStatus(saved(),false,present)
             assertTrue(unknown.isNull("engineActive"));assertFalse(unknown.getBoolean("engineStateKnown"))
             assertTrue(unknown.getBoolean("desiredOn"));assertEquals(7,unknown.getInt("generation"))
+            assertEquals("Recovering",unknown.getString("phase"))
         }
         val live=LifecycleAccess.engineStatus(saved(),true,true)
         assertTrue(live.getBoolean("engineActive"));assertTrue(live.getBoolean("engineStateKnown"))
-        assertFalse(LifecycleAccess.engineStatus(JSONObject().put("engineActive",false),true,false).getBoolean("engineActive"))
+        val readyAfterHandshake=LifecycleAccess.engineStatus(JSONObject().put("engineActive",false),true,null)
+        assertTrue(readyAfterHandshake.getBoolean("engineActive"))
     }
 }
