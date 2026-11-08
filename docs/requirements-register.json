@@ -1664,6 +1664,7 @@
         "docs/ANDROID_UI.md",
         "app/src/main/kotlin/io/syn443/android/MainActivity.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PrototypeTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt",
         "docs/implementation-status.md#evidence-index-and-register-semantics"
       ]
     },
@@ -2966,6 +2967,7 @@
         "docs/ANDROID_UI.md",
         "app/src/main/kotlin/io/syn443/android/MainActivity.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PrototypeTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt",
         "docs/implementation-status.md"
       ]
     },

@@ -1,5 +1,6 @@
 package io.syn443.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -8,9 +9,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import io.syn443.android.chat.SupportActivity
+import io.syn443.android.vpn.LoginControls
+import io.syn443.android.vpn.VpnControls
 import io.syn443.decision.Coordinator
 import io.syn443.decision.Decision
 import io.syn443.decision.Request
@@ -19,35 +27,61 @@ import kotlinx.serialization.json.*
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val fixture = assets.open("decision-vectors.json").bufferedReader().use { it.readText() }
-        val input = Decision.json.parseToJsonElement(fixture).jsonObject["cases"]!!.jsonArray.first().jsonObject["input"]!!
-        val request = Decision.decode(input.toString())
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(Modifier.fillMaxSize()) { Prototype(request, intent.getLongExtra("syn443.consentGeneration", -1)) }
+                Surface(Modifier.fillMaxSize()) { Home(intent.getLongExtra("syn443.consentGeneration", -1)) }
             }
         }
     }
 }
 
 @Composable
-private fun Prototype(request: Request, consentGeneration: Long = -1) {
-    val coordinator = remember { Coordinator(request.context) }
-    var state by remember { mutableStateOf(coordinator.snapshot()) }
-    var pending by remember { mutableStateOf<Request?>(null) }
-    var outcome by remember { mutableStateOf("Проверка ещё не запускалась") }
+private fun Home(consentGeneration: Long) {
+    val context = LocalContext.current
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("SYN443", style = MaterialTheme.typography.headlineLarge)
         Text("Secure Your Network")
-        io.syn443.android.vpn.LoginControls()
-        val enrollmentContext=androidx.compose.ui.platform.LocalContext.current
-        Button(onClick={enrollmentContext.startActivity(android.content.Intent(enrollmentContext,EnrollmentActivity::class.java))},modifier=Modifier.testTag("manual-enrollment")){Text("Привязать по приглашению или QR")}
-        val context=androidx.compose.ui.platform.LocalContext.current
-        Button(onClick={context.startActivity(android.content.Intent(context,io.syn443.android.chat.SupportActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))},modifier=Modifier.testTag("support-chat")) {Text("Чат с администратором")}
-        io.syn443.android.vpn.VpnControls(consentGeneration)
+        VpnControls(consentGeneration) {
+            LoginControls()
+            TextButton(
+                onClick = { context.startActivity(Intent(context, EnrollmentActivity::class.java)) },
+                modifier = Modifier.testTag("manual-enrollment"),
+            ) { Text("Привязать по приглашению или QR") }
+            TextButton(
+                onClick = { context.startActivity(Intent(context, SupportActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) },
+                modifier = Modifier.testTag("support-chat"),
+            ) { Text("Чат с администратором") }
+        }
+        if (BuildConfig.DEBUG) {
+            var demoOpen by rememberSaveable { mutableStateOf(false) }
+            TextButton(
+                onClick = { demoOpen = !demoOpen },
+                modifier = Modifier.testTag("developer-tools").semantics {
+                    stateDescription = if (demoOpen) "Раскрыто" else "Свёрнуто"
+                },
+            ) { Text(if (demoOpen) "Скрыть модель маршрутизации" else "Модель маршрутизации для разработчиков") }
+            if (demoOpen) {
+                val request = remember {
+                    val fixture = context.assets.open("decision-vectors.json").bufferedReader().use { it.readText() }
+                    val input = Decision.json.parseToJsonElement(fixture).jsonObject["cases"]!!.jsonArray.first().jsonObject["input"]!!
+                    Decision.decode(input.toString())
+                }
+                RoutePrototype(request)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoutePrototype(request: Request) {
+    val coordinator = remember { Coordinator(request.context) }
+    var state by remember { mutableStateOf(coordinator.snapshot()) }
+    var pending by remember { mutableStateOf<Request?>(null) }
+    var outcome by remember { mutableStateOf("Проверка ещё не запускалась") }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Модель выбора маршрута (тестовые данные).", Modifier.testTag("prototype"))
         Text("Эпоха сети: " + state.context.networkEpoch, Modifier.testTag("epoch"))
         Text(if (state.desiredOn) "Модель запущена" else "Остановлено", Modifier.testTag("state"))

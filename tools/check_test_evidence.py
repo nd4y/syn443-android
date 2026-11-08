@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=188
+    minimum=190
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -65,6 +65,10 @@ if mode=="jvm":
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
+    assert {
+        ("io.syn443.android.PrototypeTest", "homeShowsVpnBeforeAccountAndKeepsToolsCollapsed"),
+        ("io.syn443.android.VpnPrimaryActionTest", "startRequiresKnownReadyStateAndStopDoesNotRequireReadiness"),
+    } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required VPN home UI cases missing"
     assert {("io.syn443.android.RouteSnapshotTest",name) for name in {
         "sshWithoutServerPinCannotBeImportedAssignedOrRendered",
         "insecureProxyAndDnsTlsCannotBeImportedAssignedOrRendered",
