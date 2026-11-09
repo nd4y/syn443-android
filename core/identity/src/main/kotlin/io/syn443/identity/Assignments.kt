@@ -47,9 +47,19 @@ object Assignments {
         val expected=identity(login,payload)
         if(state.identity==null)require(state==AssignmentState()) else bound(state,login,payload)
         val window=reply.time.window(boot,elapsed)
-        state.time?.takeIf {it.boot==boot}?.let {
-            val previous=it.window(boot,elapsed)
-            require(window.upperMs>=previous.lowerMs && window.lowerMs<=Math.addExact(previous.upperMs,30_000))
+        val freshRegistration=login.phase==LoginPhase.PROVISIONING && login.reauthRevision>0
+        state.time?.let {
+            if(it.boot==boot) {
+                if(freshRegistration && elapsed>=it.elapsedMs && !it.isCurrent(boot,elapsed)) {
+                    // Fresh OIDC and the new device session reanchor expired time.
+                    // Keep the durable lower bound, as well as every policy floor.
+                    val delta=elapsed-it.elapsedMs
+                    require(window.upperMs>=Math.addExact(it.lowerMs,delta-(delta/5000+1)))
+                } else {
+                    val previous=it.window(boot,elapsed)
+                    require(window.upperMs>=previous.lowerMs && window.lowerMs<=Math.addExact(previous.upperMs,30_000))
+                }
+            } else if(freshRegistration)require(window.upperMs>=it.lowerMs)
         }
         val verified=verify(reply.envelope,login,payload,reply.time,boot,elapsed)
         val j=state.journal
@@ -111,7 +121,7 @@ object Assignments {
         val deadline=if(candidate)minOf(lease,state.applyDeadlineElapsed) else lease
         require(deadline>elapsed)
         return AssignmentPermit(checkNotNull(state.identity),login.policyHash,state.journal.activationGeneration,
-            candidate,boot,elapsed,deadline,verified)
+            login.reauthRevision,candidate,boot,elapsed,deadline,verified)
     }
     fun begin(state:AssignmentState,login:LoginIntent,payload:LoginPayload,baseline:List<Boolean>,boot:Int,elapsed:Long):AssignmentState {
         val candidate=authorized(state,login,payload,boot,elapsed,true)

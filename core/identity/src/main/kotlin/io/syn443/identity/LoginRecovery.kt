@@ -2,6 +2,8 @@ package io.syn443.identity
 
 import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
@@ -20,6 +22,7 @@ enum class LoginResume { IDLE, KEY_RESERVATION, BROWSER, AUTHENTICATED, RETRY_CL
 }
 
 /** Public intent fence, written before the referenced protected payload/network effect. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class LoginIntent(
     val generation:Long=0,val revision:Long=0,val phase:LoginPhase=LoginPhase.SIGNED_OUT,val method:String="oidc",
     val authority:String="",val serviceId:String="",val keyAlias:String="",val thumbprint:String="",
@@ -28,7 +31,8 @@ enum class LoginResume { IDLE, KEY_RESERVATION, BROWSER, AUTHENTICATED, RETRY_CL
     val operation:IdentityOperation?=null,val operationBoot:Int = -1,val operationElapsedMs:Long = -1,
     val refreshReturnPhase:LoginPhase?=null,val tombstones:List<RegistrationTombstone> = emptyList(),
     val retiringAliases:List<String> = emptyList(),val overlayNamespaces:List<String> = emptyList(),
-    val retiringOverlays:List<String> = emptyList()
+    val retiringOverlays:List<String> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val reauthRevision:Long=0
 ) {
     override fun toString()="LoginIntent(phase=$phase, [redacted])"
 }
@@ -49,7 +53,7 @@ object LoginRecovery {
     fun encode(s:LoginIntent):String {validate(s);return Canonical.encode(Canonical.parse(Canonical.json.encodeToString(s)))}
     fun decode(raw:String):LoginIntent {
         val o=Identity.objectJSON(raw)
-        for(name in listOf("generation","revision","sessionGeneration","operationBoot","operationElapsedMs"))
+        for(name in listOf("generation","revision","sessionGeneration","operationBoot","operationElapsedMs","reauthRevision"))
             o[name]?.jsonPrimitive?.let {require(!it.isString);it.long}
         o["maybeRegistered"]?.jsonPrimitive?.let {require(!it.isString && it.booleanOrNull!=null)}
         return Canonical.json.decodeFromJsonElement<LoginIntent>(o).also(::validate)
@@ -69,17 +73,23 @@ object LoginRecovery {
             require(names.size<=16 && names.distinct().size==names.size && names.all(::ownedOverlay))
         require(s.phase==LoginPhase.RETIRING || s.retiringOverlays.isEmpty())
         if(s.phase in setOf(LoginPhase.SIGNED_OUT,LoginPhase.RETIRING)) {
-            require(s.overlayNamespaces.isEmpty())
+            require(s.overlayNamespaces.isEmpty() && s.reauthRevision==0L)
             require(listOf(s.authority,s.serviceId,s.keyAlias,s.thumbprint,s.ownerTag,s.protectedHash,s.deviceId,s.policyHash).all {it.isEmpty()} &&
                 !s.maybeRegistered && s.sessionGeneration== -1L && s.operation==null && s.operationBoot== -1 && s.operationElapsedMs== -1L && s.refreshReturnPhase==null)
             require(s.method=="oidc" && (s.phase==LoginPhase.RETIRING)==s.retiringAliases.isNotEmpty());return
         }
-        require(s.overlayNamespaces.isEmpty() || s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING,LoginPhase.NEEDS_REAUTH))
+        require(s.reauthRevision in 0..s.revision)
+        val reauthFlow=s.reauthRevision>0 && s.phase in setOf(LoginPhase.BROWSER,LoginPhase.EXCHANGING,LoginPhase.AUTHENTICATED,LoginPhase.ENROLLING,LoginPhase.PROVISIONING)
+        if(s.deviceId.isNotEmpty() && s.phase in setOf(LoginPhase.BROWSER,LoginPhase.EXCHANGING,LoginPhase.AUTHENTICATED,LoginPhase.ENROLLING))
+            require(reauthFlow)
+        require(s.reauthRevision==0L || s.method=="oidc" && s.maybeRegistered && s.deviceId.isNotEmpty() &&
+            s.phase !in setOf(LoginPhase.RESERVED,LoginPhase.CLEANUP,LoginPhase.INVITING))
+        require(s.overlayNamespaces.isEmpty() || reauthFlow || s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING,LoginPhase.NEEDS_REAUTH))
         require(s.overlayNamespaces.isEmpty() || s.maybeRegistered && digest(s.ownerTag) && s.deviceId.isNotEmpty() && s.policyHash.isNotEmpty())
         require(digest(s.authority) && s.serviceId.matches(Regex("[A-Za-z0-9_-]{1,64}")) && ownedAlias(s.keyAlias) && s.keyAlias !in s.retiringAliases)
         if(s.phase==LoginPhase.RESERVED) require(s.thumbprint.isEmpty() && s.protectedHash.isEmpty())
         else require(digest(s.thumbprint) && digest(s.protectedHash))
-        if(s.phase in setOf(LoginPhase.RESERVED,LoginPhase.BROWSER,LoginPhase.EXCHANGING)) require(s.ownerTag.isEmpty() && !s.maybeRegistered)
+        if(!reauthFlow && s.phase in setOf(LoginPhase.RESERVED,LoginPhase.BROWSER,LoginPhase.EXCHANGING)) require(s.ownerTag.isEmpty() && !s.maybeRegistered)
         else require(digest(s.ownerTag) || s.phase in setOf(LoginPhase.NEEDS_REAUTH,LoginPhase.INVITING) && s.ownerTag.isEmpty() && !s.maybeRegistered)
         if(s.method=="invite")require(s.phase !in setOf(LoginPhase.BROWSER,LoginPhase.EXCHANGING,LoginPhase.AUTHENTICATED,LoginPhase.CLEANUP,LoginPhase.ENROLLING))
         if(s.phase==LoginPhase.INVITING)require(s.method=="invite" && s.deviceId.isEmpty())
@@ -101,7 +111,7 @@ object LoginRecovery {
             require(batch.all {t->RegistrationTombstone(s.ownerTag,t) in s.tombstones})
         }
         if(s.phase==LoginPhase.ENROLLING) {
-            require(s.maybeRegistered && s.deviceId.isEmpty())
+            require(s.maybeRegistered && (s.deviceId.isEmpty() || reauthFlow))
             val key=Identity.objectJSON(checkNotNull(s.operation).body).getValue("key")
             require(Identity.hash(Canonical.encode(key).toByteArray(Charsets.UTF_8))==s.thumbprint)
         }
@@ -119,6 +129,14 @@ object LoginRecovery {
         current(s,generation);require(s.phase==LoginPhase.RESERVED && s.method=="oidc" && s.tombstones.none {it.thumbprint==thumbprint})
         return revised(s.copy(phase=LoginPhase.BROWSER,thumbprint=thumbprint,protectedHash=protectedHash))
     }
+    fun canReauthenticate(s:LoginIntent)=s.method=="oidc" && s.deviceId.isNotEmpty() &&
+        (s.phase==LoginPhase.NEEDS_REAUTH || s.phase==LoginPhase.BROWSER && s.reauthRevision>0)
+
+    fun beginReauthentication(s:LoginIntent,generation:Long):LoginIntent {
+        current(s,generation);require(canReauthenticate(s))
+        return revised(s.copy(phase=LoginPhase.BROWSER,reauthRevision=next(s.revision)))
+    }
+
     fun invitationPrepared(s:LoginIntent,generation:Long,thumbprint:String,protectedHash:String):LoginIntent {
         current(s,generation);require(s.phase==LoginPhase.RESERVED && s.method=="invite" && s.tombstones.none {it.thumbprint==thumbprint})
         return revised(s.copy(phase=LoginPhase.INVITING,thumbprint=thumbprint,protectedHash=protectedHash))
@@ -141,7 +159,9 @@ object LoginRecovery {
     fun authenticated(s:LoginIntent,generation:Long,bootstrap:Bootstrap,user:UserCredential,protectedHash:String):LoginIntent {
         current(s,generation);require(s.phase==LoginPhase.EXCHANGING && s.authority==Identity.bootstrapAuthority(bootstrap) &&
             user.authority==s.authority && user.keyThumbprint==s.thumbprint)
-        return revised(s.copy(phase=LoginPhase.AUTHENTICATED,ownerTag=ownerTag(bootstrap,user.subject),protectedHash=protectedHash))
+        val owner=ownerTag(bootstrap,user.subject)
+        require(s.reauthRevision==0L || owner==s.ownerTag)
+        return revised(s.copy(phase=LoginPhase.AUTHENTICATED,ownerTag=owner,protectedHash=protectedHash))
     }
     private fun cleanupThumbprints(op:IdentityOperation)=Identity.objectJSON(op.body).getValue("thumbprints").jsonArray.map {it.jsonPrimitive.content}
     fun beginCleanup(s:LoginIntent,generation:Long,boot:Int,elapsed:Long):LoginIntent {
@@ -160,11 +180,13 @@ object LoginRecovery {
     fun beginEnrollment(s:LoginIntent,generation:Long,key:ECPublicKey,boot:Int,elapsed:Long):LoginIntent {
         current(s,generation);require(Identity.thumbprint(key)==s.thumbprint)
         if(s.phase==LoginPhase.ENROLLING)return s
-        require(s.phase==LoginPhase.AUTHENTICATED && s.tombstones.size<32 && s.tombstones.none {it.ownerTag==s.ownerTag})
+        require(s.phase==LoginPhase.AUTHENTICATED && (s.reauthRevision>0 ||
+            s.tombstones.size<32 && s.tombstones.none {it.ownerTag==s.ownerTag}))
         return revised(operation(s,IdentityOperation.enroll(key),boot,elapsed,LoginPhase.ENROLLING).copy(maybeRegistered=true))
     }
     fun enrolled(s:LoginIntent,generation:Long,reply:SessionReply,protectedHash:String):LoginIntent {
         current(s,generation);require(s.phase==LoginPhase.ENROLLING && reply.authority==s.authority && reply.keyThumbprint==s.thumbprint && reply.session.generation==0L)
+        require(s.deviceId.isEmpty() || reply.session.deviceId==s.deviceId)
         return revised(withoutOperation(s).copy(phase=LoginPhase.PROVISIONING,protectedHash=protectedHash,
             deviceId=reply.session.deviceId,sessionGeneration=reply.session.generation))
     }

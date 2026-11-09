@@ -10,7 +10,7 @@ internal class AssignedPolicyRuntime(private val boot:()->Int,private val elapse
     private val overlay:(String)->OverlayRuntimeMaterial?={null}) {
     private fun usable(v:Verified)= "overlay.credentials.v1" !in v.payload.requiredCapabilities || overlay(v.payload.contentHash)?.authorized()==true
     private fun launchable(v:Verified)= "overlay.credentials.v1" !in v.payload.requiredCapabilities || overlay(v.payload.contentHash)?.available()==true
-    internal data class Ticket(val loginGeneration:Long,val receipt:String,val activation:Long) {
+    internal data class Ticket(val loginGeneration:Long,val receipt:String,val activation:Long,val reauthRevision:Long) {
         override fun toString()="AssignmentTicket([redacted])"
     }
     internal class Prepared internal constructor(val login:LoginIntent,val state:AssignmentState,val candidate:Verified?,
@@ -40,12 +40,13 @@ internal class AssignedPolicyRuntime(private val boot:()->Int,private val elapse
         require(login.phase==LoginPhase.POLICY_CACHED || login.phase==LoginPhase.REFRESHING && login.refreshReturnPhase==LoginPhase.POLICY_CACHED)
         val view=checkNotNull(value)
         require(login.generation==view.login.generation && login.authority==view.login.authority &&
-            login.deviceId==view.login.deviceId && login.thumbprint==view.login.thumbprint && login.policyHash==view.login.policyHash)
+            login.deviceId==view.login.deviceId && login.thumbprint==view.login.thumbprint &&
+            login.policyHash==view.login.policyHash && login.reauthRevision==view.login.reauthRevision)
         return view
     }
     fun ticket(login:LoginIntent):Ticket {
         val view=current(login)
-        return Ticket(login.generation,login.policyHash,view.state.journal.activationGeneration)
+        return Ticket(login.generation,login.policyHash,view.state.journal.activationGeneration,login.reauthRevision)
     }
     fun contains(login:LoginIntent,state:AssignmentState):Boolean = runCatching {current(login).state==state}.getOrDefault(false)
     fun read(login:LoginIntent):Prepared = current(login)

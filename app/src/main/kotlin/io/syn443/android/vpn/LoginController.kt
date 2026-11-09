@@ -246,6 +246,7 @@ class LoginController private constructor(private val context:android.app.Applic
             it.first.sessionGeneration==s.sessionGeneration}?.second?.session?.let(::telemetryKey)
         JSONObject().put("phase",s.phase.name).put("method",s.method).put("generation",s.generation).put("configured",configured)
             .put("busy",pendingCommands.get()>0).put("reason",error)
+            .put("intentRevision",s.revision).put("canReauthenticate",LoginRecovery.canReauthenticate(s))
             .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
             .put("controlPanelConfigured",panelOrigin(s)!=null)
             .put("controlPanelAvailable",adminPanelUrl(s.generation)!=null)
@@ -344,6 +345,25 @@ class LoginController private constructor(private val context:android.app.Applic
             prepareBrowser(s,b)
         }
     }
+    fun startReauthentication(generation:Long,revision:Long):Boolean {
+        lateinit var expected:LoginIntent
+        return submitIfIdle(admit={
+            val s=journal.snapshot()
+            if(s.generation!=generation || s.revision!=revision || !LoginRecovery.canReauthenticate(s))false
+            else {expected=s;true}
+        },onAdmission={
+            commandEpoch++;browser=null;chatTicket=null;activationDelivery=null;panelHint=null;panelPoll=null
+            deviceSourcePollAfter=0;deviceSourceAuthority=null;telemetryAuthority=null;nextTelemetryElapsed=0
+        }) {
+            val old=payload(expected)
+            val next=LoginRecovery.beginReauthentication(expected,generation)
+            val pending=Identity.newPending(generation,expected.thumbprint,boot(),elapsed())
+            val protected=LoginPayload(old.bootstrap,pending=pending,registration=RegisteredLogin.from(next))
+            val ready=protect(expected,protected) {hash->next.copy(protectedHash=hash)}
+            synchronized(commands) {current(ready);browser=generation to Identity.authorization(old.bootstrap,pending,true)}
+        }
+    }
+
     private fun prepareBrowser(s:LoginIntent,b:Bootstrap) {
         current(s);workingAlias=s.keyAlias;require(Identity.bootstrapAuthority(b)==s.authority)
         val key=runCatching {DeviceKey.open(s.keyAlias)}.getOrElse {
@@ -419,10 +439,15 @@ class LoginController private constructor(private val context:android.app.Applic
             withProtocol(consumed,payload.bootstrap) {protocol,scope->
                 val issuer=protocol.discover(scope)
                 val user=protocol.exchangeCode(checkNotNull(callback.code),pending,issuer,scope)
-                val auth=protect(consumed,LoginPayload(payload.bootstrap,user=user)) {hash->
+                if(payload.registration!=null && LoginRecovery.ownerTag(payload.bootstrap,user.subject)!=consumed.ownerTag) {
+                    reauthenticate(consumed)
+                    throw AuthException(AuthFailure.ACCESS_DENIED)
+                }
+                val signedIn=LoginPayload(payload.bootstrap,user=user,registration=payload.registration)
+                val auth=protect(consumed,signedIn) {hash->
                     LoginRecovery.authenticated(consumed,consumed.generation,payload.bootstrap,user,hash)
                 }
-                provision(auth,LoginPayload(payload.bootstrap,user=user),protocol,scope)
+                provision(auth,signedIn,protocol,scope)
             }
         }
     }
@@ -445,7 +470,9 @@ class LoginController private constructor(private val context:android.app.Applic
         fun admitted() {
             val current=journal.snapshot()
             require(workerEpoch==commandEpoch && current.generation==generation && (current.phase==LoginPhase.RETIRING)==retiring && cancelledGeneration!=generation)
-            if(current.phase !in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))noVpn()
+            val registeredRecovery=current.reauthRevision>0 &&
+                current.phase in setOf(LoginPhase.EXCHANGING,LoginPhase.AUTHENTICATED,LoginPhase.ENROLLING,LoginPhase.PROVISIONING)
+            if(!registeredRecovery && current.phase !in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))noVpn()
         }
         // Established account requests use a physical Network even while its TUN is running.
         admitted();val uri=Identity.https(url)
@@ -502,7 +529,7 @@ class LoginController private constructor(private val context:android.app.Applic
     private fun provision(initial:LoginIntent,p:LoginPayload,protocol:AuthProtocol,scope:IdentityScope) {
         var s=initial;val user=checkNotNull(p.user)
         repeat(2) {
-            if(s.phase==LoginPhase.CLEANUP || s.tombstones.any {it.ownerTag==s.ownerTag}) {
+            if(s.reauthRevision==0L && (s.phase==LoginPhase.CLEANUP || s.tombstones.any {it.ownerTag==s.ownerTag})) {
                 val next=LoginRecovery.beginCleanup(s,s.generation,boot(),elapsed())
                 if(next!=s)s=commit(s,next)
                 val op=checkNotNull(s.operation);protocol.cleanup(op,user,scope)
@@ -521,7 +548,12 @@ class LoginController private constructor(private val context:android.app.Applic
             operation=checkNotNull(s.operation)
             reply=protocol.enroll(operation,user,scope)
         }
-        val sessionPayload=LoginPayload(p.bootstrap,session=reply,advertisedCapabilities=CapabilityNegotiation.canonical(operation.enrollmentCapabilities()))
+        if(p.registration!=null && reply.session.deviceId!=s.deviceId) {
+            reauthenticate(s)
+            throw AuthException(AuthFailure.ACCESS_DENIED)
+        }
+        val sessionPayload=LoginPayload(p.bootstrap,session=reply,registration=p.registration,
+            advertisedCapabilities=CapabilityNegotiation.canonical(operation.enrollmentCapabilities()))
         val registered=protect(s,sessionPayload) {hash->LoginRecovery.enrolled(s,s.generation,reply,hash)}
         fetchAssignment(registered,sessionPayload,protocol,scope)
     }
@@ -529,7 +561,10 @@ class LoginController private constructor(private val context:android.app.Applic
         current(s)
         lastAssignmentFetch=elapsed()
         val response=protocol.policy(checkNotNull(p.session),scope)
-        val next=Assignments.receive(journal.readAssignment(s)?:AssignmentState(),s,p,response,boot(),elapsed())
+        var previous=journal.readAssignment(s)?:AssignmentState()
+        if(s.phase==LoginPhase.PROVISIONING && s.reauthRevision>0 && previous.journal.phase=="applying")
+            previous=Assignments.abort(previous,s,p,"interrupted_activation")
+        val next=Assignments.receive(previous,s,p,response,boot(),elapsed())
         val receipt=Assignments.receipt(next,s,p,boot(),elapsed())
         val target=if(s.phase==LoginPhase.POLICY_CACHED && s.policyHash==receipt)s
             else LoginRecovery.policyCached(s,s.generation,receipt,s.protectedHash)
@@ -749,7 +784,8 @@ class LoginController private constructor(private val context:android.app.Applic
         if(invalidate && runCatching {assignmentTicket()==ticket}.getOrDefault(false)) {assignedRuntime.clear();policyChanged()}
     }) {
         val s=journal.snapshot();current(s)
-        require(s.phase==LoginPhase.POLICY_CACHED && s.generation==ticket.loginGeneration && s.policyHash==ticket.receipt)
+        require(s.phase==LoginPhase.POLICY_CACHED && s.generation==ticket.loginGeneration &&
+            s.reauthRevision==ticket.reauthRevision && s.policyHash==ticket.receipt)
         val p=payload(s);val before=checkNotNull(journal.readAssignment(s))
         require(before.journal.activationGeneration==ticket.activation)
         if(!canCommit())throw LoginStorageException(LoginStorageFailure.STALE)
@@ -1046,7 +1082,8 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     private fun handleSessionFailure(reason:AuthFailure) {synchronized(commands) {
         val s=journal.snapshot();current(s)
-        if(s.phase !in setOf(LoginPhase.INVITING,LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))return
+        val registeredExchange=s.reauthRevision>0 && s.phase in setOf(LoginPhase.EXCHANGING,LoginPhase.AUTHENTICATED,LoginPhase.ENROLLING)
+        if(!registeredExchange && s.phase !in setOf(LoginPhase.INVITING,LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))return
         // Local credential expiry does not revoke a separately signed offline permit.
         if(reason==AuthFailure.SESSION_EXPIRED && assignedRuntime.status(s).optBoolean("runtimeAuthorized"))return
         reauthenticate(s)
@@ -1075,7 +1112,7 @@ class LoginController private constructor(private val context:android.app.Applic
         }
         when(LoginRecovery.resume(s,true,true,boot(),elapsed(),p.pending,p.user?.time?.boot?:p.session?.time?.boot?: -1)) {
             LoginResume.RETRY_INVITATION->resumeInvitation(s,p)
-            LoginResume.BROWSER->synchronized(commands) {current(s);browser=s.generation to Identity.authorization(p.bootstrap,checkNotNull(p.pending))}
+            LoginResume.BROWSER->synchronized(commands) {current(s);browser=s.generation to Identity.authorization(p.bootstrap,checkNotNull(p.pending),p.registration!=null)}
             LoginResume.AUTHENTICATED,LoginResume.RETRY_CLEANUP,LoginResume.RETRY_ENROLLMENT->withProtocol(s,p.bootstrap) {protocol,scope->provision(s,p,protocol,scope)}
             LoginResume.SESSION,LoginResume.REANCHOR_SESSION,LoginResume.RETRY_REFRESH->withProtocol(s,p.bootstrap) {protocol,scope->resumeSession(s,p,protocol,scope)}
             else->reauthenticate(s)

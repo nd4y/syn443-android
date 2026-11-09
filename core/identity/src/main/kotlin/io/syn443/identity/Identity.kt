@@ -91,12 +91,13 @@ object Identity {
         require(generation >= 0 && thumbprint.matches(Regex("[A-Za-z0-9_-]{43}")) && boot >= 0 && elapsedMs >= 0)
         return Pending(generation, random(), random(), random(), thumbprint, boot, elapsedMs)
     }
-    fun authorization(bootstrap: Bootstrap, pending: Pending): String {
+    fun authorization(bootstrap: Bootstrap, pending: Pending, reauthenticate:Boolean=false): String {
         bootstrap.validate()
         return bootstrap.issuer + "/protocol/openid-connect/auth?" + form(linkedMapOf(
             "client_id" to bootstrap.clientId, "redirect_uri" to callback, "response_type" to "code", "scope" to "openid",
             "state" to pending.state, "nonce" to pending.nonce, "code_challenge_method" to "S256",
-            "code_challenge" to hash(pending.verifier.toByteArray(Charsets.US_ASCII)), "dpop_jkt" to pending.thumbprint))
+            "code_challenge" to hash(pending.verifier.toByteArray(Charsets.US_ASCII)), "dpop_jkt" to pending.thumbprint)
+            .apply {if(reauthenticate)put("prompt","login")})
     }
     fun form(values: Map<String, String>) = values.entries.joinToString("&") {
         URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8")
