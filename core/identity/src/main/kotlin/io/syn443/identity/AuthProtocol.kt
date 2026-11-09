@@ -9,7 +9,7 @@ import java.security.interfaces.RSAPublicKey
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-enum class AuthFailure { CANCELLED, TRANSPORT, INVALID_REPLY, ACCESS_DENIED, REAUTHENTICATE, CONFLICT, PENDING, THROTTLED, UNAVAILABLE }
+enum class AuthFailure { CANCELLED, TRANSPORT, INVALID_REPLY, ACCESS_DENIED, REAUTHENTICATE, SESSION_EXPIRED, CONFLICT, PENDING, THROTTLED, UNAVAILABLE }
 class AuthException(val reason:AuthFailure):Exception(reason.name)
 
 interface ProofKey { val publicKey:ECPublicKey; fun sign(input:ByteArray):ByteArray }
@@ -252,7 +252,7 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     fun refresh(op:IdentityOperation,previous:SessionReply,scope:IdentityScope):SessionReply=checked {
         require(op.path=="/v1/device/session/refresh");bound(previous)
         if(previous.time.window(boot(),elapsed()).upperMs>=previous.session.refreshUntilMs)
-            throw AuthException(AuthFailure.REAUTHENTICATE)
+            throw AuthException(AuthFailure.SESSION_EXPIRED)
         val result=api(op.path,op.body,previous.session.refreshToken,previous.session.nonce,previous.time,scope)
         val next=session(result)
         require(next.deviceId==previous.session.deviceId && next.generation==Math.addExact(previous.session.generation,1) &&

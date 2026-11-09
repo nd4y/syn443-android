@@ -190,7 +190,10 @@ if mode=="emulator":
         'logoutAfterAccessExpiryRotatesOnlyInRamRevokesAndErasesTheProtectedSession',
         'lostLogoutRefreshKeepsRecoveryTombstoneWithoutRestoringSecretsOrRetryingEnrollment'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android expired-session retirement cases missing'
     assert ('io.syn443.android.HealthChecksTest','androidDnsRetainsBoundedDistinctAddressesForFallbackAndStillCancelsQuery') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android DNS fallback case missing'
-    assert ('io.syn443.android.LoginControllerTest','expiredRefreshFamilyRequiresLoginWithoutContactingTheServer') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required expired refresh family case missing'
+    assert {('io.syn443.android.LoginControllerTest',name) for name in {
+        'expiredRefreshFamilyRequiresLoginWithoutContactingTheServer',
+        'expiredRefreshFamilyPreservesAnAuthorizedOfflinePolicy',
+    }} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required expired refresh family cases missing'
     assert ('io.syn443.android.LoginControllerTest','assignedLeaseRenewalPersistsWithoutNewActivationAndRetainsDeviceIdentityAcrossRestart') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required durable Android lease renewal case missing'
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'legacyCapabilityApprovalSurvivesRestartWithoutChangingAssignedPolicyOrDeviceIdentity',

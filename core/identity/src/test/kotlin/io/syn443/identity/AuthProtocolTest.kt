@@ -536,14 +536,14 @@ class AuthProtocolTest {
         }
         val requests=f.requests.size
         f.elapsed+=86_000_001
-        error(AuthFailure.REAUTHENTICATE) {f.client.refresh(refresh,previous,IdentityScope())}
+        error(AuthFailure.SESSION_EXPIRED) {f.client.refresh(refresh,previous,IdentityScope())}
         assertEquals(requests,f.requests.size)
     }
     @Test fun refreshAtTheConservativeDeadlineRequiresLoginWithoutSendingTheToken() {
         val f=Fixture()
         val deadline=f.time().upperMs
         val atDeadline=f.current(session().copy(accessUntilMs=deadline,refreshUntilMs=deadline))
-        error(AuthFailure.REAUTHENTICATE) {
+        error(AuthFailure.SESSION_EXPIRED) {
             f.client.refresh(IdentityOperation.refresh(),atDeadline,IdentityScope())
         }
         assertTrue(f.requests.isEmpty())
@@ -574,7 +574,7 @@ class AuthProtocolTest {
         for(reboot in listOf(false,true)) {
             val bad=Fixture();val previous=bad.current()
             if(reboot)bad.boot++ else bad.elapsed=86_001_000
-            error(if(reboot)AuthFailure.INVALID_REPLY else AuthFailure.REAUTHENTICATE) {
+            error(if(reboot)AuthFailure.INVALID_REPLY else AuthFailure.SESSION_EXPIRED) {
                 bad.client.revoke(IdentityOperation.revoke(),previous,IdentityScope())
             }
             assertTrue(bad.requests.isEmpty())

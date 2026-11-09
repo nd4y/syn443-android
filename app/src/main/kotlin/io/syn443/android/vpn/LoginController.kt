@@ -121,7 +121,8 @@ class LoginController private constructor(private val context:android.app.Applic
                     current(journal.snapshot())
                 }
             } catch(e:AuthException) {failure=e.reason.name
-                if(e.reason==AuthFailure.REAUTHENTICATE)runCatching {reauthenticate(journal.snapshot())}
+                if(e.reason in setOf(AuthFailure.REAUTHENTICATE,AuthFailure.SESSION_EXPIRED))
+                    runCatching {handleSessionFailure(e.reason)}
             } catch(_:Exception) {failure="UNAVAILABLE"}
             synchronized(commands) {
                 val ticket=chatTicket
@@ -161,10 +162,8 @@ class LoginController private constructor(private val context:android.app.Applic
                 if(synchronized(commands) {if(admitted!=commandEpoch)true else {workerEpoch=admitted;false}})return
                 block();""
             } catch(e:AuthException) {
-                if(!quiet && e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))runCatching {
-                    val s=journal.snapshot()
-                    if(s.phase in setOf(LoginPhase.INVITING,LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))reauthenticate(s)
-                }
+                if(!quiet && e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE,AuthFailure.SESSION_EXPIRED))
+                    runCatching {handleSessionFailure(e.reason)}
                 e.reason.name
             }
             catch(e:LoginStorageException) {if(e.reason==LoginStorageFailure.STALE)"" else e.reason.name}
@@ -998,9 +997,9 @@ class LoginController private constructor(private val context:android.app.Applic
         val currentBoot=boot();val now=elapsed()
         val reanchor=session.time.boot!=currentBoot
         val trustedUpper=if(reanchor)null else {
-            if(!session.time.isCurrent(currentBoot,now))throw AuthException(AuthFailure.REAUTHENTICATE)
+            if(!session.time.isCurrent(currentBoot,now))throw AuthException(AuthFailure.SESSION_EXPIRED)
             session.time.window(currentBoot,now).upperMs.also {
-                if(it>=session.session.refreshUntilMs)throw AuthException(AuthFailure.REAUTHENTICATE)
+                if(it>=session.session.refreshUntilMs)throw AuthException(AuthFailure.SESSION_EXPIRED)
             }
         }
         val refresh=s.phase==LoginPhase.REFRESHING || trustedUpper==null ||
@@ -1033,6 +1032,13 @@ class LoginController private constructor(private val context:android.app.Applic
         }
         if(fetch)fetchAssignment(s,p,protocol,scope)
     }
+    private fun handleSessionFailure(reason:AuthFailure) {synchronized(commands) {
+        val s=journal.snapshot();current(s)
+        if(s.phase !in setOf(LoginPhase.INVITING,LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))return
+        // Local credential expiry does not revoke a separately signed offline permit.
+        if(reason==AuthFailure.SESSION_EXPIRED && assignedRuntime.status(s).optBoolean("runtimeAuthorized"))return
+        reauthenticate(s)
+    }}
     private fun reauthenticate(s:LoginIntent) {synchronized(commands) {
         clearOverlays();assignedRuntime.clear();commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null;policyChanged()
     }}

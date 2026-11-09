@@ -531,23 +531,42 @@ class LoginControllerTest {
         assertFalse(f.controller.pollProvisioning(current.generation))
         assertFalse(f.controller.allowsConnect());assertFalse(f.controller.status().getBoolean("busy"))
     }
-    @Test fun expiredRefreshFamilyRequiresLoginWithoutContactingTheServer()=fixture {f->
-        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
-        val before=f.journal.snapshot();assertEquals(LoginPhase.POLICY_CACHED,before.phase)
-        val original=LoginPayload.decode(f.journal.readProtected(before),before)
+    private fun Fixture.expireRefreshFamily(before:LoginIntent) {
+        val original=LoginPayload.decode(journal.readProtected(before),before)
         val session=checkNotNull(original.session);val deadline=session.time.upperMs
         val expired=original.copy(session=session.copy(session=session.session.copy(
             accessUntilMs=deadline,refreshUntilMs=deadline)))
-        f.journal.prepare(before,expired.encode()).use {prepared->
-            f.journal.commit(before,LoginRecovery.capabilitiesRecorded(before,before.generation,prepared.hash),prepared)
+        journal.prepare(before,expired.encode()).use {prepared->
+            journal.commit(before,LoginRecovery.capabilitiesRecorded(before,before.generation,prepared.hash),prepared)
         }
+    }
+    @Test fun expiredRefreshFamilyRequiresLoginWithoutContactingTheServer()=fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val before=f.journal.snapshot();assertEquals(LoginPhase.POLICY_CACHED,before.phase)
+        f.expireRefreshFamily(before)
         val paths=f.server.paths.toList()
         f.restart()
         val after=f.journal.snapshot();assertEquals(LoginPhase.NEEDS_REAUTH,after.phase)
         assertEquals(before.deviceId,after.deviceId);assertEquals(before.keyAlias,after.keyAlias)
         assertEquals(before.generation,after.generation);assertEquals(paths,f.server.paths)
-        assertEquals("REAUTHENTICATE",f.controller.status().getString("reason"))
+        assertEquals("SESSION_EXPIRED",f.controller.status().getString("reason"))
         assertFalse(f.controller.allowsConnect())
+    }
+    @Test fun expiredRefreshFamilyPreservesAnAuthorizedOfflinePolicy()=fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val ticket=f.controller.assignmentTicket()
+        assertTrue(f.controller.beginAssignment(ticket,listOf(false)));f.idle()
+        assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()
+        val before=f.journal.snapshot()
+        val config=f.controller.assignedRuntime.config(before)
+        f.expireRefreshFamily(before)
+        val paths=f.server.paths.toList()
+        f.restart()
+        val after=f.journal.snapshot();assertEquals(LoginPhase.POLICY_CACHED,after.phase)
+        assertEquals(before.deviceId,after.deviceId);assertEquals(before.policyHash,after.policyHash)
+        assertEquals(config,f.controller.assignedRuntime.config(after))
+        assertEquals("SESSION_EXPIRED",f.controller.status().getString("reason"))
+        assertEquals(paths,f.server.paths)
     }
     @Test fun chatReplyIsPrivateAndDenialDoesNotWithdrawAssignedPolicy()=fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
