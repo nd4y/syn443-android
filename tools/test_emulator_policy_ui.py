@@ -40,6 +40,37 @@ class OwnedVpnSettingsTest(unittest.TestCase):
         with patch.object(ui,'adb',return_value=b'physical-phone'),patch.object(ui,'tree')as tree:
             with self.assertRaises(AssertionError):ui.open_policy()
             tree.assert_not_called()
+    def test_only_focused_settings_anr_is_recognized(self):
+        owned=b'  mCurrentFocus=Window{123a u0 Application Not Responding: com.android.settings}' + bytes([10])
+        self.assertTrue(ui.focused_settings_anr(owned))
+        for foreign in (
+            owned.replace(b'com.android.settings', b'io.syn443.android'),
+            owned.replace(b'com.android.settings', b'com.android.settings.other'),
+            owned.replace(b'mCurrentFocus', b'mPreviousFocus'),
+        ):
+            self.assertFalse(ui.focused_settings_anr(foreign))
+
+    def test_owned_settings_anr_reopens_activity_without_tapping_dialog(self):
+        blocked=ET.Element('hierarchy')
+        node(blocked, package='android', resource_id='android:id/aerr_close')
+        settings,gear=self.row()
+        launches=[]
+
+        def adb(*args, **kwargs):
+            if args[-1]=='ro.hardware':return b'ranchu'
+            if args[-1]=='size':return b'1080x1920'
+            if 'resolve-activity' in args:return b'com.android.settings/.Settings$VpnSettingsActivity'
+            if args[1:3]==('dumpsys','window'):
+                return b'  mCurrentFocus=Window{123a u0 Application Not Responding: com.android.settings}'
+            if args[1:3]==('am','start'):launches.append(args)
+            return b''
+
+        with patch.object(ui,'adb',side_effect=adb),patch.object(ui,'tree',side_effect=[blocked,settings]),patch.object(ui,'tap') as tap:
+            ui.open_policy()
+            tap.assert_called_once_with(gear)
+        self.assertEqual(len(launches),2)
+        self.assertEqual(launches[0],launches[1])
+
     def test_protected_bouncer_is_never_filled_by_policy_navigation(self):
         root,_=self.row()
         def adb(*args,**kwargs):return b'ranchu' if args[-1]=='ro.hardware' else b'1080x1920' if args[-1]=='size' else b'com.android.settings/.Settings$VpnSettingsActivity' if args[1:3]==('cmd','package') else b''
