@@ -24,7 +24,7 @@ def adb(*args, timeout=30):
 
 
 class ControlUnavailable(RuntimeError):
-    """The provider may briefly disappear while its process is being killed."""
+    """An emulator observation may be unavailable while Android replaces a process."""
 
 
 def call(method, arg=None):
@@ -42,9 +42,15 @@ def call(method, arg=None):
 
 def pid(suffix):
     raw = adb('shell', 'sh', '-c', "'pidof " + PACKAGE + suffix + " || true'").strip()
-    if raw and not raw.isdigit():
+    if not raw:
+        return ''
+    matches = raw.split()
+    if not all(re.fullmatch(rb'[1-9][0-9]{0,9}', item) for item in matches):
         raise AssertionError('Unexpected process identity')
-    return raw.decode()
+    if len(matches) != 1:
+        # pidof lists all matches. A poll must wait for exactly one owner.
+        raise ControlUnavailable('Multiple matching emulator process IDs')
+    return matches[0].decode()
 
 
 def vpn_stopped():

@@ -27,14 +27,20 @@ import javax.net.ssl.TrustManagerFactory
 class LoginController private constructor(private val context:android.app.Application,
     private val namespace:String="device-login-v1",private val testExchange:IdentityExchange?=null,
     private val testBeforeQueue:(()->Unit)?=null,private val testTrustAnchor:TrustAnchor?=null,
-    private val testReportVpnOn:(()->Boolean)?=null) {
+    private val testReportVpnOn:(()->Boolean)?=null,private val testVpnStopped:(()->Boolean)?=null) {
     companion object {
         @Volatile private var instance:LoginController?=null
         @Synchronized fun get(context:Context):LoginController = instance ?: LoginController(context.applicationContext as android.app.Application).also {instance=it}
         internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange,beforeQueue:(()->Unit)?=null,
             anchor:TrustAnchor?=null,reportVpnOn:(()->Boolean)?=null):LoginController {
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") && namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
-            return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue,anchor,reportVpnOn)
+            return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue,anchor,reportVpnOn,
+                testVpnStopped={
+                    val status=context.contentResolver.call(android.net.Uri.parse("content://io.syn443.control"),"status",null,null)
+                        ?.getString("json")?.let(::JSONObject)
+                    status!=null && status.optString("phase")=="Off" && !status.optBoolean("desiredOn") &&
+                        status.optBoolean("engineStateKnown") && !status.getBoolean("engineActive")
+                })
         }
     }
     private val journal=LoginJournal(context,namespace)
@@ -216,7 +222,12 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     private fun commit(s:LoginIntent,next:LoginIntent):LoginIntent=synchronized(commands) {current(s);journal.commit(s,next)}
     private fun state()=StateStore.get(context)
-    private fun noVpn() {require(!state().checkpoint().desiredOn && !state().read().optBoolean("engineActive"))}
+    private fun noVpn() {
+        // The disposable fixture runs outside the controller process. Reading
+        // its AtomicFile directly would bypass the controller's writer lock.
+        val stopped=testVpnStopped?.invoke() ?: (!state().checkpoint().desiredOn && !state().read().optBoolean("engineActive"))
+        require(stopped)
+    }
     internal fun loginIntent()=journal.snapshot()
     /** Memory/public-intent reads only. Never call StateStore, Keystore or network in this block. */
     internal fun <T> assignedRead(block:(LoginIntent)->T):T=synchronized(commands) {block(journal.snapshot())}

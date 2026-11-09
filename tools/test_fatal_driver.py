@@ -1,5 +1,24 @@
 import unittest
+from unittest.mock import patch
+from run_vpn_process_faults import ControlUnavailable, await_condition, pid
 from run_vpn_fatal import native_crash_matches, await_native_crash, scoped_libc_abort_matches
+
+
+class ProcessObservationTest(unittest.TestCase):
+    @patch("run_vpn_process_faults.adb", side_effect=[b"42 57\n", b"57\n", b""])
+    @patch("run_vpn_process_faults.time.sleep")
+    def test_overlap_cannot_prove_exit_until_a_single_owner_is_observed(self, sleep, adb):
+        await_condition(lambda: pid(":engine") == "57", timeout=5)
+        self.assertEqual(2, adb.call_count)
+        sleep.assert_called_once_with(1)
+        self.assertEqual("", pid(":engine"))
+
+    @patch("run_vpn_process_faults.adb", side_effect=[b"42 57", b"pidof: permission denied"])
+    def test_multi_owner_and_malformed_samples_never_report_off(self, adb):
+        with self.assertRaises(ControlUnavailable):
+            pid(":engine")
+        with self.assertRaisesRegex(AssertionError, "Unexpected process identity"):
+            pid(":engine")
 
 
 class NativeCrashEvidenceTest(unittest.TestCase):
