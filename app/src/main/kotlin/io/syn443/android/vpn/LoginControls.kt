@@ -22,7 +22,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import io.syn443.identity.Identity
 
-@Composable fun LoginControls() {
+@Composable fun LoginControls(vpnStopped:Boolean) {
     val context=LocalContext.current;val scope=rememberCoroutineScope()
     val uri=remember {"content://io.syn443.control".toUri()}
     var status by remember {mutableStateOf(JSONObject())}
@@ -101,12 +101,14 @@ import io.syn443.identity.Identity
             if(command("auth-start",generation.toString())?.getBoolean("ok")==true)launchGeneration=generation+1
             else message="Не удалось начать вход. Сначала остановите VPN."
         }},modifier=Modifier.testTag("auth-start")) {Text("Войти")}
-        if(canReauthenticate)Button(enabled=!status.optBoolean("busy"),onClick={scope.launch {
+        if(canReauthenticate && !vpnStopped)
+            Text("Отключите VPN, чтобы открыть Keycloak. После входа подключите VPN снова.",Modifier.testTag("auth-reauth-stop-required"))
+        if(canReauthenticate)Button(enabled=vpnStopped && !status.optBoolean("busy"),onClick={scope.launch {
             if(command("auth-reauth","$generation:$revision")?.getBoolean("ok")==true) {
                 launchAfterRevision=revision;launchGeneration=generation;message=""
             } else message="Не удалось начать повторный вход. Повторите попытку."
         }},modifier=Modifier.testTag("auth-reauth")) {Text(if(phase=="BROWSER")"Начать вход заново" else "Войти снова через Keycloak")}
-        if(phase=="BROWSER")Button(enabled=status.optBoolean("browserReady"),onClick={
+        if(phase=="BROWSER")Button(enabled=status.optBoolean("browserReady") && (!canReauthenticate || vpnStopped),onClick={
             launchAfterRevision=null;launchGeneration=generation
         },modifier=Modifier.testTag("auth-open")) {Text("Продолжить вход")}
         if(phase !in setOf("SIGNED_OUT","BLOCKED","BROWSER","NEEDS_REAUTH") && (phase!="POLICY_CACHED" || reason.isNotEmpty()))

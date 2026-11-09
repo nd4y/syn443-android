@@ -347,6 +347,9 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     fun startReauthentication(generation:Long,revision:Long):Boolean {
         lateinit var expected:LoginIntent
+        // The ordinary browser cannot reach Keycloak through the blocked
+        // data tunnel. Only a confirmed explicit VPN Stop can open sign-in.
+        noVpn()
         return submitIfIdle(admit={
             val s=journal.snapshot()
             if(s.generation!=generation || s.revision!=revision || !LoginRecovery.canReauthenticate(s))false
@@ -355,6 +358,7 @@ class LoginController private constructor(private val context:android.app.Applic
             commandEpoch++;browser=null;chatTicket=null;activationDelivery=null;panelHint=null;panelPoll=null
             deviceSourcePollAfter=0;deviceSourceAuthority=null;telemetryAuthority=null;nextTelemetryElapsed=0
         }) {
+            noVpn()
             val old=payload(expected)
             val next=LoginRecovery.beginReauthentication(expected,generation)
             val pending=Identity.newPending(generation,expected.thumbprint,boot(),elapsed())
@@ -470,9 +474,7 @@ class LoginController private constructor(private val context:android.app.Applic
         fun admitted() {
             val current=journal.snapshot()
             require(workerEpoch==commandEpoch && current.generation==generation && (current.phase==LoginPhase.RETIRING)==retiring && cancelledGeneration!=generation)
-            val registeredRecovery=current.reauthRevision>0 &&
-                current.phase in setOf(LoginPhase.EXCHANGING,LoginPhase.AUTHENTICATED,LoginPhase.ENROLLING,LoginPhase.PROVISIONING)
-            if(!registeredRecovery && current.phase !in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))noVpn()
+            if(current.phase !in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))noVpn()
         }
         // Established account requests use a physical Network even while its TUN is running.
         admitted();val uri=Identity.https(url)
