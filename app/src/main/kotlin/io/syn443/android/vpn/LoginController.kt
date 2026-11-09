@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.AtomicFile
+import androidx.core.net.toUri
 import io.syn443.identity.*
 import io.syn443.policy.Canonical
 import kotlinx.serialization.encodeToString
@@ -36,7 +37,7 @@ class LoginController private constructor(private val context:android.app.Applic
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") && namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
             return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue,anchor,reportVpnOn,
                 testVpnStopped={
-                    val status=context.contentResolver.call(android.net.Uri.parse("content://io.syn443.control"),"status",null,null)
+                    val status=context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null)
                         ?.getString("json")?.let(::JSONObject)
                     status!=null && status.optString("phase")=="Off" && !status.optBoolean("desiredOn") &&
                         status.optBoolean("engineStateKnown") && !status.getBoolean("engineActive")
