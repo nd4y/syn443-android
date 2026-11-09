@@ -995,8 +995,16 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     private fun resumeSession(initial:LoginIntent,original:LoginPayload,protocol:AuthProtocol,scope:IdentityScope,fetch:Boolean=true) {
         var s=initial;var p=original;var session=checkNotNull(p.session)
-        val reanchor=session.time.boot!=boot()
-        val refresh=s.phase==LoginPhase.REFRESHING || reanchor || Math.addExact(session.time.window(boot(),elapsed()).upperMs,30_000)>=session.session.accessUntilMs
+        val currentBoot=boot();val now=elapsed()
+        val reanchor=session.time.boot!=currentBoot
+        val trustedUpper=if(reanchor)null else {
+            if(!session.time.isCurrent(currentBoot,now))throw AuthException(AuthFailure.REAUTHENTICATE)
+            session.time.window(currentBoot,now).upperMs.also {
+                if(it>=session.session.refreshUntilMs)throw AuthException(AuthFailure.REAUTHENTICATE)
+            }
+        }
+        val refresh=s.phase==LoginPhase.REFRESHING || trustedUpper==null ||
+            Math.addExact(trustedUpper,30_000)>=session.session.accessUntilMs
         if(refresh) {
             val next=LoginRecovery.beginRefresh(s,s.generation,boot(),elapsed())
             if(next!=s)s=commit(s,next)

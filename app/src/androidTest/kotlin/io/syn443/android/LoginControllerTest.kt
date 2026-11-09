@@ -531,6 +531,24 @@ class LoginControllerTest {
         assertFalse(f.controller.pollProvisioning(current.generation))
         assertFalse(f.controller.allowsConnect());assertFalse(f.controller.status().getBoolean("busy"))
     }
+    @Test fun expiredRefreshFamilyRequiresLoginWithoutContactingTheServer()=fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val before=f.journal.snapshot();assertEquals(LoginPhase.POLICY_CACHED,before.phase)
+        val original=LoginPayload.decode(f.journal.readProtected(before),before)
+        val session=checkNotNull(original.session);val deadline=session.time.upperMs
+        val expired=original.copy(session=session.copy(session=session.session.copy(
+            accessUntilMs=deadline,refreshUntilMs=deadline)))
+        f.journal.prepare(before,expired.encode()).use {prepared->
+            f.journal.commit(before,LoginRecovery.capabilitiesRecorded(before,before.generation,prepared.hash),prepared)
+        }
+        val paths=f.server.paths.toList()
+        f.restart()
+        val after=f.journal.snapshot();assertEquals(LoginPhase.NEEDS_REAUTH,after.phase)
+        assertEquals(before.deviceId,after.deviceId);assertEquals(before.keyAlias,after.keyAlias)
+        assertEquals(before.generation,after.generation);assertEquals(paths,f.server.paths)
+        assertEquals("REAUTHENTICATE",f.controller.status().getString("reason"))
+        assertFalse(f.controller.allowsConnect())
+    }
     @Test fun chatReplyIsPrivateAndDenialDoesNotWithdrawAssignedPolicy()=fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
         val before=f.journal.snapshot();val id="a".repeat(32)

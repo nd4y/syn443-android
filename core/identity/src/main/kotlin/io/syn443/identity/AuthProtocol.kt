@@ -251,7 +251,8 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     }
     fun refresh(op:IdentityOperation,previous:SessionReply,scope:IdentityScope):SessionReply=checked {
         require(op.path=="/v1/device/session/refresh");bound(previous)
-        require(previous.time.window(boot(),elapsed()).upperMs<previous.session.refreshUntilMs)
+        if(previous.time.window(boot(),elapsed()).upperMs>=previous.session.refreshUntilMs)
+            throw AuthException(AuthFailure.REAUTHENTICATE)
         val result=api(op.path,op.body,previous.session.refreshToken,previous.session.nonce,previous.time,scope)
         val next=session(result)
         require(next.deviceId==previous.session.deviceId && next.generation==Math.addExact(previous.session.generation,1) &&
