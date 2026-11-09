@@ -99,6 +99,14 @@ def settings_component(raw):
     return vpn[0] if len(vpn)==1 else None
 
 
+def focused_settings_anr(windows):
+    """The platform attaches the ANR process name to its focused window."""
+    return re.search(
+        rb'(?m)^\s*mCurrentFocus=Window\{[^}\r\n]* Application Not Responding: com\.android\.settings\}\s*$',
+        windows,
+    ) is not None
+
+
 def open_policy():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
     # Reboots can leave a nonsecure keyguard or a previously restored Settings
@@ -116,14 +124,26 @@ def open_policy():
     if component is None:
         component=settings_component(adb(*args,'query-activities','--brief','-a','android.settings.VPN_SETTINGS','-p','com.android.settings'))
     assert component is not None,'Platform did not resolve an owned VPN Settings component'
-    adb('shell','am','start','-S','-W','-n',shlex.quote(component),'-f','0x10008000')
+    launch=('shell','am','start','-S','-W','-n',shlex.quote(component),'-f','0x10008000')
+    adb(*launch)
     end=time.monotonic()+20
     root=None
+    relaunched=False
     while time.monotonic()<end:
         root=tree()
         if pin_keys(root):raise AssertionError('Protected emulator keyguard unexpectedly active')
         gear=profile_settings(root)
         if gear is not None:tap(gear);return
+        # Never press a generic error dialog. Restart only the already resolved
+        # Settings activity once, after confirming that its own ANR has focus.
+        if not relaunched and any(n.get('package')=='android' and n.get('resource-id')=='android:id/aerr_close'
+                                   for n in root.iter('node')):
+            if focused_settings_anr(adb('shell','dumpsys','window','windows')):
+                relaunched=True
+                print('Owned Settings ANR: restarting the VPN settings activity once',flush=True)
+                adb(*launch)
+                end=time.monotonic()+20
+                continue
         time.sleep(1)
     # Structural data only: no arbitrary UI text, identifiers or auth content.
     nodes=[] if root is None else list(root.iter('node'))

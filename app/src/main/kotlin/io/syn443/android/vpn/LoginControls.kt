@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -48,6 +49,7 @@ import io.syn443.identity.Identity
         }
     }
     val phase=status.optString("phase");val generation=status.optLong("generation",-1)
+    val reason=status.optString("reason")
     val panelConfigured=status.optBoolean("controlPanelConfigured")
     LaunchedEffect(visible,generation,panelConfigured) {
         if(visible && panelConfigured)while(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
@@ -74,32 +76,42 @@ import io.syn443.identity.Identity
             "EXCHANGING","AUTHENTICATED","CLEANUP","ENROLLING"->"Проверка доступа и регистрация устройства"
             "PROVISIONING"->"Устройство зарегистрировано. Ожидается конфигурация от сервера."
             "POLICY_CACHED"->if(status.optJSONObject("assignedPolicy")?.let {it.optBoolean("candidateValidated") || it.optBoolean("runtimeAuthorized")}==true)
-                "Конфигурация получена и проверена. Можно включить VPN." else "Ожидаем действующую конфигурацию."
+                "Конфигурация получена и проверена." else "Ожидаем действующую конфигурацию."
             "REFRESHING"->"Обновление защищённой сессии"
             "NEEDS_REAUTH"->if(status.optString("method")=="invite")"Проверьте доступ у администратора. Завершите привязку и запросите новое приглашение." else "Нужен повторный вход. Завершите текущую сессию и войдите снова."
             "RETIRING"->"Завершение сессии и удаление локальных ключей"
             else->"Данные входа недоступны. VPN заблокирован до восстановления."
         },Modifier.testTag("auth-phase"))
-        if(status.optString("reason").isNotEmpty())Text("Операция не завершена. Можно повторить попытку или завершить сессию.")
+        if(reason.isNotEmpty() && phase!="NEEDS_REAUTH")Text(when(reason) {
+            "PENDING"->"Сервер ещё готовит конфигурацию."
+            "TRANSPORT"->"Сервер управления недоступен. Проверьте сеть и повторите попытку."
+            "ACCESS_DENIED"->"Доступ ограничен. Обратитесь к администратору."
+            else->"Операция не завершена."
+        })
         if(phase=="SIGNED_OUT")Button(enabled=!status.optBoolean("busy"),onClick={scope.launch {
             if(command("auth-start",generation.toString())?.getBoolean("ok")==true)launchGeneration=generation+1
             else message="Не удалось начать вход. Сначала остановите VPN."
         }},modifier=Modifier.testTag("auth-start")) {Text("Войти")}
         if(phase=="BROWSER")Button(enabled=status.optBoolean("browserReady"),onClick={launchGeneration=generation},modifier=Modifier.testTag("auth-open")) {Text("Продолжить вход")}
-        if(phase !in setOf("SIGNED_OUT","BLOCKED","BROWSER"))Button(enabled=!status.optBoolean("busy"),onClick={scope.launch {
-            command("auth-retry",generation.toString())
+        if(phase !in setOf("SIGNED_OUT","BLOCKED","BROWSER","NEEDS_REAUTH") && (phase!="POLICY_CACHED" || reason.isNotEmpty()))
+            TextButton(enabled=!status.optBoolean("busy"),onClick={scope.launch {
+            if(command("auth-retry",generation.toString())?.getBoolean("ok")!=true)message="Не удалось повторить операцию."
+            else message=""
         }},modifier=Modifier.testTag("auth-retry")) {Text("Повторить")}
-        if(phase!="SIGNED_OUT")Button(onClick={launchGeneration=null;scope.launch {
+        if(phase!="SIGNED_OUT")TextButton(onClick={launchGeneration=null;scope.launch {
             if(command("auth-cancel")?.getBoolean("ok")!=true)message="Завершение не подтверждено. Повторите попытку."
         }},modifier=Modifier.testTag("auth-cancel")) {Text("Завершить сессию")}
         if(status.optInt("cleanupPending")>0)Text("Очистка регистрации на сервере продолжится после нового входа в тот же аккаунт.")
-        if(status.optBoolean("controlPanelAvailable"))Button(enabled=!status.optBoolean("busy"),onClick={scope.launch {
+        if(status.optBoolean("controlPanelAvailable"))TextButton(enabled=!status.optBoolean("busy"),onClick={scope.launch {
             val reply=command("auth-admin-panel",generation.toString())
             val url=reply?.getString("url")
-            if(reply?.getBoolean("ok")==true && url!=null && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))runCatching {
-                Identity.controlOrigin(url)
-                context.startActivity(Intent(Intent.ACTION_VIEW,url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
-            }.onFailure {message="Не удалось открыть панель управления."}
+            if(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                if(reply?.getBoolean("ok")==true && url!=null)runCatching {
+                    Identity.controlOrigin(url)
+                    context.startActivity(Intent(Intent.ACTION_VIEW,url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
+                }.onSuccess {message=""}.onFailure {message="Не удалось открыть панель управления."}
+                else message="Доступ к панели нужно подтвердить заново. Подождите и повторите попытку."
+            }
         }},modifier=Modifier.testTag("auth-admin-panel")) {Text("Администрирование")}
         val telemetryEnabled=status.optBoolean("telemetryEnabled")
         if(status.optBoolean("telemetryAvailable") || telemetryEnabled) {
