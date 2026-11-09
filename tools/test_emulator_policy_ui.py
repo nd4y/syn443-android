@@ -41,7 +41,7 @@ class OwnedVpnSettingsTest(unittest.TestCase):
             with self.assertRaises(AssertionError):ui.open_policy()
             tree.assert_not_called()
     def test_only_focused_settings_anr_is_recognized(self):
-        owned=b'  mCurrentFocus=Window{123a u0 Application Not Responding: com.android.settings}\\n'
+        owned=b'  mCurrentFocus=Window{123a u0 Application Not Responding: com.android.settings}' + bytes([10])
         self.assertTrue(ui.focused_settings_anr(owned))
         for foreign in (
             owned.replace(b'com.android.settings', b'io.syn443.android'),
