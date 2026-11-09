@@ -86,6 +86,7 @@ import io.syn443.identity.Identity
             "PENDING"->"Сервер ещё готовит конфигурацию."
             "TRANSPORT"->"Сервер управления недоступен. Проверьте сеть и повторите попытку."
             "ACCESS_DENIED"->"Доступ ограничен. Обратитесь к администратору."
+            "SESSION_EXPIRED"->"Сессия истекла. Действующая офлайн-политика сохраняется до своего срока. Для обновления нужен вход."
             else->"Операция не завершена."
         })
         if(phase=="SIGNED_OUT")Button(enabled=!status.optBoolean("busy"),onClick={scope.launch {

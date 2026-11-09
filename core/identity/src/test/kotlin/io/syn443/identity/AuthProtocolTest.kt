@@ -425,6 +425,8 @@ class AuthProtocolTest {
     }
     @Test fun clockRejectsRebootRollbackStaleAnchorsAndMalformedDates() {
         val a=TrustedTime.observe(date(),2,1000,1000)
+        assertTrue(a.isCurrent(2,86_401_000))
+        assertFalse(a.isCurrent(3,2000));assertFalse(a.isCurrent(2,999));assertFalse(a.isCurrent(2,86_401_001))
         invalid {a.window(3,2000)};invalid {a.window(2,999)};invalid {a.window(2,86_401_001)}
         invalid {TrustedTime.observe(date(),2,0,20_001)};invalid {TrustedTime.observe(date(),2,3,2)}
         invalid {TrustedTime.observe(date(now-60_000),2,1000,1000,a)}
@@ -532,7 +534,19 @@ class AuthProtocolTest {
             next.copy(accessToken=previous.session.accessToken),next.copy(refreshToken=previous.session.refreshToken),next.copy(nonce=previous.session.nonce))) {
             f.handler={_,_,_,_,_,_->json(text=sessionWire(bad))};error(AuthFailure.INVALID_REPLY) {f.client.refresh(refresh,previous,IdentityScope())}
         }
-        f.elapsed+=86_000_001;error(AuthFailure.INVALID_REPLY) {f.client.refresh(refresh,previous,IdentityScope())}
+        val requests=f.requests.size
+        f.elapsed+=86_000_001
+        error(AuthFailure.SESSION_EXPIRED) {f.client.refresh(refresh,previous,IdentityScope())}
+        assertEquals(requests,f.requests.size)
+    }
+    @Test fun refreshAtTheConservativeDeadlineRequiresLoginWithoutSendingTheToken() {
+        val f=Fixture()
+        val deadline=f.time().upperMs
+        val atDeadline=f.current(session().copy(accessUntilMs=deadline,refreshUntilMs=deadline))
+        error(AuthFailure.SESSION_EXPIRED) {
+            f.client.refresh(IdentityOperation.refresh(),atDeadline,IdentityScope())
+        }
+        assertTrue(f.requests.isEmpty())
     }
     @Test fun expiredAccessLogoutRefreshesInRamAndRevokesOnlyTheSameDeviceWithCurrentProof() {
         val f=Fixture();val previous=f.current();f.elapsed=601_000
@@ -560,7 +574,9 @@ class AuthProtocolTest {
         for(reboot in listOf(false,true)) {
             val bad=Fixture();val previous=bad.current()
             if(reboot)bad.boot++ else bad.elapsed=86_001_000
-            error(AuthFailure.INVALID_REPLY) {bad.client.revoke(IdentityOperation.revoke(),previous,IdentityScope())}
+            error(if(reboot)AuthFailure.INVALID_REPLY else AuthFailure.SESSION_EXPIRED) {
+                bad.client.revoke(IdentityOperation.revoke(),previous,IdentityScope())
+            }
             assertTrue(bad.requests.isEmpty())
         }
     }

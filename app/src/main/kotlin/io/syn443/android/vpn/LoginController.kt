@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.AtomicFile
+import androidx.core.net.toUri
 import io.syn443.identity.*
 import io.syn443.policy.Canonical
 import kotlinx.serialization.encodeToString
@@ -27,14 +28,20 @@ import javax.net.ssl.TrustManagerFactory
 class LoginController private constructor(private val context:android.app.Application,
     private val namespace:String="device-login-v1",private val testExchange:IdentityExchange?=null,
     private val testBeforeQueue:(()->Unit)?=null,private val testTrustAnchor:TrustAnchor?=null,
-    private val testReportVpnOn:(()->Boolean)?=null) {
+    private val testReportVpnOn:(()->Boolean)?=null,private val testVpnStopped:(()->Boolean)?=null) {
     companion object {
         @Volatile private var instance:LoginController?=null
         @Synchronized fun get(context:Context):LoginController = instance ?: LoginController(context.applicationContext as android.app.Application).also {instance=it}
         internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange,beforeQueue:(()->Unit)?=null,
             anchor:TrustAnchor?=null,reportVpnOn:(()->Boolean)?=null):LoginController {
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") && namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
-            return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue,anchor,reportVpnOn)
+            return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue,anchor,reportVpnOn,
+                testVpnStopped={
+                    val status=context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null)
+                        ?.getString("json")?.let(::JSONObject)
+                    status!=null && status.optString("phase")=="Off" && !status.optBoolean("desiredOn") &&
+                        status.optBoolean("engineStateKnown") && !status.getBoolean("engineActive")
+                })
         }
     }
     private val journal=LoginJournal(context,namespace)
@@ -121,7 +128,8 @@ class LoginController private constructor(private val context:android.app.Applic
                     current(journal.snapshot())
                 }
             } catch(e:AuthException) {failure=e.reason.name
-                if(e.reason==AuthFailure.REAUTHENTICATE)runCatching {reauthenticate(journal.snapshot())}
+                if(e.reason in setOf(AuthFailure.REAUTHENTICATE,AuthFailure.SESSION_EXPIRED))
+                    runCatching {handleSessionFailure(e.reason)}
             } catch(_:Exception) {failure="UNAVAILABLE"}
             synchronized(commands) {
                 val ticket=chatTicket
@@ -161,10 +169,8 @@ class LoginController private constructor(private val context:android.app.Applic
                 if(synchronized(commands) {if(admitted!=commandEpoch)true else {workerEpoch=admitted;false}})return
                 block();""
             } catch(e:AuthException) {
-                if(!quiet && e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE))runCatching {
-                    val s=journal.snapshot()
-                    if(s.phase in setOf(LoginPhase.INVITING,LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))reauthenticate(s)
-                }
+                if(!quiet && e.reason in setOf(AuthFailure.ACCESS_DENIED,AuthFailure.REAUTHENTICATE,AuthFailure.SESSION_EXPIRED))
+                    runCatching {handleSessionFailure(e.reason)}
                 e.reason.name
             }
             catch(e:LoginStorageException) {if(e.reason==LoginStorageFailure.STALE)"" else e.reason.name}
@@ -217,7 +223,12 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     private fun commit(s:LoginIntent,next:LoginIntent):LoginIntent=synchronized(commands) {current(s);journal.commit(s,next)}
     private fun state()=StateStore.get(context)
-    private fun noVpn() {require(!state().checkpoint().desiredOn && !state().read().optBoolean("engineActive"))}
+    private fun noVpn() {
+        // The disposable fixture runs outside the controller process. Reading
+        // its AtomicFile directly would bypass the controller's writer lock.
+        val stopped=testVpnStopped?.invoke() ?: (!state().checkpoint().desiredOn && !state().read().optBoolean("engineActive"))
+        require(stopped)
+    }
     internal fun loginIntent()=journal.snapshot()
     /** Memory/public-intent reads only. Never call StateStore, Keystore or network in this block. */
     internal fun <T> assignedRead(block:(LoginIntent)->T):T=synchronized(commands) {block(journal.snapshot())}
@@ -995,8 +1006,16 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     private fun resumeSession(initial:LoginIntent,original:LoginPayload,protocol:AuthProtocol,scope:IdentityScope,fetch:Boolean=true) {
         var s=initial;var p=original;var session=checkNotNull(p.session)
-        val reanchor=session.time.boot!=boot()
-        val refresh=s.phase==LoginPhase.REFRESHING || reanchor || Math.addExact(session.time.window(boot(),elapsed()).upperMs,30_000)>=session.session.accessUntilMs
+        val currentBoot=boot();val now=elapsed()
+        val reanchor=session.time.boot!=currentBoot
+        val trustedUpper=if(reanchor)null else {
+            if(!session.time.isCurrent(currentBoot,now))throw AuthException(AuthFailure.SESSION_EXPIRED)
+            session.time.window(currentBoot,now).upperMs.also {
+                if(it>=session.session.refreshUntilMs)throw AuthException(AuthFailure.SESSION_EXPIRED)
+            }
+        }
+        val refresh=s.phase==LoginPhase.REFRESHING || trustedUpper==null ||
+            Math.addExact(trustedUpper,30_000)>=session.session.accessUntilMs
         if(refresh) {
             val next=LoginRecovery.beginRefresh(s,s.generation,boot(),elapsed())
             if(next!=s)s=commit(s,next)
@@ -1025,6 +1044,13 @@ class LoginController private constructor(private val context:android.app.Applic
         }
         if(fetch)fetchAssignment(s,p,protocol,scope)
     }
+    private fun handleSessionFailure(reason:AuthFailure) {synchronized(commands) {
+        val s=journal.snapshot();current(s)
+        if(s.phase !in setOf(LoginPhase.INVITING,LoginPhase.PROVISIONING,LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))return
+        // Local credential expiry does not revoke a separately signed offline permit.
+        if(reason==AuthFailure.SESSION_EXPIRED && assignedRuntime.status(s).optBoolean("runtimeAuthorized"))return
+        reauthenticate(s)
+    }}
     private fun reauthenticate(s:LoginIntent) {synchronized(commands) {
         clearOverlays();assignedRuntime.clear();commit(s,LoginRecovery.needsReauthentication(s,s.generation));browser=null;policyChanged()
     }}
