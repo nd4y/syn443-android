@@ -40,6 +40,24 @@ class AssignmentsTest {
         Assignments.receive(state,intent,payload,PolicyReply(signed(p),time),1,1000)
     private fun acknowledged(state:AssignmentState)=LoginRecovery.policyCached(login,1,Assignments.receipt(state,login,payload,1,1000),login.protectedHash)
     private fun invalid(block:()->Unit) {assertThrows(IllegalArgumentException::class.java,block)}
+    @Test fun reauthenticationReanchorsStaleTimeWithoutResettingPolicyFloors() {
+        val before=receive(p=policy(3).copy(securityEpoch=2,revocationFloor=2))
+        val renewedLogin=login.copy(reauthRevision=5)
+        val elapsed=90_001_000L
+        val current=now+90_000_000
+        val fresh=TrustedTime(1,elapsed,current,current+1000)
+        val renewedPayload=payload.copy(session=session.copy(time=fresh),registration=RegisteredLogin.from(renewedLogin))
+        val newPolicy=policy(4).copy(securityEpoch=2,revocationFloor=2,issuedAtMs=current,
+            notBeforeMs=current,refreshAfterMs=current+30_000,offlineUntilMs=current+3_600_000)
+        fun receiveRenewed(p:Payload,time:TrustedTime)=Assignments.receive(before,renewedLogin,renewedPayload,
+            PolicyReply(signed(p),time),1,elapsed)
+        val result=receiveRenewed(newPolicy,fresh)
+        assertEquals(before.identity,result.identity);assertEquals(2L,result.journal.floor)
+        assertEquals(2L,result.journal.epoch);assertEquals(4L,result.journal.maxRevision)
+        invalid {receiveRenewed(newPolicy.copy(revision=2),fresh)}
+        invalid {receiveRenewed(newPolicy.copy(securityEpoch=1),fresh)}
+        invalid {receiveRenewed(newPolicy,fresh.copy(lowerMs=current-600_000,upperMs=current-599_000))}
+    }
     @Test fun activationReportPersistsOnlyFinalCurrentEnvelopeDecisions() {
         val first=receive();val enrolled=acknowledged(first)
         assertNull(Assignments.report(first,enrolled,payload,1,1000))

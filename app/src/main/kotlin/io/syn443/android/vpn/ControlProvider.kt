@@ -81,6 +81,13 @@ class ControlProvider : ContentProvider() {
                 }
                 "auth-start" -> LoginController.get(context).start(requireNotNull(arg?.toLongOrNull()))
                 "auth-retry" -> LoginController.get(context).retry(requireNotNull(arg?.toLongOrNull()))
+                "auth-reauth" -> {
+                    require(caller==Process.myUid())
+                    val parts=requireNotNull(arg).split(':',limit=3)
+                    require(parts.size==2)
+                    val admitted=LoginController.get(context).startReauthentication(parts[0].toLong(),parts[1].toLong())
+                    return Bundle().apply {putBoolean("ok",admitted)}
+                }
                 "auth-poll" -> return Bundle().apply {
                     putBoolean("ok",true)
                     putBoolean("admitted",LoginController.get(context).pollProvisioning(requireNotNull(arg?.toLongOrNull())))

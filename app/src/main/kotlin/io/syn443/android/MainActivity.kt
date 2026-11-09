@@ -44,8 +44,8 @@ private fun Home(consentGeneration: Long) {
     ) {
         Text("SYN443", style = MaterialTheme.typography.headlineLarge)
         Text("Secure Your Network")
-        VpnControls(consentGeneration) {
-            LoginControls()
+        VpnControls(consentGeneration) { vpnStopped ->
+            LoginControls(vpnStopped)
             TextButton(
                 onClick = { context.startActivity(Intent(context, EnrollmentActivity::class.java)) },
                 modifier = Modifier.testTag("manual-enrollment"),

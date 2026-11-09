@@ -8,11 +8,20 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 
+@Serializable data class RegisteredLogin(val ownerTag:String,val deviceId:String,val revision:Long) {
+    override fun toString()="RegisteredLogin([redacted])"
+    companion object {
+        fun from(intent:LoginIntent)=if(intent.reauthRevision==0L)null
+            else RegisteredLogin(intent.ownerTag,intent.deviceId,intent.reauthRevision)
+    }
+}
+
 /** Protected worker-only cache. A policy envelope belongs in the separate activation journal. */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable data class LoginPayload(val bootstrap:Bootstrap,val pending:Pending?=null,
     val user:UserCredential?=null,val session:SessionReply?=null,val invitation:InvitationPending?=null,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val advertisedCapabilities:List<String>?=null) {
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val advertisedCapabilities:List<String>?=null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val registration:RegisteredLogin?=null) {
     override fun toString()="LoginPayload([redacted])"
     fun encode():String {
         validate()
@@ -43,6 +52,7 @@ import kotlinx.serialization.json.*
     fun requireBound(intent:LoginIntent):LoginPayload {
         validate();LoginRecovery.validate(intent)
         require(intent.authority==Identity.bootstrapAuthority(bootstrap) && intent.serviceId==bootstrap.serviceId)
+        require(registration==RegisteredLogin.from(intent))
         invitation?.let {
             require(intent.method=="invite" && intent.phase in setOf(LoginPhase.INVITING,LoginPhase.NEEDS_REAUTH))
             it.validate(intent.thumbprint)
@@ -51,7 +61,7 @@ import kotlinx.serialization.json.*
         }
         pending?.let {
             require(intent.phase in setOf(LoginPhase.BROWSER,LoginPhase.EXCHANGING,LoginPhase.NEEDS_REAUTH) &&
-                it.generation==intent.generation && it.thumbprint==intent.thumbprint && !intent.maybeRegistered)
+                it.generation==intent.generation && it.thumbprint==intent.thumbprint && (!intent.maybeRegistered || registration!=null))
         }
         user?.let {
             require(intent.phase in setOf(LoginPhase.AUTHENTICATED,LoginPhase.CLEANUP,LoginPhase.ENROLLING,LoginPhase.NEEDS_REAUTH) &&

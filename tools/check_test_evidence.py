@@ -193,6 +193,8 @@ if mode=="emulator":
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'expiredRefreshFamilyRequiresLoginWithoutContactingTheServer',
         'expiredRefreshFamilyPreservesAnAuthorizedOfflinePolicy',
+        'repeatKeycloakLoginKeepsDevicePolicyAndFencesPreviousResults',
+        'repeatKeycloakLoginRejectsWrongOwnerAndDifferentDevice',
     }} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required expired refresh family cases missing'
     assert ('io.syn443.android.LoginControllerTest','assignedLeaseRenewalPersistsWithoutNewActivationAndRetainsDeviceIdentityAcrossRestart') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required durable Android lease renewal case missing'
     assert {('io.syn443.android.LoginControllerTest',name) for name in {

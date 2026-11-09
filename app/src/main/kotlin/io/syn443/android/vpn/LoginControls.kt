@@ -22,12 +22,13 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import io.syn443.identity.Identity
 
-@Composable fun LoginControls() {
+@Composable fun LoginControls(vpnStopped:Boolean) {
     val context=LocalContext.current;val scope=rememberCoroutineScope()
     val uri=remember {"content://io.syn443.control".toUri()}
     var status by remember {mutableStateOf(JSONObject())}
     var message by remember {mutableStateOf("")}
     var launchGeneration by remember {mutableStateOf<Long?>(null)}
+    var launchAfterRevision by remember {mutableStateOf<Long?>(null)}
     val lifecycle=(context as LifecycleOwner).lifecycle
     var visible by remember {mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))}
     DisposableEffect(lifecycle) {
@@ -49,6 +50,8 @@ import io.syn443.identity.Identity
         }
     }
     val phase=status.optString("phase");val generation=status.optLong("generation",-1)
+    val revision=status.optLong("intentRevision",-1)
+    val canReauthenticate=status.optBoolean("canReauthenticate")
     val reason=status.optString("reason")
     val panelConfigured=status.optBoolean("controlPanelConfigured")
     LaunchedEffect(visible,generation,panelConfigured) {
@@ -57,12 +60,13 @@ import io.syn443.identity.Identity
             delay(if(admitted)60_000 else 5_000)
         }
     }
-    LaunchedEffect(visible,generation,status.optBoolean("browserReady"),launchGeneration) {
-        if(visible && launchGeneration==generation && status.optBoolean("browserReady")) {
+    LaunchedEffect(visible,generation,revision,status.optBoolean("browserReady"),launchGeneration,launchAfterRevision) {
+        if(visible && launchGeneration==generation && status.optBoolean("browserReady") &&
+            (launchAfterRevision?.let {revision>it} ?: true)) {
             val url=command("auth-browser",generation.toString())?.getString("url")
             if(url!=null && launchGeneration==generation)runCatching {context.startActivity(Intent(Intent.ACTION_VIEW,url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))}
                 .onFailure {message="Не удалось открыть браузер. Нажмите «Продолжить вход»."}
-            launchGeneration=null
+            launchGeneration=null;launchAfterRevision=null
         }
     }
     if(status.optBoolean("configured") || phase !in setOf("","SIGNED_OUT"))Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -78,11 +82,15 @@ import io.syn443.identity.Identity
             "POLICY_CACHED"->if(status.optJSONObject("assignedPolicy")?.let {it.optBoolean("candidateValidated") || it.optBoolean("runtimeAuthorized")}==true)
                 "Конфигурация получена и проверена." else "Ожидаем действующую конфигурацию."
             "REFRESHING"->"Обновление защищённой сессии"
-            "NEEDS_REAUTH"->if(status.optString("method")=="invite")"Проверьте доступ у администратора. Завершите привязку и запросите новое приглашение." else "Нужен повторный вход. Завершите текущую сессию и войдите снова."
+            "NEEDS_REAUTH"->when {
+                canReauthenticate->"Войдите в тот же аккаунт Keycloak. Привязка устройства сохранится."
+                status.optString("method")=="invite"->"Проверьте доступ у администратора. Завершите привязку и запросите новое приглашение."
+                else->"Нужен повторный вход. Завершите текущую сессию и войдите снова."
+            }
             "RETIRING"->"Завершение сессии и удаление локальных ключей"
             else->"Данные входа недоступны. VPN заблокирован до восстановления."
         },Modifier.testTag("auth-phase"))
-        if(reason.isNotEmpty() && phase!="NEEDS_REAUTH")Text(when(reason) {
+        if(reason.isNotEmpty() && (phase!="NEEDS_REAUTH" || canReauthenticate && reason!="SESSION_EXPIRED"))Text(when(reason) {
             "PENDING"->"Сервер ещё готовит конфигурацию."
             "TRANSPORT"->"Сервер управления недоступен. Проверьте сеть и повторите попытку."
             "ACCESS_DENIED"->"Доступ ограничен. Обратитесь к администратору."
@@ -93,13 +101,22 @@ import io.syn443.identity.Identity
             if(command("auth-start",generation.toString())?.getBoolean("ok")==true)launchGeneration=generation+1
             else message="Не удалось начать вход. Сначала остановите VPN."
         }},modifier=Modifier.testTag("auth-start")) {Text("Войти")}
-        if(phase=="BROWSER")Button(enabled=status.optBoolean("browserReady"),onClick={launchGeneration=generation},modifier=Modifier.testTag("auth-open")) {Text("Продолжить вход")}
+        if(canReauthenticate && !vpnStopped)
+            Text("Отключите VPN, чтобы открыть Keycloak. После входа подключите VPN снова.",Modifier.testTag("auth-reauth-stop-required"))
+        if(canReauthenticate)Button(enabled=vpnStopped && !status.optBoolean("busy"),onClick={scope.launch {
+            if(command("auth-reauth","$generation:$revision")?.getBoolean("ok")==true) {
+                launchAfterRevision=revision;launchGeneration=generation;message=""
+            } else message="Не удалось начать повторный вход. Повторите попытку."
+        }},modifier=Modifier.testTag("auth-reauth")) {Text(if(phase=="BROWSER")"Начать вход заново" else "Войти снова через Keycloak")}
+        if(phase=="BROWSER")Button(enabled=status.optBoolean("browserReady") && (!canReauthenticate || vpnStopped),onClick={
+            launchAfterRevision=null;launchGeneration=generation
+        },modifier=Modifier.testTag("auth-open")) {Text("Продолжить вход")}
         if(phase !in setOf("SIGNED_OUT","BLOCKED","BROWSER","NEEDS_REAUTH") && (phase!="POLICY_CACHED" || reason.isNotEmpty()))
             TextButton(enabled=!status.optBoolean("busy"),onClick={scope.launch {
             if(command("auth-retry",generation.toString())?.getBoolean("ok")!=true)message="Не удалось повторить операцию."
             else message=""
         }},modifier=Modifier.testTag("auth-retry")) {Text("Повторить")}
-        if(phase!="SIGNED_OUT")TextButton(onClick={launchGeneration=null;scope.launch {
+        if(phase!="SIGNED_OUT")TextButton(onClick={launchGeneration=null;launchAfterRevision=null;scope.launch {
             if(command("auth-cancel")?.getBoolean("ok")!=true)message="Завершение не подтверждено. Повторите попытку."
         }},modifier=Modifier.testTag("auth-cancel")) {Text("Завершить сессию")}
         if(status.optInt("cleanupPending")>0)Text("Очистка регистрации на сервере продолжится после нового входа в тот же аккаунт.")

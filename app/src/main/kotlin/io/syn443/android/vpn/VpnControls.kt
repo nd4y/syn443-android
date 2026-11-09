@@ -40,7 +40,7 @@ import org.json.JSONObject
 private val controlUri = "content://io.syn443.control".toUri()
 
 @Composable
-fun VpnControls(consentGeneration: Long = -1, account: @Composable () -> Unit = {}) {
+fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     var status by remember { mutableStateOf(JSONObject()) }
     var statusAvailable by remember { mutableStateOf<Boolean?>(null) }
@@ -197,7 +197,8 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable () -> Unit = 
         if (statusAvailable == true && desiredOn == true && next > System.currentTimeMillis())
             Text("Повтор не ранее чем через ${(next - System.currentTimeMillis()) / 1_000} с, при доступной сети")
         if (message.isNotEmpty()) Text(message, Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-        account()
+        account(statusAvailable==true && phase=="Off" && desiredOn==false &&
+            status.optBoolean("engineStateKnown") && !status.optBoolean("engineActive"))
         TextButton(
             onClick = { detailsOpen = !detailsOpen },
             modifier = Modifier.testTag("vpn-details").semantics {

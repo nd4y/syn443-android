@@ -129,6 +129,8 @@ class LoginControllerTest {
         @Volatile var policyProblem="test_failure"
         @Volatile var shortAccess=false
         @Volatile var dropRefresh=false
+        @Volatile var subject="synthetic-owner"
+        @Volatile var replaceRegisteredDevice=false
         @Volatile var chatStatus=200
         val enrollmentEntered=CountDownLatch(1);val release=CountDownLatch(1)
         val revokeEntered=CountDownLatch(1);val releaseRevoke=CountDownLatch(1)
@@ -144,7 +146,7 @@ class LoginControllerTest {
             "date" to listOf(DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'",Locale.US).withZone(ZoneOffset.UTC).format(Instant.ofEpochMilli(timeMs)))),text.toByteArray())
         private fun jwt(id:Boolean,thumb:String):String {
             val claims=buildJsonObject {
-                put("iss",bootstrap.issuer);put("sub","synthetic-owner");put("aud",if(id)bootstrap.clientId else "syn443-api")
+                put("iss",bootstrap.issuer);put("sub",subject);put("aud",if(id)bootstrap.clientId else "syn443-api")
                 put("azp",bootstrap.clientId);put("iat",now()/1000);put("exp",now()/1000+300)
                 if(id)put("nonce",checkNotNull(authorization.toUri().getQueryParameter("nonce"))) else putJsonObject("cnf") {put("jkt",thumb)}
             }
@@ -227,7 +229,8 @@ class LoginControllerTest {
                 val response=receipts.getOrPut(text) {
                     activeKeys.add(thumb)
                     capabilities[thumb]=declared
-                    val session=DeviceSession(Identity.random(),Identity.random(),Identity.random(),now()+(if(shortAccess)10_000 else 590_000),now()+86_000_000,0,Identity.random())
+                    val device=sessions[thumb]?.deviceId?.takeUnless {replaceRegisteredDevice} ?: Identity.random()
+                    val session=DeviceSession(device,Identity.random(),Identity.random(),now()+(if(shortAccess)10_000 else 590_000),now()+86_000_000,0,Identity.random())
                     sessions[thumb]=session;Canonical.json.encodeToString(session)
                 }
                 enrollmentEntered.countDown()
@@ -303,6 +306,18 @@ class LoginControllerTest {
             check(controller.status().getBoolean("browserReady"));server.authorization=controller.browserUrl(generation+1)
             val state=checkNotNull(server.authorization.toUri().getQueryParameter("state"))
             return Identity.callback+"?"+Identity.form(mapOf("state" to state,"iss" to server.bootstrap.issuer,"code" to "synthetic-code"))
+        }
+        fun repeatLogin():String {
+            val login=journal.snapshot()
+            check(controller.startReauthentication(login.generation,login.revision));idle()
+            return repeatCallback()
+        }
+        fun repeatCallback():String {
+            server.authorization=controller.browserUrl(journal.snapshot().generation)
+            val uri=server.authorization.toUri()
+            check(uri.getQueryParameter("prompt")=="login")
+            return Identity.callback+"?"+Identity.form(mapOf("state" to checkNotNull(uri.getQueryParameter("state")),
+                "iss" to server.bootstrap.issuer,"code" to "synthetic-code"))
         }
         fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,reportVpnOn=reportVpnOn);controller.recover();idle()}
         fun legacyCache() {
@@ -530,6 +545,65 @@ class LoginControllerTest {
         val current=f.journal.snapshot();assertEquals(LoginPhase.NEEDS_REAUTH,current.phase)
         assertFalse(f.controller.pollProvisioning(current.generation))
         assertFalse(f.controller.allowsConnect());assertFalse(f.controller.status().getBoolean("busy"))
+    }
+    @Test fun repeatKeycloakLoginKeepsDevicePolicyAndFencesPreviousResults()=fixture {f->
+        f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+        val staged=f.controller.assignmentTicket()
+        assertTrue(f.controller.beginAssignment(staged,listOf(false)));f.idle()
+        assertTrue(f.controller.finishAssignment(staged,listOf(true),true));f.idle()
+        val before=f.journal.snapshot()
+        val oldTicket=f.controller.assignmentTicket()
+        val config=f.controller.assignedRuntime.config(before)
+        val oldSession=f.server.sessions.getValue(before.thumbprint)
+        f.server.policyStatus=409;f.server.policyProblem="reauthentication_required"
+        f.controller.retry(before.generation);f.idle()
+        val expired=f.journal.snapshot()
+        assertEquals(LoginPhase.NEEDS_REAUTH,expired.phase);assertFalse(f.controller.allowsConnect())
+        val obsolete=f.repeatLogin()
+        assertFalse(f.controller.startReauthentication(expired.generation,expired.revision))
+        val selected=f.repeatLogin()
+        val directory=File(context.noBackupFilesDir,"login/${f.namespace}")
+        val ciphertext=File(directory,"protected.bin")
+        val backup=File(directory,"protected.previous.bin")
+        ciphertext.copyTo(backup)
+        ciphertext.writeBytes(byteArrayOf(1,2,3)) // Interrupted before the new intent hash committed.
+        f.restart()
+        assertEquals(selected,f.repeatCallback())
+        f.controller.callback(obsolete);f.idle()
+        assertEquals(LoginPhase.BROWSER,f.journal.snapshot().phase)
+        assertEquals(1,f.server.enrollBodies.size)
+        f.server.policyStatus=200
+        f.controller.callback(selected);f.idle()
+        val after=f.journal.snapshot()
+        assertEquals(LoginPhase.POLICY_CACHED,after.phase)
+        assertEquals(before.keyAlias,after.keyAlias);assertEquals(before.thumbprint,after.thumbprint)
+        assertEquals(before.deviceId,after.deviceId);assertEquals(before.ownerTag,after.ownerTag)
+        assertEquals(before.generation,after.generation);assertEquals(before.policyHash,after.policyHash)
+        assertEquals(config,f.controller.assignedRuntime.config(after))
+        assertNotEquals(oldSession.accessToken,f.server.sessions.getValue(after.thumbprint).accessToken)
+        assertEquals(setOf(before.thumbprint),f.server.activeKeys)
+        assertEquals(2,f.server.enrollBodies.size);assertFalse(backup.exists())
+        assertNotEquals(oldTicket,f.controller.assignmentTicket())
+        assertTrue(f.controller.finishAssignment(oldTicket,listOf(false),false));f.idle()
+        assertEquals(after,f.journal.snapshot());assertTrue(f.controller.allowsConnect())
+    }
+    @Test fun repeatKeycloakLoginRejectsWrongOwnerAndDifferentDevice()=fixture {f->
+        f.server.policyStatus=409;f.server.policyProblem="reauthentication_required"
+        f.controller.callback(f.begin());f.idle()
+        val before=f.journal.snapshot()
+        assertEquals(LoginPhase.NEEDS_REAUTH,before.phase)
+        f.server.subject="another-synthetic-owner"
+        f.controller.callback(f.repeatLogin());f.idle()
+        assertEquals(1,f.server.enrollBodies.size)
+        assertEquals(LoginPhase.NEEDS_REAUTH,f.journal.snapshot().phase)
+        assertEquals("ACCESS_DENIED",f.controller.status().getString("reason"))
+        f.server.subject="synthetic-owner";f.server.replaceRegisteredDevice=true
+        f.controller.callback(f.repeatLogin());f.idle()
+        val after=f.journal.snapshot()
+        assertEquals(LoginPhase.NEEDS_REAUTH,after.phase);assertFalse(f.controller.allowsConnect())
+        assertEquals(before.keyAlias,after.keyAlias);assertEquals(before.deviceId,after.deviceId)
+        assertEquals(before.ownerTag,after.ownerTag);assertEquals(before.generation,after.generation)
+        assertEquals(2,f.server.enrollBodies.size)
     }
     private fun Fixture.expireRefreshFamily(before:LoginIntent) {
         val original=LoginPayload.decode(journal.readProtected(before),before)
