@@ -171,3 +171,11 @@ The fix adds only that independently protected module discriminator and a requir
 real ES256 signature/key/device/expiry/unknown-feature/duplicate-capability JVM
 case (policy minimum16). It does not relax signature, namespace, runtime material
 or activation guards. Exact corrected Actions acceptance remains pending.
+
+### Patched network runtime (v73)
+
+The native engine is rebuilt with Go 1.26.11 and the synthetic Go-to-Kotlin
+fixture uses Go 1.27.4 for [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859).
+Source and patch pins are unchanged; the engine lock invalidates the old AAR
+cache. The full native/JVM/API29/35/37 gates and exact build manifest remain
+mandatory before installing this candidate.

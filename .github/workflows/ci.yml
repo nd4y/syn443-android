@@ -55,7 +55,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
           cache-dependency-path: native/bridge/go.sum
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
@@ -188,7 +188,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: false
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color
   emulator:
