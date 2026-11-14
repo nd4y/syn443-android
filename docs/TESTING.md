@@ -179,3 +179,9 @@ fixture uses Go 1.27.4 for [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859).
 Source and patch pins are unchanged; the engine lock invalidates the old AAR
 cache. The full native/JVM/API29/35/37 gates and exact build manifest remain
 mandatory before installing this candidate.
+
+The candidate also pins the compatible kotlinx.serialization 1.13.0 in all four
+consuming modules after mandatory dependency lint rejected 1.12.0. The strict
+wire/canonical-hash and encrypted journal recovery suites remain mandatory.
+The additive control device-discovery schema and exact public content digest
+are synchronized with the control plane. Privacy/secret detection remains on.
