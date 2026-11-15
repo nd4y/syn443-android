@@ -185,3 +185,10 @@ consuming modules after mandatory dependency lint rejected 1.12.0. The strict
 wire/canonical-hash and encrypted journal recovery suites remain mandatory.
 The additive control device-discovery schema and exact public content digest
 are synchronized with the control plane. Privacy/secret detection remains on.
+
+The [journal memory correction](journal-memory-bounds.md) retains the byte cap
+and v1 ciphertext format, with three additional required instrumentation cases.
+The original oversized-input case must return its typed storage failure on API29,
+and large/canonical/escaped inputs must pass without skipped checks. The external
+direct-boot fixture also requires bounded fresh hierarchy acquisition; it never
+retries PIN entry or relaxes locked-storage/VPN recovery checks.

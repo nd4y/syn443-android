@@ -8,8 +8,13 @@ import io.syn443.android.vpn.DeviceKey
 import io.syn443.android.vpn.LoginJournal
 import io.syn443.android.vpn.LoginStorageException
 import io.syn443.android.vpn.LoginStorageFailure
+import io.syn443.android.vpn.AssignmentJsonBuffer
 import io.syn443.identity.*
 import io.syn443.policy.Journal
+import io.syn443.policy.Policy
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.encodeToStream
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,6 +23,9 @@ import java.security.KeyPairGenerator
 import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 @RunWith(AndroidJUnit4::class)
 class LoginJournalTest {
@@ -115,6 +123,41 @@ class LoginJournalTest {
         reason(LoginStorageFailure.CORRUPT) {f.journal.snapshot()}
         File(f.directory,"intent.json").writeText(LoginRecovery.encode(LoginIntent()))
         reason(LoginStorageFailure.CORRUPT) {f.journal.snapshot()}
+    }
+    @Test fun assignmentEscapedByteOverflowLeavesItsPreviousCiphertextAndReceiptIntact() = withFixture {f->
+        val s=registered(f);val value=assignment(s)
+        f.journal.prepareAssignment(s,value).use {f.journal.commitAssignment(s,it)}
+        val before=File(f.directory,"assignment.bin").readBytes()
+        // Character count fits, while JSON escaping exceeds the local byte cap.
+        reason(LoginStorageFailure.UNAVAILABLE) {
+            f.journal.prepareAssignment(s,value.copy(journal=Journal(desired="\u0001".repeat(400_000))))
+        }
+        assertArrayEquals(before,File(f.directory,"assignment.bin").readBytes())
+        assertEquals(value,f.journal.readAssignment(s));assertEquals(s,f.journal.snapshot())
+    }
+    @Test fun assignmentLargeCanonicalSnapshotsRoundTripWithoutFullStringBuffers() = withFixture {f->
+        val s=registered(f);val envelope="x".repeat(470_000)
+        val value=assignment(s).copy(journal=Journal(desired=envelope,active=envelope,lastGood=envelope))
+        f.journal.prepareAssignment(s,value).use {f.journal.commitAssignment(s,it)}
+        val stored=File(f.directory,"assignment.bin")
+        assertTrue(stored.length() in 1_410_000L..2_097_181L)
+        assertEquals(value,f.journal.readAssignment(s));assertEquals(s,f.journal.snapshot())
+    }
+    @OptIn(ExperimentalSerializationApi::class)
+    @Test fun assignmentStreamingCiphertextKeepsItsLegacyV1EncodingAndCanonicalUnicode() = withFixture {f->
+        val value=assignment(registered(f)).copy(journal=Journal(reason="Synthetic Unicode: Ω, ё, \u0001, \"quote\" and \\slash"))
+        val raw=Policy.json.encodeToString(value).toByteArray(Charsets.UTF_8)
+        val key=SecretKeySpec(ByteArray(32) {it.toByte()},"AES")
+        val iv=ByteArray(12) {it.toByte()};val aad="synthetic-journal-scope".toByteArray()
+        fun cipher()=Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.ENCRYPT_MODE,key,GCMParameterSpec(128,iv));updateAAD(aad)
+        }
+        val streamed=AssignmentJsonBuffer(65_536).use {
+            Policy.json.encodeToStream(AssignmentState.serializer(),value,it);it.encrypt(cipher())
+        }
+        assertArrayEquals(byteArrayOf(1)+iv+cipher().doFinal(raw),streamed)
+        AssignmentJsonBuffer.requireCanonical(value,raw)
+        assertThrows(IllegalArgumentException::class.java) {AssignmentJsonBuffer.requireCanonical(value,raw+byteArrayOf(32))}
     }
     @Test fun protectedStatePersistsWithoutPlaintextAndCallbackIsConsumedOnce() = withFixture {f->
         val s=browser(f);val reopened=LoginJournal(context,f.name)

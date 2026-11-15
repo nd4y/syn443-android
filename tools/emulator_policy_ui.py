@@ -1,14 +1,39 @@
 """Ordinary Android Settings controls, for disposable emulator lifecycle tests."""
 import re
 import shlex
+import subprocess
 import time
 import xml.etree.ElementTree as ET
 from run_vpn_process_faults import adb
 
 
 def tree():
-    adb('shell','uiautomator','dump','/data/local/tmp/syn443-os-policy.xml',timeout=20)
-    return ET.fromstring(adb('shell','cat','/data/local/tmp/syn443-os-policy.xml'))
+    assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
+    path='/data/local/tmp/syn443-os-policy.xml'
+    deadline=time.monotonic()+25
+    last=None
+    def command(*args,maximum=15):
+        remaining=deadline-time.monotonic()
+        if remaining<=0:raise subprocess.TimeoutExpired('bounded emulator UI observation',25)
+        return adb(*args,timeout=min(maximum,remaining))
+    for attempt in range(3):
+        try:
+            # uiautomator may exit0 before Keyguard has a root, without writing
+            # a file. Never accept a leftover hierarchy from an earlier screen.
+            command('shell','rm','-f',path,maximum=3)
+            command('shell','uiautomator','dump',path)
+            root=ET.fromstring(command('shell','cat',path,maximum=3))
+            if root.tag!='hierarchy':raise ET.ParseError('Unexpected emulator hierarchy root')
+            return root
+        except (subprocess.CalledProcessError,subprocess.TimeoutExpired,ET.ParseError) as e:
+            last=e
+        finally:
+            try:adb('shell','rm','-f',path,timeout=2)
+            except (subprocess.CalledProcessError,subprocess.TimeoutExpired):pass
+        remaining=deadline-time.monotonic()
+        if attempt==2 or remaining<=0:break
+        time.sleep(min(.25,remaining))
+    raise AssertionError('Disposable emulator UI hierarchy did not become ready within its observation budget') from last
 
 
 def tap(node):

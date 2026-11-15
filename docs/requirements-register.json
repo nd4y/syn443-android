@@ -905,11 +905,12 @@
         "docs/m1-vpn.md",
         "docs/managed-policy.md",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/non-lte-acceptance-20261115.md"
+        "docs/non-lte-acceptance-20261115.md",
+        "docs/journal-memory-bounds.md"
       ],
       "text": "Одно нажатие «Подключиться» в приложении или плитке Android транзакционно сохраняет desiredOn=true, ссылку на проверенную желаемую конфигурацию/configRevision, режим и монотонный intentGeneration до запуска побочных эффектов. UI, плитка, уведомление и разрешённый ADB/API используют один сериализованный контракт команд и один источник состояния; создание Activity не является командой подключения. Намерение и конфигурация переживают смерть UI/контроллера/сервиса и допустимый ОС перезапуск, не зависят от памяти процесса и восстанавливаются с проверкой schema/signature/lease/capability и доступности ключей. Ошибка записи намерения явно возвращается, ложное подтверждение отсутствует. Недоступная или невалидная конфигурация не заменяется произвольным профилем и не сбрасывает намерение; серверный desired pointer и пользовательское намерение имеют разные области версионирования.",
-      "implementationScope": " The dated2026-11-15 checkpoint records exact accepted source, CI and physical/live scope; statuses remain partial.",
-      "remainingScope": " Full normative clauses and excluded physical/operational gates remain required."
+      "implementationScope": " The dated2026-11-15 checkpoint records exact accepted source, CI and physical/live scope; statuses remain partial. Byte-bounded streaming assignment serialization/canonical readback and actual-size file allocation replace full String buffers; current v74 Actions acceptance pending.",
+      "remainingScope": " Full normative clauses and excluded physical/operational gates remain required. Exact corrected three-API and physical upgrade acceptance plus every remaining normative clause stay open."
     },
     {
       "id": "REC-02",

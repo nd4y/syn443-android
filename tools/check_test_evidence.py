@@ -297,6 +297,9 @@ if mode=="emulator":
     required |= {"assignmentJournalIsSeparateEncryptedAndCancellationFencesLateStorage",
         "assignmentCiphertextCannotCrossNamespaceGenerationDeviceKeyOrTrustScope",
         "assignmentBoundsOrphansMissingReceiptsAndWrongThreadFailClosed",
+        "assignmentEscapedByteOverflowLeavesItsPreviousCiphertextAndReceiptIntact",
+        "assignmentLargeCanonicalSnapshotsRoundTripWithoutFullStringBuffers",
+        "assignmentStreamingCiphertextKeepsItsLegacyV1EncodingAndCanonicalUnicode",
         "verifiedAssignmentPersistsAcrossControllerDeathAndIsErasedOnLogout",
         "wrongKeyAssignmentNeverGetsAReceiptOrUsableConfiguration",
         "rotatedSessionReplyLossRetriesItsPersistedOperationWithoutLosingThePolicy"}

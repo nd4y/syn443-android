@@ -55,8 +55,12 @@ No additional personal privileges were granted during this checkpoint.
 
 ## Integration and remaining scope
 
-The integration branches preserve the accepted executable source and add only
-this evidence update, roadmap/register notes and corrected historical headings.
+The initial integration candidates preserved the accepted executable source and
+added only the evidence/roadmap/register refresh. Their repeated Android run
+reproduced a journal allocation defect on API29 and an API37 hierarchy-read
+failure. See [the corrective work](journal-memory-bounds.md). Android main merge
+is held until the correction has its own exact CI and physical acceptance; the
+earlier v73 record above remains dated evidence.
 Merge state and main CI are separate GitHub observations; a pinned feature run
 is not a claim that main or an installed APK has a different source revision.
 Unverified dependency and side branches remain separate.

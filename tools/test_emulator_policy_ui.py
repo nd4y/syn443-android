@@ -1,4 +1,5 @@
 import unittest
+import subprocess
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
 import emulator_policy_ui as ui
@@ -6,6 +7,39 @@ import emulator_policy_ui as ui
 def node(parent,**values):return ET.SubElement(parent,'node',{k.replace('_','-'):v for k,v in values.items()})
 
 class OwnedVpnSettingsTest(unittest.TestCase):
+    def test_hierarchy_waits_for_a_fresh_file_before_any_pin_input(self):
+        calls=[];reads=0
+        def adb(*args,**kwargs):
+            nonlocal reads
+            calls.append(args)
+            if args[-1]=='ro.hardware':return b'ranchu'
+            if args[1]=='cat':
+                reads+=1
+                if reads==1:raise subprocess.CalledProcessError(1,['adb','cat'])
+                return b'<hierarchy><node package="com.android.systemui"/></hierarchy>'
+            return b''
+        with patch.object(ui,'adb',side_effect=adb),patch.object(ui.time,'sleep'):
+            self.assertEqual(ui.tree().tag,'hierarchy')
+        self.assertEqual(reads,2)
+        self.assertEqual(sum(args[1:3]==('rm','-f') for args in calls),4)
+        self.assertFalse(any('input' in args for args in calls))
+
+    def test_hierarchy_retries_are_bounded_and_do_not_accept_invalid_roots(self):
+        for raw in (b'not xml',b'<previous-screen/>'):
+            calls=[]
+            def adb(*args,**kwargs):
+                calls.append(args)
+                return b'ranchu' if args[-1]=='ro.hardware' else raw if args[1]=='cat' else b''
+            with patch.object(ui,'adb',side_effect=adb),patch.object(ui.time,'sleep'):
+                with self.assertRaisesRegex(AssertionError,'observation budget'):ui.tree()
+            self.assertEqual(sum(args[1]=='cat' for args in calls),3)
+            self.assertFalse(any('input' in args for args in calls))
+
+    def test_hierarchy_refuses_physical_devices_before_writing_fixture_files(self):
+        with patch.object(ui,'adb',return_value=b'physical-device')as adb:
+            with self.assertRaises(AssertionError):ui.tree()
+        adb.assert_called_once_with('shell','getprop','ro.hardware')
+
     def row(self,package='com.android.settings',description='Settings for SYN443',offset=0):
         root=ET.Element('hierarchy');row=node(root,package=package,bounds=f'[0,{offset}][400,{offset+80}]')
         node(row,package=package,resource_id='android:id/title',text='SYN443',bounds=f'[20,{offset+20}][180,{offset+50}]')
