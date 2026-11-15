@@ -2,6 +2,14 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$root/native/build"
+# Pure graph metadata validation is not yet advertised or activated at runtime.
+# Keep the native decoder under the same shared vectors and mandatory race gate.
+(
+    cd "$root/native/routegraph"
+    test -z "$(gofmt -l .)"
+    go test -race -count=1 ./...
+    go test -run '^$' -fuzz '^FuzzRouteGraphDecode$' -fuzztime=15s -parallel=2
+)
 mkdir -p "$work"
 python3 - "$root/native" "$work" <<'PY'
 import hashlib,json,pathlib,subprocess,sys

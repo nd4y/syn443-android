@@ -42,6 +42,19 @@ if mode=="recovery":
     assert ("io.syn443.recovery.PhysicalNetworkSelectionTest","captiveCandidateCannotBeSelectedEvenWithPriorProof") in {
         (c.get("classname"),c.get("name")) for c in cases}, "Required captive network case missing"
 if mode=="jvm":
+    assert {("io.syn443.decision.RouteGraphTest",name) for name in {
+        "sharedGraphQueriesAndBoundsAgreeWithGo",
+        "sharedMalformedGraphsNeverAcquirePartialAuthority",
+        "graphFrontierEnumeratesOnlyBoundGroupPathsWithStableIDs",
+        "graphWarmHintDoesNotBypassModeTemplateExpiryOrContext",
+        "exactCatalogueAndCandidateBoundaryCannotBeTruncated",
+        "perIntentBoundDeduplicatesSharedTemplatesAndRejectsSplitOverflow",
+        "utf8ByteLimitsAndOwnedMetadataSurviveCallerMutation",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route graph conformance cases missing"
+    from coverage_evidence import verify_classes
+    verify_classes(root/"core/decision/build/reports/jacoco/test/jacocoTestReport.xml", {
+        "io.syn443.decision.RouteGraph", "io.syn443.decision.RouteGraph.Companion",
+    })
     assert {("io.syn443.decision.RouteFrontierTest",name) for name in {
         "boundedCursorCoversSparseGraphWithoutDuplicateOrWrongExitPaths",
         "allHopsAndEdgesSatisfyModeAndFullPathCapabilityRequirements",
