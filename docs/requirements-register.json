@@ -646,7 +646,9 @@
       "id": "PROTO-02",
       "text": "Кандидаты маршрутов формируются из ориентированного графа разрешённых подключений. Конкретная цепочка - простой путь без циклов, с ограничением глубины, первоначально четыре proxy-перехода. Разрешённые комбинации задаются политикой и capabilities; каталог не обязан заранее перечислять каждую цепочку. UI показывает порядок входов и фактический конечный выход. Запрещены ссылки на себя, обход через защищённый служебный сокет и DNS-зависимость от ещё не поднятого пути.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/private-path-construction.md"
+      ]
     },
     {
       "id": "PROTO-03",
@@ -931,7 +933,8 @@
       "status": "partial",
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/non-lte-acceptance-20261115.md"
+        "docs/non-lte-acceptance-20261115.md",
+        "docs/emulator-observation-boundaries.md"
       ],
       "text": "Необязательный туннель/peer/outbound может быть недоступен уже при холодном старте: независимые разрешённые маршруты должны запуститься/продолжить работу, а затронутые приватные назначения остаются явно заблокированными без fallback в общий прокси или direct. Восстановление выбирает минимальную неисправную dependency scope; проверяются DNS/bootstrap dependencies, отсутствие потока до установки блокировок и отсутствие утечки при старте, handover, реконфигурации и смерти модуля. Граница отдельного процесса не доказывает независимый startup/recovery outbounds внутри одного native box: engine-api объявляет реальные capabilities, движок/адаптер устраняет fail-fast общего запуска для optional dependency либо использует доказанную архитектуру с теми же гарантиями. Если для восстановления разделяемого runtime всё же нужен общий перезапуск, он bounded, временный разрыв независимых потоков измерен, блокировки установлены до него; это не считается независимым восстановлением и не закрывает соответствующий AC86. Обязательные взаимозависимости не объявляются optional ради прохождения проверки.",
       "implementationScope": "Deferred optional NetBird startup and independent target-route evidence. The dated2026-11-15 checkpoint records exact accepted source, CI and physical/live scope; statuses remain partial.",
@@ -948,7 +951,8 @@
         "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt",
         "core/recovery/src/main/kotlin/io/syn443/recovery/RouteEvidence.kt",
         "tools/run_enrolled_vpn.py",
-        "docs/non-lte-acceptance-20261115.md"
+        "docs/non-lte-acceptance-20261115.md",
+        "docs/emulator-observation-boundaries.md"
       ],
       "text": "Supervisor и контроль его прогресса находятся вне управляемого native runtime. Watchdog проверяет полезный прогресс/дедлайны операций, а не только живой PID или ответ отдельного control looper; полный native hang имеет fault-injection сценарий. После bounded graceful stop supervisor вправе завершить только аутентифицированный принадлежащий ему host с проверенными identity token/UID/handle, подтвердить его смерть и освобождение TUN duplicates/identity locks перед новым поколением. Timeout или PID не являются подтверждением. После смерти самого контроллера разрешённый ОС новый экземпляр сначала читает намерение/последний Stop, сверяет реальное владение и незавершённые эффекты, безопасно дожидается/завершает только своего старого host; два владельца TUN/identity и повторное enrollment исключены. Если прекращение владения не доказано, новый host не запускается, отображается блокировка/необходимое действие. Смерть владельца TUN может уничтожить интерфейс и оборвать трафик; отсутствие сети или процесса-владельца не сопровождается обещанием непрерывного соединения. Границы MOD-08/09 и системный lockdown остаются обязательными.",
       "implementationScope": "Signed route-profile activation pilot requires fresh candidate-scoped native outbound proof, independently of global HTTPS; final worker storage fence, bounded retries and required-route rollback. Optional routes remain independent. The dated2026-11-15 checkpoint records exact accepted source, CI and physical/live scope; statuses remain partial.",

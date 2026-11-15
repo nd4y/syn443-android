@@ -256,6 +256,16 @@ class ControlProvider : ContentProvider() {
                     require(arg != "synthetic-http" || android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
                     store.update { it.put("testHealth", arg == "synthetic-http") }
                 }
+                "test-reset-ready" -> {
+                    require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+                    // Owner-only serialized snapshot: no foreign process reads AtomicFile
+                    // and no budget-reset command is replayed while Stop is settling.
+                    val ready=store.serialized {
+                        val value=store.read()
+                        !store.checkpoint(value).desiredOn && !value.optBoolean("engineActive")
+                    }
+                    return Bundle().apply {putBoolean("ok",true);putBoolean("ready",ready)}
+                }
                 "test-reset" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
                     store.update { value ->

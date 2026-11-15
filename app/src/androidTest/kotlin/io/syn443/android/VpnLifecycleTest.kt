@@ -106,6 +106,16 @@ class VpnLifecycleTest {
         assertTrue("Control command failed: $method", context.contentResolver.call(uri, method, arg, null)?.getBoolean("ok") == true)
     }
     private fun status() = JSONObject(checkNotNull(context.contentResolver.call(uri, "status", null, null)?.getString("json")))
+    private fun resetReady():Boolean {
+        val reply=context.contentResolver.call(uri,"test-reset-ready",null,null)
+        assertTrue("Read-only fixture readiness command rejected",reply?.getBoolean("ok")==true)
+        return reply!!.getBoolean("ready")
+    }
+    private fun stoppedForFixture():Boolean {
+        val observed=status()
+        return !observed.optBoolean("desiredOn") && observed.optString("phase")=="Off" &&
+            observed.optBoolean("engineStateKnown") && observed.opt("engineActive")==false && pid()==null && resetReady()
+    }
     private fun pid() = context.getSystemService(ActivityManager::class.java).runningAppProcesses
         ?.firstOrNull { it.processName == "${context.packageName}:engine" }?.pid
     private fun await(timeout: Long = 35_000, predicate: () -> Boolean) {
@@ -126,7 +136,7 @@ class VpnLifecycleTest {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         assertNull("Emulator harness must grant VPN permission before instrumentation starts", VpnService.prepare(context))
         call("disconnect")
-        await { pid() == null && !status().optBoolean("engineActive") }
+        await { stoppedForFixture() }
         // Each scenario starts with an independent synthetic budget. No reset
         // occurs inside a scenario; real-device and release calls are rejected.
         call("test-reset")
@@ -197,6 +207,15 @@ class VpnLifecycleTest {
         assertTrue("Loopback fixture workers did not retire",terminated)
         assertTrue("Loopback fixture left owned sockets",peerSockets.isEmpty())
         fixtureFailure.get()?.let {throw AssertionError("Unexpected loopback fixture failure",it)}
+    }
+    @Test fun resetReadinessIsReadOnlyAndCannotAuthorizeAnActiveOwner() {
+        val off=status();assertTrue(resetReady());assertEquals(off.getLong("generation"),status().getLong("generation"))
+        connect();val active=status();assertFalse(resetReady())
+        assertFalse(context.contentResolver.call(uri,"test-reset",null,null)!!.getBoolean("ok"))
+        val unchanged=status();assertEquals(active.getLong("generation"),unchanged.getLong("generation"))
+        assertTrue(unchanged.getBoolean("desiredOn"));assertTrue(unchanged.getBoolean("engineActive"))
+        call("disconnect");await {stoppedForFixture()}
+        assertTrue(resetReady());assertEquals(active.getLong("generation")+1,status().getLong("generation"))
     }
     @Test fun idleFaultClientClosesWithoutFalseHealthOrEscapingItsWorker() {
         idleTimeoutMs = 100
