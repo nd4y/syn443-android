@@ -4,6 +4,9 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 
 @Serializable private data class GraphWire(
     val schemaVersion: Int,
@@ -79,7 +82,13 @@ class RouteGraph private constructor(
                     .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
                     .decode(ByteBuffer.wrap(raw)).toString()
                 StrictJson.validate(text)
-                val wire = Decision.json.decodeFromString<GraphWire>(text)
+                val tree = Decision.json.parseToJsonElement(text)
+                require(tree is JsonObject)
+                // kotlinx.serialization accepts quoted integer tokens even in
+                // strict mode. Version is a JSON number, exactly literal 1.
+                val version = tree["schemaVersion"]
+                require(version is JsonPrimitive && !version.isString && version.content == "1")
+                val wire = Decision.json.decodeFromJsonElement<GraphWire>(tree)
                 require(wire.schemaVersion == 1 && wire.hops.size in 1..500 && wire.hops.size == authorized.size)
                 require(wire.edges.size <= 4096 && wire.templates.size in 1..64 && wire.groups.size in 1..16)
 

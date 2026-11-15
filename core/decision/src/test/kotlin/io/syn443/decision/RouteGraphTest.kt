@@ -15,8 +15,8 @@ class RouteGraphTest {
     private fun graph(value: JsonObject): RouteGraph = RouteGraph.decode(
         value.getValue("graph").toString().toByteArray(), value.getValue("catalogue").strings()
     )
-    private fun rejected(raw: ByteArray, ids: List<String>) {
-        val failure = assertThrows(IllegalArgumentException::class.java) { RouteGraph.decode(raw, ids) }
+    private fun rejected(raw: ByteArray, ids: List<String>, label: String = "invalid graph") {
+        val failure = assertThrows(label, IllegalArgumentException::class.java) { RouteGraph.decode(raw, ids) }
         assertEquals("invalid_route_graph", failure.message)
         assertNull(failure.cause)
     }
@@ -48,7 +48,8 @@ class RouteGraphTest {
         assertTrue(cases.size >= 60)
         for (element in cases) {
             val v = element.jsonObject
-            rejected(v.getValue("raw").jsonPrimitive.content.toByteArray(), v.getValue("catalogue").strings())
+            rejected(v.getValue("raw").jsonPrimitive.content.toByteArray(), v.getValue("catalogue").strings(),
+                v.getValue("name").jsonPrimitive.content)
         }
     }
 
