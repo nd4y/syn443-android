@@ -9,10 +9,11 @@ BOOTED = b'mProcessesReady=true mSystemReady=true mBooted=true mBooting=false'
 
 class FrameworkHeapTest(unittest.TestCase):
     def exercise(self, *, overrides=None, environment=None, stop_lost=False, start_lost=False,
-                 stop_stuck=False, same_pid=False, ready=True, root=True, ready_after=0):
+                 stop_stuck=False, same_pid=False, ready=True, root=True, ready_after=0, unroot_fails=False):
         calls = []
         time = [0]
         state = ['running']
+        privileged = [False]
         values = {
             ('get-serialno',): b'emulator-5554', ('emu', 'avd', 'name'): b'syn443-ci\r\nOK\r\n',
             ('shell', 'getprop', 'ro.hardware'): b'ranchu',
@@ -21,8 +22,8 @@ class FrameworkHeapTest(unittest.TestCase):
             ('shell', 'getprop', 'dalvik.vm.heapsize'): b'512m',
             ('shell', 'getprop', 'dalvik.vm.heapgrowthlimit'): b'512m',
             ('shell', 'pm', 'list', 'packages', '--user', '0', 'io.syn443.android'): b'',
-            ('shell', 'id', '-u'): b'0' if root else b'2000',
             ('root',): b'restarting adbd as root', ('wait-for-device',): b'',
+            ('unroot',): b'restarting adbd as non root',
             ('shell', 'service', 'check', 'package'): b'Service package: found' if ready else b'Service package: not found',
             ('shell', 'dumpsys', 'activity', '-a', 'processes'): BOOTED,
             ('shell', 'pm', 'list', 'packages', '--user', '0', 'android'): b'package:android',
@@ -31,6 +32,12 @@ class FrameworkHeapTest(unittest.TestCase):
 
         def adb(*args, **kwargs):
             calls.append(args)
+            if args == ('shell', 'id', '-u'):
+                return b'0' if privileged[0] else b'2000'
+            if args == ('root',):
+                privileged[0] = root
+            if args == ('unroot',) and not unroot_fails:
+                privileged[0] = False
             if args == ('shell', 'dumpsys', 'activity', '-a', 'processes') and time[0] < ready_after:
                 return BOOTED.replace(b'mBooted=true', b'mBooted=false')
             if args in values:
@@ -60,6 +67,7 @@ class FrameworkHeapTest(unittest.TestCase):
             self.calls = calls
             self.assertLessEqual(calls.count(('shell', 'stop')), 1)
             self.assertLessEqual(calls.count(('shell', 'start')), 1)
+            self.assertLessEqual(calls.count(('unroot',)), 1)
         return calls
 
     def test_owned_api29_restarts_once_and_requires_a_new_framework(self):
@@ -67,6 +75,7 @@ class FrameworkHeapTest(unittest.TestCase):
             calls = self.exercise(stop_lost=lost_stop, start_lost=lost_start)
             self.assertEqual(1, calls.count(('shell', 'stop')))
             self.assertEqual(1, calls.count(('shell', 'start')))
+            self.assertEqual(1, calls.count(('unroot',)))
 
     def test_other_supported_api_does_not_restart_or_root(self):
         for api in (b'35', b'37'):
@@ -116,6 +125,11 @@ class FrameworkHeapTest(unittest.TestCase):
         self.assertTrue(framework_booted(BOOTED))
         with self.assertRaisesRegex(AssertionError, 'Unbounded'):
             framework_booted(b'x'*1_048_577)
+
+    def test_failure_to_restore_ordinary_shell_cannot_reach_instrumentation(self):
+        with self.assertRaisesRegex(AssertionError, 'deadline'):
+            self.exercise(unroot_fails=True)
+        self.assertEqual(1, self.calls.count(('unroot',)))
 
 
 if __name__ == '__main__':

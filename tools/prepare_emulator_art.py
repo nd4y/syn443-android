@@ -30,6 +30,7 @@ def prepare(adb, *, clock=time.monotonic, sleep=time.sleep, budget=120):
     sdk = adb('shell', 'getprop', 'ro.build.version.sdk').strip()
     assert sdk in (b'29', b'35', b'37'), 'Unexpected CI matrix API'
     if sdk != b'29':
+        assert adb('shell', 'id', '-u').strip() == b'2000', 'Instrumentation requires ordinary shell UID'
         print('Framework heap preparation is unnecessary on this API', flush=True)
         return
     assert adb('shell', 'getprop', 'ro.debuggable').strip() == b'1'
@@ -77,6 +78,7 @@ def prepare(adb, *, clock=time.monotonic, sleep=time.sleep, budget=120):
                 adb('shell', 'start', timeout=10)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                 pass
+    unroot_dispatched = False
     while clock() < deadline:
         try:
             current = call('shell', 'pidof', 'system_server').strip()
@@ -86,8 +88,24 @@ def prepare(adb, *, clock=time.monotonic, sleep=time.sleep, budget=120):
                 packages = call('shell', 'pm', 'list', 'packages', '--user', '0', 'android')
                 assert b'package:android' in packages.splitlines(), 'Core package inventory unavailable'
                 assert call('shell', 'pidof', 'system_server').strip() == current, 'Framework changed during readiness observation'
+                if not unroot_dispatched:
+                    # Root is only for this owned framework preparation. The
+                    # app correctly rejects root callers; instrumentation's
+                    # shell bridge must run as ordinary shell UID2000.
+                    unroot_dispatched = True
+                    try:
+                        call('unroot')
+                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                        pass
+                call('wait-for-device')
+                if call('shell', 'id', '-u').strip() != b'2000':
+                    sleep(min(1, max(0, deadline-clock())))
+                    continue
+                assert call('get-serialno').strip() == serial
+                assert call('emu', 'avd', 'name').splitlines() == [b'syn443-ci', b'OK']
+                assert call('shell', 'pidof', 'system_server').strip() == current
                 check(adb)
-                print('Owned API29 framework restarted once; new system_server verified; userdata preserved', flush=True)
+                print('Owned API29 framework restarted once; new system_server verified; ordinary shell UID2000 restored; userdata preserved', flush=True)
                 return
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             pass
