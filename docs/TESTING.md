@@ -1,5 +1,10 @@
 # Testing and release gates
 
+[Real chat background transitions](chat-background-fixture.md) retain all five
+observed stop/resume cycles in the same Activity and five recreations, plus the
+original root/title/status and VPN intent assertions. An owned foreground cover
+drives the OS lifecycle; no transition, method or platform case is skipped.
+
 [Actual ART heap preparation](emulator-art-startup.md) requires241 actual
 zero-skipped Android outcomes on API29/35/37. The API29 framework preparation
 is restricted to the fresh, owned disposable CI AVD before APK installation.
