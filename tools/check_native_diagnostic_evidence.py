@@ -14,6 +14,12 @@ PATH_REQUIRED = {
     'TestPrivateCandidateRegistryClonesParentAndNeverBorrowsDefault',
     'TestPrivateCandidateFailureOwnsPartialObjectsAndClosesInReverse',
     'TestPrivateCandidateRejectsInvalidPathsAndClosePanicCannotOrphanEarlierNodes',
+    'TestPrivatePoolRealTrafficHoldAndConfiguredCapacity',
+    'TestPrivatePoolBlockedConstructionCannotPublishAfterScopeChange',
+    'TestPrivatePoolRetirementFailureAndBlockedCloseKeepReservations',
+    'TestPrivateTrafficRealTCPLeaseAndGracefulDrain',
+    'TestPrivateTrafficPacketsAndLateReadCannotOutliveContext',
+    'TestPrivateTrafficPartialDialPanicAndLateOwnerKeepCapacity',
 }
 
 
