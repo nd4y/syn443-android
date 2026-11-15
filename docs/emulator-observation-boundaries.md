@@ -20,3 +20,13 @@ Seven host negatives/positive boundaries accompany the unchanged238-outcome gate
 
 These are test-only corrections pending exact-head Actions acceptance. They do
 not prove a permanent upstream Compose/emulator RCA or physical network quality.
+
+A separate API29 failure in the updated chat run43707907162/8db4bfbf56af1eecb9fc863f1e2dbed9dda3123d
+came from the loopback fixture reader while the native engine was intentionally
+fully frozen. A10-second socket read timeout escaped its executor worker and was
+reported as an instrumentation Error. The fixture now closes expected idle/reset
+peer streams, retains unexpected worker failures for assertions, closes every
+owned socket on teardown and confirms worker retirement. The actual frozen-host
+new-PID/Online/desired-On/tunnel-count assertions are unchanged. A real idle-client
+case proves EOF without any false health counter; all239outcomes are mandatory.
+No client exception, timeout or crash is suppressed by this test-only correction.

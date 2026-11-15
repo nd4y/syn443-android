@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=238
+    minimum=239
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -277,6 +277,7 @@ if mode=="emulator":
               "workerRunsInSeparateProcessAndStops", "wedgedWorkerCanBeTerminatedAndRebound",
               "foreignSessionCannotTerminateHost", "realTunTrafficAndExplicitStop",
               "nativeCrashRecoversButNewerStopWins", "fullyFrozenNativeProcessIsKilledOutsideItsControlLoop",
+              "idleFaultClientClosesWithoutFalseHealthOrEscapingItsWorker",
               "closingActivityDoesNotStopVpn", "lostNetworkCannotRemainSelectedFromAStaleSystemSnapshot",
               "uiProcessDeathKeepsRealTunTraffic", "controllerDeathRetiresFrozenNativeAndPreservesIntent",
               "stopDuringForegroundServiceStartupNeverCrashesController", "twoHopTunTrafficCrossesBothProxies",
