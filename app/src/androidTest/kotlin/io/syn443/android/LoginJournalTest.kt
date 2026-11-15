@@ -9,16 +9,16 @@ import io.syn443.android.vpn.LoginJournal
 import io.syn443.android.vpn.LoginStorageException
 import io.syn443.android.vpn.LoginStorageFailure
 import io.syn443.android.vpn.AssignmentJsonBuffer
+import io.syn443.android.vpn.AssignmentJsonEncoder
 import io.syn443.identity.*
 import io.syn443.policy.Journal
 import io.syn443.policy.Policy
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.encodeToStream
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.security.KeyPairGenerator
 import java.security.spec.ECGenParameterSpec
 import java.util.Base64
@@ -143,7 +143,6 @@ class LoginJournalTest {
         assertTrue(stored.length() in 1_410_000L..2_097_181L)
         assertEquals(value,f.journal.readAssignment(s));assertEquals(s,f.journal.snapshot())
     }
-    @OptIn(ExperimentalSerializationApi::class)
     @Test fun assignmentStreamingCiphertextKeepsItsLegacyV1EncodingAndCanonicalUnicode() = withFixture {f->
         val value=assignment(registered(f)).copy(journal=Journal(reason="Synthetic Unicode: Ω, ё, \u0001, \"quote\" and \\slash"))
         val raw=Policy.json.encodeToString(value).toByteArray(Charsets.UTF_8)
@@ -153,11 +152,32 @@ class LoginJournalTest {
             init(Cipher.ENCRYPT_MODE,key,GCMParameterSpec(128,iv));updateAAD(aad)
         }
         val streamed=AssignmentJsonBuffer(65_536).use {
-            Policy.json.encodeToStream(AssignmentState.serializer(),value,it);it.encrypt(cipher())
+            AssignmentJsonEncoder.encode(value,it);it.encrypt(cipher())
         }
         assertArrayEquals(byteArrayOf(1)+iv+cipher().doFinal(raw),streamed)
         AssignmentJsonBuffer.requireCanonical(value,raw)
         assertThrows(IllegalArgumentException::class.java) {AssignmentJsonBuffer.requireCanonical(value,raw+byteArrayOf(32))}
+    }
+    @Test fun assignmentQuotedStringStreamingMatchesReferenceDefaultsEscapesAndUnicode() = withFixture {f->
+        val base=assignment(registered(f))
+        val text=(0..127).map(Int::toChar).joinToString("")+"Ω ё 漢 \uD83D\uDE80 \u2028 \u2029"
+        val values=listOf(AssignmentState(),base,base.copy(
+            journal=Journal(phase="rolling_back",desired=text,active=text,lastGood=text,candidate=text,
+                maxRevision=17,epoch=3,floor=2,activationGeneration=9,failedRevisions=listOf(1,2,16),
+                failedSnapshots=listOf("one",text),baseline=listOf(true,false),reason=text),
+            applyDeadlineElapsed=12345,applyBoot=3,
+            activationReport=DeviceActivationReport(1,2,Identity.random(),3,"rolled_back",1)))
+        for(value in values) {
+            val expected=Policy.json.encodeToString(value).toByteArray(Charsets.UTF_8)
+            val out=ByteArrayOutputStream()
+            AssignmentJsonEncoder.encode(value,out)
+            assertArrayEquals(expected,out.toByteArray());AssignmentJsonBuffer.requireCanonical(value,expected)
+        }
+        for(text in listOf("\uD800","\uDC00","x\uD800y")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                AssignmentJsonEncoder.encode(base.copy(journal=Journal(reason=text)),ByteArrayOutputStream())
+            }
+        }
     }
     @Test fun protectedStatePersistsWithoutPlaintextAndCallbackIsConsumedOnce() = withFixture {f->
         val s=browser(f);val reopened=LoginJournal(context,f.name)

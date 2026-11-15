@@ -1,9 +1,6 @@
 package io.syn443.android.vpn
 
 import io.syn443.identity.AssignmentState
-import io.syn443.policy.Policy
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.json.encodeToStream
 import java.io.OutputStream
 import javax.crypto.Cipher
 
@@ -51,7 +48,6 @@ internal class AssignmentJsonBuffer(private val limit:Int):OutputStream() {
     companion object {
         /** A streaming comparison keeps strict canonical bytes, including UTF-8,
          * without allocating a second journal-sized String/character buffer. */
-        @OptIn(ExperimentalSerializationApi::class)
         fun requireCanonical(value:AssignmentState,expected:ByteArray) {
             var at=0
             val output=object:OutputStream() {
@@ -63,7 +59,7 @@ internal class AssignmentJsonBuffer(private val limit:Int):OutputStream() {
                     for(i in offset until offset+length)require(bytes[i]==expected[at++])
                 }
             }
-            Policy.json.encodeToStream(AssignmentState.serializer(),value,output)
+            AssignmentJsonEncoder.encode(value,output)
             require(at==expected.size)
         }
     }

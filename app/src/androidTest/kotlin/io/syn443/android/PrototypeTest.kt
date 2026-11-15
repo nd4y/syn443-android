@@ -24,8 +24,10 @@ class PrototypeTest {
     @OptIn(ExperimentalTestApi::class)
     @Test fun darkThemeByDefault() {
         compose.onNodeWithTag("prototype").assertDoesNotExist()
-        val screen = compose.onRoot().captureToImage().toPixelMap()
-        val background = screen[1, screen.height - 2].luminance()
+        val screen = compose.onRoot().captureToImage()
+        // Read the exact same background pixel without copying the whole screen
+        // into a second multi-megabyte IntArray on low-memory Android images.
+        val background = screen.toPixelMap(startX=1,startY=screen.height-2,width=1,height=1)[0,0].luminance()
         assertTrue("Default surface is not dark", background < 0.1f)
         val title = compose.onNodeWithText("SYN443").captureToImage().toPixelMap()
         var foreground = 0f
