@@ -98,6 +98,10 @@ class LoginController private constructor(private val context:android.app.Applic
         if(namespace=="device-login-v1")TechnicalTelemetryDisk(context) else TechnicalTelemetryDisk(context,"$namespace-telemetry")
     }
     private val telemetryTransport=java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
+    private val runtimeTransport=java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
+    private val runtimeDisk by lazy {RuntimeObservationDisk(context,
+        if(namespace=="device-login-v1")"runtime-observation-v1" else "$namespace-runtime")}
+    private var nextRuntimeElapsed=0L
     private val telemetryPurge=java.util.concurrent.atomic.AtomicBoolean()
     private var nextTelemetryElapsed=0L
     private val deviceSourceScope=java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
@@ -179,6 +183,7 @@ class LoginController private constructor(private val context:android.app.Applic
         } finally {
             complete()
             if(telemetryPurge.getAndSet(false))runCatching {telemetryDisk.erase()}
+                .also {runCatching {runtimeDisk.clearPending()}}
         }}
     }
     private fun submit(block:()->Unit) {
@@ -356,7 +361,7 @@ class LoginController private constructor(private val context:android.app.Applic
             else {expected=s;true}
         },onAdmission={
             commandEpoch++;browser=null;chatTicket=null;activationDelivery=null;panelHint=null;panelPoll=null
-            deviceSourcePollAfter=0;deviceSourceAuthority=null;telemetryAuthority=null;nextTelemetryElapsed=0
+            deviceSourcePollAfter=0;deviceSourceAuthority=null;telemetryAuthority=null;nextTelemetryElapsed=0;nextRuntimeElapsed=0
         }) {
             noVpn()
             val old=payload(expected)
@@ -841,7 +846,7 @@ class LoginController private constructor(private val context:android.app.Applic
             (policy.payload.refreshAfterMs-checkNotNull(view.state.time).window(boot(),elapsed()).upperMs).coerceIn(30_000,300_000)
         }.getOrDefault(30_000L)
         if(elapsed()-lastAssignmentFetch<interval)return !force &&
-            (refreshOverlayCredential() || reportActivation() || syncDeviceSubscription() || syncTechnicalTelemetry())
+            (refreshOverlayCredential() || reportActivation() || syncDeviceSubscription() || syncTechnicalTelemetry() || syncRuntimeObservation())
         if(runCatching {assignedRuntime.read(s).state.journal.phase=="applying"}.getOrDefault(false))return false
         return submitIfIdle(onAdmission={lastAssignmentFetch=elapsed()}) {
             current(s);resumeWorker(s)
@@ -850,7 +855,9 @@ class LoginController private constructor(private val context:android.app.Applic
     /** Piggyback on the existing supervisor tick and physical account transport. */
     private fun reportVpnOn():Boolean = testReportVpnOn?.invoke() ?: state().checkpoint().desiredOn
     internal fun cancelDeviceSubscription() {deviceSourceScope.getAndSet(null)?.cancel()}
-    internal fun cancelTechnicalTelemetry() {telemetryTransport.getAndSet(null)?.cancel()}
+    internal fun cancelTechnicalTelemetry() {
+        telemetryTransport.getAndSet(null)?.cancel();runtimeTransport.getAndSet(null)?.cancel()
+    }
     internal fun cancelOptionalNetworkWork() {cancelDeviceSubscription();cancelTechnicalTelemetry()}
     private fun purgeTechnicalTelemetryWhenIdle() {
         telemetryPurge.set(true)
@@ -860,6 +867,7 @@ class LoginController private constructor(private val context:android.app.Applic
     private fun eraseTechnicalTelemetryOnRetirement() {
         runCatching {telemetryCapture.disable()}
         runCatching {telemetryDisk.erase()}
+        runCatching {runtimeDisk.erase()}
     }
     private fun telemetryFor(s:LoginIntent)=telemetryAuthority?.takeIf {
         s.phase==LoginPhase.POLICY_CACHED && it.generation==s.generation && it.sessionGeneration==s.sessionGeneration
@@ -874,6 +882,7 @@ class LoginController private constructor(private val context:android.app.Applic
                 val authority=telemetryFor(s) ?: return@synchronized false
                 telemetryCapture.enable(authority.scope,state().read().optLong("eventSequence"))
                 nextTelemetryElapsed=0
+                nextRuntimeElapsed=0
             } else {
                 cancelTechnicalTelemetry()
                 telemetryCapture.disable()
@@ -932,6 +941,83 @@ class LoginController private constructor(private val context:android.app.Applic
                         telemetryDisk.write(queueKey,queue.acknowledged(queueKey,batch))
                     }
                 } finally {telemetryTransport.compareAndSet(scope,null)}
+            }
+        }
+    }
+    /** Reuse the supervisor's worker and consent; no new timer, wake lock or probe. */
+    internal fun syncRuntimeObservation():Boolean {
+        if(!reportVpnOn())return false
+        lateinit var expected:LoginIntent
+        lateinit var authority:TelemetryAuthority
+        lateinit var consent:TelemetryCapture.Consent
+        return submitIfIdle(quiet=true,admit={
+            val s=journal.snapshot();val a=telemetryFor(s)
+            val c=a?.let {runCatching {telemetryCapture.consent(it.scope)}.getOrNull()}
+            if(a==null || c==null || elapsed()<nextRuntimeElapsed)false
+            else {expected=s;authority=a;consent=c;true}
+        },onAdmission={nextRuntimeElapsed=elapsed()+60_000}) {
+            fun currentConsent() {
+                current(expected)
+                require(telemetryFor(expected)==authority && telemetryCapture.consent(authority.scope)?.session==consent.session)
+            }
+            currentConsent();val p=payload(expected);val session=checkNotNull(p.session)
+            val physical=PhysicalIdentityRoute.capture(context)
+            // Metered networks use a five-minute budget. They can truthfully age
+            // to stale in the console rather than causing extra radio wakeups.
+            val interval=if(physical.unmetered)60_000L else 300_000L
+            synchronized(commands) {currentConsent();nextRuntimeElapsed=elapsed()+interval}
+            val time=session.time.window(boot(),elapsed())
+            val sampleTime=io.syn443.identity.RuntimeObservation.sampleTime(time)
+            val checkpoint=state().checkpoint();require(checkpoint.desiredOn)
+            val revision=assignedRuntime.read(expected).state.journal.active?.let {assignedRuntime.allowed(expected,it)?.payload?.revision} ?: 0
+            val status=LifecycleAccess.engineStatus(context,state().read())
+            val sample=RuntimeObservationCapture.sample(status,revision,physical.networkKind,sampleTime,
+                io.syn443.android.BuildConfig.VERSION_CODE)
+            val queueKey=Identity.hash(("syn443/runtime/"+expected.authority+"/"+session.session.deviceId+"/"+session.keyThumbprint).toByteArray(Charsets.US_ASCII))
+            val prepared=runtimeDisk.read(queueKey).offer(queueKey,sample)
+            if(!prepared.ready(queueKey,time.lowerMs)) {
+                // Reuse the same supervisor tick close to the durable deadline.
+                // A restart must not repeatedly decrypt a one-hour backoff,
+                // nor add another full minute when the deadline is imminent.
+                synchronized(commands) {
+                    currentConsent()
+                    nextRuntimeElapsed=elapsed()+(prepared.notBeforeMs-time.lowerMs).coerceIn(1000,3_600_000)
+                }
+                return@submitIfIdle
+            }
+            val report=checkNotNull(prepared.pending)
+            val queue=prepared.attempted(queueKey,report,time,interval)
+            val route=object:HttpRoute {
+                override fun resolve(host:String)=physical.resolve(host)
+                override fun bind(socket:java.net.Socket)=physical.bind(socket)
+                override fun check() {
+                    currentConsent();require(state().checkpoint().let {it.desiredOn && it.generation==checkpoint.generation})
+                    physical.check()
+                }
+            }
+            route.check();runtimeDisk.write(queueKey,queue)
+            withProtocol(expected,p.bootstrap,route) {protocol,scope->
+                check(runtimeTransport.compareAndSet(null,scope))
+                try {
+                    route.check()
+                    val result=protocol.reportRuntime(report,session,scope)
+                    route.check()
+                    when(result) {
+                        AuthProtocol.RuntimeResult.ACKNOWLEDGED->runtimeDisk.write(queueKey,queue.acknowledged(queueKey,report))
+                        AuthProtocol.RuntimeResult.CONFLICT->{
+                            runtimeDisk.write(queueKey,queue.discard(queueKey).deferred(queueKey,session.time.window(boot(),elapsed()),300_000))
+                            nextRuntimeElapsed=elapsed()+300_000
+                        }
+                        AuthProtocol.RuntimeResult.UNSUPPORTED->{
+                            runtimeDisk.write(queueKey,queue.deferred(queueKey,session.time.window(boot(),elapsed()),3_600_000))
+                            nextRuntimeElapsed=elapsed()+3_600_000
+                        }
+                        AuthProtocol.RuntimeResult.THROTTLED->{
+                            runtimeDisk.write(queueKey,queue.deferred(queueKey,session.time.window(boot(),elapsed()),300_000))
+                            nextRuntimeElapsed=elapsed()+300_000
+                        }
+                    }
+                }finally {runtimeTransport.compareAndSet(scope,null)}
             }
         }
     }
@@ -1132,7 +1218,7 @@ class LoginController private constructor(private val context:android.app.Applic
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
         commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;activationDelivery=null;panelHint=null;panelPoll=null;deviceSourcePollAfter=0;deviceSourceAuthority=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()
-        telemetryAuthority=null;nextTelemetryElapsed=0;cancelTechnicalTelemetry()
+        telemetryAuthority=null;nextTelemetryElapsed=0;nextRuntimeElapsed=0;cancelTechnicalTelemetry()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {

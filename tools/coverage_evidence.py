@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 
 IDENTITY_CLASSES = {'io.syn443.identity.' + name for name in (
     'Identity', 'Bootstrap', 'Pending', 'BoundedHttp', 'BoundedHttpKt', 'BoundedHttp.Scope',
+    'RuntimeObservation', 'RuntimeObservation.Report', 'RuntimeObservation.Snapshot',
     'AuthProtocol', 'IdentityScope', 'TrustedTime', 'TrustedTime.Companion',
     'IdentityOperation', 'IdentityOperation.Companion',
     'LoginRecovery', 'LoginIntent', 'RegistrationTombstone', 'LoginPayload', 'LoginPayload.Companion', 'CapabilityNegotiation',

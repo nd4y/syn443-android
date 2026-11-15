@@ -173,6 +173,7 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     private class ControlPanelUnavailable:Exception()
     private class DeviceSubscriptionUnavailable:Exception()
     private class TelemetryUnavailable:Exception()
+    private class RuntimeObservationUnavailable:Exception()
     private fun api(path:String,body:String?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int=if(body==null)524_288 else 65_536):Delivered =
         apiBytes(path,body?.toByteArray(Charsets.UTF_8),token,nonce,floor,scope,maxReply)
     private fun apiBytes(path:String,body:ByteArray?,token:String,nonce:String,floor:TrustedTime,scope:IdentityScope,maxReply:Int):Delivered {
@@ -198,7 +199,8 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
             if(path=="/v1/device/control-panel" && reply.status==404)throw ControlPanelUnavailable()
             if(DeviceSubscription.isClaim(path) && reply.status==404)throw DeviceSubscriptionUnavailable()
             if(path==TechnicalTelemetry.PATH && reply.status==404)throw TelemetryUnavailable()
-            status(reply,if(path.endsWith("/revoke") || path=="/v1/device/policy/status" || sourceLimit!=null ||
+            if(path==RuntimeObservation.PATH && reply.status==404)throw RuntimeObservationUnavailable()
+            status(reply,if(path.endsWith("/revoke") || path=="/v1/device/policy/status" || path==RuntimeObservation.PATH || sourceLimit!=null ||
                 (path==TechnicalTelemetry.PATH || DeviceSubscription.isClaim(path)) && reply.status==204)204 else 200)
             return Delivered(reply,observed(reply,start,floor),currentNonce)
         }
@@ -343,6 +345,24 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
             val receipt=json(result.reply)
             receipt.keys==setOf("schemaVersion","eventIds") && receipt["schemaVersion"]==JsonPrimitive(1) &&
                 receipt["eventIds"]==JsonArray(batch.events.map {JsonPrimitive(it.id)})
+        }finally {body.fill(0)}
+    }
+    enum class RuntimeResult { ACKNOWLEDGED, UNSUPPORTED, CONFLICT, THROTTLED }
+    fun reportRuntime(report:RuntimeObservation.Report,current:SessionReply,scope:IdentityScope):RuntimeResult=checked {
+        bound(current)
+        require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)
+        val body=report.body()
+        try {
+            val result=try {
+                apiBytes(RuntimeObservation.PATH,body,current.session.accessToken,current.session.nonce,current.time,scope,1024)
+            }catch(_:RuntimeObservationUnavailable){return@checked RuntimeResult.UNSUPPORTED}
+            catch(e:AuthException){return@checked when(e.reason) {
+                AuthFailure.CONFLICT->RuntimeResult.CONFLICT
+                AuthFailure.THROTTLED->RuntimeResult.THROTTLED
+                else->throw e
+            }}
+            require(result.reply.body.isEmpty())
+            RuntimeResult.ACKNOWLEDGED
         }finally {body.fill(0)}
     }
     private fun sendSubscription(claim:DeviceSubscription.Claim,current:SessionReply,scope:IdentityScope,

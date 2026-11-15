@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=190
+    minimum=235
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -113,6 +113,18 @@ if mode=="health":
     required.add(('io.syn443.health.TlsTest','certificateFailureDoesNotTryAnotherAddressOrWeakenTrust'))
     assert required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required bounded address fallback cases missing'
 if mode=="identity":
+    runtime_required={("io.syn443.identity.RuntimeObservationTest",name) for name in {
+        "wireIsClosedSmallRedactedAndCompatibleWithAllSupportedPhases",
+        "invalidNumbersPhasesAndContradictoryEvidenceNeverProduceARequest",
+        "exactPendingRetrySurvivesSerializationWithoutRefreshingItsTimestamp",
+        "oldOrChangedFactsReserveANewSequenceBeforeTheNextUpload",
+        "acknowledgmentAndConsentWithdrawalKeepTheCursorAndRejectSubstitution",
+        "samplesUseOnlyTheTrustedTimeWindowAndRefuseUnboundedUncertainty",
+        "durableAttemptAndErrorBudgetsSurviveRestartAcknowledgmentConsentAndClockUncertainty"}}
+    runtime_required.update({("io.syn443.identity.AuthProtocolTest",name) for name in {
+        "runtimeObservationBindsTheExactRetryBodyAndRequiresAnEmptyAcknowledgment",
+        "optionalRuntimeFailuresDoNotReplaceAuthorityAndReauthenticationIsStillRequired"}})
+    assert runtime_required <= {(c.get("classname"),c.get("name")) for c in cases}, "Runtime wire/queue evidence missing"
     assert {
         ("io.syn443.identity.AuthProtocolTest","technicalTelemetryIsProofBoundAndDisabledEndpointDoesNotAcknowledge"),
         ("io.syn443.identity.TelemetryTest","acknowledgmentRemovesOnlyTheOriginalPrefixAndNeverAnotherScope"),
@@ -320,6 +332,13 @@ if mode=="emulator":
         "enrolledLogoutRetiresFrozenNativeBeforeAcknowledging",
         "pendingPollFencesStaleGenerationAndCannotReviveLogout",
         "enrolledPendingAssignmentRetriesWhileVisible"}
+    required |= {"encryptedRuntimeRetrySurvivesRestartAndConsentWithdrawalRetainsOnlyItsCursor",
+        "runtimeQueueRejectsCiphertextSubstitutionTruncationAndOversizeWithoutReplacingIt",
+        "runtimeCaptureNeverTurnsCachedOnlineOrAnUnboundEngineIntoPositiveEvidence",
+        "runtimeQueueRejectsMainThreadStorageAccess",
+        "runtimeTransportReportsOnlyTheSelectedPhysicalNetworkAndFencesItsClassChanges",
+        "runtimeUploadNeedsExplicitConsentAndCannotBorrowAnArtificialVpnOnHint",
+        "runtimeAttemptBudgetSurvivesEncryptedRestartAndCannotBeResetByConsentOrRetry"}
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"
 print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
 

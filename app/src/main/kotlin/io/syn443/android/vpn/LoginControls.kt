@@ -133,7 +133,7 @@ import io.syn443.identity.Identity
         }},modifier=Modifier.testTag("auth-admin-panel")) {Text("Администрирование")}
         val telemetryEnabled=status.optBoolean("telemetryEnabled")
         if(status.optBoolean("telemetryAvailable") || telemetryEnabled) {
-            Text("Техническая телеметрия помогает разбирать сбои VPN. Отправляются коды состояний без истории сайтов, адресов и учётных данных.")
+            Text("Техническая телеметрия помогает разбирать сбои VPN. Отправляются коды событий, состояние VPN, версия приложения и тип сети без истории сайтов, адресов и учётных данных. Сводка состояния доступна вашему администратору. Её можно отключить этой кнопкой.")
             Button(enabled=!status.optBoolean("busy"),onClick={scope.launch {
                 val reply=command("auth-telemetry","$generation:${!telemetryEnabled}")
                 if(reply?.getBoolean("ok")!=true)message="Не удалось изменить настройку телеметрии."

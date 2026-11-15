@@ -18,6 +18,39 @@ import java.util.Base64
 import java.util.Locale
 
 class AuthProtocolTest {
+    @Test fun runtimeObservationBindsTheExactRetryBodyAndRequiresAnEmptyAcknowledgment() {
+        val f=Fixture();val current=f.current();val report=RuntimeObservation.Report(1,17,75,"online",4,true,true,"wifi",now)
+        var response=json(204,text="")
+        f.handler={method,url,headers,raw,_,limit->
+            assertEquals("POST",method);assertEquals(b.apiOrigin+RuntimeObservation.PATH,url);assertEquals(1024,limit)
+            assertEquals("DPoP "+current.session.accessToken,headers["Authorization"])
+            val body=checkNotNull(raw);assertArrayEquals(report.body(),body)
+            val proof=Identity.objectJSON(Policy.utf8(Policy.decode64(headers.getValue("DPoP").split('.')[1])))
+            assertEquals(Identity.hash(body),proof.getValue("req_hash").jsonPrimitive.content)
+            response
+        }
+        repeat(2){assertEquals(AuthProtocol.RuntimeResult.ACKNOWLEDGED,f.client.reportRuntime(report,current,IdentityScope()))}
+        response=json(204,text="unexpected")
+        error(AuthFailure.INVALID_REPLY){f.client.reportRuntime(report,current,IdentityScope())}
+        response=json(200,text="")
+        error(AuthFailure.INVALID_REPLY){f.client.reportRuntime(report,current,IdentityScope())}
+    }
+    @Test fun optionalRuntimeFailuresDoNotReplaceAuthorityAndReauthenticationIsStillRequired() {
+        val f=Fixture();val current=f.current();val report=RuntimeObservation.Report(1,17,75,"starting",0,false,false,"wifi",now)
+        var response=json(404)
+        f.handler={_,_,_,_,_,_->response}
+        assertEquals(AuthProtocol.RuntimeResult.UNSUPPORTED,f.client.reportRuntime(report,current,IdentityScope()))
+        response=json(409);assertEquals(AuthProtocol.RuntimeResult.CONFLICT,f.client.reportRuntime(report,current,IdentityScope()))
+        response=json(429);assertEquals(AuthProtocol.RuntimeResult.THROTTLED,f.client.reportRuntime(report,current,IdentityScope()))
+        response=json(409,text="""{"code":"reauthentication_required"}""")
+        error(AuthFailure.REAUTHENTICATE){f.client.reportRuntime(report,current,IdentityScope())}
+        response=json(403);error(AuthFailure.ACCESS_DENIED){f.client.reportRuntime(report,current,IdentityScope())}
+        val cancelled=IdentityScope().apply {cancel()}
+        error(AuthFailure.CANCELLED){f.client.reportRuntime(report,current,cancelled)}
+        val late=IdentityScope()
+        f.handler={_,_,_,_,_,_->late.cancel();json(204,text="")}
+        error(AuthFailure.CANCELLED){f.client.reportRuntime(report,current,late)}
+    }
     @Test fun technicalTelemetryIsProofBoundAndDisabledEndpointDoesNotAcknowledge() {
         val f=Fixture();val current=f.current()
         val batch=TechnicalTelemetry.Batch(1,Identity.random(),52,0,1,listOf(
