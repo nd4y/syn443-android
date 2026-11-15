@@ -39,6 +39,7 @@ trap collect_diagnostics EXIT
 
 adb -e shell getprop ro.build.version.sdk
 python3 tools/check_emulator_heap.py
+python3 tools/prepare_emulator_art.py
 adb -e shell df -h /data
 # Disposable emulator only: prove the app stays dark with light system settings.
 adb -e shell cmd uimode night no

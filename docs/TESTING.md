@@ -1,5 +1,11 @@
 # Testing and release gates
 
+[Actual ART heap preparation](emulator-art-startup.md) requires241 actual
+zero-skipped Android outcomes on API29/35/37. The API29 framework preparation
+is restricted to the fresh, owned disposable CI AVD before APK installation.
+The running ART heap is checked separately from heap properties; every existing
+media/storage/process/OS assertion remains mandatory.
+
 [Emulator observation boundaries](emulator-observation-boundaries.md) require240
 actual Android outcomes perAPI29/35/37. The real idle-peer and read-only owner
 readiness cases are mandatory; frozen-host recovery and all original assertions
@@ -55,7 +61,7 @@ Disposable AVDs use an explicit256MiB Java heap; API29 also selects the Pixel2
 hardware profile and2048MiB RAM. The generic old16MiB heap caused system_server
 to die in ConfigUpdateInstallReceiver during an automatic system update, before
 the instrumentation suite could complete. A hardware/serial-gated preflight now
-checks the actual maximum and growth limit before installing the app. This does
+checks the configured maximum and growth properties before installing the app. This does
 not change application limits, omit media/OS cases or substitute for physical
 memory/battery acceptance. An interrupted run remains failed.
 CI must list these as pending rather than skip them and report success.
