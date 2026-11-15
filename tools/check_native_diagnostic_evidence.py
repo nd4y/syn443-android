@@ -23,6 +23,9 @@ PATH_REQUIRED = {
     'TestPrivateSelectionRealFreshSwitchPinsAndBoundsDrain',
     'TestPrivateSelectionProofBindingsFreshnessAndSharedPins',
     'TestPrivateSelectionBlockedProbeCannotBeReplacedOrPublishLate',
+    'TestPrivateCatalogueOwnsNormalizedProfilesAndRuntimeFactory',
+    'TestPrivateCatalogueRejectsNoncanonicalUnsafeAndSubstitutedOptions',
+    'TestPrivateCatalogueBoundsContextAndFreshTypedConstruction',
 }
 
 
