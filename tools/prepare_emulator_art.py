@@ -26,8 +26,9 @@ def prepare(adb, *, clock=time.monotonic, sleep=time.sleep, budget=120):
         return
     assert adb('shell', 'getprop', 'ro.debuggable').strip() == b'1'
     # Never restart a previously installed test or a configured application.
-    for package in ('io.syn443.android', 'io.syn443.android.test'):
-        assert not adb('shell', 'pm', 'path', package).strip(), 'Expected an uninstalled fresh fixture'
+    # pm path exits1 for an absent package on API29. The successful inventory
+    # query proves absence without confusing a PackageManager failure with it.
+    assert not adb('shell', 'pm', 'list', 'packages', '--user', '0', 'io.syn443.android').strip(), 'Expected an uninstalled fresh fixture'
     initial = adb('shell', 'pidof', 'system_server').strip()
     assert re.fullmatch(rb'[1-9][0-9]*', initial), 'Expected one system_server'
     deadline = clock() + budget

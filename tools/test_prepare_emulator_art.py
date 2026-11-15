@@ -18,8 +18,7 @@ class FrameworkHeapTest(unittest.TestCase):
             ('shell', 'getprop', 'ro.debuggable'): b'1',
             ('shell', 'getprop', 'dalvik.vm.heapsize'): b'512m',
             ('shell', 'getprop', 'dalvik.vm.heapgrowthlimit'): b'512m',
-            ('shell', 'pm', 'path', 'io.syn443.android'): b'',
-            ('shell', 'pm', 'path', 'io.syn443.android.test'): b'',
+            ('shell', 'pm', 'list', 'packages', '--user', '0', 'io.syn443.android'): b'',
             ('shell', 'id', '-u'): b'0' if root else b'2000',
             ('root',): b'restarting adbd as root', ('wait-for-device',): b'',
             ('shell', 'service', 'check', 'package'): b'Service package: found' if ready else b'Service package: not found',
@@ -75,8 +74,8 @@ class FrameworkHeapTest(unittest.TestCase):
             {('shell', 'getprop', 'ro.hardware'): b'qcom'},
             {('shell', 'getprop', 'ro.debuggable'): b'0'},
             {('shell', 'getprop', 'dalvik.vm.heapgrowthlimit'): b'16m'},
-            {('shell', 'pm', 'path', 'io.syn443.android'): b'package:/data/app/base.apk'},
-            {('shell', 'pm', 'path', 'io.syn443.android.test'): b'package:/data/app/test.apk'},
+            {('shell', 'pm', 'list', 'packages', '--user', '0', 'io.syn443.android'): b'package:io.syn443.android'},
+            {('shell', 'pm', 'list', 'packages', '--user', '0', 'io.syn443.android'): b'package:io.syn443.android.test'},
         ):
             with self.assertRaises(AssertionError):
                 self.exercise(overrides=overrides)
