@@ -17,6 +17,9 @@ PATH_REQUIRED = {
     'TestPrivatePoolRealTrafficHoldAndConfiguredCapacity',
     'TestPrivatePoolBlockedConstructionCannotPublishAfterScopeChange',
     'TestPrivatePoolRetirementFailureAndBlockedCloseKeepReservations',
+    'TestPrivateTrafficRealTCPLeaseAndGracefulDrain',
+    'TestPrivateTrafficPacketsAndLateReadCannotOutliveContext',
+    'TestPrivateTrafficPartialDialPanicAndLateOwnerKeepCapacity',
 }
 
 

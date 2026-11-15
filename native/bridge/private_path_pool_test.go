@@ -47,17 +47,17 @@ func TestPrivatePoolRealTrafficHoldAndConfiguredCapacity(t *testing.T) {
 	entry := socksWire(t, exit.listener.Addr().String())
 	instance, parent := wireNetworkBox(t, nil, []map[string]any{{"type": "direct", "tag": "existing"}}, nil)
 	scope := strings.Repeat("a", 64)
-	p, err := newPrivatePathPool(parent, scope, 3)
+	p, err := newPrivatePathPool(parent, scope, 3, privatePoolLease(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cleanupPrivatePool(t, p)
 	for _, cap := range []int{0, 129} {
-		if other, e := newPrivatePathPool(parent, scope, cap); e == nil || other != nil {
+		if other, e := newPrivatePathPool(parent, scope, cap, privatePoolLease(t)); e == nil || other != nil {
 			t.Fatal("invalid adapter cap admitted")
 		}
 	}
-	if other, e := newPrivatePathPool(parent, "wrong-scope", 3); e == nil || other != nil {
+	if other, e := newPrivatePathPool(parent, "wrong-scope", 3, privatePoolLease(t)); e == nil || other != nil {
 		t.Fatal("invalid context binding admitted")
 	}
 	catalogue := map[string]map[string]any{"entry": entry.node("socks", "input-entry"), "exit": exit.node("http", "input-exit")}
@@ -134,7 +134,7 @@ func TestPrivatePoolRealTrafficHoldAndConfiguredCapacity(t *testing.T) {
 func TestPrivatePoolBlockedConstructionCannotPublishAfterScopeChange(t *testing.T) {
 	_, parent := wireNetworkBox(t, nil, []map[string]any{{"type": "direct", "tag": "existing"}}, nil)
 	a, b := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	p, err := newPrivatePathPool(parent, a, 5)
+	p, err := newPrivatePathPool(parent, a, 5, privatePoolLease(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestPrivatePoolRetirementFailureAndBlockedCloseKeepReservations(t *testing.
 	_, parent := wireNetworkBox(t, nil, []map[string]any{{"type": "direct", "tag": "existing"}}, nil)
 	scope := strings.Repeat("a", 64)
 	t.Run("partial constructor cleanup", func(t *testing.T) {
-		p, e := newPrivatePathPool(parent, scope, 2)
+		p, e := newPrivatePathPool(parent, scope, 2, privatePoolLease(t))
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -238,7 +238,7 @@ func TestPrivatePoolRetirementFailureAndBlockedCloseKeepReservations(t *testing.
 		}
 	})
 	t.Run("failed cleanup", func(t *testing.T) {
-		p, e := newPrivatePathPool(parent, scope, 2)
+		p, e := newPrivatePathPool(parent, scope, 2, privatePoolLease(t))
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -262,7 +262,7 @@ func TestPrivatePoolRetirementFailureAndBlockedCloseKeepReservations(t *testing.
 		}
 	})
 	t.Run("blocked closer", func(t *testing.T) {
-		p, e := newPrivatePathPool(parent, scope, 10)
+		p, e := newPrivatePathPool(parent, scope, 10, privatePoolLease(t))
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -305,4 +305,13 @@ func TestPrivatePoolRetirementFailureAndBlockedCloseKeepReservations(t *testing.
 			t.Fatal("Stop did not fence pool")
 		}
 	})
+}
+
+func privatePoolLease(t *testing.T) *leaseGuard {
+	t.Helper()
+	g := &leaseGuard{clock: bootMillis}
+	if e := g.set(bootMillis() + 60_000); e != nil {
+		t.Fatal(e)
+	}
+	return g
 }

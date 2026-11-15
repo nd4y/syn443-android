@@ -21,11 +21,13 @@ type privatePathPool struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	stopParent   func() bool
+	lease        *leaseGuard
 	scope        string
 	configured   int
 	capacity     int
 	used         int
 	holds        int
+	operations   int
 	building     bool
 	closed       bool
 	queueClosed  bool
@@ -45,6 +47,8 @@ type privatePoolEntry struct {
 	draining bool
 	queued   bool
 	retained bool
+	closed   bool
+	flows    map[*privateFlowOwner]struct{}
 }
 
 type privatePathCandidate struct {
@@ -60,12 +64,12 @@ type privatePathHold struct {
 }
 
 type privatePoolSnapshot struct {
-	Configured, Dynamic, Entries, Holds, Retained int
-	Building, Closed                              bool
+	Configured, Dynamic, Entries, Holds, Retained, Operations int
+	Building, Closed                                          bool
 }
 
-func newPrivatePathPool(parent context.Context, scope string, capacity int) (*privatePathPool, error) {
-	if parent == nil || parent.Err() != nil || !privateScopeID.MatchString(scope) || capacity < 1 || capacity > 128 {
+func newPrivatePathPool(parent context.Context, scope string, capacity int, lease *leaseGuard) (*privatePathPool, error) {
+	if parent == nil || parent.Err() != nil || !privateScopeID.MatchString(scope) || capacity < 1 || capacity > 128 || !privateManagedLease(lease) {
 		return nil, errPrivatePath
 	}
 	manager := service.FromContext[adapter.OutboundManager](parent)
@@ -77,7 +81,7 @@ func newPrivatePathPool(parent context.Context, scope string, capacity int) (*pr
 		return nil, errPrivatePath
 	}
 	ctx, cancel := context.WithCancel(parent)
-	p := &privatePathPool{ctx: ctx, cancel: cancel, scope: scope, configured: configured, capacity: capacity,
+	p := &privatePathPool{ctx: ctx, cancel: cancel, lease: lease, scope: scope, configured: configured, capacity: capacity,
 		entries: map[uint64]*privatePoolEntry{}, retire: make(chan *privatePoolEntry, 8), workerExited: make(chan struct{})}
 	go p.retirementWorker()
 	stop := context.AfterFunc(parent, p.Close)
@@ -94,7 +98,7 @@ func newPrivatePathPool(parent context.Context, scope string, capacity int) (*pr
 func (p *privatePathPool) snapshot() privatePoolSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	s := privatePoolSnapshot{Configured: p.configured, Dynamic: p.used, Entries: len(p.entries), Holds: p.holds, Building: p.building, Closed: p.closed}
+	s := privatePoolSnapshot{Configured: p.configured, Dynamic: p.used, Entries: len(p.entries), Holds: p.holds, Operations: p.operations, Building: p.building, Closed: p.closed}
 	for _, e := range p.entries {
 		if e.retained {
 			s.Retained++
@@ -112,13 +116,13 @@ func (p *privatePathPool) prepare(scope string, hops []string, create func(conte
 	}
 	ownedHops := append([]string(nil), hops...)
 	p.mu.Lock()
-	if p.closed || p.ctx.Err() != nil || scope != p.scope || p.building || len(p.entries) >= 8 || p.configured+p.used+len(ownedHops) > p.capacity || p.next == ^uint64(0) {
+	if p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || scope != p.scope || p.building || len(p.entries) >= 8 || p.configured+p.used+len(ownedHops) > p.capacity || p.next == ^uint64(0) {
 		p.mu.Unlock()
 		return nil, errPrivatePath
 	}
 	p.next++
 	child, cancel := context.WithCancel(p.ctx)
-	e := &privatePoolEntry{id: p.next, scope: scope, cost: len(ownedHops), cancel: cancel}
+	e := &privatePoolEntry{id: p.next, scope: scope, cost: len(ownedHops), cancel: cancel, flows: map[*privateFlowOwner]struct{}{}}
 	p.entries[e.id] = e
 	p.used += e.cost
 	p.building = true
@@ -136,7 +140,7 @@ func (p *privatePathPool) prepare(scope string, hops []string, create func(conte
 		p.used -= e.cost
 	} else {
 		e.path = path
-		if p.closed || p.ctx.Err() != nil || e.scope != p.scope || e.draining {
+		if p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || e.scope != p.scope || e.draining {
 			p.enqueueLocked(e)
 		} else {
 			return &privatePathCandidate{pool: p, entry: e}, nil
@@ -170,13 +174,26 @@ func (p *privatePathPool) enqueueLocked(e *privatePoolEntry) {
 func (p *privatePathPool) retirementWorker() {
 	defer close(p.workerExited)
 	for e := range p.retire {
+		p.mu.Lock()
+		flows := make([]*privateFlowOwner, 0, len(e.flows))
+		for f := range e.flows {
+			flows = append(flows, f)
+		}
+		p.mu.Unlock()
+		for _, f := range flows {
+			_ = f.Close()
+		}
 		err := e.path.Close()
 		p.mu.Lock()
 		if err != nil {
 			e.retained = true
 		} else {
-			delete(p.entries, e.id)
-			p.used -= e.cost
+			e.closed = true
+			// A late/blocked dial still owns a hold, even if adapter.Close
+			// returned. Never lend that reservation to a replacement.
+			if e.holds == 0 && !e.retained {
+				p.releaseEntryLocked(e)
+			}
 		}
 		p.mu.Unlock()
 	}
@@ -207,7 +224,7 @@ func (c *privatePathCandidate) hold(scope string) (*privatePathHold, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	e := c.entry
-	if p.closed || p.ctx.Err() != nil || scope != p.scope || e.scope != scope || p.entries[e.id] != e || e.draining || e.path == nil || p.holds >= 128 {
+	if p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || scope != p.scope || e.scope != scope || p.entries[e.id] != e || e.draining || e.path == nil || p.holds >= 128 {
 		return nil, errPrivatePath
 	}
 	e.holds++
@@ -223,7 +240,7 @@ func (h *privatePathHold) outbound(scope string) (adapter.Outbound, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	e := h.entry
-	if h.closed.Load() || p.closed || p.ctx.Err() != nil || scope != p.scope || e.scope != scope || p.entries[e.id] != e || e.queued || e.path.ctx.Err() != nil {
+	if h.closed.Load() || p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || scope != p.scope || e.scope != scope || p.entries[e.id] != e || e.queued || e.path.ctx.Err() != nil {
 		return nil, errPrivatePath
 	}
 	nodes := e.path.registry.Outbounds()
@@ -244,12 +261,36 @@ func (h *privatePathHold) Close() error {
 			e.holds--
 			p.holds--
 		}
-		if e.holds == 0 && e.draining && p.entries[e.id] == e && !p.queueClosed {
+		if e.holds == 0 && e.closed && !e.retained {
+			p.releaseEntryLocked(e)
+		} else if e.holds == 0 && e.draining && p.entries[e.id] == e && !p.queueClosed {
 			p.enqueueLocked(e)
 		}
 	})
 	return nil
 }
+
+func privateManagedLease(g *leaseGuard) bool {
+	if g == nil || g.clock == nil {
+		return false
+	}
+	s := g.state.Load()
+	return s != nil && s.deadline > 0 && g.allowed()
+}
+
+func (p *privatePathPool) releaseEntryLocked(e *privatePoolEntry) {
+	if p.entries[e.id] == e {
+		delete(p.entries, e.id)
+		p.used -= e.cost
+	}
+}
+
+func (p *privatePathPool) String() string        { return "PrivatePathPool([redacted])" }
+func (p *privatePathPool) GoString() string      { return p.String() }
+func (c *privatePathCandidate) String() string   { return "PrivatePathCandidate([redacted])" }
+func (c *privatePathCandidate) GoString() string { return c.String() }
+func (h *privatePathHold) String() string        { return "PrivatePathHold([redacted])" }
+func (h *privatePathHold) GoString() string      { return h.String() }
 
 // Graceful retirement rejects new holds while existing holders finish. Stop or
 // a changed security context instead cancels and retires all owned adapters.

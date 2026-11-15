@@ -33,12 +33,23 @@ and reject stale work. Graceful retirement rejects new references and lets old
 holders finish before closing the private adapters. Real SOCKS/HTTP traffic and
 configured-parent survival are tested under this ownership model; separate cases
 cover blocked construction, late completion, failed/blocked retirement and caps.
-All six constructor/pool cases must pass in ordinary and race JSON evidence.
+Actual TCP/UDP handles now retain their reference through confirmed socket close
+and completion of every in-flight dial/read/write. Even a successful adapter
+close cannot release capacity while a late dial or read is pending. A bounded
+per-flow and pool operation admission prevents unlimited concurrent work. The
+pool requires a live managed lease; zero/unmanaged or expired leases are rejected.
+Each socket operation checks current context/lease, and a late read cannot publish
+bytes after withdrawal. Panics and failed cleanup preserve an uncertain owner
+reservation. Pool/candidate/flow diagnostic formatting redacts route details.
+Real SOCKS/HTTP TCP payloads, local UDP socket ownership, late positive reads,
+partial/panicking dials and close failures are mandatory test cases. Local UDP
+ownership tests are not proof of SOCKS/VLESS UDP protocol acceptance.
+All nine constructor/pool/traffic cases must pass in ordinary and race JSON evidence.
 
 This primitive is not exposed through the Java API, accepted configuration or a
-signed device capability. Its callback still needs an independently authorized
-immutable catalogue resolver. It does not grant graph eligibility, resource or
-probe admission, fresh selection proof, active/draining ownership, connection
-pinning, bounded asynchronous retirement or an atomic route switch. Those gates
-must be implemented and accepted before runtime use. Source and executable tests
+signed device capability. Socket ownership grants no route selection authority.
+It still needs an independently authorized immutable catalogue resolver, graph
+eligibility, shared priority/probe admission, fresh proof-bound atomic selection,
+drain deadlines and client integration. Those gates must be implemented and
+accepted before runtime use. Source and executable tests
 remain pending exact-head GitHub Actions acceptance; no physical path is claimed.
