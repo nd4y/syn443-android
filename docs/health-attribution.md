@@ -7,3 +7,19 @@ The existing three-second total check deadline, two-worker pool, one waiting slo
 Three additional JVM methods exercise every stalled stage with late completion, a queued timeout and queued cancellation. The health evidence minimum is 21 methods with the existing 90% line coverage gate. This instrumentation identifies the stage of a future physical failure; it does not by itself establish or fix the cause of a cold-start failure.
 
 Android v23 also cancels the underlying platform DNS query on interruption/deadline and bypasses DNS for numeric addresses. Four Android regressions include three cancelled queries followed by successful work in the same bounded pool. Incomplete observations distinguish cancelled, unavailable and deadline outcomes; they never prove connectivity or become a false baseline. Generic injected noninterruptible resolvers remain covered by the existing pool-cap tests.
+
+## Bounded address fallback (new source, acceptance pending)
+
+The resolver retains at most16 distinct candidates from the first16 DNS answers.
+A probe attempts at most four distinct addresses, placing the first alternative
+address family second. Failed TCP attempts release their raw socket before the
+next attempt; nonfinal connects wait at most500ms. The same existing CheckJob
+three-second total deadline covers DNS, all connects, TLS and response. The
+process pool remains two workers with one waiting slot; fallback adds no threads.
+
+Only TCP connection failures try another address. TLS certificate/hostname errors,
+HTTP rejection, unexpected errors and cancellation do not retry through another
+endpoint. Existing platform trust, SNI/hostname verification and no-redirect rules
+remain. Required JVM/Android cases exercise family ordering, bounds, attribution,
+socket ownership, cancellation and certificate failure. Actual Wi-Fi family
+availability and final device checks remain separate acceptance evidence.

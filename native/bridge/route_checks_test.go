@@ -29,13 +29,13 @@ func TestRouteProbeUsesChosenDialerWithoutDirectFallback(t *testing.T) {
 		go func() { defer b.Close(); _, _ = io.WriteString(b, "SSH-2.0-synthetic\r\n") }()
 		return a, nil
 	}
-	code, complete := probeRoute(context.Background(), dial, routeCheck{"ssh_banner", "192.0.2.11:22"})
+	code, complete := probeRoute(context.Background(), dial, routeCheck{Method: "ssh_banner", Target: "192.0.2.11:22"})
 	if code != "ok" || !complete || calls != 1 {
 		t.Fatal("selected dialer was not used")
 	}
 	code, complete = probeRoute(context.Background(), func(context.Context, string, M.Socksaddr) (net.Conn, error) {
 		return nil, errors.New("private endpoint must not escape")
-	}, routeCheck{"tcp", "192.0.2.11:22"})
+	}, routeCheck{Method: "tcp", Target: "192.0.2.11:22"})
 	if code != "dial_failed" || !complete {
 		t.Fatal("failed path silently escaped or error text leaked")
 	}
@@ -47,29 +47,72 @@ func TestRouteTLSStrict204AndCertificateFailures(t *testing.T) {
 	defer server.Close()
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
-	code, complete := probeRouteWithRoots(context.Background(), routeTestDial, routeCheck{"https_204", server.URL}, roots)
+	code, complete := probeRouteWithRoots(context.Background(), routeTestDial, routeCheck{Method: "https_204", Target: server.URL}, roots)
 	if code != "ok" || !complete {
 		t.Fatalf("trusted204 rejected: %s", code)
 	}
 	status.Store(302)
-	code, _ = probeRouteWithRoots(context.Background(), routeTestDial, routeCheck{"https_204", server.URL}, roots)
+	code, _ = probeRouteWithRoots(context.Background(), routeTestDial, routeCheck{Method: "https_204", Target: server.URL}, roots)
 	if code != "http_response_mismatch" {
 		t.Fatal("redirect accepted")
 	}
-	code, _ = probeRoute(context.Background(), routeTestDial, routeCheck{"tls", server.URL})
+	code, _ = probeRoute(context.Background(), routeTestDial, routeCheck{Method: "tls", Target: server.URL})
 	if code != "tls_failed" {
 		t.Fatal("untrusted TLS accepted")
+	}
+}
+
+func TestRouteExitProofRequiresExactIPFromFreshVerifiedHTTPSResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name, expected, body, header, want string
+		status                             int
+	}{
+		{"ipv4", "192.0.2.9", "192.0.2.9\n", "", "ok", 200},
+		{"ipv6 equivalent", "2001:db8::1", "2001:0DB8:0:0:0:0:0:1\r\n", "", "ok", 200},
+		{"wrong exit", "192.0.2.9", "192.0.2.10", "", "exit_ip_mismatch", 200},
+		{"successful website", "192.0.2.9", "reachable", "", "exit_evidence_invalid", 200},
+		{"redirect", "192.0.2.9", "192.0.2.9", "", "exit_evidence_invalid", 302},
+		{"cached response", "192.0.2.9", "192.0.2.9", "Age", "exit_evidence_invalid", 200},
+		{"encoded response", "192.0.2.9", "192.0.2.9", "Content-Encoding", "exit_evidence_invalid", 200},
+		{"oversized", "192.0.2.9", strings.Repeat("1", 48), "", "exit_evidence_invalid", 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Cache-Control") != "no-cache, no-store" || r.Header.Get("Accept-Encoding") != "identity" {
+					w.WriteHeader(400)
+					return
+				}
+				requests.Add(1)
+				w.Header().Set("Location", "/should-not-follow")
+				if tc.header != "" {
+					w.Header().Set(tc.header, "1")
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+			roots := x509.NewCertPool()
+			roots.AddCert(server.Certificate())
+			check := routeCheck{Method: "https_exit_ip", Target: server.URL, ExpectedIP: tc.expected}
+			if code, complete := probeRouteWithRoots(context.Background(), routeTestDial, check, roots); code != tc.want || !complete || requests.Load() != 1 {
+				t.Fatalf("unexpected proof: code=%s complete=%t requests=%d", code, complete, requests.Load())
+			}
+			if code, _ := probeRoute(context.Background(), routeTestDial, check); code != "tls_failed" || requests.Load() != 1 {
+				t.Fatalf("untrusted origin reached the proof endpoint: %s", code)
+			}
+		})
 	}
 }
 func TestRoutePlansRejectUnsupportedOversizedAndCredentialTargets(t *testing.T) {
 	// Synthetic userinfo is constructed by the URL library: no credential URL is shipped in source.
 	credentialTarget := (&url.URL{Scheme: "https", Host: "example.org", User: url.UserPassword("fixture-user", "fixture-pass")}).String()
-	for _, c := range []routeCheck{{"icmp", "192.0.2.1"}, {"https_204", "http://example.org"}, {"https_204", credentialTarget}, {"tcp", "example.org:0"}, {"tcp", "example.org:65536"}, {"tcp", "example.org:ssh"}, {"tls", "https://example.org:65536"}, {"tcp", strings.Repeat("x", 2049)}} {
+	for _, c := range []routeCheck{{Method: "icmp", Target: "192.0.2.1"}, {Method: "https_204", Target: "http://example.org"}, {Method: "https_204", Target: credentialTarget}, {Method: "tcp", Target: "example.org:0"}, {Method: "tcp", Target: "example.org:65536"}, {Method: "tcp", Target: "example.org:ssh"}, {Method: "tls", Target: "https://example.org:65536"}, {Method: "tcp", Target: strings.Repeat("x", 2049)}} {
 		if validRouteCheck(c) {
 			t.Fatal("invalid check admitted")
 		}
 	}
-	p := routePlan{ID: "route-1", Outbound: "test", Checks: []routeCheck{{"tcp", "example.org:443"}}}
+	p := routePlan{ID: "route-1", Outbound: "test", Checks: []routeCheck{{Method: "tcp", Target: "example.org:443"}}}
 	if !validRouteRequest(routeRequest{"job", []routePlan{p}}) || validRouteRequest(routeRequest{"job", []routePlan{p, p}}) {
 		t.Fatal("duplicate boundary invalid")
 	}
@@ -123,7 +166,7 @@ func TestCancelledUninterruptibleRouteCannotAdmitAnotherBatchOrPublishLate(t *te
 func TestParentCancellationIsIncompleteNotAProxyFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	code, complete := probeRoute(ctx, func(c context.Context, _ string, _ M.Socksaddr) (net.Conn, error) { return nil, c.Err() }, routeCheck{"tcp", "192.0.2.1:443"})
+	code, complete := probeRoute(ctx, func(c context.Context, _ string, _ M.Socksaddr) (net.Conn, error) { return nil, c.Err() }, routeCheck{Method: "tcp", Target: "192.0.2.1:443"})
 	if code != "cancelled" || complete {
 		t.Fatal("cancellation poisoned path health")
 	}
@@ -143,7 +186,7 @@ func TestRouteDialReturningAfterItsDeadlineCannotBecomeSuccess(t *testing.T) {
 	// a suspended or uncooperative dial returns a connection after cancellation.
 	parent, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer cancel()
-	code, complete := probeRouteWithClock(parent, dial, routeCheck{"tcp", "192.0.2.1:443"}, nil, func() int64 { return elapsed })
+	code, complete := probeRouteWithClock(parent, dial, routeCheck{Method: "tcp", Target: "192.0.2.1:443"}, nil, func() int64 { return elapsed })
 	if peer != nil {
 		peer.Close()
 	}
@@ -170,7 +213,7 @@ func (c *earlyRouteConn) Write(b []byte) (int, error) {
 func TestRouteSSHFlushesLazyProxyRequestBeforeReadingServerBanner(t *testing.T) {
 	a, b := net.Pipe()
 	early := &earlyRouteConn{Conn: a, peer: b}
-	code, complete := probeRoute(context.Background(), func(context.Context, string, M.Socksaddr) (net.Conn, error) { return early, nil }, routeCheck{"ssh_banner", "192.0.2.9:22"})
+	code, complete := probeRoute(context.Background(), func(context.Context, string, M.Socksaddr) (net.Conn, error) { return early, nil }, routeCheck{Method: "ssh_banner", Target: "192.0.2.9:22"})
 	if code != "ok" || !complete || early.writes != 1 {
 		t.Fatal("server-first probe did not complete its lazy proxy handshake")
 	}
@@ -184,7 +227,7 @@ func TestRouteSuspendCannotRefreshAnOldBufferedSuccess(t *testing.T) {
 		go b.Close()
 		return a, nil
 	}
-	code, complete := probeRouteWithClock(context.Background(), dial, routeCheck{"tcp", "192.0.2.1:443"}, nil, func() int64 { return now })
+	code, complete := probeRouteWithClock(context.Background(), dial, routeCheck{Method: "tcp", Target: "192.0.2.1:443"}, nil, func() int64 { return now })
 	if code != "check_timeout" || complete {
 		t.Fatal("suspend converted old data into a fresh success")
 	}
@@ -205,7 +248,7 @@ func TestRouteLeaseExpiryAfterDialCannotPublishSuccess(t *testing.T) {
 		}
 		return 0
 	}
-	result := r.runPlan(context.Background(), routePlan{ID: "route-1", Outbound: "test", Checks: []routeCheck{{"tcp", "192.0.2.1:443"}}})
+	result := r.runPlan(context.Background(), routePlan{ID: "route-1", Outbound: "test", Checks: []routeCheck{{Method: "tcp", Target: "192.0.2.1:443"}}})
 	if result.OK || result.Complete || result.Code != "cancelled" {
 		t.Fatal("expired authorization published route readiness")
 	}
@@ -217,7 +260,7 @@ func TestRouteExpiredBootBudgetDoesNotDialAndProbePanicCannotKillOtherRoute(t *t
 		panic("synthetic probe failure")
 	}}
 	r := newRouteRunner(context.Background(), func(string) (adapter.Outbound, bool) { return outbound, true })
-	p := routePlan{ID: "route-1", Outbound: "test", Checks: []routeCheck{{"tcp", "192.0.2.1:443"}}}
+	p := routePlan{ID: "route-1", Outbound: "test", Checks: []routeCheck{{Method: "tcp", Target: "192.0.2.1:443"}}}
 	closed := r.runPlan(context.WithValue(context.Background(), routeDeadlineKey{}, bootMillis()-1), p)
 	if closed.OK || closed.Complete || calls != 0 {
 		t.Fatal("expired batch admitted work")

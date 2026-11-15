@@ -9,13 +9,17 @@ import org.json.JSONObject
 
 /** Process-wide worker cap also applies to cancelled jobs and later service generations. */
 class PolicyChecks(synthetic: Boolean = false) {
-    private val job = CheckJob(pool, NetworkProbe(synthetic, resolve = AndroidProbeResolver()::resolve), { android.os.SystemClock.elapsedRealtime() })
+    private val job = CheckJob(pool, NetworkProbe(synthetic, resolve = AndroidProbeResolver()::resolveAll), { android.os.SystemClock.elapsedRealtime() })
     fun cancel() = job.cancel()
     fun run(checks: List<Check>) = job.run(checks)
     val failure get() = job.failure
     val failureStage get() = job.failureStage
     companion object {
         private val pool = ProbePool()
+        private val results = PolicyCheckSnapshot()
+        internal fun record(batch: io.syn443.health.Batch, intent: Long, network: Long, activation: Long) = results.record(batch,intent,network,activation)
+        internal fun invalidate() = results.invalidate()
+        internal fun view(intent: Long, network: Long, activation: Long, active: Boolean) = results.read(intent,network,activation,active)
         private var sampledAt = -30_000L
         private var cached = ""
         /** Explicit DEBUG diagnostics only: fixed worker names and stack symbols, never values/targets. */

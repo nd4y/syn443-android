@@ -19,6 +19,8 @@ class HostProbeService : Service() {
     private lateinit var worker: Handler
     private lateinit var control: Messenger
     private var session: String? = null
+    private var ownerReply: Messenger? = null
+    private var ownerRequest = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -32,6 +34,7 @@ class HostProbeService : Service() {
                 // before dispatching any work to the other looper.
                 val destination = message.replyTo
                 val requestId = message.arg1
+                ownerReply=destination;ownerRequest=requestId
                 when (message.what) {
                     PROBE -> worker.post { reply(destination, requestId, PONG) }
                     STOP -> worker.post { AndroidProcess.killProcess(AndroidProcess.myPid()) }
@@ -69,6 +72,13 @@ class HostProbeService : Service() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
+        // A delayed unbind for a rejected/older interface must not kill the
+        // currently owned session. Intent extras alone do not identify an
+        // Android binding record; callers use a per-session action as well.
+        if(session==null || intent?.getStringExtra(SESSION)!=session) {
+            if(intent?.action=="io.syn443.host-probe.foreign")reply(ownerReply,ownerRequest,UNBIND_IGNORED)
+            return false
+        }
         AndroidProcess.killProcess(AndroidProcess.myPid())
         return false
     }
@@ -86,5 +96,6 @@ class HostProbeService : Service() {
         const val HANG_WORKER = 4
         const val HANG_QUEUED = 5
         const val TERMINATE = 6
+        const val UNBIND_IGNORED = 7
     }
 }

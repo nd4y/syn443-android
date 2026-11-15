@@ -9,8 +9,11 @@ data class TimeWindow(val lowerMs:Long,val upperMs:Long)
 /** Trusted HTTPS Date plus measured RTT/second precision; wall-clock changes grant no time. */
 @Serializable data class TrustedTime(val boot:Int,val elapsedMs:Long,val lowerMs:Long,val upperMs:Long) {
     init {require(boot>=0 && elapsedMs>=0 && lowerMs>0 && upperMs>=lowerMs && upperMs-lowerMs<=51_000)}
+    fun isCurrent(currentBoot:Int,elapsed:Long):Boolean =
+        currentBoot==boot && elapsed>=elapsedMs && elapsed-elapsedMs<=86_400_000
+
     fun window(currentBoot:Int,elapsed:Long):TimeWindow {
-        require(currentBoot==boot && elapsed>=elapsedMs && elapsed-elapsedMs<=86_400_000)
+        require(isCurrent(currentBoot,elapsed))
         val delta=elapsed-elapsedMs
         // Bound oscillator drift by 200ppm in either direction, rounded conservatively.
         val drift=(delta+4999)/5000

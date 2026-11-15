@@ -1,5 +1,7 @@
+import subprocess
 import unittest
-from check_public_data import findings, scan_files
+from unittest.mock import patch
+from check_public_data import findings, scan_files, scan_history
 from pathlib import Path
 import tempfile, zipfile
 import io
@@ -25,6 +27,35 @@ class PublicDataTest(unittest.TestCase):
     def test_credential_url(self):
         self.assertIn("credential-url", findings(("https://" + "synthetic:placeholder@" + "example.invalid").encode()))
         self.assertFalse(findings(b"https://example.invalid:443/path"))
+
+    def test_history_scans_deleted_blobs_and_binary_bytes_on_other_refs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(["git", "-C", str(root), *args])
+
+            git("init", "--quiet", "--initial-branch=main")
+            git("config", "user.name", "Synthetic Test")
+            git("config", "user.email", "fixture@users.noreply.github.com")
+            git("config", "commit.gpgsign", "false")
+            sample = root / "probe.txt"
+            sample.write_bytes(b"first\nserver." + b"local\nlast\n")
+            git("add", "probe.txt")
+            git("commit", "--quiet", "-m", "Synthetic history fixture")
+            old = git("rev-parse", "HEAD:probe.txt").decode().strip()
+            git("rm", "--quiet", "probe.txt")
+            git("commit", "--quiet", "-m", "Remove synthetic history fixture")
+            git("switch", "--quiet", "-c", "other")
+            (root / "probe.bin").write_bytes(b"line\n\0bytes\n")
+            git("add", "probe.bin")
+            git("commit", "--quiet", "-m", "Synthetic binary fixture")
+            binary = git("rev-parse", "HEAD:probe.bin").decode().strip()
+            git("switch", "--quiet", "main")
+            with patch("check_public_data.ROOT", root):
+                self.assertEqual(set(scan_history()), {
+                    (old[:12] + ":probe.txt", "private-domain"),
+                    (binary[:12] + ":probe.bin", "unreviewed-binary"),
+                })
 
     def test_compressed_android_archive_members_are_scanned(self):
         with tempfile.TemporaryDirectory() as directory:

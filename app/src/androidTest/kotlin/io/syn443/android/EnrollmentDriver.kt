@@ -2,8 +2,11 @@ package io.syn443.android
 
 import androidx.test.runner.AndroidJUnitRunner
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.Settings
 import org.json.JSONObject
 import java.net.URL
 import java.security.KeyStore
@@ -24,7 +27,18 @@ class EnrollmentDriver:AndroidJUnitRunner() {
         val arguments=checkNotNull(fixtureArguments)
         var stage="preflight"
         val ok=runCatching {
-            require(BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+            require(BuildConfig.DEBUG)
+            if(android.os.Build.HARDWARE !in setOf("ranchu","goldfish")) {
+                // The test APK may exercise real hardware with an explicit opt-in,
+                // loopback TLS and a validated Wi-Fi-only environment.
+                require(arguments.getString("physicalWifiFixture")=="true")
+                require(Settings.Global.getInt(targetContext.contentResolver,Settings.Global.AIRPLANE_MODE_ON,0)==1)
+                val manager=checkNotNull(targetContext.getSystemService(ConnectivityManager::class.java))
+                val network=checkNotNull(manager.getNetworkCapabilities(checkNotNull(manager.activeNetwork)))
+                require(network.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                    network.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
+                    network.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN))
+            }
             val port=arguments.getString("fixturePort")!!.toInt();require(port in 1024..65535)
             val origin="https://127.0.0.1:$port"
             val cert=CertificateFactory.getInstance("X.509").generateCertificate(java.util.Base64.getDecoder().decode(arguments.getString("fixtureCa")).inputStream())

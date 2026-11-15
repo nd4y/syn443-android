@@ -7,10 +7,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 enum class Outcome { PASS, FAIL, UNAVAILABLE, CANCELLED, DEADLINE }
-enum class Failure { DNS, TLS, EOF, TIMEOUT, TRANSPORT }
+enum class Failure { DNS, TLS, EOF, TIMEOUT, TRANSPORT, WORKER_REJECTED, WORKER_START_TIMEOUT }
 /** Fixed vocabulary only: never contains an endpoint, exception message or response bytes. */
 enum class Stage { QUEUED, RESOLVE, CONNECT, TLS, REQUEST, RESPONSE }
-data class Batch(val outcomes: List<Outcome>) {
+/** Positional diagnostic only. No check identifier, target, exception or response is retained. */
+data class CheckObservation(val outcome: Outcome, val failure: Failure? = null, val stage: Stage? = null)
+data class Batch(val outcomes: List<Outcome>, val observations: List<CheckObservation> = emptyList()) {
+    init { require(observations.isEmpty() || observations.map { it.outcome } == outcomes) }
     val complete: Boolean get() = outcomes.all { it == Outcome.PASS || it == Outcome.FAIL }
     val incompleteOutcome: Outcome? get() = outcomes.firstOrNull { it != Outcome.PASS && it != Outcome.FAIL }
     fun values(): List<Boolean> { check(complete); return outcomes.map { it == Outcome.PASS } }
@@ -22,10 +25,21 @@ class ProbeScope {
     private val socket = AtomicReference<Socket?>()
     @Volatile var stage: Stage = Stage.QUEUED
         private set
+    @Volatile internal var started = false
+        private set
+    /** Cancellation and the worker's first admission use the same lock. */
+    @Synchronized internal fun begin() {
+        requireActive()
+        started = true
+    }
     @Synchronized fun enter(value: Stage) { requireActive(); stage = value }
     fun attach(value: Socket) {
         check(socket.compareAndSet(null, value))
         if (cancelled.get()) socket.getAndSet(null)?.let { runCatching { it.close() } }
+    }
+    /** Retire one failed connection before attaching its bounded alternative. */
+    fun release(value: Socket) {
+        if(socket.compareAndSet(value,null))runCatching {value.close()}
     }
     fun cancel() {
         synchronized(this) { cancelled.set(true) }
@@ -68,56 +82,78 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
     fun run(checks: List<Check>): Batch {
         check(used.compareAndSet(false, true)); require(checks.size in 1..8)
         val deadline = clockMillis() + batchMillis
-        return Batch(checks.map { check ->
+        val observations = checks.map { check ->
             when {
-                cancelled.get() -> Outcome.CANCELLED
-                clockMillis() >= deadline -> Outcome.DEADLINE
+                cancelled.get() -> CheckObservation(Outcome.CANCELLED)
+                clockMillis() >= deadline -> CheckObservation(Outcome.DEADLINE)
                 else -> execute(check, minOf(checkMillis, deadline - clockMillis()), deadline)
             }
-        })
+        }
+        return Batch(observations.map { it.outcome }, observations)
     }
-    private fun execute(check: Check, waitMillis: Long, deadline: Long): Outcome {
-        if (waitMillis <= 0) return Outcome.DEADLINE
-        val checkDeadline = clockMillis() + waitMillis
-        val started = AtomicBoolean()
-        val scope = ProbeScope(); active.set(scope)
-        if (cancelled.get()) { scope.cancel(); active.compareAndSet(scope, null); return Outcome.CANCELLED }
-        var future: Future<Boolean>? = null
+    private fun submit(check: Check, scope: ProbeScope, deadline: Long): Future<Boolean> {
+        val task = Callable { scope.begin(); probe.run(check, scope) }
         return try {
-            future = pool.executor.submit<Boolean> { scope.requireActive(); started.set(true); probe.run(check, scope) }
+            pool.executor.submit(task)
+        } catch (first: RejectedExecutionException) {
+            // A retiring task may release a slot immediately after rejection.
+            // Retry only admission, before any probe has run, within this check's time.
+            if (cancelled.get()) throw CancellationException()
+            if (pool.executor.isShutdown || deadline - clockMillis() <= 50) throw first
+            Thread.sleep(50)
+            if (cancelled.get()) throw CancellationException()
+            if (clockMillis() >= deadline) throw first
+            pool.executor.submit(task)
+        }
+    }
+    private fun execute(check: Check, waitMillis: Long, deadline: Long): CheckObservation {
+        if (waitMillis <= 0) return CheckObservation(Outcome.DEADLINE)
+        val checkDeadline = clockMillis() + waitMillis
+        val scope = ProbeScope(); active.set(scope)
+        if (cancelled.get()) { scope.cancel(); active.compareAndSet(scope, null); return CheckObservation(Outcome.CANCELLED) }
+        var checkFailure: Failure? = null
+        fun failed(value: Failure) { checkFailure = value; failure = value; failureStage = scope.stage }
+        var future: Future<Boolean>? = null
+        val outcome = try {
+            future = submit(check, scope, minOf(checkDeadline, deadline))
             pending.set(future)
             if (cancelled.get()) { scope.cancel(); future.cancel(true) }
-            val value = future.get(waitMillis, TimeUnit.MILLISECONDS)
+            val value = future.get((minOf(checkDeadline, deadline) - clockMillis()).coerceAtLeast(0), TimeUnit.MILLISECONDS)
             when {
                 cancelled.get() -> Outcome.CANCELLED
                 clockMillis() >= deadline -> Outcome.DEADLINE
-                clockMillis() >= checkDeadline -> { failure = Failure.TIMEOUT; failureStage = scope.stage; Outcome.FAIL }
+                clockMillis() >= checkDeadline -> { failed(Failure.TIMEOUT); Outcome.FAIL }
                 value -> Outcome.PASS
                 else -> Outcome.FAIL
             }
-        } catch (_: RejectedExecutionException) { Outcome.UNAVAILABLE
+        } catch (_: RejectedExecutionException) {
+            checkFailure = Failure.WORKER_REJECTED
+            Outcome.UNAVAILABLE
         } catch (_: CancellationException) { Outcome.CANCELLED
         } catch (_: InterruptedException) { Thread.currentThread().interrupt(); cancel(); Outcome.CANCELLED
         } catch (_: TimeoutException) {
             // Freeze progress before attribution: a cancelled resolver may return later.
             scope.cancel()
-            if (started.get() && !cancelled.get()) { failure = Failure.TIMEOUT; failureStage = scope.stage }
+            if (scope.started && !cancelled.get()) failed(Failure.TIMEOUT)
             if (cancelled.get()) Outcome.CANCELLED else if (clockMillis() >= deadline) Outcome.DEADLINE
-            else if (!started.get()) Outcome.UNAVAILABLE else Outcome.FAIL
+            else if (!scope.started) {
+                checkFailure = Failure.WORKER_START_TIMEOUT
+                Outcome.UNAVAILABLE
+            } else Outcome.FAIL
         } catch (error: ExecutionException) {
-            failureStage = scope.stage
-            failure = when (error.cause) {
+            failed(when (error.cause) {
                 is java.net.UnknownHostException -> Failure.DNS
                 is javax.net.ssl.SSLException -> Failure.TLS
                 is java.io.EOFException -> Failure.EOF
                 is java.net.SocketTimeoutException -> Failure.TIMEOUT
                 else -> Failure.TRANSPORT
-            }
+            })
             if (cancelled.get()) Outcome.CANCELLED else Outcome.FAIL
         } finally {
             scope.cancel(); future?.cancel(true)
             (future as? Runnable)?.let { pool.executor.remove(it) }
             active.compareAndSet(scope, null); pending.compareAndSet(future, null)
         }
+        return CheckObservation(outcome, checkFailure, if (scope.started) scope.stage else null)
     }
 }

@@ -38,6 +38,7 @@ type Deferred struct {
 	report         atomic.Value
 	diagnostics    atomic.Value
 	failure        atomic.Value
+	startupCodes   atomic.Value
 	options        OutboundOptions
 	startupTimeout time.Duration
 	cleanupTimeout time.Duration
@@ -80,6 +81,7 @@ func NewDeferredOutbound(ctx context.Context, router adapter.Router, logger log.
 	d.report.Store(`{"active":false,"peers":[]}`)
 	d.diagnostics.Store(`{"state":"unavailable","results":[]}`)
 	d.failure.Store("")
+	d.startupCodes.Store([]string(nil))
 	deferredPeer.Lock()
 	deferredPeer.current = d
 	deferredPeer.Unlock()
@@ -142,6 +144,17 @@ func stopBounded(peer *Outbound, timeout time.Duration) error {
 func (d *Deferred) run() {
 	defer close(d.done)
 	retry := retryState{}
+	if d.options.CredentialPending {
+		d.set("Recovering", "credentials_pending", retry)
+		<-d.ctx.Done()
+		return
+	}
+	if d.options.RecoverExisting {
+		if _, err := os.Stat(filepath.Join(d.options.StateDirectory, "config.json")); err != nil {
+			d.set("NeedsAction", "identity_unavailable", retry)
+			return
+		}
+	}
 	if err := os.MkdirAll(d.options.StateDirectory, 0700); err != nil {
 		d.set("NeedsAction", "state_unavailable", retry)
 		return
@@ -210,6 +223,9 @@ func (d *Deferred) run() {
 		if err == nil {
 			d.failure.Store("")
 			d.set("Started", "client_started", retry)
+			// Diagnostic progress is local, bounded state. A stalled SDK roster
+			// read must not hide a completed/cancelled job from the UI.
+			go d.sampleDiagnostics(peer, 5*time.Second)
 			// One sampler only. If recorder access stalls, cache age reveals stale
 			// diagnostics; neither the native host heartbeat nor other routes block.
 			go func() {
@@ -219,7 +235,6 @@ func (d *Deferred) run() {
 				for {
 					report := RuntimeStatus()
 					d.report.Store(report)
-					d.diagnostics.Store(RuntimeDiagnostics())
 					var snapshot struct {
 						Management bool `json:"management_connected"`
 						Signal     bool `json:"signal_connected"`
@@ -251,6 +266,7 @@ func (d *Deferred) run() {
 			return
 		}
 		d.failure.Store(redactStartupFailure(err, d.options.SetupKey))
+		d.startupCodes.Store(peer.startup.snapshot())
 		if stopBounded(peer, d.cleanupTimeout) != nil {
 			d.set("NeedsAction", "cleanup_unconfirmed", retry)
 			return
@@ -259,6 +275,14 @@ func (d *Deferred) run() {
 		d.current = nil
 		d.mu.Unlock()
 		if d.ctx.Err() != nil {
+			return
+		}
+		if errors.Is(err, errPeerHostname) {
+			d.set("NeedsAction", "identity_metadata_unavailable", retry)
+			return
+		}
+		if d.options.RecoverExisting && errors.Is(err, errManagedIdentity) {
+			d.set("NeedsAction", "identity_unavailable", retry)
 			return
 		}
 		switch status.Code(err) {
@@ -339,7 +363,31 @@ func (d *Deferred) Close() error {
 	}
 }
 
-// Cached diagnostics only; no SDK locks/network calls on the host control loop.
+// This source reads only the exact owner's local job state, never an SDK.
+type localDiagnosticSource interface{ diagnosticsSnapshot() string }
+
+func (d *Deferred) sampleDiagnostics(peer localDiagnosticSource, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if d.ctx.Err() != nil {
+			return
+		}
+		local := peer.diagnosticsSnapshot()
+		// Stop may have arrived while waiting for the short local job lock.
+		if d.ctx.Err() != nil {
+			return
+		}
+		d.diagnostics.Store(local)
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// Host reads only atomics. No recorder, local job lock or JSON producer runs here.
 func DeferredStatus() string {
 	deferredPeer.RLock()
 	peer := deferredPeer.current
@@ -349,9 +397,19 @@ func DeferredStatus() string {
 	}
 	result := struct {
 		moduleState
-		PeerState   json.RawMessage `json:"peer_state"`
-		Diagnostics json.RawMessage `json:"diagnostics"`
-	}{peer.state.Load().(moduleState), json.RawMessage(peer.report.Load().(string)), json.RawMessage(peer.diagnostics.Load().(string))}
+		PeerState    json.RawMessage `json:"peer_state"`
+		Diagnostics  json.RawMessage `json:"diagnostics"`
+		StartupCodes []string        `json:"startup_codes,omitempty"`
+	}{peer.state.Load().(moduleState), json.RawMessage(peer.report.Load().(string)), json.RawMessage(peer.diagnostics.Load().(string)), peer.startupCodes.Load().([]string)}
+	peer.mu.RLock()
+	current := peer.current
+	peer.mu.RUnlock()
+	if current != nil {
+		// Only our bounded collector lock; never call an SDK recorder here.
+		if codes := current.startup.snapshot(); len(codes) > 0 {
+			result.StartupCodes = codes
+		}
+	}
 	data, err := json.Marshal(result)
 	if err != nil || len(data) > 65536 {
 		return `{"active":true,"phase":"Unknown","reason":"diagnostics_unavailable"}`

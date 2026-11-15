@@ -3,13 +3,14 @@ import android.os.ParcelFileDescriptor;
 import io.syn443.android.vpn.IPlatform;
 interface IEngineHost {
     int pid();
-    oneway void start(in ParcelFileDescriptor tun, String config, String token, String interfaceName, int interfaceIndex, long leaseDeadline, IPlatform platform);
+    oneway void start(in ParcelFileDescriptor tun, String config, String routeSelection, String token, String interfaceName, int interfaceIndex, long leaseDeadline, IPlatform platform);
     oneway void leaseDeadline(String token, long deadline);
     oneway void stop(String token);
     oneway void pulse(String token);
     oneway void diagnoseNetBird(String token);
     oneway void checkRoutes(String token, String request);
     oneway void cancelRouteChecks(String token);
+    oneway void selectVerifiedRoute(String token, String receipt, String checkId, String group, String previous, String candidate);
     oneway void debugFatal(String token, String kind);
     oneway void networkChanged(String token, String interfaceName, int interfaceIndex);
 }

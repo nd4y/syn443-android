@@ -35,6 +35,10 @@ import org.json.JSONObject
             },Modifier.testTag("route-${i+1}-state"))
             if(!row.getBoolean("configured"))Text("Профиль проверки не назначен; доступность не подтверждена")
             if(row.getBoolean("required"))Text("Обязательный маршрут")
+            when(row.optString("selectionState")) {
+                "quarantined"->Text("Временно исключён из выбора. Повторная проверка через ${(row.getLong("retryInMs")+999)/1000} с")
+                "revalidate","half_open"->Text("Для возврата в выбор нужна новая успешная проверка")
+            }
             if(!row.isNull("ageMs"))Text("Возраст проверки: ${row.getLong("ageMs")/1000} с; время: ${row.optLong("latencyMs")} мс")
             val path=row.optJSONArray("measuredPath")
             if(path!=null && path.length()>0)Text("Проверенный путь: "+(0 until path.length()).joinToString(" → "){path.getString(it)})

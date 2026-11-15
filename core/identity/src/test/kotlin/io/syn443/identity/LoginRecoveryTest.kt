@@ -1,7 +1,11 @@
 package io.syn443.identity
 
 import io.syn443.policy.Policy
+import io.syn443.policy.Canonical
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.*
 import org.junit.Test
 import java.security.KeyPairGenerator
@@ -10,6 +14,75 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class LoginRecoveryTest {
+    @Test fun recordedCapabilitiesPreserveActivationGenerationSessionAndOverlayClaims() {
+        val f=Flow();val s=LoginRecovery.claimOverlay(f.cached(),f.generation,"managed-netbird/"+h())
+        val hash=h();val next=LoginRecovery.capabilitiesRecorded(s,f.generation,hash)
+        assertEquals(s.copy(revision=s.revision+1,protectedHash=hash),next)
+        assertEquals(next,LoginRecovery.decode(LoginRecovery.encode(next)))
+        assertEquals(LoginPhase.PROVISIONING,LoginRecovery.capabilitiesRecorded(f.registered(),f.generation,h()).phase)
+        invalid {LoginRecovery.capabilitiesRecorded(s,f.generation-1,h())}
+        invalid {LoginRecovery.capabilitiesRecorded(s,f.generation,"")}
+        invalid {LoginRecovery.capabilitiesRecorded(f.enrolling(),f.generation,h())}
+    }
+    @Test fun legacyEnrollmentCanBeSupersededOnlyAfterItsBoundAcknowledgement() {
+        val f=Flow();val current=f.enrolling()
+        val oldOp=IdentityOperation(current.operation!!.path,Canonical.encode(JsonObject(Identity.objectJSON(current.operation!!.body)+
+            ("capabilities" to JsonArray(IdentityOperation.requiredCapabilities.map(::JsonPrimitive))))))
+        val old=current.copy(operation=oldOp)
+        val reply=f.reply()
+        val next=LoginRecovery.renewEnrollmentAfterAck(old,f.generation,oldOp.body,reply,f.key,2,2000)
+        assertNotEquals(oldOp.body,next.operation!!.body)
+        assertEquals(IdentityOperation.supportedCapabilities,next.operation!!.enrollmentCapabilities())
+        assertEquals(old,next.copy(revision=old.revision,operation=oldOp,operationBoot=old.operationBoot,operationElapsedMs=old.operationElapsedMs))
+        assertEquals(oldOp.body,old.operation!!.body)
+        invalid {LoginRecovery.renewEnrollmentAfterAck(old,f.generation-1,oldOp.body,reply,f.key,2,2000)}
+        invalid {LoginRecovery.renewEnrollmentAfterAck(old,f.generation,"{}",reply,f.key,2,2000)}
+        invalid {LoginRecovery.renewEnrollmentAfterAck(old,f.generation,oldOp.body,reply.copy(keyThumbprint=h()),f.key,2,2000)}
+        invalid {LoginRecovery.renewEnrollmentAfterAck(old,f.generation,oldOp.body,reply.copy(session=reply.session.copy(generation=1)),f.key,2,2000)}
+        invalid {LoginRecovery.renewEnrollmentAfterAck(current,f.generation,current.operation!!.body,reply,f.key,2,2000)}
+    }
+    @Test fun namespaceClaimSurvivesRefreshAndCancelUntilActualErasureCompletes() {
+        val f=Flow();val initial=f.cached();val first="managed-netbird/"+h();val second="managed-netbird/"+h()
+        val claimed=LoginRecovery.claimOverlay(initial,f.generation,first)
+        assertEquals(claimed,LoginRecovery.claimOverlay(claimed,f.generation,first))
+        val both=LoginRecovery.claimOverlay(claimed,f.generation,second)
+        assertEquals(listOf(first,second),both.overlayNamespaces)
+        assertEquals(both,LoginRecovery.decode(LoginRecovery.encode(both)))
+        assertEquals(both.overlayNamespaces,LoginRecovery.beginRefresh(both,f.generation,2,2000).overlayNamespaces)
+        assertEquals(both.overlayNamespaces,LoginRecovery.needsReauthentication(both,f.generation).overlayNamespaces)
+        var retiring=LoginRecovery.cancel(both,f.generation)
+        assertTrue(retiring.overlayNamespaces.isEmpty());assertEquals(listOf(first,second),retiring.retiringOverlays)
+        invalid{LoginRecovery.retired(retiring,retiring.generation,initial.keyAlias,true,true)}
+        for(flags in listOf(listOf(false,true,true),listOf(true,false,true),listOf(true,true,false)))
+            invalid{LoginRecovery.overlayRetired(retiring,retiring.generation,first,flags[0],flags[1],flags[2])}
+        invalid{LoginRecovery.overlayRetired(retiring,f.generation,first,true,true,true)}
+        invalid{LoginRecovery.overlayRetired(retiring,retiring.generation,"managed-netbird/"+h(),true,true,true)}
+        retiring=LoginRecovery.overlayRetired(retiring,retiring.generation,first,true,true,true)
+        invalid{LoginRecovery.retired(retiring,retiring.generation,initial.keyAlias,true,true)}
+        retiring=LoginRecovery.overlayRetired(retiring,retiring.generation,second,true,true,true)
+        val retired=LoginRecovery.retired(retiring,retiring.generation,initial.keyAlias,true,true)
+        assertEquals(LoginPhase.SIGNED_OUT,retired.phase);assertTrue(retired.retiringOverlays.isEmpty())
+    }
+    @Test fun namespaceClaimsRejectUnsafePathsUnboundedSetsAndUnprovisionedAuthority() {
+        val f=Flow();var state=f.cached()
+        for(bad in listOf("netbird/operator","managed-netbird/../escape","managed-netbird/"+h()+"="))
+            invalid{LoginRecovery.claimOverlay(state,f.generation,bad)}
+        invalid{LoginRecovery.claimOverlay(state,f.generation-1,"managed-netbird/"+h())}
+        invalid{LoginRecovery.claimOverlay(f.browser,f.generation,"managed-netbird/"+h())}
+        repeat(16){state=LoginRecovery.claimOverlay(state,f.generation,"managed-netbird/"+h())}
+        invalid{LoginRecovery.claimOverlay(state,f.generation,"managed-netbird/"+h())}
+        invalid{LoginRecovery.validate(state.copy(overlayNamespaces=state.overlayNamespaces+state.overlayNamespaces.first()))}
+        invalid{LoginRecovery.validate(LoginIntent(overlayNamespaces=state.overlayNamespaces))}
+        invalid{LoginRecovery.validate(state.copy(retiringOverlays=state.overlayNamespaces))}
+        val retiring=LoginRecovery.cancel(state,f.generation)
+        invalid{LoginRecovery.validate(retiring.copy(retiringOverlays=retiring.retiringOverlays+retiring.retiringOverlays.first()))}
+        invalid{LoginRecovery.overlayRetired(state,state.generation,state.overlayNamespaces.first(),true,true,true)}
+    }
+    @Test fun recoveryMetadataBeforeManagedOverlaysRetainsEmptyOwnershipClaims() {
+        val state=Flow().cached()
+        val old=JsonObject(Identity.objectJSON(LoginRecovery.encode(state)).filterKeys{it !in setOf("overlayNamespaces","retiringOverlays")})
+        assertEquals(state,LoginRecovery.decode(Canonical.encode(old)))
+    }
     companion object {
         private val root=KeyPairGenerator.getInstance("EC").apply {initialize(ECGenParameterSpec("secp256r1"))}.generateKeyPair()
         private val bootstrap=Bootstrap("fixture","https://id.example.invalid/realms/test","syn443-android","https://api.example.invalid",

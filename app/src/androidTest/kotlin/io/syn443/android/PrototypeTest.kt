@@ -15,6 +15,7 @@ class PrototypeTest {
 
     @Test fun resourceSnapshotIsExplicitAndVisible() {
         compose.onNodeWithTag("resource-status").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-details").performScrollTo().performClick()
         compose.onNodeWithTag("resource-refresh").performScrollTo().performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("resource-status").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("resource-status").assertTextContains("без фонового сбора", substring = true)
@@ -22,7 +23,7 @@ class PrototypeTest {
 
     @OptIn(ExperimentalTestApi::class)
     @Test fun darkThemeByDefault() {
-        compose.onNodeWithTag("prototype").assertExists()
+        compose.onNodeWithTag("prototype").assertDoesNotExist()
         val screen = compose.onRoot().captureToImage().toPixelMap()
         val background = screen[1, screen.height - 2].luminance()
         assertTrue("Default surface is not dark", background < 0.1f)
@@ -41,6 +42,7 @@ class PrototypeTest {
                 .getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).top
         }
         assertTrue("Title overlaps system bars/cutout", titleTop >= safeTop)
+        compose.onNodeWithTag("developer-tools").performScrollTo().performClick()
         compose.onNodeWithTag("prototype").assertTextContains("тестовые данные", substring = true)
         compose.onNodeWithTag("state").assertTextEquals("Остановлено")
         compose.onNodeWithTag("start").performScrollTo().performClick()
@@ -55,11 +57,23 @@ class PrototypeTest {
     }
 
     @Test fun explicitStopRejectsLateCompletion() {
+        compose.onNodeWithTag("developer-tools").performScrollTo().performClick()
         compose.onNodeWithTag("start").performScrollTo().performClick()
         compose.onNodeWithTag("stop").performScrollTo().performClick()
         compose.onNodeWithTag("apply").performScrollTo().performClick()
         compose.onNodeWithTag("state").assertTextEquals("Остановлено")
         compose.onNodeWithTag("outcome").assertTextEquals("Устаревший результат отклонён")
+    }
+
+    @Test fun homeShowsVpnBeforeAccountAndKeepsToolsCollapsed() {
+        val action = compose.onNode(hasTestTag("vpn-connect") or hasTestTag("vpn-disconnect"))
+        val top = action.assertIsDisplayed().fetchSemanticsNode().boundsInWindow.top
+        val account = compose.onNodeWithTag("manual-enrollment").fetchSemanticsNode().boundsInWindow.top
+        assertTrue("Account action is above the VPN action", top < account)
+        compose.onNodeWithTag("routes-title").assertDoesNotExist()
+        compose.onNodeWithTag("prototype").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-details").performScrollTo().performClick()
+        compose.onNodeWithTag("routes-title").performScrollTo().assertIsDisplayed()
     }
 }
 

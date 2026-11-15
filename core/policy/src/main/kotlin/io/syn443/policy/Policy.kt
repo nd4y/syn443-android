@@ -93,6 +93,14 @@ object Canonical {
 }
 
 object Policy {
+    /** Select from a worker-verified, still-authorized policy for the running
+     * engine. A managed failure cannot silently revert to a public default URL. */
+    fun internetChecks(managed:Boolean, verified:Verified?, runningHash:String, synthetic:Boolean=false):List<Check> {
+        if(!managed)return listOf(Check("internet","https_204",if(synthetic)"https://health.example.org/generate_204" else "https://www.gstatic.com/generate_204"))
+        requireNotNull(verified)
+        require(verified.payload.contentHash==runningHash)
+        return verified.payload.activation.checks.filter {it.required && it.type=="https_204"}.also {require(it.size in 1..8)}
+    }
     /** Local scheduling is not evidence of a defective signed candidate. */
     fun preparation(desiredOn: Boolean, activeExists: Boolean, activeAuthorized: Boolean,
         ownerPresent: Boolean, ownerReady: Boolean, replacementRequired: Boolean, restartReady: Boolean,
@@ -112,7 +120,12 @@ object Policy {
         return if (ownerReady) Preparation.CHECK_BASELINE else Preparation.WAIT
     }
     val json = Canonical.json
-    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless")
+    const val RESERVE_PROBE_COOLDOWN = "route.reserve-cooldown.v1"
+    const val ROUTE_EXIT_IP = "route.exit-ip.v1"
+    const val ROUTE_DECISION = "route.decision.v1"
+    const val BASELINE_ALGORITHM = "m1-local-v1"
+    const val CONFIRMED_ALGORITHM = "m4-confirmed-v1"
+    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1", RESERVE_PROBE_COOLDOWN, ROUTE_EXIT_IP, ROUTE_DECISION)
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     fun decode64(value: String): ByteArray {
         require(value.matches(Regex("[A-Za-z0-9_-]+")))
@@ -164,8 +177,29 @@ object Policy {
         require(p.revision in 1..9_007_199_254_740_991L && p.securityEpoch in 0..9_007_199_254_740_991L && p.revocationFloor in 0..p.revision)
         require(p.issuedAtMs in 1..now + 300_000 && p.notBeforeMs >= p.issuedAtMs && p.notBeforeMs <= now)
         require(p.refreshAfterMs in p.notBeforeMs..p.offlineUntilMs && p.offlineUntilMs > now && p.offlineUntilMs - p.issuedAtMs <= 604_800_000)
-        require(p.algorithmRevision == "m1-local-v1" && p.requiredCapabilities.containsAll(setOf("engine-config.v1", "tun.lease.v1")) && p.requiredCapabilities.size <= 16 && p.requiredCapabilities.toSet().size == p.requiredCapabilities.size && capabilities.containsAll(p.requiredCapabilities))
+        require(p.algorithmRevision in setOf(BASELINE_ALGORITHM, CONFIRMED_ALGORITHM) && p.requiredCapabilities.containsAll(setOf("engine-config.v1", "tun.lease.v1")) && p.requiredCapabilities.size <= 16 && p.requiredCapabilities.toSet().size == p.requiredCapabilities.size && capabilities.containsAll(p.requiredCapabilities))
         val engine = utf8(decode64(p.engineConfigB64)); require(engine.toByteArray().size in 1..262_144 && hash(engine) == p.contentHash)
+        val engineConfig = json.parseToJsonElement(engine) as? JsonObject
+        val decisionVariant = p.algorithmRevision == CONFIRMED_ALGORITHM
+        require(decisionVariant == (ROUTE_DECISION in p.requiredCapabilities))
+        if (decisionVariant) {
+            require(p.schemaVersion == 2 && p.operation == "configure" &&
+                p.requiredCapabilities.containsAll(setOf("route.health.v1", "route.failover.v1")) &&
+                engineConfig?.get("route_failover") is JsonObject)
+        }
+        val routeChecks = engineConfig?.get("route_checks") as? JsonArray
+        val hasExitCheck = routeChecks?.any { plan ->
+            ((plan as? JsonObject)?.get("checks") as? JsonArray)?.any { check ->
+                ((check as? JsonObject)?.get("method") as? JsonPrimitive)?.content == "https_exit_ip"
+            } == true
+        } == true
+        require(hasExitCheck == (ROUTE_EXIT_IP in p.requiredCapabilities))
+        if (hasExitCheck) require(p.schemaVersion == 2 && p.operation == "configure" && "route.health.v1" in p.requiredCapabilities)
+        if(RESERVE_PROBE_COOLDOWN in p.requiredCapabilities) {
+            require(p.schemaVersion==2 && p.operation=="configure" &&
+                p.requiredCapabilities.containsAll(setOf("route.health.v1","route.failover.v1")))
+            require(engineConfig?.get("route_failover") is JsonObject)
+        }
         val g = p.activation; require(g.timeoutSeconds in 30..120 && g.checks.size in 1..8 && g.checks.map { it.id }.toSet().size == g.checks.size)
         require(g.checks.any { it.required && it.type == "https_204" })
         g.checks.forEach { c ->
@@ -202,7 +236,9 @@ object Policy {
         return j.copy(phase = if (v.payload.operation == "release") "released" else if (failed.isEmpty()) "committed" else "degraded", active = v.envelope,
             lastGood = if (failed.isEmpty()) v.envelope else j.lastGood, candidate = null, baseline = emptyList(), reason = if (failed.isEmpty()) "checks_passed" else "baseline_also_unavailable")
     }
-    fun snapshot(p: Payload) = hash(p.operation + ":" + p.contentHash + ":" + p.algorithmRevision + ":" + Canonical.encode(json.encodeToJsonElement(p.activation)))
+    fun snapshot(p: Payload) = hash(p.operation + ":" + p.contentHash + ":" + p.algorithmRevision + ":" +
+        Canonical.encode(json.encodeToJsonElement(p.activation)) +
+        if(RESERVE_PROBE_COOLDOWN in p.requiredCapabilities) ":$RESERVE_PROBE_COOLDOWN" else "")
     fun rollback(j: Journal, revision: Long, reason: String): Journal {
         val fingerprint = j.candidate?.let { snapshot(json.decodeFromString<Payload>(utf8(decode64(it.split('.')[1])))) }
         return j.copy(phase = "rolled_back", candidate = null, active = j.lastGood,

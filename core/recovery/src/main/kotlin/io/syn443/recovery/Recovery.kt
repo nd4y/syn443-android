@@ -60,18 +60,28 @@ object Recovery {
     fun heavyAdmission(state: Checkpoint, now: Long): Pair<Checkpoint, Boolean> {
         require(now >= 0)
         // Clock rollback retains a conservative bounded window, never an unlimited ban.
-        val history = state.heavyWallMs.map { min(it, now) }.filter { now - it < WINDOW }.sorted()
+        val history = recentStarts(state, now).sorted().toList()
         if (!state.desiredOn) return state.copy(heavyWallMs = history) to false
         if (history.size >= 3) return state.copy(heavyWallMs = history, nextWallMs = maxOf(state.nextWallMs.coerceAtMost(add(now, WINDOW)), add(history.first(), WINDOW))) to false
         if (now < state.nextWallMs.coerceAtMost(add(now, WINDOW))) return state.copy(heavyWallMs = history, nextWallMs = min(state.nextWallMs, add(now, WINDOW))) to false
         return state.copy(heavyWallMs = history + now) to true
     }
 
-    /** Read-only reservation check. A waiting policy must not consume native starts. */
+    private fun recentStarts(state: Checkpoint, now: Long) = state.heavyWallMs.asSequence()
+        .map { min(it, now) }.filter { now - it < WINDOW }
+
+    /** Earliest time a policy can reserve its replacement and rollback starts. */
+    fun replacementReadyAt(state: Checkpoint, now: Long, slots: Int = 2): Long {
+        require(now >= 0 && slots in 1..3)
+        val recent = recentStarts(state, now).sortedDescending().toList()
+        val available = recent.getOrNull(3 - slots)?.let { add(it, WINDOW) } ?: now
+        return maxOf(state.nextWallMs, available)
+    }
+
+    /** A waiting policy must not consume native starts. */
     fun replacementReady(state: Checkpoint, now: Long, slots: Int = 2): Boolean {
         require(now >= 0 && slots in 1..3)
-        val recent = state.heavyWallMs.count { now - min(it, now) < WINDOW }
-        return state.desiredOn && now >= state.nextWallMs && recent + slots <= 3
+        return state.desiredOn && now >= state.nextWallMs && recentStarts(state, now).count() + slots <= 3
     }
 
     fun current(state: Checkpoint, generation: Long) = state.desiredOn && state.generation == generation

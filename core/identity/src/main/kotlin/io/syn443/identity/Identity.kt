@@ -3,6 +3,8 @@ package io.syn443.identity
 import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.io.ByteArrayOutputStream
@@ -22,8 +24,10 @@ import java.security.spec.RSAPublicKeySpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable data class Bootstrap(val serviceId: String, val issuer: String, val clientId: String,
-    val apiOrigin: String, val roots: Map<String, String>, val tlsCaDer: String = "") {
+    val apiOrigin: String, val roots: Map<String, String>, val tlsCaDer: String = "",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val controlPanelOrigin:String="") {
     override fun toString()="Bootstrap([redacted])"
     fun validate() {
         require(serviceId.matches(Regex("[a-zA-Z0-9_-]{1,64}")))
@@ -39,6 +43,7 @@ import java.util.Base64
         // Development CA is trusted only from the operator bootstrap, never from API responses.
         require(tlsCaDer.length <= 8192)
         if (tlsCaDer.isNotEmpty()) require(api.host == "127.0.0.1")
+        if(controlPanelOrigin.isNotEmpty())Identity.controlOrigin(controlPanelOrigin)
     }
 }
 @Serializable data class Pending(val generation: Long, val state: String, val nonce: String,
@@ -75,6 +80,9 @@ object Identity {
         require(u.rawPath == u.path && !u.path.contains("//") && u.normalize() == u)
         return u
     }
+    fun controlOrigin(raw:String):URI= https(raw).also {u->
+        require(u.path.isEmpty() && u.rawAuthority==u.rawAuthority.lowercase() && !u.host.endsWith('.') && !u.rawAuthority.endsWith(':') && u.port!=443)
+    }
     fun objectJSON(raw: String): JsonObject {
         require(raw.toByteArray(Charsets.UTF_8).size in 1..65_536)
         return Canonical.parse(raw).jsonObject
@@ -83,12 +91,13 @@ object Identity {
         require(generation >= 0 && thumbprint.matches(Regex("[A-Za-z0-9_-]{43}")) && boot >= 0 && elapsedMs >= 0)
         return Pending(generation, random(), random(), random(), thumbprint, boot, elapsedMs)
     }
-    fun authorization(bootstrap: Bootstrap, pending: Pending): String {
+    fun authorization(bootstrap: Bootstrap, pending: Pending, reauthenticate:Boolean=false): String {
         bootstrap.validate()
         return bootstrap.issuer + "/protocol/openid-connect/auth?" + form(linkedMapOf(
             "client_id" to bootstrap.clientId, "redirect_uri" to callback, "response_type" to "code", "scope" to "openid",
             "state" to pending.state, "nonce" to pending.nonce, "code_challenge_method" to "S256",
-            "code_challenge" to hash(pending.verifier.toByteArray(Charsets.US_ASCII)), "dpop_jkt" to pending.thumbprint))
+            "code_challenge" to hash(pending.verifier.toByteArray(Charsets.US_ASCII)), "dpop_jkt" to pending.thumbprint)
+            .apply {if(reauthenticate)put("prompt","login")})
     }
     fun form(values: Map<String, String>) = values.entries.joinToString("&") {
         URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8")
@@ -151,7 +160,9 @@ object Identity {
     }
     fun proof(key: ECPublicKey, sign: (ByteArray)->ByteArray, method: String, uri: String, nowSeconds: Long,
         token: String = "", nonce: String = "", body: ByteArray? = null, maxBody:Int=8192): String {
-        https(uri); require(maxBody in 1..360_448 && method in setOf("GET","POST") && nowSeconds>0 && nonce.length<=256 && token.length<=16_384 && (body?.size?:0)<=maxBody)
+        val url=https(uri)
+        val limit=if(method=="POST")DeviceSubscription.resultLimit(url.path) ?: 360_448 else 360_448
+        require(maxBody in 1..limit && method in setOf("GET","POST") && nowSeconds>0 && nonce.length<=256 && token.length<=16_384 && (body?.size?:0)<=maxBody)
         val header=buildJsonObject { put("alg","ES256"); put("jwk",jwk(key)); put("typ","dpop+jwt") }
         val claims=buildJsonObject { put("htm",method); put("htu",uri); put("iat",nowSeconds); put("jti",random())
             if(token.isNotEmpty())put("ath",hash(token.toByteArray(Charsets.US_ASCII)))

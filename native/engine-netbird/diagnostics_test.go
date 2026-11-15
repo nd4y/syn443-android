@@ -17,6 +17,53 @@ type diagnosticPeer struct {
 	concurrent, maximum atomic.Int32
 }
 
+type emptyRosterPeer struct{ peerClient }
+
+func (*emptyRosterPeer) ConnectionSnapshot() embed.ConnectionSnapshot {
+	return embed.ConnectionSnapshot{ManagementConnected: true, SignalConnected: true, Peers: []embed.PeerSnapshot{}}
+}
+func (*emptyRosterPeer) ProbePeer(context.Context, string) (time.Duration, error) {
+	panic("empty roster must not admit probe traffic")
+}
+func (*emptyRosterPeer) NotifyNetworkChange() {}
+
+func TestEmptyRosterIsNotACompletedHealthCheckAndCanBeRetried(t *testing.T) {
+	o := &Outbound{ctx: context.Background(), client: &emptyRosterPeer{}, ready: true}
+	runtimePeer.Lock()
+	old := runtimePeer.outbound
+	runtimePeer.outbound = o
+	runtimePeer.Unlock()
+	defer func() { runtimePeer.Lock(); runtimePeer.outbound = old; runtimePeer.Unlock() }()
+	var result DiagnosticJob
+	if e := json.Unmarshal([]byte(StartDiagnostics()), &result); e != nil || result.State != "no_peers" || len(result.Results) != 0 || result.Started.IsZero() || result.Stale {
+		t.Fatal("empty recorder reported successful completion", e)
+	}
+	o.InterfaceUpdated()
+	if e := json.Unmarshal([]byte(RuntimeDiagnostics()), &result); e != nil || !result.Stale {
+		t.Fatal("empty result reused across network change", e)
+	}
+	o.mu.Lock()
+	o.client = &diagnosticPeer{}
+	o.mu.Unlock()
+	if e := json.Unmarshal([]byte(StartDiagnostics()), &result); e != nil || result.State != "running" || len(result.Results) != 12 || result.Stale {
+		t.Fatal("empty recorder poisoned later diagnostic admission", e)
+	}
+	CancelDiagnostics()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if e := json.Unmarshal([]byte(RuntimeDiagnostics()), &result); e != nil {
+			t.Fatal(e)
+		}
+		if result.State == "cancelled" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("retry diagnostic did not cancel")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestExpiredAuthorizationDoesNotAdmitDiagnosticTraffic(t *testing.T) {
 	previous := DiagnosticsAllowed
 	DiagnosticsAllowed = func() bool { return false }

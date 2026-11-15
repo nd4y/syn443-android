@@ -40,7 +40,7 @@ class SupportActivity:ComponentActivity() {
 }
 private fun JSONArray.objects()=(0 until length()).map {getJSONObject(it)}
 private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
-    "ACCOUNT_CHANGED","REAUTHENTICATE"->"Сессия завершена. Войдите снова."
+    "ACCOUNT_CHANGED","REAUTHENTICATE","SESSION_EXPIRED"->"Сессия завершена. Войдите снова."
     "ACCESS_DENIED"->"Нет доступа к этому диалогу."
     "THROTTLED"->"Сервер занят. Повторим через минуту."
     "BUSY"->"Клиент выполняет другую операцию. Повторим позже."

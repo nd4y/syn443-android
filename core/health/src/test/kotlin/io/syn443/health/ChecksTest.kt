@@ -23,6 +23,42 @@ class ChecksTest {
             assertThrows(IllegalStateException::class.java) { batch.values() }
         }
     }
+    @Test fun positionalDiagnosticsKeepEachFailureSeparateFromLaterSuccessOrMismatch() {
+        ProbePool().use { pool ->
+            var index = 0
+            val job = CheckJob(pool, Probe { _, scope ->
+                when (index++) {
+                    0 -> { scope.enter(Stage.RESOLVE); throw java.net.UnknownHostException("private-target") }
+                    1 -> { scope.enter(Stage.RESPONSE); true }
+                    else -> { scope.enter(Stage.RESPONSE); false }
+                }
+            })
+            val batch = job.run(listOf(check, check, check))
+            assertEquals(listOf(false, true, false), batch.values())
+            assertEquals(listOf(
+                CheckObservation(Outcome.FAIL, Failure.DNS, Stage.RESOLVE),
+                CheckObservation(Outcome.PASS, null, Stage.RESPONSE),
+                CheckObservation(Outcome.FAIL, null, Stage.RESPONSE)), batch.observations)
+            assertFalse(batch.toString().contains("private-target"))
+            assertFalse(batch.toString().contains(check.target))
+            // Existing aggregate attribution still retains the last exception.
+            assertEquals(Failure.DNS, job.failure)
+            assertThrows(IllegalArgumentException::class.java) {
+                Batch(listOf(Outcome.PASS), listOf(CheckObservation(Outcome.FAIL)))
+            }
+        }
+    }
+    @Test fun checksNeverStartedDoNotInheritAStageOrNetworkFailure() {
+        ProbePool().use { pool ->
+            val cancelled = CheckJob(pool, Probe { _, _ -> error("must_not_run") })
+            cancelled.cancel()
+            assertEquals(List(8) { CheckObservation(Outcome.CANCELLED) }, cancelled.run(List(8) { check }).observations)
+            val clock = AtomicLong()
+            val deadline = CheckJob(pool, Probe { _, scope -> scope.enter(Stage.RESPONSE); clock.set(300); true }, { clock.get() }, 100, 200)
+            assertEquals(listOf(CheckObservation(Outcome.DEADLINE, null, Stage.RESPONSE), CheckObservation(Outcome.DEADLINE)),
+                deadline.run(listOf(check, check)).observations)
+        }
+    }
     @Test fun cancellationBeforeStartDoesNotCallProbe() {
         ProbePool().use { pool ->
             val job = CheckJob(pool, Probe { _, _ -> error("must_not_run") }); job.cancel()
@@ -108,10 +144,44 @@ class ChecksTest {
                 assertTrue(entered.await(2, TimeUnit.SECONDS))
                 assertEquals(2L,pool.counters().getValue("active"));assertEquals(2L,pool.counters().getValue("workers"))
                 val job = CheckJob(pool, Probe { _, _ -> error("queued probe must not execute") }, checkMillis = 100)
-                assertEquals(Outcome.UNAVAILABLE, job.run(listOf(check)).outcomes.single())
+                assertEquals(CheckObservation(Outcome.UNAVAILABLE, Failure.WORKER_START_TIMEOUT), job.run(listOf(check)).observations.single())
                 assertEquals(0L,pool.counters().getValue("queued"));assertEquals(0L,pool.counters().getValue("shutdown"))
                 assertNull(job.failure); assertNull(job.failureStage)
                 assertEquals(0, pool.executor.queue.size)
+                val occupying = pool.executor.submit(Runnable { error("queue occupant must not execute") })
+                try {
+                    val rejected = CheckJob(pool, Probe { _, _ -> error("rejected probe must not execute") })
+                    assertEquals(CheckObservation(Outcome.UNAVAILABLE, Failure.WORKER_REJECTED), rejected.run(listOf(check)).observations.single())
+                    assertNull(rejected.failure);assertNull(rejected.failureStage)
+                } finally {
+                    occupying.cancel(false)
+                    (occupying as? Runnable)?.let { pool.executor.remove(it) }
+                }
+            } finally { release.countDown() }
+        }
+    }
+    @Test fun oneAdmissionRetryUsesFreedCapacityAndRunsTheProbeOnlyOnce() {
+        ProbePool().use { pool ->
+            val entered = CountDownLatch(2)
+            val release = CountDownLatch(1)
+            val leftQueue = CountDownLatch(1)
+            val rejections = java.util.concurrent.atomic.AtomicInteger()
+            val probes = java.util.concurrent.atomic.AtomicInteger()
+            repeat(2) { pool.executor.submit { entered.countDown(); release.await() } }
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS))
+                pool.executor.submit { leftQueue.countDown() }
+                pool.executor.rejectedExecutionHandler = RejectedExecutionHandler { _, _ ->
+                    rejections.incrementAndGet()
+                    release.countDown()
+                    assertTrue(leftQueue.await(2, TimeUnit.SECONDS))
+                    throw RejectedExecutionException()
+                }
+                val job = CheckJob(pool, Probe { _, _ -> probes.incrementAndGet(); true })
+                assertEquals(listOf(true), job.run(listOf(check)).values())
+                assertEquals(1, rejections.get())
+                assertEquals(1, probes.get())
+                assertTrue(pool.executor.largestPoolSize <= 2)
             } finally { release.countDown() }
         }
     }

@@ -5,7 +5,7 @@ import re
 import threading
 import time
 import xml.etree.ElementTree as ET
-from run_vpn_process_faults import ROOT, PACKAGE, Server, Proxy, adb, call, pid, await_condition
+from run_vpn_process_faults import ROOT, PACKAGE, Server, Proxy, adb, call, pid, await_condition, vpn_stopped
 
 
 def native_crash_matches(crash, owner):
@@ -17,6 +17,14 @@ def native_crash_matches(crash, owner):
         end=records[i+1].start() if i+1<len(records) else len(crash)
         if re.search(rb'signal\s+6\s*\(SIGABRT\)',crash[record.end():end]):return True
     return False
+
+
+def scoped_libc_abort_matches(logs, owner):
+    """API 29 may emit libc's fatal signal without a complete tombstone."""
+    assert len(logs)<=2*1024*1024 and owner.isascii() and owner.isdecimal()
+    exact=re.escape(owner.encode('ascii'))
+    return re.search(rb'^\S+\s+\S+\s+'+exact+rb'\s+\d+\s+F\s+libc\s*:\s+'
+        rb'Fatal signal 6 \(SIGABRT\), [^\r\n]*\bpid '+exact+rb' \([^\r\n]*\)\s*$',logs,re.M) is not None
 
 
 def await_native_crash(owner,read,wait=await_condition):
@@ -36,7 +44,7 @@ def main():
     def new_case(name):
         return ET.SubElement(suite,'testcase',classname='io.syn443.android.FatalOwnerTest',name=name)
     def stop():
-        call('disconnect');await_condition(lambda:not pid(':engine') and not call('status')['engineActive'],30)
+        call('disconnect');await_condition(vpn_stopped,30)
     def prepare():
         stop();call('policy-test-reset');call('test-reset')
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')
@@ -51,14 +59,14 @@ def main():
         if api>=30:
             expected=('java_crash',) if kind=='java' else ('native_crash','signal')
             await_condition(lambda:any(x['kind'] in expected and (kind=='java' or x.get('status')==6) for x in call('engine-exits',old)['exits']),30)
-        logs=adb('logcat','-b','all','-d','--pid='+old,'-t','2000',timeout=20)
+        logs=adb('logcat','-v','threadtime','-b','all','-d','--pid='+old,'-t','2000',timeout=20)
         assert len(logs)<=2*1024*1024
         marker=b'SYN443 synthetic Java failure' if kind=='java' else b'SYN443 synthetic native failure'
         assert marker in logs,'The actual uncaught fault marker was not observed'
         if api<30:
             # API29 has no ApplicationExitInfo. Match the crashed owner in OS crash output.
             if kind=='java':assert b'FATAL EXCEPTION' in logs
-            else:
+            elif not scoped_libc_abort_matches(logs,old):
                 await_native_crash(old,lambda:adb('logcat','-b','crash','-d','-t','2000',timeout=20))
     try:
         adb('reverse','tcp:'+port,'tcp:'+port)

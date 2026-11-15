@@ -8,7 +8,7 @@ import json
 import threading
 import time
 import xml.etree.ElementTree as ET
-from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition
+from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
     case = ET.SubElement(suite, 'testcase', classname='io.syn443.android.NativeRevocationTest',
                          name='revocationDrainsNativeBeforeFinalOffAndSurvivesControllerDeath')
     try:
-        call('disconnect'); await_condition(lambda: not pid(':engine') and not call('status')['engineActive'], 30)
+        call('disconnect'); await_condition(vpn_stopped, 30)
         call('policy-test-reset'); call('test-reset')
         adb('reverse', 'tcp:' + port, 'tcp:' + port)
         config = {'outbounds': [{'type': 'http', 'tag': 'test-proxy', 'server': '127.0.0.1', 'server_port': int(port)}],
@@ -31,18 +31,17 @@ def main():
         await_condition(lambda: call('status')['phase'] == 'Online' and proxy.progress > 0)
         before = call('status'); original = pid(':engine'); assert original
         call('fault-revoke')
-        await_condition(lambda: not pid(':engine') and not call('status')['desiredOn'] and
-                        not call('status')['engineActive'] and call('status')['phase'] == 'Off', 20)
+        await_condition(vpn_stopped, 20)
         stopped = call('status'); assert stopped['generation'] > before['generation']
         assert any(e['code'] == 'vpn_permission_revoked' for e in stopped['events'])
         time.sleep(5)
-        assert not pid(':engine') and not call('status')['desiredOn'] and not call('status')['engineActive']
+        assert vpn_stopped()
         controller = pid(':controller'); assert controller
         # Use the existing debug-only self-termination hook: run-as signal
         # delivery is not supported on every Android SELinux policy.
         call('fault-controller')
         await_condition(lambda: pid(':controller') != controller, 20)
-        await_condition(lambda: call('status')['phase'] == 'Off' and not call('status')['engineActive'] and
+        await_condition(lambda: vpn_stopped() and
                         call('status')['generation'] == stopped['generation'], 20)
         assert not pid(':engine')
         progress = proxy.progress
@@ -68,7 +67,7 @@ def main():
         raise
     finally:
         try:
-            call('disconnect'); await_condition(lambda: not pid(':engine') and not call('status')['engineActive'], 30)
+            call('disconnect'); await_condition(vpn_stopped, 30)
         finally:
             adb('reverse', '--remove', 'tcp:' + port)
             proxy.shutdown(); proxy.server_close()

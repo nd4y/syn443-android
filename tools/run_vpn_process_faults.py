@@ -24,7 +24,7 @@ def adb(*args, timeout=30):
 
 
 class ControlUnavailable(RuntimeError):
-    """The provider may briefly disappear while its process is being killed."""
+    """An emulator observation may be unavailable while Android replaces a process."""
 
 
 def call(method, arg=None):
@@ -42,9 +42,24 @@ def call(method, arg=None):
 
 def pid(suffix):
     raw = adb('shell', 'sh', '-c', "'pidof " + PACKAGE + suffix + " || true'").strip()
-    if raw and not raw.isdigit():
+    if not raw:
+        return ''
+    matches = raw.split()
+    if not all(re.fullmatch(rb'[1-9][0-9]{0,9}', item) for item in matches):
         raise AssertionError('Unexpected process identity')
-    return raw.decode()
+    if len(matches) != 1:
+        # pidof lists all matches. A poll must wait for exactly one owner.
+        raise ControlUnavailable('Multiple matching emulator process IDs')
+    return matches[0].decode()
+
+
+def vpn_stopped():
+    """A missing process is insufficient until the controller settles Off."""
+    if pid(':engine'):
+        return False
+    state = call('status')
+    return (state.get('phase') == 'Off' and state.get('desiredOn') is False and
+            state.get('engineStateKnown') is True and state.get('engineActive') is False)
 
 
 def await_condition(predicate, timeout=110):
@@ -131,7 +146,7 @@ def main():
         adb('shell', 'appops', 'set', PACKAGE, 'ACTIVATE_VPN', 'allow')
         adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
         call('disconnect')
-        await_condition(lambda: not pid(':engine') and not call('status')['engineActive'], timeout=30)
+        await_condition(vpn_stopped, timeout=30)
         # Independent emulator suite: do not inherit the preceding lifecycle
         # suite's legitimate restart spending. Never reset within this suite:
         # its controller/native death sequence must exhaust the real limit.

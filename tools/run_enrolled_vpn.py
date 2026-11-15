@@ -7,7 +7,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from enrollment_fixture import Fixture
-from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition
+from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
 from run_route_lifecycle import RouteProxy
 
 def stopped_rollback_recovered(controller,generation):
@@ -42,9 +42,8 @@ def main():
     port=proxy.server_address[1];adb('reverse','tcp:'+str(port),'tcp:'+str(port))
     config={'outbounds':[{'type':'http','tag':'enrolled-proxy','server':'127.0.0.1','server_port':port}], 'route':{'final':'enrolled-proxy'}}
     fixture=None
-    def stopped():return not pid(':engine') and not call('status').get('engineActive')
     def logout():
-        call('auth-cancel');await_condition(lambda:stopped() and call('auth-status').get('phase')=='SIGNED_OUT' and not call('auth-status').get('busy'),40)
+        call('auth-cancel');await_condition(lambda:vpn_stopped() and call('auth-status').get('phase')=='SIGNED_OUT' and not call('auth-status').get('busy'),40)
     def close_fixture():
         nonlocal fixture
         if fixture:
@@ -78,6 +77,9 @@ def main():
            'enrolledAssignedRoutesCommitWithOptionalFailure',
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
            'enrolledStopFencesPendingCandidateRouteSuccess']
+    def observed_report(revision,outcome,selected):
+        return any(r['policyRevision']==revision and r['outcome']==outcome and r['activePolicyRevision']==selected
+                   for r in list(fixture.activation_reports.values()))
     try:
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
@@ -88,7 +90,8 @@ def main():
                     assert call('status')['policy']['activeRevision']==1
                 elif name=='enrolledSignedAssignmentStartsRealTun':
                     assert call('status')['policy']['activeRevision']==1 and fixture.policy_requests>=1
-                    call('disconnect');await_condition(stopped)
+                    await_condition(lambda:observed_report(1,'committed',1),45)
+                    call('disconnect');await_condition(vpn_stopped)
                     try:call('import',base64.b64encode(json.dumps(config).encode()).decode());raise RuntimeError('managed import unexpectedly accepted')
                     except AssertionError:pass
                     before=proxy.progress;call('connect')
@@ -105,6 +108,7 @@ def main():
                     call('policy-refresh')
                     await_condition(lambda:call('status').get('policy',{}).get('phase')=='rolled_back' and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert call('status')['policy']['activeRevision']==1
+                    await_condition(lambda:observed_report(2,'rolled_back',1),45)
                 elif name in ('enrolledAssignedRoutesCommitWithOptionalFailure','enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet','enrolledStopFencesPendingCandidateRouteSuccess'):
                     changed=copy.deepcopy(config)
                     changed['outbounds'].append({'type':'http','tag':'unavailable-route','server':'127.0.0.1','server_port':1})
@@ -126,9 +130,9 @@ def main():
                         assert proxy.progress>before
                     else:
                         await_condition(lambda:call('status')['policy']['phase']=='applying' and proxy.route_probes>probes,60)
-                        call('disconnect');await_condition(stopped);generation_after=call('status')['generation'];time.sleep(5)
+                        call('disconnect');await_condition(vpn_stopped);generation_after=call('status')['generation'];time.sleep(5)
                         state=call('status')
-                        assert not state['desiredOn'] and state['generation']==generation_after and stopped()
+                        assert not state['desiredOn'] and state['generation']==generation_after and vpn_stopped()
                         # A trial permit authorizes only the candidate; the previous active
                         # envelope is intentionally not reported as a usable current permit.
                         assert state['policy']['phase'] in ('applying','rolled_back')
@@ -137,16 +141,17 @@ def main():
                         # unavailable runtime-view field for a committed revision.
                         fixture.policy_status=503;controller=pid(':controller');call('fault-controller')
                         await_condition(lambda:stopped_rollback_recovered(controller,generation_after),45)
-                        assert call('status')['generation']==generation_after and not call('status')['desiredOn'] and stopped()
+                        assert call('status')['generation']==generation_after and not call('status')['desiredOn'] and vpn_stopped()
                     proxy.delay=0
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
                     fixture.policy_status=403;call('policy-refresh')
-                    await_condition(lambda:call('auth-status').get('phase')=='NEEDS_REAUTH' and stopped())
+                    await_condition(lambda:call('auth-status').get('phase')=='NEEDS_REAUTH' and
+                                    not pid(':engine') and call('status').get('engineActive') is False)
                     assert call('status')['desiredOn'] and call('status')['policy']['managed']
                     observed=proxy.progress;time.sleep(2);assert proxy.progress==observed
                 else:
                     call('fault-hang');logout()
-                    assert not fixture.sessions and stopped()
+                    assert not fixture.sessions and vpn_stopped()
                     entries=adb('shell','run-as',PACKAGE,'ls','no_backup/login/device-login-v1').decode().split()
                     assert entries==['intent.json']
                 print(name+': passed',flush=True)

@@ -30,25 +30,29 @@ func RegisterOutbound(registry *outbound.Registry) {
 
 type Outbound struct {
 	outbound.Adapter
-	ctx             context.Context
-	logger          log.ContextLogger
-	options         OutboundOptions
-	manager         adapter.OutboundManager
-	diagMu          sync.Mutex
-	job             DiagnosticJob
-	diagCancel      context.CancelFunc
-	diagEpoch       uint64
-	notifyPending   atomic.Bool
-	mu              sync.RWMutex
-	client          peerClient
-	newClient       func(embed.Options) (peerClient, error)
-	underlay        *trackedUnderlay
-	closed          bool
-	ready           bool
-	startDone       chan struct{}
-	startCancel     context.CancelFunc
-	releaseIdentity func()
-	releaseProcess  func()
+	ctx        context.Context
+	logger     log.ContextLogger
+	options    OutboundOptions
+	manager    adapter.OutboundManager
+	diagMu     sync.Mutex
+	job        DiagnosticJob
+	diagCancel context.CancelFunc
+	diagEpoch  uint64
+	// Local hard limit; tests may shorten it. Not a remotely configurable option.
+	diagnosticSnapshotTimeout time.Duration
+	notifyPending             atomic.Bool
+	mu                        sync.RWMutex
+	client                    peerClient
+	newClient                 func(embed.Options) (peerClient, error)
+	underlay                  *trackedUnderlay
+	closed                    bool
+	ready                     bool
+	startDone                 chan struct{}
+	startCancel               context.CancelFunc
+	releaseIdentity           func()
+	releaseProcess            func()
+	identityEvidence          string
+	startup                   startupTrace
 }
 
 type peerClient interface {
@@ -80,6 +84,15 @@ func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger
 	if options.StateDirectory == "" || !filepath.IsAbs(options.StateDirectory) {
 		return nil, errors.New("netbird requires an absolute persistent state_directory")
 	}
+	if options.ManagedNamespace != "" && validateManagedPath(options.StateDirectory, options.ManagedNamespace) != nil {
+		return nil, errManagedIdentity
+	}
+	if options.CredentialPending && (options.ManagedNamespace == "" || options.SetupKey != "") {
+		return nil, errManagedIdentity
+	}
+	if options.RecoverExisting && (options.CredentialPending || options.ManagedNamespace == "" || options.SetupKey != "") {
+		return nil, errManagedIdentity
+	}
 	manager := service.FromContext[adapter.OutboundManager](ctx)
 	if manager == nil {
 		return nil, errors.New("netbird outbound manager is unavailable")
@@ -92,6 +105,9 @@ func NewOutbound(ctx context.Context, _ adapter.Router, logger log.ContextLogger
 }
 
 func (o *Outbound) Start(stage adapter.StartStage) error {
+	if o.options.CredentialPending {
+		return errManagedIdentity
+	}
 	if stage != adapter.StartStateStarted {
 		return nil
 	}
@@ -122,6 +138,9 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	} else if PhysicalResolver == nil {
 		return errors.New("physical DNS resolver is unavailable")
 	}
+	if o.options.ManagedNamespace != "" && validateManagedParents(o.options.StateDirectory, o.options.ManagedNamespace) != nil {
+		return errManagedIdentity
+	}
 	if strings.TrimSpace(o.options.SetupKey) == "" {
 		info, err := os.Stat(filepath.Join(o.options.StateDirectory, "config.json"))
 		if err != nil || info.IsDir() {
@@ -141,6 +160,24 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	o.mu.Lock()
 	o.releaseIdentity = releaseIdentity
 	o.mu.Unlock()
+	var ownedIdentity *managedIdentity
+	if o.options.ManagedNamespace != "" {
+		if o.options.RecoverExisting {
+			manifest, readErr := readManagedManifest(o.options.StateDirectory)
+			evidence, configErr := managedConfigEvidence(o.options.StateDirectory, o.options.ManagedNamespace, false)
+			if readErr != nil || configErr != nil || !manifest.Initialized || manifest.Namespace != o.options.ManagedNamespace || manifest.IdentityEvidence != evidence {
+				return errManagedIdentity
+			}
+		}
+		ownedIdentity, err = prepareManagedIdentity(o.options.StateDirectory, o.options.ManagedNamespace)
+		if err != nil {
+			return errManagedIdentity
+		}
+	}
+	hostname, err := peerHostname(o.options.StateDirectory, o.options.ManagedNamespace, o.options.Hostname)
+	if err != nil {
+		return err
+	}
 	u := newUnderlay(o.ctx, vlessGroupDialer{manager: o.manager, tag: o.options.Detour})
 	o.mu.Lock()
 	if o.closed {
@@ -159,7 +196,7 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	o.releaseProcess = releaseProcess
 	o.mu.Unlock()
 	opts := embed.Options{
-		DeviceName:     o.options.Hostname,
+		DeviceName:     hostname,
 		ManagementURL:  o.options.ManagementURL,
 		SetupKey:       o.options.SetupKey,
 		ConfigPath:     filepath.Join(o.options.StateDirectory, "config.json"),
@@ -168,7 +205,7 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 		BlockInbound:   true,
 		DisableIPv6:    true,
 		LogLevel:       "warn",
-		LogOutput:      logWriter{logger: o.logger, secret: o.options.SetupKey},
+		LogOutput:      logWriter{logger: o.logger, secret: o.options.SetupKey, startup: &o.startup},
 	}
 	if o.options.ConnectionMode == "direct" {
 		opts.UnderlayDialer = nil
@@ -182,6 +219,20 @@ func (o *Outbound) Start(stage adapter.StartStage) error {
 	o.mu.Lock()
 	o.client = client
 	o.mu.Unlock()
+	if ownedIdentity != nil {
+		evidence, sealErr := ownedIdentity.seal()
+		if sealErr != nil {
+			u.Close()
+			return errManagedIdentity
+		}
+		o.mu.Lock()
+		o.identityEvidence = evidence
+		o.mu.Unlock()
+	}
+	if ctx.Err() != nil {
+		u.Close()
+		return ctx.Err()
+	}
 	if err = client.Start(ctx); err != nil {
 		u.Close()
 		return fmt.Errorf("start netbird (%s): %w", o.options.ConnectionMode, err)
@@ -240,7 +291,7 @@ func (o *Outbound) ListenPacket(ctx context.Context, _ M.Socksaddr) (net.PacketC
 func (o *Outbound) InterfaceUpdated() {
 	o.diagMu.Lock()
 	o.diagEpoch++
-	if len(o.job.Results) > 0 {
+	if len(o.job.Results) > 0 || !o.job.Started.IsZero() {
 		o.job.Stale = true
 	}
 	if o.diagCancel != nil {
@@ -334,11 +385,13 @@ func (o *Outbound) stopClient(ctx context.Context) error {
 }
 
 type logWriter struct {
-	logger log.ContextLogger
-	secret string
+	logger  log.ContextLogger
+	secret  string
+	startup *startupTrace
 }
 
 func (w logWriter) Write(p []byte) (int, error) {
+	w.startup.observe(p)
 	line := strings.TrimSpace(string(p))
 	if w.secret != "" {
 		line = strings.ReplaceAll(line, w.secret, "[redacted]")

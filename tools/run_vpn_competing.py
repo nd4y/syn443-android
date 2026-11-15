@@ -4,7 +4,7 @@ import json
 import threading
 import time
 import xml.etree.ElementTree as ET
-from run_vpn_process_faults import ROOT,PACKAGE,Server,Proxy,adb,call,pid,await_condition
+from run_vpn_process_faults import ROOT,PACKAGE,Server,Proxy,adb,call,pid,await_condition, vpn_stopped
 
 
 def main():
@@ -22,7 +22,7 @@ def main():
         adb('shell','am','start','-n',component,'--ez','ci-stop','true')
         await_condition(lambda:peer_state()==b'off',20)
     try:
-        call('disconnect');await_condition(lambda:not pid(':engine') and not call('status')['engineActive'],30)
+        call('disconnect');await_condition(vpn_stopped,30)
         call('policy-test-reset');call('test-reset');peer_stop()
         adb('reverse','tcp:'+port,'tcp:'+port)
         config={'outbounds':[{'type':'http','tag':'test-proxy','server':'127.0.0.1','server_port':int(port)}],'route':{'final':'test-proxy'}}
@@ -33,7 +33,7 @@ def main():
         adb('shell','appops','set',peer,'ACTIVATE_VPN','allow')
         adb('shell','am','start','-n',component,'--ez','ci-start','true')
         await_condition(lambda:adb('shell','run-as',peer,'sh','-c',"'cat no_backup/competing-vpn-state 2>/dev/null || true'").strip()==b'active',20)
-        await_condition(lambda:call('status')['phase']=='Off' and not call('status')['desiredOn'] and not call('status')['engineActive'] and not pid(':engine'),25)
+        await_condition(vpn_stopped,25)
         revoked=call('status');assert revoked['generation']>before['generation']
         assert any(e['code']=='vpn_permission_revoked' for e in revoked['events'])
         controller=pid(':controller');call('fault-controller');await_condition(lambda:pid(':controller')!=controller,20)
@@ -52,7 +52,7 @@ def main():
     finally:
         try:
             peer_stop();call('disconnect');call('test-health','production-https')
-            await_condition(lambda:not pid(':engine') and not call('status')['engineActive'],30)
+            await_condition(vpn_stopped,30)
         finally:
             adb('reverse','--remove','tcp:'+port);proxy.shutdown();proxy.server_close()
             out.parent.mkdir(parents=True,exist_ok=True);ET.ElementTree(suite).write(out,encoding='utf-8',xml_declaration=True)

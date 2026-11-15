@@ -10,7 +10,9 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,8 +24,9 @@ import (
 )
 
 type routeCheck struct {
-	Method string `json:"method"`
-	Target string `json:"target"`
+	Method     string `json:"method"`
+	Target     string `json:"target"`
+	ExpectedIP string `json:"expected_ip,omitempty"`
 }
 type routePlan struct {
 	ID       string       `json:"id"`
@@ -34,6 +37,10 @@ type routeRequest struct {
 	Request string      `json:"request"`
 	Routes  []routePlan `json:"routes"`
 }
+type routeSelectionPlan struct {
+	Selector string      `json:"selector"`
+	Paths    []routePlan `json:"paths"`
+}
 type routeResult struct {
 	ID               string   `json:"id"`
 	Complete         bool     `json:"complete"`
@@ -42,8 +49,10 @@ type routeResult struct {
 	ElapsedMS        int64    `json:"elapsedMs"`
 	SampledElapsedMS int64    `json:"sampledElapsedMs"`
 	Path             []string `json:"path"`
+	outbound         string
+	selectionProof   bool
 }
-type routeNode struct{ ID, Detour string }
+type routeNode struct{ ID, Detour, Kind string }
 type routeReport struct {
 	Request string        `json:"request"`
 	Running bool          `json:"running"`
@@ -51,15 +60,20 @@ type routeReport struct {
 }
 
 type routeRunner struct {
-	mu     sync.Mutex
-	ctx    context.Context
-	lookup func(string) (adapter.Outbound, bool)
-	cancel context.CancelFunc
-	serial uint64
-	busy   bool
-	report routeReport
-	nodes  map[string]routeNode // Immutable once a runtime starts.
-	limit  func() time.Duration
+	mu             sync.Mutex
+	ctx            context.Context
+	lookup         func(string) (adapter.Outbound, bool)
+	cancel         context.CancelFunc
+	serial         uint64
+	busy           bool
+	report         routeReport
+	nodes          map[string]routeNode       // Immutable once a runtime starts.
+	selectors      map[string]map[string]bool // Membership of noninterrupting selectors.
+	selectionGroup string
+	selectionPlans map[string]routePlan // Immutable approved checks, indexed by concrete member.
+	selectionUsed  bool
+	restore        map[string]string
+	limit          func() time.Duration
 }
 
 func (r *routeRunner) path(tag string) []string {
@@ -87,6 +101,40 @@ func (r *routeRunner) path(tag string) []string {
 func newRouteRunner(ctx context.Context, lookup func(string) (adapter.Outbound, bool)) *routeRunner {
 	return &routeRunner{ctx: ctx, lookup: lookup, report: routeReport{Results: []routeResult{}}}
 }
+
+// Called before starting a runtime. A diagnostic request cannot set these checks.
+func (r *routeRunner) configureSelection(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	if len(raw) > 32768 {
+		return false
+	}
+	var selection routeSelectionPlan
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&selection) != nil || decoder.Decode(new(any)) != io.EOF {
+		return false
+	}
+	members := r.selectors[selection.Selector]
+	if len(members) < 2 || len(members) > 8 || len(selection.Paths) != len(members) ||
+		!validRouteRequest(routeRequest{Request: "approved", Routes: selection.Paths}) {
+		return false
+	}
+	approved := make(map[string]routePlan, len(members))
+	for _, path := range selection.Paths {
+		if !members[path.Outbound] || path.ID != r.nodes[path.Outbound].ID || len(r.fixedPath(path.Outbound)) == 0 {
+			return false
+		}
+		if _, duplicate := approved[path.Outbound]; duplicate {
+			return false
+		}
+		approved[path.Outbound] = path
+	}
+	r.selectionGroup, r.selectionPlans = selection.Selector, approved
+	return true
+}
+
 func (r *routeRunner) snapshot() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -96,12 +144,102 @@ func (r *routeRunner) snapshot() string {
 func (r *routeRunner) stop() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.stopLocked()
+}
+func (r *routeRunner) stopLocked() {
 	if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
 	}
 	r.serial++
+	r.selectionUsed = false
 	r.report = routeReport{Results: []routeResult{}}
+}
+
+type routeSelector interface {
+	Now() string
+	SelectOutbound(string) bool
+}
+
+func (r *routeRunner) networkChanged() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stopLocked()
+	for group, previous := range r.restore {
+		outbound, ok := r.lookup(group)
+		if !ok || !r.selectors[group][previous] {
+			continue
+		}
+		if selector, ok := outbound.(routeSelector); ok {
+			selector.SelectOutbound(previous)
+		}
+	}
+	r.restore = nil
+}
+
+// The check must cover one concrete end-to-end path, not a group whose
+// selected member can change between evidence and selection.
+func (r *routeRunner) fixedPath(tag string) []string {
+	path := []string{}
+	seen := map[string]bool{}
+	for tag != "" {
+		node, ok := r.nodes[tag]
+		if !ok || seen[tag] || len(path) == 4 {
+			return nil
+		}
+		switch node.Kind {
+		case "http", "socks", "vless", "ssh":
+		default:
+			return nil
+		}
+		seen[tag] = true
+		path = append(path, node.ID)
+		tag = node.Detour
+	}
+	return path
+}
+
+func (r *routeRunner) selectVerified(request, checkID, group, previous, candidate string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if request == "" || request != r.report.Request || r.busy || r.selectionUsed ||
+		r.ctx.Err() != nil || !r.allowed() || group != r.selectionGroup || candidate == previous ||
+		!r.selectors[group][candidate] || !r.selectors[group][previous] {
+		return false
+	}
+	path := r.fixedPath(candidate)
+	if len(path) == 0 {
+		return false
+	}
+	var verified bool
+	now := bootMillis()
+	for _, result := range r.report.Results {
+		if result.ID == checkID && result.outbound == candidate && result.selectionProof && result.OK && result.Complete &&
+			now != math.MaxInt64 && result.SampledElapsedMS > 0 && result.SampledElapsedMS <= now &&
+			now-result.SampledElapsedMS < 15_000 && strings.Join(result.Path, "/") == strings.Join(path, "/") {
+			verified = true
+			break
+		}
+	}
+	if !verified {
+		return false
+	}
+	outbound, ok := r.lookup(group)
+	if !ok {
+		return false
+	}
+	selector, ok := outbound.(routeSelector)
+	if !ok || selector.Now() != previous || !r.allowed() || !selector.SelectOutbound(candidate) {
+		return false
+	}
+	r.selectionUsed = true
+	if r.restore == nil {
+		r.restore = map[string]string{}
+	}
+	if _, restored := r.restore[group]; !restored {
+		r.restore[group] = previous
+	}
+	return true
 }
 func validRouteRequest(q routeRequest) bool {
 	if len(q.Request) < 1 || len(q.Request) > 80 || len(q.Routes) < 1 || len(q.Routes) > 64 {
@@ -127,15 +265,30 @@ func validRouteCheck(c routeCheck) bool {
 	if len(c.Target) < 1 || len(c.Target) > 2048 {
 		return false
 	}
+	if c.Method == "https_exit_ip" {
+		if _, ok := routeExitIP(c.ExpectedIP); !ok {
+			return false
+		}
+	} else if c.ExpectedIP != "" {
+		return false
+	}
 	switch c.Method {
 	case "tcp", "ssh_banner":
 		host, port, err := net.SplitHostPort(c.Target)
 		return err == nil && host != "" && validRoutePort(port) && !strings.ContainsAny(host, " /\\\r\n\t")
-	case "tls", "https_204":
+	case "tls", "https_204", "https_exit_ip":
 		u, err := url.Parse(c.Target)
 		return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Fragment == "" && (u.Port() == "" || validRoutePort(u.Port()))
 	}
 	return false
+}
+
+func routeExitIP(raw string) (netip.Addr, bool) {
+	if len(raw) < 2 || len(raw) > 45 {
+		return netip.Addr{}, false
+	}
+	address, err := netip.ParseAddr(raw)
+	return address, err == nil && address.Zone() == "" && !address.Is4In6()
 }
 func validRoutePort(port string) bool {
 	n, e := strconv.ParseUint(port, 10, 16)
@@ -182,6 +335,7 @@ func (r *routeRunner) start(raw string) bool {
 	r.serial++
 	serial := r.serial
 	r.busy = true
+	r.selectionUsed = false
 	r.report = routeReport{Request: q.Request, Running: true, Results: []routeResult{}}
 	r.mu.Unlock()
 	go func() {
@@ -256,7 +410,9 @@ func (c *authorizedRouteConn) Write(b []byte) (int, error) {
 func (c *authorizedRouteConn) NeedHandshakeForWrite() bool { return N.NeedHandshakeForWrite(c.Conn) }
 func (r *routeRunner) runPlan(ctx context.Context, p routePlan) (result routeResult) {
 	start := time.Now()
-	result = routeResult{ID: p.ID, Complete: true, OK: true, Code: "ok"}
+	approved := r.selectionPlans[p.Outbound]
+	result = routeResult{ID: p.ID, Complete: true, OK: true, Code: "ok", outbound: p.Outbound,
+		selectionProof: p.ID == approved.ID && slices.Equal(p.Checks, approved.Checks)}
 	defer func() {
 		if recover() != nil {
 			result.OK = false
@@ -346,7 +502,7 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 	defer cancel()
 	target := c.Target
 	var u *url.URL
-	if c.Method == "tls" || c.Method == "https_204" {
+	if c.Method == "tls" || c.Method == "https_204" || c.Method == "https_exit_ip" {
 		u, _ = url.Parse(target)
 		port := u.Port()
 		if port == "" {
@@ -418,8 +574,15 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 	if c.Method == "tls" {
 		return "ok", true
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.Target, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Target, nil)
+	if err != nil {
+		return "unsupported", false
+	}
 	req.Header.Set("Connection", "close")
+	if c.Method == "https_exit_ip" {
+		req.Header.Set("Cache-Control", "no-cache, no-store")
+		req.Header.Set("Accept-Encoding", "identity")
+	}
 	if req.Write(secure) != nil {
 		return "request_failed", true
 	}
@@ -434,6 +597,28 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 		return "check_timeout", true
 	}
 	defer response.Body.Close()
+	if c.Method == "https_exit_ip" {
+		if response.StatusCode != 200 || response.ContentLength < 2 || response.ContentLength > 47 ||
+			len(response.TransferEncoding) > 0 || response.Header.Get("Content-Encoding") != "" || response.Header.Get("Age") != "" {
+			return "exit_evidence_invalid", true
+		}
+		body, readErr := io.ReadAll(response.Body)
+		if parent.Err() != nil {
+			return "cancelled", false
+		}
+		if ctx.Err() != nil {
+			return "check_timeout", false
+		}
+		reported, ok := routeExitIP(strings.TrimSuffix(strings.TrimSuffix(string(body), "\n"), "\r"))
+		if readErr != nil || int64(len(body)) != response.ContentLength || !ok {
+			return "exit_evidence_invalid", true
+		}
+		expected, _ := routeExitIP(c.ExpectedIP)
+		if reported != expected {
+			return "exit_ip_mismatch", true
+		}
+		return "ok", true
+	}
 	length := response.Header.Get("Content-Length")
 	if response.StatusCode != 204 || response.ContentLength > 0 || len(response.TransferEncoding) > 0 || (length != "" && length != "0") {
 		return "http_response_mismatch", true

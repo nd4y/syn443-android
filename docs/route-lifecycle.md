@@ -121,3 +121,86 @@ credentials must not be changed to manufacture a locked-boot test. USB/Wi-Fi can
 verify supported reboot/update/force-stop/system-policy behavior and real external/
 internal traffic. LTE, natural unplugged battery/Doze/endurance and complete M1-M5
 acceptance are explicitly outside this stage. Green CI is not physical acceptance.
+
+### First policy while restart budget is occupied
+
+The first enrolled assignment keeps the TUN closed to user traffic until a
+valid activation permit is ready. If local recovery history cannot reserve
+both a start and rollback, the controller reports the earliest retry time and
+uses the bounded hostless wake interval. The durable budget and the required
+checks are preserved. A prepared assignment with an expired or withdrawn
+lease remains blocked.
+
+### Physical network preference
+
+The network candidate compares the platform's validation and captive-portal
+signals separately from transport. A newly visible, unvalidated Wi-Fi network
+does not replace a validated network or the current VPN path with successful
+checks. Validated Wi-Fi is preferred, equal choices retain their current
+owner, and lost networks cannot lend their evidence to a replacement. The
+selector does not infer trusted home Wi-Fi or restricted cellular access
+from a transport. The controller consumes ordered Android callback values for
+capabilities and link properties. Loss of validation or a metering change on
+the same network advances the probe epoch and cancels pending measurements.
+If the handle and link properties are unchanged, the controller keeps the
+native network binding and does not advance the recovery budget. JVM cases
+cover ranking, loss and the distinction between capability and path changes.
+Physical handover and the four-mode policy matrix require separate acceptance.
+
+### Route report delivery
+
+The host publishes a route batch as soon as it is admitted, then reads its
+result every two seconds while the same batch is running, for at most 35
+seconds. Completion, cancellation, network replacement and owner retirement
+end the polling window. This moves result delivery off the slower host
+heartbeat without scheduling additional network probes. The two distinct
+failure batches and fresh reserve checks remain required.
+
+### Reserve probe cooldown
+
+For the enrolled, signed internal Wi-Fi selector, a failed optional reserve
+is attributed only when a different member passes the identical checks in
+the same batch. The result must name the complete expected chain; missing,
+cancelled and changed-path samples cannot create a failure. The second
+independent attributable failure starts the existing local cooldown.
+
+Routine checks defer optional members during that cooldown. They still
+probe the required selector and any other required routes. A manual
+diagnostic or a policy activation keeps its full check set; it cannot
+promote a reserve with evidence sampled before the cooldown expires.
+After expiry the reserve returns to the bounded probe scheduler and
+needs fresh evidence. Changing the network, configuration or engine
+fences both observations and cooldown. This is a single-intent Wi-Fi
+implementation; it does not claim graph exploration, persistence across
+process restart or physical cellular acceptance.
+
+The controller requires the signed `route.reserve-cooldown.v1` capability
+on the active, key-bound configuration to attribute optional reserve
+failures and suppress their routine probes. Existing signed configurations
+continue the previous scheduling behavior. A failed opt-in uses a distinct
+rollback fingerprint; the legacy configuration with identical proxy bytes
+can still be issued as a newer revision. This is a fixed local evaluator
+feature that can be enabled for a reviewed recipient set.
+
+Wi-Fi can be available before Android marks it validated. The first
+validated, signed failover batch for the current route scope can bypass
+the normal cadence once. It waits for a batch already in progress and
+does not reuse its unvalidated measurements as a new receipt. Later
+validation callbacks for the same scope cannot repeatedly accelerate
+probing. Two independent receipts and a verified reserve remain required.
+
+### Captive portal wait
+
+When Android reports a captive portal, that physical Network is excluded
+from VPN admission, even if the VPN previously had good evidence on it.
+Other usable physical networks remain eligible. With only captive
+networks, the controller keeps the user's intent and waits for Android
+network callbacks without issuing route checks or starting a native
+owner. A running owner is handled as on ordinary network loss, with new
+socket protection fenced to the current eligible network.
+
+The VPN screen shows the system sign-in instruction and a distinct
+message under lockdown. The app never opens a bypass socket or changes
+Android lockdown. Unknown reachability without Android's captive flag is
+not treated as a portal or as a restricted cellular mode. A real portal
+and lockdown still need separate acceptance.

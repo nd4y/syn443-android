@@ -1,6 +1,7 @@
 package io.syn443.android.vpn
 
 import android.content.Context
+import io.syn443.decision.FailoverAlgorithm
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
@@ -15,6 +16,8 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** All entry points execute in :controller. AtomicFile is never written by the UI/native host. */
+internal data class RouteDecisionStamp(val policyRevision: Long, val algorithm: FailoverAlgorithm)
+
 class StateStore private constructor(context: Context) {
     companion object {
         @Volatile private var instance: StateStore? = null
@@ -62,7 +65,9 @@ class StateStore private constructor(context: Context) {
         value.put("desiredOn", cp.desiredOn).put("generation", cp.generation).put("attempt", cp.attempt)
             .put("nextWallMs", cp.nextWallMs).put("lastEarlyWallMs", cp.lastEarlyWallMs).put("heavyWallMs", JSONArray(cp.heavyWallMs))
     }
-    @Synchronized fun event(phase: String, code: String, epoch: Long, generation: Long? = null): Boolean {
+    @Synchronized internal fun event(
+        phase: String, code: String, epoch: Long, generation: Long? = null, decision: RouteDecisionStamp? = null,
+    ): Boolean {
         if (generation != null) {
             val cp = checkpoint()
             if (cp.generation != generation) return false
@@ -71,8 +76,15 @@ class StateStore private constructor(context: Context) {
         update { value ->
             value.put("phase", phase).put("reason", code).put("networkEpoch", epoch)
             val events = value.optJSONArray("events") ?: JSONArray()
-            events.put(JSONObject().put("at", System.currentTimeMillis()).put("phase", phase).put("code", code)
-                .put("intentGeneration", value.optLong("generation")).put("networkEpoch", epoch))
+            val sequence=(value.optLong("eventSequence").coerceIn(0,9_007_199_254_740_990L)+1)
+            value.put("eventSequence",sequence)
+            val event = JSONObject().put("at", System.currentTimeMillis()).put("phase", phase).put("code", code)
+                .put("sequence",sequence).put("elapsed",android.os.SystemClock.elapsedRealtime())
+                .put("intentGeneration", value.optLong("generation")).put("networkEpoch", epoch)
+            if (decision != null && code == "managed_route_recheck") {
+                event.put("policyRevision", decision.policyRevision).put("algorithmRevision", decision.algorithm.revision)
+            }
+            events.put(event)
             while (events.length() > 64) events.remove(0)
             value.put("events", events)
         }
@@ -97,6 +109,23 @@ class StateStore private constructor(context: Context) {
         try { output.write(cipher.iv.size); output.write(cipher.iv); output.write(ciphertext); config.finishWrite(output) }
         catch (e: Exception) { config.failWrite(output); throw e }
         update { it.put("configRevision", revision(raw)) }
+    }
+    @Synchronized fun localConfig(raw:String,expected:String,candidate:String,apply:Boolean):JSONObject {
+        require(!policyStore.managed() && !checkpoint().desiredOn && !read().optBoolean("engineActive"))
+        val previous=originalConfig()?.let(::revision) ?: "none"
+        require(previous==expected && revision(raw)==candidate)
+        EngineConfig.validate(raw)
+        val changed=previous!=candidate
+        if(apply && changed) {
+            importConfig(raw)
+            require(originalConfig()?.let(::revision)==candidate)
+        }
+        val parsed=JSONObject(raw)
+        return JSONObject().put("schemaVersion",1).put("baseRevision",previous).put("candidateRevision",candidate)
+            .put("generation",checkpoint().generation).put("different",changed).put("written",apply && changed)
+            .put("currentRevision",if(apply)candidate else previous)
+            .put("outboundCount",parsed.getJSONArray("outbounds").length())
+            .put("configuredCheckCount",parsed.optJSONArray("route_checks")?.length() ?: 0)
     }
     @Synchronized fun originalConfig(): String? {
         if (!config.baseFile.exists()) return null

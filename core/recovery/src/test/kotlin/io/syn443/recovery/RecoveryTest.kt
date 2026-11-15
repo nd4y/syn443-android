@@ -6,6 +6,11 @@ import org.junit.Test
 class RecoveryTest {
     @Test fun candidateWaitReservesRollbackWithoutConsumingAttempts() {
         val full = Checkpoint(true, 7, nextWallMs = 600_000, heavyWallMs = listOf(0, 1000, 2000))
+        assertEquals(601_000L, Recovery.replacementReadyAt(full, 599_999))
+        assertEquals(600_000L, Recovery.replacementReadyAt(full, 599_999, slots = 1))
+        assertEquals(602_000L, Recovery.replacementReadyAt(full, 599_999, slots = 3))
+        assertEquals(603_000L, Recovery.replacementReadyAt(full.copy(nextWallMs = 603_000), 599_999))
+        assertEquals(601_000L, Recovery.replacementReadyAt(full.copy(heavyWallMs = listOf(1000, 2000, 0)), 600_000))
         assertFalse(Recovery.replacementReady(full, 599_999))
         assertFalse(Recovery.replacementReady(full, 600_000)) // only one slot is free
         assertTrue(Recovery.replacementReady(full, 601_000))
@@ -13,6 +18,9 @@ class RecoveryTest {
         assertFalse(Recovery.replacementReady(full.copy(desiredOn = false), 700_000))
         assertFalse(Recovery.replacementReady(full.copy(heavyWallMs = emptyList()), 599_999))
         assertFalse(Recovery.replacementReady(Recovery.normalizeClock(full, 0), 0))
+        val saturated = full.copy(heavyWallMs = List(3) { Long.MAX_VALUE })
+        assertEquals(Long.MAX_VALUE, Recovery.replacementReadyAt(saturated, Long.MAX_VALUE))
+        assertFalse(Recovery.replacementReady(saturated, Long.MAX_VALUE))
     }
     @Test fun stopRejectsLateEffectsAndReconnectDoesNotEraseBudget() {
         val started = Recovery.command(Checkpoint(), true)

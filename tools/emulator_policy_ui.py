@@ -1,13 +1,39 @@
 """Ordinary Android Settings controls, for disposable emulator lifecycle tests."""
 import re
+import shlex
+import subprocess
 import time
 import xml.etree.ElementTree as ET
 from run_vpn_process_faults import adb
 
 
 def tree():
-    adb('shell','uiautomator','dump','/data/local/tmp/syn443-os-policy.xml',timeout=20)
-    return ET.fromstring(adb('shell','cat','/data/local/tmp/syn443-os-policy.xml'))
+    assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
+    path='/data/local/tmp/syn443-os-policy.xml'
+    deadline=time.monotonic()+25
+    last=None
+    def command(*args,maximum=15):
+        remaining=deadline-time.monotonic()
+        if remaining<=0:raise subprocess.TimeoutExpired('bounded emulator UI observation',25)
+        return adb(*args,timeout=min(maximum,remaining))
+    for attempt in range(3):
+        try:
+            # uiautomator may exit0 before Keyguard has a root, without writing
+            # a file. Never accept a leftover hierarchy from an earlier screen.
+            command('shell','rm','-f',path,maximum=3)
+            command('shell','uiautomator','dump',path)
+            root=ET.fromstring(command('shell','cat',path,maximum=3))
+            if root.tag!='hierarchy':raise ET.ParseError('Unexpected emulator hierarchy root')
+            return root
+        except (subprocess.CalledProcessError,subprocess.TimeoutExpired,ET.ParseError) as e:
+            last=e
+        finally:
+            try:adb('shell','rm','-f',path,timeout=2)
+            except (subprocess.CalledProcessError,subprocess.TimeoutExpired):pass
+        remaining=deadline-time.monotonic()
+        if attempt==2 or remaining<=0:break
+        time.sleep(min(.25,remaining))
+    raise AssertionError('Disposable emulator UI hierarchy did not become ready within its observation budget') from last
 
 
 def tap(node):
@@ -54,19 +80,103 @@ def unlock_test_pin():
     raise AssertionError('Disposable emulator PIN bouncer did not become ready')
 
 
+def profile_settings(root):
+    """Only the owned Settings row, never a SystemUI label or another VPN gear."""
+    parents={c:p for p in root.iter() for c in p}
+    def bounds(node):
+        values=re.findall(r'\d+',node.get('bounds',''))
+        return tuple(map(int,values)) if len(values)==4 else None
+    for label in root.iter('node'):
+        if label.get('package')!='com.android.settings' or label.get('text')!='SYN443':continue
+        container=label
+        for _ in range(4):
+            container=parents.get(container,container)
+            gears=[n for n in container.iter('node') if n.get('package')=='com.android.settings' and
+                   (n.get('resource-id','').endswith('/settings_button') or n.get('content-desc')=='Settings for SYN443')]
+            titles=[n for n in container.iter('node') if n.get('package')=='com.android.settings' and n.get('resource-id')=='android:id/title']
+            # A two-line preference can place its title above the gear. Match
+            # their unique owned row, not overlapping text/icon rectangles or
+            # an English-only description. Never ascend into multiple VPN rows.
+            if len(gears)!=1 or len(titles)>1 or titles and titles[0] is not label:continue
+            for gear in gears:
+                description=gear.get('content-desc','')
+                if description.startswith('Settings for ') and description!='Settings for SYN443':continue
+                row_bounds=bounds(container);label_bounds=bounds(label)
+                gear_bounds=bounds(gear)
+                if row_bounds is None or label_bounds is None or gear_bounds is None:continue
+                if all(row_bounds[0]<=b[0]<b[2]<=row_bounds[2] and row_bounds[1]<=b[1]<b[3]<=row_bounds[3] for b in (label_bounds,gear_bounds)):return gear
+    return None
+
+
+def settings_component(raw):
+    """Accept only platform-resolved Settings components, never a chooser app."""
+    if len(raw)>8192:return None
+    values=[]
+    for line in raw.decode('utf-8',errors='strict').splitlines():
+        line=line.strip()
+        if not re.fullmatch(r'[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+',line):continue
+        package,activity=line.split('/',1)
+        if package!='com.android.settings' or not (activity.startswith('.') or activity.startswith('com.android.settings.')):return None
+        values.append(line)
+    values=sorted(set(values))
+    if len(values)==1:return values[0]
+    vpn=[v for v in values if re.search(r'[.$]VpnSettingsActivity$',v)]
+    return vpn[0] if len(vpn)==1 else None
+
+
+def focused_settings_anr(windows):
+    """The platform attaches the ANR process name to its focused window."""
+    return re.search(
+        rb'(?m)^\s*mCurrentFocus=Window\{[^}\r\n]* Application Not Responding: com\.android\.settings\}\s*$',
+        windows,
+    ) is not None
+
+
 def open_policy():
-    adb('shell','am','start','-a','android.settings.VPN_SETTINGS')
+    assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
+    # Reboots can leave a nonsecure keyguard or a previously restored Settings
+    # fragment. Wake/swipe and start the VPN task afresh; never enter a PIN here.
+    adb('shell','input','keyevent','KEYCODE_WAKEUP')
+    dimensions=re.findall(r'(\d+)x(\d+)',adb('shell','wm','size').decode())
+    assert dimensions,'Disposable emulator dimensions unavailable'
+    width,height=map(int,dimensions[-1])
+    adb('shell','input','swipe',str(width//2),str(height*9//10),str(width//2),str(height//3),'300')
+    # Resolve the actual platform component. A package-restricted implicit
+    # intent may still leave a framework window after a reboot. Launch the
+    # verified Settings component afresh, without clicking framework dialogs.
+    args=('shell','cmd','package')
+    component=settings_component(adb(*args,'resolve-activity','--brief','-a','android.settings.VPN_SETTINGS','-p','com.android.settings'))
+    if component is None:
+        component=settings_component(adb(*args,'query-activities','--brief','-a','android.settings.VPN_SETTINGS','-p','com.android.settings'))
+    assert component is not None,'Platform did not resolve an owned VPN Settings component'
+    launch=('shell','am','start','-S','-W','-n',shlex.quote(component),'-f','0x10008000')
+    adb(*launch)
     end=time.monotonic()+20
+    root=None
+    relaunched=False
     while time.monotonic()<end:
-        root=tree();parents={c:p for p in root.iter() for c in p}
-        for label in root.iter('node'):
-            if label.get('text')!='SYN443':continue
-            container=label
-            for _ in range(4):
-                container=parents.get(container,container)
-                gear=next((n for n in container.iter('node') if 'settings_button' in n.get('resource-id','') or n.get('content-desc','').startswith('Settings for')),None)
-                if gear is not None:tap(gear);return
+        root=tree()
+        if pin_keys(root):raise AssertionError('Protected emulator keyguard unexpectedly active')
+        gear=profile_settings(root)
+        if gear is not None:tap(gear);return
+        # Never press a generic error dialog. Restart only the already resolved
+        # Settings activity once, after confirming that its own ANR has focus.
+        if not relaunched and any(n.get('package')=='android' and n.get('resource-id')=='android:id/aerr_close'
+                                   for n in root.iter('node')):
+            if focused_settings_anr(adb('shell','dumpsys','window','windows')):
+                relaunched=True
+                print('Owned Settings ANR: restarting the VPN settings activity once',flush=True)
+                adb(*launch)
+                end=time.monotonic()+20
+                continue
         time.sleep(1)
+    # Structural data only: no arbitrary UI text, identifiers or auth content.
+    nodes=[] if root is None else list(root.iter('node'))
+    packages=sorted({n.get('package','') for n in nodes})[:8]
+    resources=sorted({n.get('resource-id','') for n in nodes if n.get('package') in ('android','com.android.settings','com.android.systemui')})[:32]
+    owned=[{'id':n.get('resource-id',''),'bounds':n.get('bounds','')} for n in nodes if n.get('package')=='com.android.settings' and n.get('text')=='SYN443']
+    gears=[{'bounds':n.get('bounds',''),'description':('expected' if n.get('content-desc')=='Settings for SYN443' else 'present' if n.get('content-desc') else 'empty')} for n in nodes if n.get('package')=='com.android.settings' and n.get('resource-id','').endswith('/settings_button')]
+    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears}),flush=True)
     raise AssertionError('Owned VPN settings entry unavailable')
 
 

@@ -23,7 +23,6 @@ import (
 	boxservice "github.com/sagernet/sing-box/adapter/service"
 	"github.com/sagernet/sing-box/common/dialer"
 	"github.com/sagernet/sing-box/dns"
-	"github.com/sagernet/sing-box/dns/transport"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/direct"
 	"github.com/sagernet/sing-box/protocol/group"
@@ -52,8 +51,8 @@ type Runtime struct {
 	routes   *routeRunner
 }
 
-func NewRuntime(config string, fd int32, protector Protector, name string, index int32, leaseDeadline int64) (*Runtime, error) {
-	if fd < 0 || protector == nil || name == "" || index <= 0 {
+func NewRuntime(config, routeSelection string, fd int32, protector Protector, name string, index int32, leaseDeadline int64) (*Runtime, error) {
+	if fd < 0 || protector == nil || name == "" || index <= 0 || routeSelection != "" && leaseDeadline <= 0 {
 		return nil, errors.New("invalid host context")
 	}
 	guard := &leaseGuard{clock: bootMillis}
@@ -61,7 +60,6 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 		return nil, err
 	}
 	netbird.DiagnosticsAllowed = guard.allowed
-	dialer.DoNotSelectInterface = true
 	installOverlayPlatform(protector)
 	ir := inbound.NewRegistry()
 	tunin.RegisterInbound(ir)
@@ -77,11 +75,8 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 	dr := dns.NewTransportRegistry()
 	registerPhysicalDNS(dr, protector)
 	netbird.RegisterDNSTransport(dr)
-	transport.RegisterUDP(dr)
-	transport.RegisterTCP(dr)
-	transport.RegisterTLS(dr)
-	transport.RegisterHTTPS(dr)
-	ctx, cancel := context.WithCancel(context.Background())
+	registerRemoteDNS(dr)
+	ctx, cancel := context.WithCancel(dialer.WithRuntimeOptions(context.Background(), dialer.RuntimeOptions{SkipInterfaceSelection: true}))
 	ctx = box.Context(ctx, ir, or, endpoint.NewRegistry(), dr, boxservice.NewRegistry())
 	ctx = service.ContextWithDefaultRegistry(ctx)
 	p := &platform{fd: int(fd), protector: protector, iface: control.Interface{Index: int(index), Name: name, MTU: 1500, Flags: net.FlagUp}, lease: guard}
@@ -92,13 +87,40 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 		cancel()
 		return nil, errors.New("invalid engine configuration")
 	}
+	routes := newRouteRunner(ctx, nil)
+	var routeConfig struct {
+		Outbounds []struct {
+			Tag       string   `json:"tag"`
+			Detour    string   `json:"detour"`
+			Kind      string   `json:"type"`
+			Members   []string `json:"outbounds"`
+			Interrupt bool     `json:"interrupt_exist_connections"`
+		} `json:"outbounds"`
+	}
+	_ = json.Unmarshal([]byte(config), &routeConfig)
+	routes.nodes = map[string]routeNode{}
+	routes.selectors = map[string]map[string]bool{}
+	for i, node := range routeConfig.Outbounds {
+		routes.nodes[node.Tag] = routeNode{ID: fmt.Sprintf("route-%d", i+1), Detour: node.Detour, Kind: node.Kind}
+		if node.Kind == "selector" && !node.Interrupt && len(node.Members) <= 64 {
+			members := make(map[string]bool, len(node.Members))
+			for _, member := range node.Members {
+				members[member] = true
+			}
+			routes.selectors[node.Tag] = members
+		}
+	}
+	if !routes.configureSelection(routeSelection) {
+		cancel()
+		return nil, errors.New("invalid route selection plan")
+	}
 	instance, err := box.New(box.Options{Options: options, Context: ctx})
 	if err != nil {
 		cancel()
 		return nil, errors.New("engine construction failed")
 	}
-	r := &Runtime{box: instance, cancel: cancel, platform: p}
-	r.routes = newRouteRunner(ctx, func(tag string) (adapter.Outbound, bool) { return instance.Outbound().Outbound(tag) })
+	routes.lookup = func(tag string) (adapter.Outbound, bool) { return instance.Outbound().Outbound(tag) }
+	r := &Runtime{box: instance, cancel: cancel, platform: p, routes: routes}
 	r.routes.limit = func() time.Duration {
 		if !guard.allowed() {
 			return 0
@@ -113,17 +135,6 @@ func NewRuntime(config string, fd int32, protector Protector, name string, index
 		}
 		return time.Duration(remaining) * time.Millisecond
 	}
-	var routeConfig struct {
-		Outbounds []struct {
-			Tag    string `json:"tag"`
-			Detour string `json:"detour"`
-		} `json:"outbounds"`
-	}
-	_ = json.Unmarshal([]byte(config), &routeConfig)
-	r.routes.nodes = map[string]routeNode{}
-	for i, node := range routeConfig.Outbounds {
-		r.routes.nodes[node.Tag] = routeNode{ID: fmt.Sprintf("route-%d", i+1), Detour: node.Detour}
-	}
 	return r, nil
 }
 func (e *Runtime) Start() error { return e.box.Start() }
@@ -134,6 +145,9 @@ func (e *Runtime) Close() error { e.Cancel(); return e.box.Close() }
 func (e *Runtime) StartRouteChecks(request string) bool { return e.routes.start(request) }
 func (e *Runtime) RouteCheckStatus() string             { return e.routes.snapshot() }
 func (e *Runtime) CancelRouteChecks()                   { e.routes.stop() }
+func (e *Runtime) SelectVerifiedRoute(request, checkID, group, previous, candidate string) bool {
+	return e.routes.selectVerified(request, checkID, group, previous, candidate)
+}
 
 // The supervisor additionally checks actual HTTPS data-path progress; this is only runtime liveness.
 func (e *Runtime) Pulse() int64 { return 1 }
@@ -147,8 +161,15 @@ func (e *Runtime) DebugFatal() {
 
 // No SDK locks on the native host control loop.
 func (e *Runtime) NetBirdStatus() string { return netbird.DeferredStatus() }
+func (e *Runtime) NetBirdIdentityProof() string {
+	if e.platform == nil || !e.platform.lease.allowed() {
+		return "{}"
+	}
+	return netbird.ManagedRegistrationProof()
+}
 func (e *Runtime) DiagnoseNetBird() bool { return netbird.RequestDiagnostics() }
 func (e *Runtime) UpdateNetwork(name string, index int32) {
+	e.routes.networkChanged()
 	e.platform.mu.Lock()
 	e.platform.iface.Name = name
 	e.platform.iface.Index = int(index)

@@ -6,6 +6,8 @@ import org.junit.Test
 import org.junit.BeforeClass
 import org.junit.AfterClass
 import java.net.InetAddress
+import java.net.Socket
+import java.util.concurrent.atomic.AtomicInteger
 import java.nio.file.Files
 import java.security.KeyStore
 import java.util.concurrent.*
@@ -35,7 +37,8 @@ class TlsTest {
         @AfterClass @JvmStatic fun deleteFixture() { Files.deleteIfExists(file); Files.deleteIfExists(directory) }
     }
     private fun request(host: String = "localhost", trusted: Boolean = true,
-        response: String = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"): Outcome {
+        response: String = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
+        addresses:List<InetAddress>?=null,created:AtomicInteger?=null): Outcome {
         val server = serverContext.serverSocketFactory.createServerSocket(0, 4, InetAddress.getByName("127.0.0.1")) as SSLServerSocket
         val worker = Executors.newSingleThreadExecutor { r -> Thread(r).apply { isDaemon = true } }
         val serving = worker.submit { runCatching {
@@ -48,7 +51,8 @@ class TlsTest {
         } }
         return try {
             ProbePool().use { pool ->
-                val probe = if (trusted) NetworkProbe(tls = trustedFactory) else NetworkProbe()
+                val probe = NetworkProbe(tls=if(trusted)trustedFactory else null,
+                    resolve={addresses ?: InetAddress.getAllByName(it).toList()},socketFactory={created?.incrementAndGet();Socket()})
                 CheckJob(pool, probe).run(listOf(Check("tls", "https_204", "https://$host:${server.localPort}/?check=1"))).outcomes.single()
             }
         } finally {
@@ -58,6 +62,11 @@ class TlsTest {
     @Test fun validTlsAndComplete204HeadersPass() { assertEquals(Outcome.PASS, request()) }
     @Test fun certificateTrustIsRequired() { assertEquals(Outcome.FAIL, request(trusted = false)) }
     @Test fun certificateHostnameIsRequired() { assertEquals(Outcome.FAIL, request(host = "127.0.0.1")) }
+    @Test fun certificateFailureDoesNotTryAnotherAddressOrWeakenTrust() {
+        val created=AtomicInteger()
+        assertEquals(Outcome.FAIL,request(trusted=false,addresses=listOf(InetAddress.getByName("127.0.0.1"),InetAddress.getByName("127.0.0.2")),created=created))
+        assertEquals(1,created.get())
+    }
     @Test fun redirectIsNotFollowed() { assertEquals(Outcome.FAIL, request(response = "HTTP/1.1 302 Found\r\nLocation: https://example.org/\r\n\r\n")) }
     @Test fun incompleteHeadersAreNotSuccess() { assertEquals(Outcome.FAIL, request(response = "HTTP/1.1 204 No Content\r\n")) }
 }

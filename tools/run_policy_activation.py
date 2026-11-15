@@ -5,6 +5,7 @@ emulator. TLS implementation/physical HTTPS acceptance is a separate gate.
 """
 import base64
 import copy
+import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -13,7 +14,8 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from policy_fixture import Publisher
-from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition
+from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
+from syn443ctl import ControlError, Device
 
 class Delivery(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -39,7 +41,8 @@ def private_input(raw, method):
 def stage(envelope):
     return private_input(envelope, 'policy-stage-file')
 
-def probe_diagnostics():
+def probe_diagnostics(snapshot):
+    print('Policy activation checks: '+json.dumps(snapshot.get('policyChecks')),flush=True)
     try:print('Policy probe workers: '+json.dumps(call('health-workers')),flush=True)
     except Exception as error:print('Policy probe diagnostics unavailable: '+type(error).__name__,flush=True)
 
@@ -57,7 +60,7 @@ def main():
     config = {'outbounds': [{'type': 'http', 'tag': 'test-proxy', 'server': '127.0.0.1', 'server_port': ports[0]}],
               'route': {'final': 'test-proxy'}}
     def stop():
-        call('disconnect'); await_condition(lambda: not pid(':engine') and not call('status').get('engineActive'), 30)
+        call('disconnect'); await_condition(vpn_stopped, 30)
     def setup(ttl=600):
         nonlocal publisher
         stop(); call('policy-test-reset'); call('test-reset')
@@ -76,9 +79,12 @@ def main():
             pressure=[e for e in snapshot.get('events',[]) if e.get('intentGeneration')==snapshot['generation'] and e.get('code')=='policy_checks_unavailable']
             for event in pressure:
                 if event['at'] not in captured and len(captured)<2:
-                    captured.add(event['at']);probe_diagnostics()
+                    captured.add(event['at']);probe_diagnostics(snapshot)
             return snapshot.get('policy',{}).get('phase')=='committed' and snapshot['policy'].get('activeRevision')==1
-        await_condition(committed)
+        try:
+            await_condition(committed)
+        except AssertionError as error:
+            raise AssertionError('Initial managed policy did not activate before the scenario') from error
     scenarios = ['signedPolicyBootstrapsCurrentConfig', 'healthyChangedCandidateCommits', 'invalidPolicyAndImportCannotReplaceActive',
                  'failedNativeCandidateRollsBackAndCannotReplay', 'requiredRegressionRollsBack',
                  'baselineOutageCanCommitDegraded', 'stopFencesPendingPolicy',
@@ -95,9 +101,27 @@ def main():
                 original = pid(':engine'); active = call('status')['policy']['activeRevision']
                 if name.startswith('signed'):
                     if name.startswith('signedManagement'):
+                        local_revision = call('status')['configRevision']
                         stage(publisher.sign(config, revision=2, operation='release'))
                         await_condition(lambda: not call('status')['policy']['managed'] and call('status')['policy']['phase'] == 'released')
                         assert pid(':engine') == original and call('status')['desiredOn']
+                        stop()
+                        progress = proxy.progress
+                        call('connect')
+
+                        def released_online():
+                            snapshot = call('status')
+                            assert snapshot['phase'] != 'BlockedByPolicy'
+                            return snapshot['phase'] == 'Online' and snapshot['engineActive'] and any(
+                                event['code'] == 'required_https_ok' and event['intentGeneration'] == snapshot['generation']
+                                for event in snapshot['events'])
+
+                        await_condition(released_online)
+                        snapshot = call('status')
+                        assert pid(':engine') and proxy.progress > progress
+                        assert snapshot['configRevision'] == local_revision
+                        assert not snapshot['policy']['managed'] and snapshot['policy']['phase'] == 'released'
+                        assert snapshot['policy']['activeRevision'] == 2
                     else:
                         assert active == 1 and call('status')['policy']['lastKnownGoodRevision'] == 1
                 elif name.startswith('healthyChanged'):
@@ -130,6 +154,22 @@ def main():
                     else:
                         raise AssertionError('Managed import bypass')
                     assert call('status')['policy']['activeRevision'] == active and pid(':engine') == original
+                    stop()
+                    stopped=call('status')
+                    assert stopped['policy']['managed'] and not stopped['desiredOn']
+                    local=copy.deepcopy(config)
+                    local['outbounds'][0]['tag']='local-only'
+                    local['route']['final']='local-only'
+                    raw=json.dumps(local).encode()
+                    operator=Device(adb('get-serialno').decode().strip(),15)
+                    try:
+                        operator.config('config-apply',raw,stopped['configRevision'],hashlib.sha256(raw).hexdigest())
+                    except ControlError as denied:
+                        assert denied.code=='command_rejected'
+                    else:
+                        raise AssertionError('Local ADB apply bypassed an active management binding while Off')
+                    after=call('status')
+                    assert after['configRevision']==stopped['configRevision'] and after['policy']['activeRevision']==active
                 elif name.startswith('failedNative'):
                     bad = copy.deepcopy(config); bad['outbounds'][0]['server_port'] = -1
                     candidate = publisher.sign(bad, revision=2); stage(candidate)
@@ -196,7 +236,7 @@ def main():
                 # Status events contain only bounded internal reason codes and
                 # counters; never print raw engine config or provider logs.
                 print('Policy failure events: ' + json.dumps(snapshot.get('events', [])[-64:]), flush=True)
-                probe_diagnostics()
+                probe_diagnostics(snapshot)
                 ET.SubElement(case, 'failure', message='Managed policy scenario failed; see bounded job output')
                 raise
     finally:
