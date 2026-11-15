@@ -2,12 +2,14 @@ import os
 import subprocess
 import unittest
 from unittest.mock import patch
-from prepare_emulator_art import prepare
+from prepare_emulator_art import prepare, framework_booted
+
+BOOTED = b'mProcessesReady=true mSystemReady=true mBooted=true mBooting=false'
 
 
 class FrameworkHeapTest(unittest.TestCase):
     def exercise(self, *, overrides=None, environment=None, stop_lost=False, start_lost=False,
-                 stop_stuck=False, same_pid=False, ready=True, root=True):
+                 stop_stuck=False, same_pid=False, ready=True, root=True, ready_after=0):
         calls = []
         time = [0]
         state = ['running']
@@ -22,11 +24,15 @@ class FrameworkHeapTest(unittest.TestCase):
             ('shell', 'id', '-u'): b'0' if root else b'2000',
             ('root',): b'restarting adbd as root', ('wait-for-device',): b'',
             ('shell', 'service', 'check', 'package'): b'Service package: found' if ready else b'Service package: not found',
+            ('shell', 'dumpsys', 'activity', '-a', 'processes'): BOOTED,
+            ('shell', 'pm', 'list', 'packages', '--user', '0', 'android'): b'package:android',
         }
         values.update(overrides or {})
 
         def adb(*args, **kwargs):
             calls.append(args)
+            if args == ('shell', 'dumpsys', 'activity', '-a', 'processes') and time[0] < ready_after:
+                return BOOTED.replace(b'mBooted=true', b'mBooted=false')
             if args in values:
                 return values[args]
             if args == ('shell', 'stop'):
@@ -96,6 +102,20 @@ class FrameworkHeapTest(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, 'deadline|did not stop'):
                 self.exercise(**args)
             self.assertEqual(1, self.calls.count(('shell', 'start')))
+
+    def test_package_binder_does_not_outrun_full_system_startup(self):
+        calls = self.exercise(ready_after=2)
+        self.assertGreaterEqual(calls.count(('shell', 'dumpsys', 'activity', '-a', 'processes')), 3)
+        for raw in (b'', BOOTED.replace(b'mSystemReady=true', b'mSystemReady=false'),
+                    BOOTED.replace(b'mProcessesReady=true', b'mProcessesReady=false'),
+                    BOOTED.replace(b'mBooted=true', b'mBooted=false'),
+                    BOOTED.replace(b'mBooting=false', b'mBooting=true'), BOOTED+b' mBooted=false'):
+            self.assertFalse(framework_booted(raw))
+            with self.assertRaisesRegex(AssertionError, 'deadline'):
+                self.exercise(overrides={('shell', 'dumpsys', 'activity', '-a', 'processes'): raw})
+        self.assertTrue(framework_booted(BOOTED))
+        with self.assertRaisesRegex(AssertionError, 'Unbounded'):
+            framework_booted(b'x'*1_048_577)
 
 
 if __name__ == '__main__':
