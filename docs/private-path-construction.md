@@ -56,4 +56,3 @@ remain pending exact-head GitHub Actions acceptance; no physical path is claimed
 
 The earlier construction primitive and ordinary/race cases passed [exact c43 Actions43715523260](https://github.com/nd4y/syn443-android/actions/runs/43715523260).
 The added pool/traffic lifecycle requires its own complete Actions acceptance.
-
