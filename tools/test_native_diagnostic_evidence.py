@@ -11,7 +11,7 @@ class NativeDiagnosticEvidenceTest(unittest.TestCase):
         self.assertEqual(5, verify(self.rows()))
 
     def test_private_candidates_require_their_own_package_and_every_real_outcome(self):
-        self.assertEqual(9, verify(self.rows(PATH_REQUIRED, package='io.syn443/bridge'), PATH_REQUIRED, 'io.syn443/bridge'))
+        self.assertEqual(12, verify(self.rows(PATH_REQUIRED, package='io.syn443/bridge'), PATH_REQUIRED, 'io.syn443/bridge'))
         for rows in [self.rows(PATH_REQUIRED), self.rows(sorted(PATH_REQUIRED)[:-1], package='io.syn443/bridge'),
                      self.rows(PATH_REQUIRED, terminal='skip', package='io.syn443/bridge'),
                      self.rows(PATH_REQUIRED, terminal='fail', package='io.syn443/bridge')]:

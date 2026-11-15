@@ -2,9 +2,11 @@ package bridge
 
 import (
 	"context"
+	"math"
 	"regexp"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing/service"
@@ -28,6 +30,8 @@ type privatePathPool struct {
 	used         int
 	holds        int
 	operations   int
+	probing      bool
+	selectors    map[string]*privatePathSelector
 	building     bool
 	closed       bool
 	queueClosed  bool
@@ -38,17 +42,21 @@ type privatePathPool struct {
 }
 
 type privatePoolEntry struct {
-	id       uint64
-	scope    string
-	cost     int
-	path     *privatePath
-	cancel   context.CancelFunc
-	holds    int
-	draining bool
-	queued   bool
-	retained bool
-	closed   bool
-	flows    map[*privateFlowOwner]struct{}
+	id             uint64
+	scope          string
+	cost           int
+	path           *privatePath
+	cancel         context.CancelFunc
+	holds          int
+	activeHolds    int
+	closeRequested bool
+	drainDeadline  int64
+	drainTimer     *time.Timer
+	draining       bool
+	queued         bool
+	retained       bool
+	closed         bool
+	flows          map[*privateFlowOwner]struct{}
 }
 
 type privatePathCandidate struct {
@@ -82,7 +90,7 @@ func newPrivatePathPool(parent context.Context, scope string, capacity int, leas
 	}
 	ctx, cancel := context.WithCancel(parent)
 	p := &privatePathPool{ctx: ctx, cancel: cancel, lease: lease, scope: scope, configured: configured, capacity: capacity,
-		entries: map[uint64]*privatePoolEntry{}, retire: make(chan *privatePoolEntry, 8), workerExited: make(chan struct{})}
+		entries: map[uint64]*privatePoolEntry{}, selectors: map[string]*privatePathSelector{}, retire: make(chan *privatePoolEntry, 8), workerExited: make(chan struct{})}
 	go p.retirementWorker()
 	stop := context.AfterFunc(parent, p.Close)
 	p.mu.Lock()
@@ -162,6 +170,10 @@ func (p *privatePathPool) finishQueueLocked() {
 
 func (p *privatePathPool) enqueueLocked(e *privatePoolEntry) {
 	e.draining = true
+	if e.drainTimer != nil {
+		e.drainTimer.Stop()
+		e.drainTimer = nil
+	}
 	if e.path != nil && !e.queued && !e.retained {
 		e.queued = true
 		e.cancel()
@@ -223,8 +235,13 @@ func (c *privatePathCandidate) hold(scope string) (*privatePathHold, error) {
 	p := c.pool
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	e := c.entry
-	if p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || scope != p.scope || e.scope != scope || p.entries[e.id] != e || e.draining || e.path == nil || p.holds >= 128 {
+	return c.holdLocked(scope)
+}
+
+func (c *privatePathCandidate) holdLocked(scope string) (*privatePathHold, error) {
+	p, e := c.pool, c.entry
+	p.expireDrainsLocked()
+	if p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || scope != p.scope || e.scope != scope || p.entries[e.id] != e || e.draining || e.queued || e.retained || e.closed || e.path == nil || e.path.ctx.Err() != nil || p.holds >= 128 {
 		return nil, errPrivatePath
 	}
 	e.holds++
@@ -239,6 +256,7 @@ func (h *privatePathHold) outbound(scope string) (adapter.Outbound, error) {
 	p := h.pool
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.expireDrainsLocked()
 	e := h.entry
 	if h.closed.Load() || p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || scope != p.scope || e.scope != scope || p.entries[e.id] != e || e.queued || e.path.ctx.Err() != nil {
 		return nil, errPrivatePath
@@ -300,12 +318,52 @@ func (c *privatePathCandidate) Close() error {
 	defer p.mu.Unlock()
 	e := c.entry
 	if p.entries[e.id] == e && !p.queueClosed {
-		e.draining = true
-		if e.holds == 0 {
-			p.enqueueLocked(e)
+		e.closeRequested = true
+		if e.activeHolds == 0 {
+			p.drainLocked(e, 120_000)
 		}
 	}
 	return nil
+}
+
+// One finite timer per resident entry. BOOTTIME is checked at every operation
+// too: a suspended scheduler must never extend a drain lease after wake-up.
+func (p *privatePathPool) drainLocked(e *privatePoolEntry, graceMS int64) {
+	if e.draining || e.queued || e.closed || p.queueClosed {
+		return
+	}
+	e.draining = true
+	now := p.lease.clock()
+	if !privateManagedLease(p.lease) || now < 0 || now > math.MaxInt64-graceMS {
+		p.enqueueLocked(e)
+		return
+	}
+	e.drainDeadline = now + graceMS
+	if e.holds == 0 {
+		p.enqueueLocked(e)
+		return
+	}
+	e.drainTimer = time.AfterFunc(time.Duration(graceMS)*time.Millisecond, func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if p.entries[e.id] != e || e.queued || p.queueClosed {
+			return
+		}
+		// The platform clock is authoritative even if a timer wakes early.
+		if remaining := e.drainDeadline - p.lease.clock(); remaining > 0 {
+			e.drainTimer.Reset(time.Duration(remaining) * time.Millisecond)
+			return
+		}
+		p.enqueueLocked(e)
+	})
+}
+
+func (p *privatePathPool) expireDrainsLocked() {
+	for _, e := range p.entries {
+		if e.draining && e.drainDeadline > 0 && !e.queued && !p.queueClosed && p.lease.clock() >= e.drainDeadline {
+			p.enqueueLocked(e)
+		}
+	}
 }
 
 func (p *privatePathPool) Close() {

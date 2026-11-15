@@ -44,13 +44,36 @@ reservation. Pool/candidate/flow diagnostic formatting redacts route details.
 Real SOCKS/HTTP TCP payloads, local UDP socket ownership, late positive reads,
 partial/panicking dials and close failures are mandatory test cases. Local UDP
 ownership tests are not proof of SOCKS/VLESS UDP protocol acceptance.
-All nine constructor/pool/traffic cases must pass in ordinary and race JSON evidence.
+The internal selection primitive copies one to four validated checks, binds them
+to the full context, group and canonical check-set digest, and runs actual checks
+through the owned candidate. One synchronous pool-wide probe remains occupied
+until its worker returns; cancellation or context replacement cannot create a
+replacement for a blocked adapter. A proof is minted only after every check
+finishes positively within the aggregate twelve-second bound. Atomic selection
+requires that exact single-use proof, the expected previous selection, current
+lease/context and age at most fifteen seconds from the oldest sample. Cached
+scores and copied/caller-supplied result objects grant no authority.
+
+Selected paths have independent group pins. Planner eviction cannot retire an
+active path, and one group cannot retire another group's selected path. A switch
+pins its replacement before releasing the previous pin, and new traffic acquires
+its flow reference under the same lock as selection. Old flows drain for an
+explicit one-to-three-hundred-second bound. One finite timer per resident entry
+and BOOTTIME checks on operations prevent suspend from extending that authority.
+Stop/context changes still withdraw every old path immediately. TCP wrappers
+preserve lazy handshake detection without providing a raw-socket unwrap.
+
+Three required selection cases exercise two real SOCKS-to-HTTP paths and hop
+counters before granting each TCP proof, old-flow continuity, boot-clock drain
+expiry, shared pins, copied/wrong-group/wrong-check/wrong-scope/stale/replayed
+proofs, expired authorization, blocked-probe admission and lazy handshake failure.
+All twelve constructor/pool/traffic/selection cases must pass in ordinary and race JSON evidence.
 
 This primitive is not exposed through the Java API, accepted configuration or a
 signed device capability. Socket ownership grants no route selection authority.
 It still needs an independently authorized immutable catalogue resolver, graph
-eligibility, shared priority/probe admission, fresh proof-bound atomic selection,
-drain deadlines and client integration. Those gates must be implemented and
+eligibility, shared priority/energy admission, contextual memory, signed issuance
+and client integration. Those gates must be implemented and
 accepted before runtime use. Source and executable tests
 remain pending exact-head GitHub Actions acceptance; no physical path is claimed.
 

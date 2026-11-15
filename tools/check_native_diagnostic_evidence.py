@@ -20,6 +20,9 @@ PATH_REQUIRED = {
     'TestPrivateTrafficRealTCPLeaseAndGracefulDrain',
     'TestPrivateTrafficPacketsAndLateReadCannotOutliveContext',
     'TestPrivateTrafficPartialDialPanicAndLateOwnerKeepCapacity',
+    'TestPrivateSelectionRealFreshSwitchPinsAndBoundsDrain',
+    'TestPrivateSelectionProofBindingsFreshnessAndSharedPins',
+    'TestPrivateSelectionBlockedProbeCannotBeReplacedOrPublishLate',
 }
 
 
