@@ -15,6 +15,10 @@ its child context and never closes or resets the configured parent manager.
 If cleanup itself fails, the helper returns a separate retained owner and no
 usable path. Its handles and resource reservation must remain held until
 confirmed recovery; a failed close is never counted as released capacity.
+An exception from a constructor before it returns a handle also retains the
+reservation. Closing previously returned objects cannot acknowledge cleanup of
+an unknown partial allocation. Context replacement cannot erase this uncertainty;
+only confirmed owner recovery may reclaim it.
 
 Native tests use real loopback SOCKS and HTTP handshakes and payloads, check both
 hop counters, reject parent/default borrowing and external mutations, exercise

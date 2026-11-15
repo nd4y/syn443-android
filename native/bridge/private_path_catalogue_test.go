@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
 	M "github.com/sagernet/sing/common/metadata"
 )
 
@@ -49,6 +50,9 @@ func TestPrivateCatalogueOwnsNormalizedProfilesAndRuntimeFactory(t *testing.T) {
 	path, e := p.prepare(scope, []string{"entry", "exit"}, c.create)
 	if e != nil {
 		t.Fatal(e)
+	}
+	if raw := fmt.Sprintf("%v %#v", path.entry.path, path.entry.path); strings.Contains(raw, address) || strings.Contains(raw, "proxy") {
+		t.Fatal("path diagnostics exposed construction data")
 	}
 	flow, e := path.dialTCP(scope, context.Background(), "tcp", M.ParseSocksaddr(address))
 	if e != nil {
@@ -220,4 +224,32 @@ func TestPrivateCatalogueBoundsContextAndFreshTypedConstruction(t *testing.T) {
 	if len(instance.Outbound().Outbounds()) != 1 {
 		t.Fatal("private construction mutated configured manager")
 	}
+	t.Run("constructor panic retains reservation across scope change", func(t *testing.T) {
+		scope := strings.Repeat("a", 64)
+		pool, e := newPrivatePathPool(parent, scope, 2, privatePoolLease(t))
+		if e != nil {
+			t.Fatal(e)
+		}
+		cleanupPrivatePool(t, pool)
+		calls := 0
+		if path, e := pool.prepare(scope, []string{"one"}, func(context.Context, string, string, string) (adapter.Outbound, error) {
+			calls++
+			panic("synthetic unknown allocation")
+		}); path != nil || e != errPrivatePath {
+			t.Fatal("constructor panic gained path authority")
+		}
+		if s := pool.snapshot(); s.Dynamic != 1 || s.Retained != 1 || s.Entries != 1 || calls != 1 {
+			t.Fatal("unknown constructor allocation was lent to a replacement", s)
+		}
+		next := strings.Repeat("b", 64)
+		if !pool.changeScope(next) {
+			t.Fatal("scope did not change")
+		}
+		if path, e := pool.prepare(next, []string{"other"}, func(context.Context, string, string, string) (adapter.Outbound, error) {
+			calls++
+			return nil, errPrivatePath
+		}); path != nil || e != errPrivatePath || calls != 1 {
+			t.Fatal("scope change erased uncertain ownership")
+		}
+	})
 }

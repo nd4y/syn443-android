@@ -59,15 +59,17 @@ func (m *privatePathRegistry) add(node adapter.Outbound) error {
 }
 
 type privatePath struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	registry *privatePathRegistry
-	owned    []adapter.Outbound
-	once     sync.Once
-	closeErr error
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	registry             *privatePathRegistry
+	owned                []adapter.Outbound
+	once                 sync.Once
+	closeErr             error
+	uncertainConstructor bool
 }
 
-func (p *privatePath) String() string { return "PrivatePath([redacted])" }
+func (p *privatePath) String() string   { return "PrivatePath([redacted])" }
+func (p *privatePath) GoString() string { return p.String() }
 
 // This primitive grants no graph, probe, selection or resource admission. It is
 // not exposed through the Java API or any accepted policy. Its resolver must
@@ -96,8 +98,12 @@ func buildPrivatePath(parent context.Context, hops []string, create func(context
 	manager := &privatePathRegistry{nodes: map[string]adapter.Outbound{}}
 	child = service.ContextWith[adapter.OutboundManager](child, manager)
 	owned := &privatePath{ctx: child, cancel: cancel, registry: manager}
+	constructing := false
 	defer func() {
 		if recover() != nil {
+			// A panicking constructor returned no handle. Closing the earlier
+			// objects cannot confirm cleanup of any hidden partial allocation.
+			owned.uncertainConstructor = constructing
 			result = nil
 			err = errPrivatePath
 		}
@@ -115,7 +121,9 @@ func buildPrivatePath(parent context.Context, hops []string, create func(context
 			return nil, nil, errPrivatePath
 		}
 		tag := fmt.Sprintf("%s-%d", prefix, i)
+		constructing = true
 		node, createErr := create(child, id, tag, previous)
+		constructing = false
 		// Some constructors return a partially initialized object with an error.
 		// Own it before inspecting errors, tags, dependencies or lifecycle.
 		if node != nil {
@@ -163,6 +171,9 @@ func privateClose(node adapter.Outbound) (failed bool) {
 }
 func (p *privatePath) Close() error {
 	p.once.Do(func() {
+		if p.uncertainConstructor {
+			p.closeErr = errPrivatePath
+		}
 		p.cancel()
 		p.registry.mu.Lock()
 		p.registry.closed = true

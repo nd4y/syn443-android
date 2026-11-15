@@ -166,8 +166,11 @@ func TestPrivateCandidateFailureOwnsPartialObjectsAndClosesInReverse(t *testing.
 				}
 				return node, nil
 			})
-			if path != nil || retained != nil || err != errPrivatePath {
+			if path != nil || err != errPrivatePath || (retained != nil) != (kind == "panic-constructor") {
 				t.Fatal("partial path or raw error escaped")
+			}
+			if retained != nil && (retained.ctx.Err() == nil || retained.Close() != errPrivatePath) {
+				t.Fatal("unknown constructor owner was counted as confirmed cleanup")
 			}
 			expected := append([]string(nil), created...)
 			if kind == "bad-tag" {
