@@ -30,11 +30,22 @@ import java.io.File
 
 class SupportActivity:ComponentActivity() {
     override fun onCreate(savedInstanceState:Bundle?) {super.onCreate(savedInstanceState)
+        var prepared by mutableStateOf(false)
+        // Install the root during onCreate. Cache preparation must not attach a
+        // new Compose root later, after the resumed window has begun drawing.
+        // Keep chat operations behind preparation so cleanup cannot delete a
+        // file created by this instance of the screen.
+        setContent {MaterialTheme(colorScheme=darkColorScheme()) {Surface(Modifier.fillMaxSize()) {
+            if(prepared)SupportChat()
+            else Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
+                Text("Подготовка чата",Modifier.testTag("chat-preparing"))
+            }
+        }}}
         // Only private chat preparation files from an interrupted UI operation.
         // Durable drafts/parts live in the encrypted no-backup SQL store.
         lifecycleScope.launch {
             withContext(Dispatchers.IO) {cacheDir.listFiles()?.filter {it.isFile && it.name.startsWith("chat-") && (it.name.endsWith(".input") || it.name.endsWith(".output") || it.name.startsWith("chat-download-"))}?.take(256)?.forEach {it.delete()}}
-            setContent {MaterialTheme(colorScheme=darkColorScheme()) {Surface(Modifier.fillMaxSize()) {SupportChat()}}}
+            prepared=true
         }
     }
 }
