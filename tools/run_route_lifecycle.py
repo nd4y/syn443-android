@@ -32,6 +32,29 @@ class RouteProxy(socketserver.BaseRequestHandler):
             self.request.sendall(b'SSH-2.0-synthetic\r\n' if self.server.ssh_ok else b'wrong-protocol\r\n')
 
 
+
+def completed_route_batch():
+    # Online is independent HTTPS health, not completion of every outbound probe.
+    report=call('routes-status')
+    rows=report.get('routes')
+    assert isinstance(rows,list) and [r.get('id') for r in rows]==['route-1','route-2','route-3'], 'Unexpected route batch membership'
+    expected=['working','failed','working']
+    pending=False
+    for row,state in zip(rows,expected):
+        observed=row.get('state')
+        if observed in ('checking','unknown','unavailable'):
+            pending=True
+            continue
+        assert observed==state, 'A completed route has an unexpected outcome'
+        age=row.get('ageMs')
+        assert type(age) is int and 0<=age<=35_000, 'Route evidence is missing or stale'
+    if pending or report.get('running') is True:
+        return False
+    assert report.get('running') is False and report.get('requiredReady') is True, 'Route batch has no completion proof'
+    assert rows[2].get('measuredPath')==['route-3','route-1'], 'Selector probe did not traverse its actual selected outbound'
+    return True
+
+
 def resume_blocked(before):
     # Activity drawn is earlier than VpnControls' asynchronous foreground-open.
     # Observe that completion, while failing immediately on any unsafe state.
@@ -105,6 +128,7 @@ def main():
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')
         call('import',base64.b64encode(raw.encode()).decode());call('test-health','synthetic-http');forward()
         call('connect');await_condition(lambda:call('status')['phase']=='Online' and servers[0].progress>0,150)
+        await_condition(completed_route_batch,35)
     def row(index):return call('routes-status')['routes'][index]
     def reboot():
         reboot_preserved(adb);forward()
@@ -133,7 +157,7 @@ def main():
         print(case.get('name')+': passed',flush=True)
 
         case=new_case('routeChecksUseActualOutboundsAndSelectedProxy')
-        prepare();assert row(0)['state']=='working' and row(1)['state']=='failed' and row(2)['state']=='working'
+        prepare();assert completed_route_batch()
         assert row(2)['measuredPath']==['route-3','route-1'] and all(s.route_probes>0 for s in servers)
         controller=pid(':controller')
         try:call('routes-check','route-99')
