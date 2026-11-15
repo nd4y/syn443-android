@@ -3,6 +3,19 @@ import sys,xml.etree.ElementTree as ET
 root=Path(__file__).resolve().parent.parent
 mode=sys.argv[1]
 if mode=="jvm":
+    assert {("io.syn443.decision.RouteGraphTest",name) for name in {
+        "sharedGraphQueriesAndBoundsAgreeWithGo",
+        "sharedMalformedGraphsNeverAcquirePartialAuthority",
+        "graphFrontierEnumeratesOnlyBoundGroupPathsWithStableIDs",
+        "graphWarmHintDoesNotBypassModeTemplateExpiryOrContext",
+        "exactCatalogueAndCandidateBoundaryCannotBeTruncated",
+        "perIntentBoundDeduplicatesSharedTemplatesAndRejectsSplitOverflow",
+        "utf8ByteLimitsAndOwnedMetadataSurviveCallerMutation",
+    }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route graph conformance cases missing"
+    from coverage_evidence import verify_classes
+    verify_classes(root/"core/decision/build/reports/jacoco/test/jacocoTestReport.xml", {
+        "io.syn443.decision.RouteGraph", "io.syn443.decision.RouteGraph.Companion",
+    })
     paths=list((root/"core/decision/build/test-results/test").glob("TEST-*.xml"))
     minimum=8
 elif mode=="emulator":
