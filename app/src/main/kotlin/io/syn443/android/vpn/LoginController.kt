@@ -975,7 +975,16 @@ class LoginController private constructor(private val context:android.app.Applic
                 io.syn443.android.BuildConfig.VERSION_CODE)
             val queueKey=Identity.hash(("syn443/runtime/"+expected.authority+"/"+session.session.deviceId+"/"+session.keyThumbprint).toByteArray(Charsets.US_ASCII))
             val prepared=runtimeDisk.read(queueKey).offer(queueKey,sample)
-            if(!prepared.ready(queueKey,time.lowerMs))return@submitIfIdle
+            if(!prepared.ready(queueKey,time.lowerMs)) {
+                // Reuse the same supervisor tick close to the durable deadline.
+                // A restart must not repeatedly decrypt a one-hour backoff,
+                // nor add another full minute when the deadline is imminent.
+                synchronized(commands) {
+                    currentConsent()
+                    nextRuntimeElapsed=elapsed()+(prepared.notBeforeMs-time.lowerMs).coerceIn(1000,3_600_000)
+                }
+                return@submitIfIdle
+            }
             val report=checkNotNull(prepared.pending)
             val queue=prepared.attempted(queueKey,report,time,interval)
             val route=object:HttpRoute {
