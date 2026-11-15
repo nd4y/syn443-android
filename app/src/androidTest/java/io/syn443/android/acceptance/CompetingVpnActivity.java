@@ -12,13 +12,20 @@ import android.widget.TextView;
 /** A separate APK process cannot inherit Kotlin classes from the target app. */
 @SuppressWarnings("deprecation")
 public final class CompetingVpnActivity extends Activity {
+    private int ciAction;
+    private boolean ciDispatched;
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         if ("ranchu".equals(Build.HARDWARE) || "goldfish".equals(Build.HARDWARE)) {
-            if (getIntent().getBooleanExtra("ci-stop", false)) { stopPeer(); finish(); return; }
-            if (getIntent().getBooleanExtra("ci-start", false)) {
-                if (VpnService.prepare(this) != null) throw new IllegalStateException("Emulator consent missing");
-                startPeer(); finish(); return;
+            boolean stop = getIntent().getBooleanExtra("ci-stop", false);
+            boolean start = getIntent().getBooleanExtra("ci-start", false);
+            if (stop && start) throw new IllegalStateException("Ambiguous fixture action");
+            if (stop || start) {
+                ciAction = stop ? 1 : 2;
+                TextView preparing = new TextView(this);
+                preparing.setText("Preparing temporary VPN acceptance action");
+                setContentView(preparing);
+                return;
             }
         }
         LinearLayout root = new LinearLayout(this);
@@ -40,8 +47,25 @@ public final class CompetingVpnActivity extends Activity {
         root.addView(stop);
         setContentView(root);
     }
+    @Override protected void onPostResume() {
+        super.onPostResume();
+        if (ciAction == 0 || ciDispatched) return;
+        ciDispatched = true;
+        // onCreate can still belong to a cached/background UID. Dispatch once
+        // from the resumed Activity rather than bypassing Android restrictions.
+        getWindow().getDecorView().post(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            try {
+                if (ciAction == 1) stopPeer();
+                else {
+                    if (VpnService.prepare(this) != null) throw new IllegalStateException("Emulator consent missing");
+                    startPeer();
+                }
+            } finally { finish(); }
+        });
+    }
     private void startPeer() { startForegroundService(new Intent(this, CompetingVpnService.class)); }
-    private void stopPeer() { startService(new Intent(this, CompetingVpnService.class).setAction(CompetingVpnService.STOP)); }
+    private void stopPeer() { startForegroundService(new Intent(this, CompetingVpnService.class).setAction(CompetingVpnService.STOP)); }
     @Override public void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == 41 && result == RESULT_OK) startPeer();
