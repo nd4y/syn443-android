@@ -26,7 +26,8 @@
         "core/decision/src/test/kotlin/io/syn443/decision/CoordinatorTest.kt",
         "contracts/README.md",
         "docs/managed-policy.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/private-path-construction.md"
       ]
     },
     {
@@ -102,7 +103,8 @@
       "text": "Каждый модуль имеет engineId, собственную версию, upstream commit, список патчей, сборочный manifest, хеши, SBOM, лицензии и тесты. Зависимости фиксируются lock-манифестом релиза; недокументированный dirty checkout не считается воспроизводимой сборкой.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/private-path-construction.md"
       ],
       "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests.",
       "remainingScope": "Complete capabilities/version/SBOM/release/update and physical acceptance."
@@ -934,7 +936,8 @@
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/non-lte-acceptance-20261115.md",
-        "docs/emulator-observation-boundaries.md"
+        "docs/emulator-observation-boundaries.md",
+        "docs/private-path-construction.md"
       ],
       "text": "Необязательный туннель/peer/outbound может быть недоступен уже при холодном старте: независимые разрешённые маршруты должны запуститься/продолжить работу, а затронутые приватные назначения остаются явно заблокированными без fallback в общий прокси или direct. Восстановление выбирает минимальную неисправную dependency scope; проверяются DNS/bootstrap dependencies, отсутствие потока до установки блокировок и отсутствие утечки при старте, handover, реконфигурации и смерти модуля. Граница отдельного процесса не доказывает независимый startup/recovery outbounds внутри одного native box: engine-api объявляет реальные capabilities, движок/адаптер устраняет fail-fast общего запуска для optional dependency либо использует доказанную архитектуру с теми же гарантиями. Если для восстановления разделяемого runtime всё же нужен общий перезапуск, он bounded, временный разрыв независимых потоков измерен, блокировки установлены до него; это не считается независимым восстановлением и не закрывает соответствующий AC86. Обязательные взаимозависимости не объявляются optional ради прохождения проверки.",
       "implementationScope": "Deferred optional NetBird startup and independent target-route evidence. The dated2026-11-15 checkpoint records exact accepted source, CI and physical/live scope; statuses remain partial.",

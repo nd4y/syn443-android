@@ -23,6 +23,18 @@ and inject partial construction, invalid dependencies/tags and lifecycle panics.
 All three named cases must actually start and pass in ordinary and race JSON
 evidence. An unrelated package, omitted outcome or skip cannot satisfy the gate.
 
+The candidate owner pool additionally reserves all in-flight, usable, draining
+and retained adapters together with the immutable configured adapters. Its local
+cap is at most128 adapters, eight resident candidates and128 held references.
+Only one constructor may run; a blocked constructor cannot be replaced after a
+context change. Closing uses one permanent worker with a bounded queue. A blocked
+or failed close retains capacity, while Stop and scope changes return promptly
+and reject stale work. Graceful retirement rejects new references and lets old
+holders finish before closing the private adapters. Real SOCKS/HTTP traffic and
+configured-parent survival are tested under this ownership model; separate cases
+cover blocked construction, late completion, failed/blocked retirement and caps.
+All six constructor/pool cases must pass in ordinary and race JSON evidence.
+
 This primitive is not exposed through the Java API, accepted configuration or a
 signed device capability. Its callback still needs an independently authorized
 immutable catalogue resolver. It does not grant graph eligibility, resource or
