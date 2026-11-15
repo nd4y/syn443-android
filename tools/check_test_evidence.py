@@ -126,6 +126,9 @@ if mode=="health":
     required.add(('io.syn443.health.TlsTest','certificateFailureDoesNotTryAnotherAddressOrWeakenTrust'))
     assert required <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required bounded address fallback cases missing'
 if mode=="identity":
+    chat_recovery={("io.syn443.identity.ChatRefreshGateTest",name) for name in {'cancellationAndBusyDoNotInventAPathOrAccumulateFailureBackoff', 'healthyPollingAndManualActionsHaveIndependentBoundedIntervals', 'authorityFailureNeedsAnExplicitRetryAndANewAccountStartsFresh', 'serverThrottlingCannotBeBypassedByTheRetryButton', 'repeatedOfflineFailuresBackOffWithoutPollingOrDroppingTheTail', 'concurrentRefreshRequestsAdmitExactlyOneOwnedAttempt', 'staleCompletionsAndInvalidClocksCannotReleaseANewerWorker'}}
+    chat_recovery.add(("io.syn443.identity.AuthProtocolTest","disabledChatSelfIsUnavailableWithoutBorrowingAnotherEndpointOrSession"))
+    assert chat_recovery <= {(c.get("classname"),c.get("name")) for c in cases}, "Required bounded chat recovery outcomes missing"
     runtime_required={("io.syn443.identity.RuntimeObservationTest",name) for name in {
         "wireIsClosedSmallRedactedAndCompatibleWithAllSupportedPhases",
         "invalidNumbersPhasesAndContradictoryEvidenceNeverProduceARequest",

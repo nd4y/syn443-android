@@ -371,6 +371,19 @@ class AuthProtocolTest {
         error(AuthFailure.INVALID_REPLY) {f.client.chat("uploads/part",body,f.current().copy(keyThumbprint="wrong"),IdentityScope())}
         val scope=IdentityScope();scope.cancel();error(AuthFailure.CANCELLED) {f.client.chat("self","{}",f.current(),scope)}
     }
+    @Test fun disabledChatSelfIsUnavailableWithoutBorrowingAnotherEndpointOrSession() {
+        val f=Fixture();var requests=0
+        f.handler={_,url,_,_,_,_->
+            requests++;assertEquals(b.apiOrigin+"/v1/chat/self",url)
+            json(404,text="not found").copy(headers=mapOf("content-type" to listOf("text/plain"),"date" to listOf(date())))
+        }
+        error(AuthFailure.UNAVAILABLE) {f.client.chat("self","{}",f.current(),IdentityScope())}
+        assertEquals(1,requests)
+        f.handler={_,_,_,_,_,_->json(404,text="not found")}
+        error(AuthFailure.INVALID_REPLY) {f.client.chat("download","{}",f.current(),IdentityScope())}
+        f.handler={_,_,_,_,_,_->json(text="{\"admin\":false,\"conversation\":{\"id\":\"synthetic\"}}")}
+        assertTrue(f.client.chat("self","{}",f.current(),IdentityScope()).contains("synthetic"))
+    }
     @Test fun chatRejectsUnknownPathOversizeExpiredSessionAndUnsafeJson() {
         val f=Fixture()
         for((action,body) in listOf("../identity" to "{}","self" to "a".repeat(32769),"uploads/part" to "a".repeat(360449),"self" to "[]","self" to "{\"x\":1,\"x\":2}")) {

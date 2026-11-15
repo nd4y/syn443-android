@@ -1,3 +1,8 @@
+[Chat availability recovery](chat-recovery.md) requires eight additional named
+identity JVM outcomes and a separate90% scheduler coverage check. Healthy/offline,
+manual/throttled, cancelled/stale/concurrent and changed-account schedules remain
+bounded. Existing238 Android outcomes on29/35/37 are retained.
+
 # Testing and release gates
 
 [Runtime observations](device-runtime-observations.md) require nine named

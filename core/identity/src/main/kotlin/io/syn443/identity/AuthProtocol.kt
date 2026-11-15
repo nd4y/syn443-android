@@ -200,6 +200,7 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
             if(DeviceSubscription.isClaim(path) && reply.status==404)throw DeviceSubscriptionUnavailable()
             if(path==TechnicalTelemetry.PATH && reply.status==404)throw TelemetryUnavailable()
             if(path==RuntimeObservation.PATH && reply.status==404)throw RuntimeObservationUnavailable()
+            if(path=="/v1/chat/self" && reply.status==404)throw AuthException(AuthFailure.UNAVAILABLE)
             status(reply,if(path.endsWith("/revoke") || path=="/v1/device/policy/status" || path==RuntimeObservation.PATH || sourceLimit!=null ||
                 (path==TechnicalTelemetry.PATH || DeviceSubscription.isClaim(path)) && reply.status==204)204 else 200)
             return Delivered(reply,observed(reply,start,floor),currentNonce)
