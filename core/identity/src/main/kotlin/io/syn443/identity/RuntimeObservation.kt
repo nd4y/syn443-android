@@ -32,9 +32,10 @@ object RuntimeObservation {
     /** One encrypted pending body and a durable per-key cursor. Session rotation
      * does not reset this cursor. Millisecond server time also bounds recovery
      * after restoring an older queue; the phone wall clock is never consulted. */
-    @Serializable data class Snapshot(val version:Int, val scope:String, val cursor:Long, val pending:Report?) {
+    @Serializable data class Snapshot(val version:Int, val scope:String, val cursor:Long, val pending:Report?, val notBeforeMs:Long=0) {
         fun validate() {
             require(version==1 && scope.matches(Regex("[A-Za-z0-9_-]{43}")) && cursor in 0..MAX_INTEGER)
+            require(notBeforeMs in 0..MAX_INTEGER)
             pending?.let {it.validate();require(it.sequence==cursor)}
         }
         fun offer(current:String,sample:Report):Snapshot {
@@ -50,6 +51,22 @@ object RuntimeObservation {
             return copy(pending=null)
         }
         fun discard(current:String):Snapshot {validate();require(current==scope);return copy(pending=null)}
+        fun ready(current:String,lowerMs:Long):Boolean {
+            validate();require(current==scope && lowerMs in 1..MAX_INTEGER)
+            return lowerMs>=notBeforeMs
+        }
+        /** Persist before dispatch. Use upper-at-attempt and lower-at-retry so
+         * neither clock uncertainty nor a new controller/boot buys radio work. */
+        fun attempted(current:String,sent:Report,time:TimeWindow,intervalMs:Long):Snapshot {
+            validate();require(pending==sent && ready(current,time.lowerMs))
+            require(intervalMs==60_000L || intervalMs==300_000L)
+            return deferred(current,time,intervalMs)
+        }
+        fun deferred(current:String,time:TimeWindow,delayMs:Long):Snapshot {
+            validate();require(current==scope);sampleTime(time)
+            require(delayMs in setOf(60_000L,300_000L,3_600_000L))
+            return copy(notBeforeMs=maxOf(notBeforeMs,Math.addExact(time.upperMs,delayMs))).also {it.validate()}
+        }
         override fun toString()="RuntimeObservationQueue([redacted])"
     }
     fun empty(scope:String)=Snapshot(1,scope,0,null).also {it.validate()}

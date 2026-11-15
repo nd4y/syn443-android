@@ -58,4 +58,30 @@ class RuntimeObservationTest {
         for(window in listOf(TimeWindow(0,1),TimeWindow(10,9),TimeWindow(1,50_002)))
             assertThrows(IllegalArgumentException::class.java){RuntimeObservation.sampleTime(window)}
     }
+    @Test fun durableAttemptAndErrorBudgetsSurviveRestartAcknowledgmentConsentAndClockUncertainty() {
+        val at=sample().sampledAtMs
+        val offered=RuntimeObservation.empty(owner).offer(owner,sample())
+        assertTrue(offered.ready(owner,at))
+        val consumed=offered.attempted(owner,offered.pending!!,TimeWindow(at,at+20_000),60_000)
+        val reopened=Canonical.json.decodeFromString<RuntimeObservation.Snapshot>(Canonical.json.encodeToString(consumed))
+        val acknowledged=reopened.acknowledged(owner,reopened.pending!!).discard(owner)
+        assertFalse(acknowledged.ready(owner,at+79_999))
+        assertTrue(acknowledged.ready(owner,at+80_000))
+        assertFalse(acknowledged.offer(owner,sample(at+1)).ready(owner,at+1))
+        assertThrows(IllegalArgumentException::class.java){reopened.attempted(owner,reopened.pending!!,TimeWindow(at+1,at+2),60_000)}
+        for(delay in listOf(300_000L,3_600_000L)) {
+            val delayed=reopened.deferred(owner,TimeWindow(at+1,at+2),delay).discard(owner)
+            val restored=Canonical.json.decodeFromString<RuntimeObservation.Snapshot>(Canonical.json.encodeToString(delayed))
+            assertFalse(restored.ready(owner,at+delay+1));assertTrue(restored.ready(owner,at+delay+2))
+        }
+        val metered=offered.attempted(owner,offered.pending!!,TimeWindow(at,at),300_000)
+        assertFalse(metered.ready(owner,at+299_999));assertTrue(metered.ready(owner,at+300_000))
+        for(action in listOf<()->Unit>({offered.attempted(owner,offered.pending!!,TimeWindow(at,at),1)},
+            {offered.attempted(owner,sample(),TimeWindow(at,at),60_000)},
+            {offered.deferred(owner,TimeWindow(at,at),2)},
+            {offered.deferred(owner,TimeWindow(9_007_199_254_740_991,9_007_199_254_740_991),60_000)},
+            {offered.ready(owner,0)},{offered.copy(notBeforeMs=-1).validate()}))
+            assertThrows(IllegalArgumentException::class.java,action)
+        assertEquals("RuntimeObservationQueue([redacted])",offered.toString())
+    }
 }

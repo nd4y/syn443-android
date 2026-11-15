@@ -73,4 +73,21 @@ class RuntimeObservationDiskTest {
             assertThrows(IllegalStateException::class.java){disk.erase()}
         }
     }
+    @Test fun runtimeAttemptBudgetSurvivesEncryptedRestartAndCannotBeResetByConsentOrRetry() {
+        val namespace=namespace();val disk=RuntimeObservationDisk(context,namespace)
+        try {
+            val queued=queue();val report=checkNotNull(queued.pending);val at=report.sampledAtMs
+            val attempted=queued.attempted(owner,report,io.syn443.identity.TimeWindow(at,at+1000),60_000)
+            disk.write(owner,attempted)
+            val restarted=RuntimeObservationDisk(context,namespace)
+            assertFalse(restarted.read(owner).ready(owner,at+60_999))
+            restarted.clearPending();val withdrawn=restarted.read(owner)
+            assertNull(withdrawn.pending);assertFalse(withdrawn.offer(owner,report).ready(owner,at+60_999))
+            assertTrue(withdrawn.ready(owner,at+61_000))
+            val unavailable=withdrawn.deferred(owner,io.syn443.identity.TimeWindow(at,at),3_600_000)
+            restarted.write(owner,unavailable)
+            val restored=RuntimeObservationDisk(context,namespace).read(owner)
+            assertFalse(restored.ready(owner,at+3_599_999));assertTrue(restored.ready(owner,at+3_600_000))
+        }finally {disk.erase()}
+    }
 }

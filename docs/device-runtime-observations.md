@@ -16,13 +16,20 @@ Transport uses one captured physical network and refuses substitution or loss.
 Stop, consent withdrawal, session changes and retirement fence late results.
 
 A no-backup Keystore/AES-GCM AtomicFile holds one pending body and its per-key
-monotonic cursor, in at most4096 encrypted bytes. Retries retain the exact
+monotonic cursor and next-attempt deadline, in at most4096 encrypted bytes. Retries retain the exact
 body and sample time; a different state or a sample at least90 seconds old
 reserves a newer sequence before dispatch. The sequence is the larger of the
 previous cursor plus one and the conservative server-time sample. It is an
 ordering token, not a count or a phone-clock reading. A new proof cannot make
 an old sample fresh. Receipt loss leaves the queue intact. Acknowledgment
-clears only its exact pending report. Consent withdrawal keeps the cursor.
+clears only its exact pending report. Consent withdrawal keeps the cursor and
+budget. Attempt deadlines are committed before any dispatch, using the trusted
+upper time bound plus the interval; a retry requires the new lower bound to
+reach that deadline. Controller death, reboot, clock uncertainty, a lost reply
+or toggling consent cannot buy additional radio work. Failure backoffs are
+durable too. The RAM elapsed timer is only a cheap admission hint. A new
+authority/device/key scope starts its own queue; login never reuses another
+scope's pending body or RAM delay.
 
 `POST /v1/device/runtime` uses the existing DPoP session, body hash and nonce
 retry. The closed nine-field body is at most1024 bytes. Only an empty204 is
@@ -34,8 +41,8 @@ receipt plus180 seconds. Thus metered or suspended clients can become stale;
 there is no guarantee of a final Off report or continuous background delivery.
 The activation receipt remains a historical record and is never rewritten.
 
-Actions must retain the existing gates and all eight named identity wire/queue
-cases, six additional Android cases and the three-API lifecycle matrix.
+Actions must retain the existing gates and all nine named identity wire/queue
+cases, seven additional Android cases and the three-API lifecycle matrix.
 The runtime core has an independently checked90% line gate. Actual SQL and
 browser cases belong to the shared server contract. Exact-source CI, upgrade,
 queue/cancellation and private Xperia USB/Wi-Fi report/readback acceptance

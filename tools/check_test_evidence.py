@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=234
+    minimum=235
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -119,7 +119,8 @@ if mode=="identity":
         "exactPendingRetrySurvivesSerializationWithoutRefreshingItsTimestamp",
         "oldOrChangedFactsReserveANewSequenceBeforeTheNextUpload",
         "acknowledgmentAndConsentWithdrawalKeepTheCursorAndRejectSubstitution",
-        "samplesUseOnlyTheTrustedTimeWindowAndRefuseUnboundedUncertainty"}}
+        "samplesUseOnlyTheTrustedTimeWindowAndRefuseUnboundedUncertainty",
+        "durableAttemptAndErrorBudgetsSurviveRestartAcknowledgmentConsentAndClockUncertainty"}}
     runtime_required.update({("io.syn443.identity.AuthProtocolTest",name) for name in {
         "runtimeObservationBindsTheExactRetryBodyAndRequiresAnEmptyAcknowledgment",
         "optionalRuntimeFailuresDoNotReplaceAuthorityAndReauthenticationIsStillRequired"}})
@@ -336,7 +337,8 @@ if mode=="emulator":
         "runtimeCaptureNeverTurnsCachedOnlineOrAnUnboundEngineIntoPositiveEvidence",
         "runtimeQueueRejectsMainThreadStorageAccess",
         "runtimeTransportReportsOnlyTheSelectedPhysicalNetworkAndFencesItsClassChanges",
-        "runtimeUploadNeedsExplicitConsentAndCannotBorrowAnArtificialVpnOnHint"}
+        "runtimeUploadNeedsExplicitConsentAndCannotBorrowAnArtificialVpnOnHint",
+        "runtimeAttemptBudgetSurvivesEncryptedRestartAndCannotBeResetByConsentOrRetry"}
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"
 print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
 

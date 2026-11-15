@@ -1,10 +1,11 @@
 # Testing and release gates
 
-[Runtime observations](device-runtime-observations.md) require eight named
-identity wire/queue cases and six additional Android cases on each API29/35/37
-(minimum234 outcomes, zero skipped). The bounded queue, immutable retry,
+[Runtime observations](device-runtime-observations.md) require nine named
+identity wire/queue cases and seven additional Android cases on each API29/35/37
+(minimum235 outcomes, zero skipped). The bounded queue, immutable retry,
 consent/Stop fences, current engine evidence and physical network attribution
-are mandatory. The runtime core retains a separately verified90% coverage gate.
+and durable radio/error budgets across restart and consent changes are mandatory.
+The runtime core retains a separately verified90% coverage gate.
 Synthetic checks do not establish physical report/readback or cellular behavior.
 
 [Managed activation reporting](activation-reporting.md) adds two mandatory

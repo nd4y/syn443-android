@@ -361,7 +361,7 @@ class LoginController private constructor(private val context:android.app.Applic
             else {expected=s;true}
         },onAdmission={
             commandEpoch++;browser=null;chatTicket=null;activationDelivery=null;panelHint=null;panelPoll=null
-            deviceSourcePollAfter=0;deviceSourceAuthority=null;telemetryAuthority=null;nextTelemetryElapsed=0
+            deviceSourcePollAfter=0;deviceSourceAuthority=null;telemetryAuthority=null;nextTelemetryElapsed=0;nextRuntimeElapsed=0
         }) {
             noVpn()
             val old=payload(expected)
@@ -964,16 +964,20 @@ class LoginController private constructor(private val context:android.app.Applic
             val physical=PhysicalIdentityRoute.capture(context)
             // Metered networks use a five-minute budget. They can truthfully age
             // to stale in the console rather than causing extra radio wakeups.
-            synchronized(commands) {currentConsent();nextRuntimeElapsed=elapsed()+if(physical.unmetered)60_000 else 300_000}
-            val sampleTime=io.syn443.identity.RuntimeObservation.sampleTime(session.time.window(boot(),elapsed()))
+            val interval=if(physical.unmetered)60_000L else 300_000L
+            synchronized(commands) {currentConsent();nextRuntimeElapsed=elapsed()+interval}
+            val time=session.time.window(boot(),elapsed())
+            val sampleTime=io.syn443.identity.RuntimeObservation.sampleTime(time)
             val checkpoint=state().checkpoint();require(checkpoint.desiredOn)
             val revision=assignedRuntime.read(expected).state.journal.active?.let {assignedRuntime.allowed(expected,it)?.payload?.revision} ?: 0
             val status=LifecycleAccess.engineStatus(context,state().read())
             val sample=RuntimeObservationCapture.sample(status,revision,physical.networkKind,sampleTime,
                 io.syn443.android.BuildConfig.VERSION_CODE)
-            val queueKey=Identity.hash(("syn443/runtime/"+session.session.deviceId+"/"+session.keyThumbprint).toByteArray(Charsets.US_ASCII))
-            val queue=runtimeDisk.read(queueKey).offer(queueKey,sample)
-            val report=checkNotNull(queue.pending)
+            val queueKey=Identity.hash(("syn443/runtime/"+expected.authority+"/"+session.session.deviceId+"/"+session.keyThumbprint).toByteArray(Charsets.US_ASCII))
+            val prepared=runtimeDisk.read(queueKey).offer(queueKey,sample)
+            if(!prepared.ready(queueKey,time.lowerMs))return@submitIfIdle
+            val report=checkNotNull(prepared.pending)
+            val queue=prepared.attempted(queueKey,report,time,interval)
             val route=object:HttpRoute {
                 override fun resolve(host:String)=physical.resolve(host)
                 override fun bind(socket:java.net.Socket)=physical.bind(socket)
@@ -991,9 +995,18 @@ class LoginController private constructor(private val context:android.app.Applic
                     route.check()
                     when(result) {
                         AuthProtocol.RuntimeResult.ACKNOWLEDGED->runtimeDisk.write(queueKey,queue.acknowledged(queueKey,report))
-                        AuthProtocol.RuntimeResult.CONFLICT->{runtimeDisk.write(queueKey,queue.discard(queueKey));nextRuntimeElapsed=elapsed()+300_000}
-                        AuthProtocol.RuntimeResult.UNSUPPORTED->nextRuntimeElapsed=elapsed()+3_600_000
-                        AuthProtocol.RuntimeResult.THROTTLED->nextRuntimeElapsed=elapsed()+300_000
+                        AuthProtocol.RuntimeResult.CONFLICT->{
+                            runtimeDisk.write(queueKey,queue.discard(queueKey).deferred(queueKey,session.time.window(boot(),elapsed()),300_000))
+                            nextRuntimeElapsed=elapsed()+300_000
+                        }
+                        AuthProtocol.RuntimeResult.UNSUPPORTED->{
+                            runtimeDisk.write(queueKey,queue.deferred(queueKey,session.time.window(boot(),elapsed()),3_600_000))
+                            nextRuntimeElapsed=elapsed()+3_600_000
+                        }
+                        AuthProtocol.RuntimeResult.THROTTLED->{
+                            runtimeDisk.write(queueKey,queue.deferred(queueKey,session.time.window(boot(),elapsed()),300_000))
+                            nextRuntimeElapsed=elapsed()+300_000
+                        }
                     }
                 }finally {runtimeTransport.compareAndSet(scope,null)}
             }
@@ -1196,7 +1209,7 @@ class LoginController private constructor(private val context:android.app.Applic
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
         commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;activationDelivery=null;panelHint=null;panelPoll=null;deviceSourcePollAfter=0;deviceSourceAuthority=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()
-        telemetryAuthority=null;nextTelemetryElapsed=0;cancelTechnicalTelemetry()
+        telemetryAuthority=null;nextTelemetryElapsed=0;nextRuntimeElapsed=0;cancelTechnicalTelemetry()
         // Even unreadable storage must not leave an in-memory operation/network request active.
         activeScope?.cancel()
         val s=try {journal.snapshot()} catch(e:Exception) {
