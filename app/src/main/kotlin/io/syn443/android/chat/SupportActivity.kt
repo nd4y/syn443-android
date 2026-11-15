@@ -1,6 +1,7 @@
 package io.syn443.android.chat
 
 import android.content.Intent
+import io.syn443.identity.ChatRefreshGate
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -50,13 +51,24 @@ class SupportActivity:ComponentActivity() {
     }
 }
 private fun JSONArray.objects()=(0 until length()).map {getJSONObject(it)}
-private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
+private fun chatCode(e:Exception):String = (e as? ChatFailure)?.code?.takeIf {it in setOf(
+    "ACCOUNT_CHANGED","REAUTHENTICATE","SESSION_EXPIRED","ACCESS_DENIED","THROTTLED","BUSY",
+    "MEDIA_UNSUPPORTED","TRANSPORT","INVALID_REPLY","UNAVAILABLE","CANCELLED","CONFLICT","PENDING",
+)} ?: "UNAVAILABLE"
+private fun chatError(e:Exception,queued:Boolean)=when(chatCode(e)) {
     "ACCOUNT_CHANGED","REAUTHENTICATE","SESSION_EXPIRED"->"Сессия завершена. Войдите снова."
     "ACCESS_DENIED"->"Нет доступа к этому диалогу."
-    "THROTTLED"->"Сервер занят. Повторим через минуту."
+    "THROTTLED"->"Сервер занят. Повторим подключение позже."
     "BUSY"->"Клиент выполняет другую операцию. Повторим позже."
     "MEDIA_UNSUPPORTED"->"Не удалось сжать видео. Выберите другой файл или отправьте оригинал до 25 МБ."
-    else->"Операция не завершена. Сообщение в очереди можно отправить повторно."
+    else->if(queued)"Сообщение сохранено на устройстве. Отправку можно повторить."
+        else "Чат временно недоступен. Повторим подключение."
+}
+private fun refreshResult(e:Exception)=when(chatCode(e)) {
+    "ACCOUNT_CHANGED","REAUTHENTICATE","SESSION_EXPIRED","ACCESS_DENIED"->ChatRefreshGate.Result.AUTHORITY_REQUIRED
+    "THROTTLED"->ChatRefreshGate.Result.THROTTLED
+    "BUSY"->ChatRefreshGate.Result.BUSY
+    else->ChatRefreshGate.Result.TRANSIENT_FAILURE
 }
 
 @Composable private fun SupportChat() {
@@ -77,6 +89,12 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
     var files by remember {mutableStateOf(emptyList<JSONObject>())}
     var status by remember {mutableStateOf("Подключение к поддержке")}
     var nextAttempt by remember {mutableStateOf(0L)}
+    var refreshGate by remember {mutableStateOf(ChatRefreshGate())}
+    var refreshRunning by remember {mutableStateOf(false)}
+    var connectionProblem by remember {mutableStateOf(false)}
+    var manualRefresh by remember {mutableStateOf(false)}
+    var refreshNonce by remember {mutableStateOf(0L)}
+    var retryReady by remember {mutableStateOf(false)}
     var download by remember {mutableStateOf<JSONObject?>(null)}
     val busy=operation?.isActive==true
     DisposableEffect(lifecycle) {
@@ -97,8 +115,8 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
             try {mutex.withLock {block()}}
             catch(e:CancellationException) {throw e}
             catch(e:Exception) {
-                if(io.syn443.android.BuildConfig.DEBUG)android.util.Log.w("SYN443Chat","operation_failed/"+e.javaClass.simpleName)
-                status=chatError(e);nextAttempt=android.os.SystemClock.elapsedRealtime()+60_000
+                if(io.syn443.android.BuildConfig.DEBUG)android.util.Log.w("SYN443Chat","operation_failed/"+chatCode(e))
+                status=chatError(e,pending.isNotEmpty());nextAttempt=android.os.SystemClock.elapsedRealtime()+60_000
             }
             finally {operation=null}
         }
@@ -140,49 +158,73 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
     }}
     val document=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->if(uri!=null)prepare(uri,false)}
     val media=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->if(uri!=null)prepare(uri,true)}
-    LaunchedEffect(visible) {
+    LaunchedEffect(visible,refreshNonce) {
         if(visible)while(true) {
             try {mutex.withLock {
                 val login=withContext(Dispatchers.IO) {JSONObject(context.contentResolver.call("content://io.syn443.control".toUri(),"auth-status",null,null)?.getString("json")?:"{}")}
                 val next=login.optLong("generation",-1)
                 if(login.optString("phase") !in setOf("PROVISIONING","POLICY_CACHED","REFRESHING")) {
                     generation= -1;client=null;store=null;messages=emptyList();inbox=emptyList();pending=emptyList();files=emptyList();text="";conversation="";admin=false
+                    refreshGate=ChatRefreshGate();connectionProblem=false;manualRefresh=false
                     status="Для чата войдите в SYN443 на главном экране."
                 } else {
-                    if(generation!=next || client==null || store==null) {
+                    if(generation!=next) {
                         messages=emptyList();conversation="";files=emptyList();text="";inbox=emptyList();pending=emptyList();admin=false
-                        val opened=withContext(NonCancellable+Dispatchers.IO) {ChatOutbox(context,next)}
-                        try {currentCoroutineContext().ensureActive()}
-                        catch(e:CancellationException) {withContext(NonCancellable+Dispatchers.IO) {opened.close()};throw e}
-                        store=opened;generation=next;client=ChatClient(context,next)
+                        client=null;store=null;generation=next;refreshGate=ChatRefreshGate()
                     }
-                    // The generation-bound local queue stays visible when the
-                    // server is offline. Sending still waits for live authority.
-                    pending=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}
-                    val own=requireNotNull(client).objectCall("self")
-                    val permittedAdmin=own.getBoolean("admin")
-                    if(admin && !permittedAdmin) {conversation="";messages=emptyList();inbox=emptyList();files=emptyList();text=""}
-                    admin=permittedAdmin
-                    if(!admin)conversation=own.getJSONObject("conversation").getString("id")
-                    if(admin)inbox=(requireNotNull(client).call("inbox",JSONObject().put("before",0).put("beforeId","")) as JSONArray).objects()
-                    refresh()
-                    pending=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}.filter {admin || it.second.getString("conversation")==conversation}
-                    if(pending.isNotEmpty() && android.os.SystemClock.elapsedRealtime()>=nextAttempt) {
-                        nextAttempt=android.os.SystemClock.elapsedRealtime()+30_000
-                        sendPending(pending.first().first)
-                    } else status=if(admin && conversation.isEmpty())"Выберите диалог" else "На связи"
+                    val gate=refreshGate
+                    val ticket=gate.begin(android.os.SystemClock.elapsedRealtime(),manualRefresh)
+                    manualRefresh=false
+                    if(ticket!=null) {
+                        refreshRunning=true
+                        try {
+                            if(client==null || store==null) {
+                                val opened=withContext(NonCancellable+Dispatchers.IO) {ChatOutbox(context,next)}
+                                try {currentCoroutineContext().ensureActive()}
+                                catch(e:CancellationException) {withContext(NonCancellable+Dispatchers.IO) {opened.close()};throw e}
+                                store=opened;client=ChatClient(context,next)
+                            }
+                            // Keep the generation-bound queue visible while the server is unavailable.
+                            pending=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}
+                            val own=requireNotNull(client).objectCall("self")
+                            val permittedAdmin=own.getBoolean("admin")
+                            if(admin && !permittedAdmin) {conversation="";messages=emptyList();inbox=emptyList();files=emptyList();text=""}
+                            admin=permittedAdmin
+                            if(!admin)conversation=own.getJSONObject("conversation").getString("id")
+                            if(admin)inbox=(requireNotNull(client).call("inbox",JSONObject().put("before",0).put("beforeId","")) as JSONArray).objects()
+                            refresh()
+                            pending=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}.filter {admin || it.second.getString("conversation")==conversation}
+                            if(pending.isNotEmpty() && android.os.SystemClock.elapsedRealtime()>=nextAttempt) {
+                                nextAttempt=android.os.SystemClock.elapsedRealtime()+30_000
+                                sendPending(pending.first().first)
+                            } else status=if(admin && conversation.isEmpty())"Выберите диалог" else "На связи"
+                            connectionProblem=false
+                            gate.complete(ticket,ChatRefreshGate.Result.SUCCESS,android.os.SystemClock.elapsedRealtime())
+                        } catch(e:CancellationException) {
+                            gate.complete(ticket,ChatRefreshGate.Result.CANCELLED,android.os.SystemClock.elapsedRealtime());throw e
+                        } catch(e:Exception) {
+                            gate.complete(ticket,refreshResult(e),android.os.SystemClock.elapsedRealtime());throw e
+                        } finally {refreshRunning=false}
+                    }
                 }
             }} catch(e:CancellationException) {throw e}
             catch(e:Exception) {
-                if(io.syn443.android.BuildConfig.DEBUG)android.util.Log.w("SYN443Chat","refresh_failed/"+e.javaClass.simpleName)
-                status=chatError(e);nextAttempt=android.os.SystemClock.elapsedRealtime()+60_000
+                if(io.syn443.android.BuildConfig.DEBUG)android.util.Log.w("SYN443Chat","refresh_failed/"+chatCode(e))
+                connectionProblem=true;status=chatError(e,pending.isNotEmpty())
+                nextAttempt=android.os.SystemClock.elapsedRealtime()+60_000
             }
+            retryReady=refreshGate.manualReady(android.os.SystemClock.elapsedRealtime())
             delay(10_000)
         }
     }
     Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text("Чат с администратором",style=MaterialTheme.typography.headlineSmall,modifier=Modifier.testTag("chat-title"))
         Text(status,Modifier.testTag("chat-status"))
+        if(connectionProblem)TextButton(
+            onClick={manualRefresh=true;refreshNonce++},
+            enabled=retryReady && !busy && !refreshRunning,
+            modifier=Modifier.testTag("chat-retry"),
+        ) {Text("Повторить подключение")}
         Text("Сообщения доступны администраторам сервиса. Файлы до 25 МБ.",style=MaterialTheme.typography.bodySmall)
         if(admin) {
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -234,6 +276,6 @@ private fun chatError(e:Exception)=when((e as? ChatFailure)?.code) {
                 }},enabled=!busy && (text.isNotBlank() || files.isNotEmpty()),modifier=Modifier.testTag("chat-send")) {Text("Отправить")}
             }
         }
-        if(busy)TextButton(onClick={operation?.cancel()}) {Text("Отменить операцию")}
+        if(busy || refreshRunning)TextButton(onClick={if(busy)operation?.cancel() else refreshNonce++}) {Text("Отменить операцию")}
     }
 }

@@ -1867,7 +1867,8 @@
         "docs/support-chat.md",
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/chat-recovery.md"
       ],
       "text": "В Android доступен раздел «Поддержка»: личная переписка пользователя с администраторами SYN443. Администратор видит список диалогов и отвечает из Android и адаптивного веб-интерфейса control plane. В базовый выпуск входят текст, файлы, изображения и видео; групповые чаты пользователей, звонки, боты и интеграции внешних мессенджеров не входят."
     },

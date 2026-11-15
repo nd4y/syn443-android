@@ -1,10 +1,16 @@
+# Testing and release gates
+
 [Emulator observation boundaries](emulator-observation-boundaries.md) require240
 actual Android outcomes perAPI29/35/37. The real idle-peer and read-only owner
 readiness cases are mandatory; frozen-host recovery and all original assertions
 remain required. The readiness probe is debug/emulator-only and cannot reset a
 budget or bypass a pending Stop. Test frames use pinned Compose junit4.v2.
 
-# Testing and release gates
+[Chat availability recovery](chat-recovery.md) requires eight additional named
+identity JVM outcomes and a separate90% scheduler coverage check. Healthy/offline,
+manual/throttled, cancelled/stale/concurrent and changed-account schedules remain
+bounded. All original238 Android outcomes remain part of the240-case matrix.
+
 
 [Runtime observations](device-runtime-observations.md) require nine named
 identity wire/queue cases and seven additional Android cases on each API29/35/37
