@@ -262,7 +262,7 @@ func TestPrivatePoolRetirementFailureAndBlockedCloseKeepReservations(t *testing.
 		}
 	})
 	t.Run("blocked closer", func(t *testing.T) {
-		p, e := newPrivatePathPool(parent, scope, 10, privatePoolLease(t))
+		p, e := newPrivatePathPool(parent, scope, 34, privatePoolLease(t))
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -270,7 +270,7 @@ func TestPrivatePoolRetirementFailureAndBlockedCloseKeepReservations(t *testing.
 		entered, release := make(chan struct{}), make(chan struct{})
 		// Release the fixture before pool cleanup, even on an assertion failure.
 		t.Cleanup(func() { close(release) })
-		for i := 0; i < 8; i++ {
+		for i := 0; i < 32; i++ {
 			candidate, e := p.prepare(scope, []string{"one"}, func(_ context.Context, _, tag, _ string) (adapter.Outbound, error) {
 				n := &privateBlockingClose{tag: tag}
 				if i == 0 {
@@ -291,7 +291,7 @@ func TestPrivatePoolRetirementFailureAndBlockedCloseKeepReservations(t *testing.
 				}
 			}
 		}
-		if s := p.snapshot(); s.Dynamic != 8 || s.Entries != 8 {
+		if s := p.snapshot(); s.Dynamic != 32 || s.Entries != 32 {
 			t.Fatal("blocked retirement lost reservations", s)
 		}
 		if _, e = p.prepare(scope, []string{"one"}, func(context.Context, string, string, string) (adapter.Outbound, error) {

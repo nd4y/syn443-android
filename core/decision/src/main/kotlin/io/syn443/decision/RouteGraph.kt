@@ -24,6 +24,11 @@ import kotlinx.serialization.json.decodeFromJsonElement
     val id: String, val intent: String, val features: List<String>, val templates: List<String>,
 )
 
+/** Owned declaration summary; never route-selection authority. */
+data class RouteGroupInfo(val intent: ExitClass, val features: Set<PathFeature>, val upperBound: Int, val maxHops: Int) {
+    override fun toString()="RouteGroupInfo([redacted])"
+}
+
 /** Immutable declarations bound to a separately authorized profile catalogue.
  * Eligibility, bounds and warm hints are not route-selection authority.
  */
@@ -43,6 +48,9 @@ class RouteGraph private constructor(
     fun groupIDs(): List<String> = groups.keys.sorted()
     fun upperBound(groupID: String): Int? = groups[groupID]?.upperBound
     fun intentUpperBound(intent: ExitClass): Int? = intentBounds[intent]
+    fun groupInfo(groupID: String): RouteGroupInfo? = groups[groupID]?.let { group ->
+        RouteGroupInfo(group.intent,group.features.toSet(),group.upperBound,group.templates.maxOf {templates.getValue(it).slots.size})
+    }
 
     /** Static metadata only. A caller still needs native evidence for selection. */
     fun isDeclaredPath(groupID: String, mode: NetworkMode, path: List<String>): Boolean {

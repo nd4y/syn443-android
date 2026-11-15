@@ -5,6 +5,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RouteGraphTest {
+    @Test fun groupInfoReturnsOwnedBoundedDeclarations() {
+        val raw="""{"schemaVersion":1,"hops":[{"id":"entry","entryModes":["WIFI"],"exitClass":null,"features":["TCP","IPV4"]},{"id":"exit","entryModes":["WIFI"],"exitClass":"INTERNAL","features":["TCP","IPV4"]}],"edges":[{"from":"entry","to":"exit","features":["TCP","IPV4"]}],"templates":[{"id":"two","slots":[["entry"],["exit"]]},{"id":"one","slots":[["exit"]]}],"groups":[{"id":"inside","intent":"INTERNAL","features":["TCP","IPV4"],"templates":["two","one"]}]}"""
+        val graph=RouteGraph.decode(raw.toByteArray(),listOf("entry","exit"))
+        val info=checkNotNull(graph.groupInfo("inside"))
+        assertEquals(ExitClass.valueOf("INTERNAL"),info.intent)
+        assertEquals(2,info.upperBound);assertEquals(2,info.maxHops)
+        assertEquals(setOf(PathFeature.TCP,PathFeature.IPV4),info.features)
+        try {(info.features as MutableSet<PathFeature>).clear()}
+        catch (_:UnsupportedOperationException) {} catch (_:ClassCastException) {}
+        assertEquals(setOf(PathFeature.TCP,PathFeature.IPV4),checkNotNull(graph.groupInfo("inside")).features)
+        assertTrue(graph.isDeclaredPath("inside",NetworkMode.WIFI,listOf("entry","exit")))
+        assertTrue(graph.isDeclaredPath("inside",NetworkMode.WIFI,listOf("exit")))
+        assertNull(graph.groupInfo("unknown"))
+        assertEquals("RouteGroupInfo([redacted])",info.toString())
+    }
     private val context = Context(1, 2, "policy", "algorithm", 3, "a".repeat(64))
     private fun fixture(): JsonObject = Decision.json.parseToJsonElement(
         requireNotNull(javaClass.getResourceAsStream("/route-graph-vectors.json")).use {

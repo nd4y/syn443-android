@@ -78,6 +78,13 @@ func (p *privatePath) GoString() string { return p.String() }
 // A non-nil retained result has no usable-route authority: cleanup failed and
 // its adapter reservation must remain held until confirmed owner recovery.
 func buildPrivatePath(parent context.Context, hops []string, create func(context.Context, string, string, string) (adapter.Outbound, error)) (result *privatePath, retained *privatePath, err error) {
+	return buildPrivatePathBudgeted(parent, hops, create, nil)
+}
+
+// The optional budget predicate is checked synchronously around every lifecycle
+// stage. A suspended Android scheduler can cross a BOOTTIME deadline before a
+// Go timer runs, so a context deadline alone cannot authorize the next stage.
+func buildPrivatePathBudgeted(parent context.Context, hops []string, create func(context.Context, string, string, string) (adapter.Outbound, error), withinBudget func() bool) (result *privatePath, retained *privatePath, err error) {
 	if parent == nil || parent.Err() != nil || create == nil || len(hops) < 1 || len(hops) > 4 ||
 		service.RegistryFromContext(parent) == nil || service.FromContext[adapter.OutboundManager](parent) == nil {
 		return nil, nil, errPrivatePath
@@ -98,6 +105,7 @@ func buildPrivatePath(parent context.Context, hops []string, create func(context
 	manager := &privatePathRegistry{nodes: map[string]adapter.Outbound{}}
 	child = service.ContextWith[adapter.OutboundManager](child, manager)
 	owned := &privatePath{ctx: child, cancel: cancel, registry: manager}
+	allowed := func() bool { return child.Err() == nil && (withinBudget == nil || withinBudget()) }
 	constructing := false
 	defer func() {
 		if recover() != nil {
@@ -117,7 +125,7 @@ func buildPrivatePath(parent context.Context, hops []string, create func(context
 	}()
 	previous := ""
 	for i, id := range hops {
-		if child.Err() != nil {
+		if !allowed() {
 			return nil, nil, errPrivatePath
 		}
 		tag := fmt.Sprintf("%s-%d", prefix, i)
@@ -145,16 +153,19 @@ func buildPrivatePath(parent context.Context, hops []string, create func(context
 			return nil, nil, errPrivatePath
 		}
 		for _, stage := range adapter.ListStartStages {
-			if child.Err() != nil {
+			if !allowed() {
 				return nil, nil, errPrivatePath
 			}
 			if err = adapter.LegacyStart(node, stage); err != nil {
 				return nil, nil, errPrivatePath
 			}
+			if !allowed() {
+				return nil, nil, errPrivatePath
+			}
 		}
 		previous = tag
 	}
-	if child.Err() != nil {
+	if !allowed() {
 		return nil, nil, errPrivatePath
 	}
 	return owned, nil, nil

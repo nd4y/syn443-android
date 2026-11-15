@@ -26,6 +26,19 @@ PATH_REQUIRED = {
     'TestPrivateCatalogueOwnsNormalizedProfilesAndRuntimeFactory',
     'TestPrivateCatalogueRejectsNoncanonicalUnsafeAndSubstitutedOptions',
     'TestPrivateCatalogueBoundsContextAndFreshTypedConstruction',
+    'TestPrivatePoolWorkBudgetCannotPublishLateOrCancelPublishedOwners',
+    'TestRouteExitCountryStrictTargetsAndJSON',
+    'TestRouteExitCountryUsesExactCandidateAndVerifiedTLS',
+    'TestRouteExitCountryRejectsUnboundedFramingAndLateEvidence',
+    'TestRouteCheckWireCannotDiscardDuplicateCaseOrForeignPredicates',
+    'TestPrivateSelectionHardExitMismatchWithdrawsOnlyItsGroup',
+    'TestPrivateSelectionUncertainExitEvidenceKeepsCurrentAuthority',
+    'TestPrivateSelectionChecksAggregateBootBudgetBeforeNextTarget',
+    'TestPrivateSelectionBlockedGroupCloseCannotBlockOtherFlowWithdrawal',
+    'TestPrivateAdaptiveHubRealTwoHopCommitDrainAndRebuild',
+    'TestPrivateAdaptiveHubStrictPlansModesReceiptsAndFreshness',
+    'TestPrivateAdaptiveHubBoundedCacheRetainsActualOwnership',
+    'TestPrivateAdaptiveHubBusyAndStopRequireActualOwnerExit',
 }
 
 

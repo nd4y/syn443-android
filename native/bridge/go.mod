@@ -185,9 +185,12 @@ require (
 	github.com/netbirdio/netbird v0.0.0
 	golang.zx2c4.com/wireguard v0.0.0-20231211153847-12269c276173
 	io.syn443/engine-netbird v0.0.0
+	io.syn443/routegraph v0.0.0
 )
 
 replace io.syn443/engine-netbird => ../engine-netbird
+
+replace io.syn443/routegraph => ../routegraph
 
 replace github.com/netbirdio/netbird => ../netbird
 

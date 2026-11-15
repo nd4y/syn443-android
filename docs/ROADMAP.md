@@ -44,6 +44,10 @@ settings, native editing and full administration remain open. Multiple
 Remnawave/x-ui/3x-ui remain extension contracts.
 
 ## M4 - autonomous routing and support (partial)
+The [exit-country checks and private TCP hub](exit-country-probe.md) connect
+declarations, normalized candidates and fresh native receipts internally. Managed
+graph activation and the shared scheduler remain open; no new graph capability
+or end-to-end autonomous routing acceptance is claimed by this contribution.
 Reference ranking, bounded per-target checks and a lazy graph frontier exist.
 The frontier is a JVM planner and is not wired into runtime route selection.
 Basic SQL user/admin chat,

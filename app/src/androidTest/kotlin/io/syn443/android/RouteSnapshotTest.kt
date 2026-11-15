@@ -86,6 +86,34 @@ class RouteSnapshotTest {
         assertFalse(result.toString().contains("2001:db8::9"))
         assertFalse(result.toString().contains("probe.example.org"))
     }
+    @Test fun countryExitCheckKeepsStrictFieldsAndReportsMismatchPrivately() {
+        val raw = config.replace("\"method\":\"https_204\"", "\"method\":\"https_exit_country\",\"expected_exit_class\":\"RU\"")
+            .replace("https://probe.example.org/generate_204", "https://probe.example.org/")
+        EngineConfig.validate(raw)
+        EngineConfig.validate(raw.replace("\"RU\"", "\"NON_RU\""))
+        for (bad in listOf(raw.replace("\"RU\"", "\"INTERNAL\""), raw.replace("\"RU\"", "true"),
+            raw.replace("\"RU\"", "null"), raw.replace("\"RU\"", "\"ru\""), raw.replace("https_exit_country", "https_204"),
+            raw.replace("\"expected_exit_class\":\"RU\",", ""), raw.replace("\"RU\"", "\"RU\",\"expected_ip\":\"192.0.2.9\""),
+            raw.replace("https://probe.example.org/", "https://probe.example.org/192.0.2.9"),
+            raw.replace("https://probe.example.org/", "https://probe.example.org/?ip=192.0.2.9"),
+            raw.replace("https://probe.example.org/", "https://probe.example.org/%2f"))) {
+            assertThrows(IllegalArgumentException::class.java) { EngineConfig.validate(bad) }
+        }
+        RouteSnapshot.configure(raw, scope.config)
+        RouteSnapshot.owner(scope)
+        val request = checkNotNull(RouteSnapshot.request(scope))
+        val check = JSONObject(request).getJSONArray("routes").getJSONObject(0).getJSONArray("checks").getJSONObject(0)
+        assertEquals("RU", check.getString("expected_exit_class"))
+        val mismatch = JSONObject(report(request, false))
+        mismatch.getJSONArray("results").getJSONObject(0).put("code", "exit_country_mismatch")
+        assertTrue(RouteSnapshot.update(scope, mismatch.toString()))
+        val view = RouteSnapshot.read(true, true, scope)
+        assertFalse(view.getBoolean("requiredReady"))
+        assertEquals("failed", view.getJSONArray("routes").getJSONObject(0).getString("state"))
+        assertFalse(view.toString().contains("probe.example.org"))
+        assertFalse(view.toString().contains("expected_exit_class"))
+    }
+
     @Test fun sshWithoutServerPinCannotBeImportedAssignedOrRendered() {
         val root = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir
         val config = JSONObject("""{"outbounds":[{"type":"ssh","tag":"ssh-hop","server":"proxy.example.invalid","server_port":22,"user":"fixture"}]}""")

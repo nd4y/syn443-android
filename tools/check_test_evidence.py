@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=241
+    minimum=242
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -16,7 +16,7 @@ elif mode=="recovery":
     minimum=15
 elif mode=="policy":
     paths=list((root/"core/policy/build/test-results/test").glob("TEST-*.xml"))
-    minimum=16
+    minimum=17
 elif mode=="observability":
     paths=list((root/"core/observability/build/test-results/test").glob("TEST-*.xml"))
     minimum=10
@@ -88,6 +88,7 @@ if mode=="emulator":
         "sshWithoutServerPinCannotBeImportedAssignedOrRendered",
         "insecureProxyAndDnsTlsCannotBeImportedAssignedOrRendered",
         "routeExitProofIsRequiredAndReportsMismatchWithoutExposingAddresses",
+        "countryExitCheckKeepsStrictFieldsAndReportsMismatchPrivately",
         "savedEngineCheckpointCannotClaimAnUnownedLiveProcess",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required peer verification cases missing"
     assert {("io.syn443.android.ManagedFailoverTest",name) for name in {
@@ -111,6 +112,7 @@ if mode=="policy":
         "managedRouteChecksKeepTheirSignedBindingAndCapability",
         "reserveCooldownRequiresBoundConfigurationAndHasAnIndependentRollbackFingerprint",
         "exitCheckRequiresMatchingCapabilityOnKeyBoundConfiguration",
+        "countryCheckRequiresItsOwnBoundCapabilityAndCannotReuseIpAuthority",
         "decisionRevisionMustMatchKeyBoundFailoverCapability",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="health":
