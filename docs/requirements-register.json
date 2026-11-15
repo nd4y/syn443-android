@@ -27,7 +27,8 @@
         "contracts/README.md",
         "docs/managed-policy.md",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/private-path-construction.md"
+        "docs/private-path-construction.md",
+        "docs/private-path-construction.md#fresh-proof-selection"
       ]
     },
     {
@@ -1065,7 +1066,8 @@
       "text": "Поиск ограничен временем шага, числом кандидатов/соединений, трафиком, памятью и параллелизмом. Сначала last-known-good, затем доступные простые пути и обоснованные цепочки; при неудаче фронтир расширяется. Поиск не создаёт декартово произведение всех профилей и hops в памяти. Ограничение полного допустимого пространства, шаблонов и фронтира задаётся ARC-05, а общая конкуренция всех jobs - ARC-06.",
       "status": "partial",
       "evidence": [
-        "docs/route-frontier.md"
+        "docs/route-frontier.md",
+        "docs/private-path-construction.md#fresh-proof-selection"
       ]
     },
     {
@@ -1089,7 +1091,8 @@
       "text": "Выбранный путь описывается как лучший из актуально проверенных допустимых кандидатов, с количеством проверенных/оставшихся и confidence. При конечном статичном наборе доступных кандидатов поисковый план должен иметь воспроизводимый порядок и продолжение; глобальный оптимум в меняющемся интернете не объявляется доказанным.",
       "status": "partial",
       "evidence": [
-        "docs/route-frontier.md"
+        "docs/route-frontier.md",
+        "docs/private-path-construction.md#fresh-proof-selection"
       ]
     },
     {
@@ -1098,7 +1101,8 @@
       "status": "partial",
       "evidence": [
         "docs/route-frontier.md",
-        "native/bridge/route_selection_wire_test.go"
+        "native/bridge/route_selection_wire_test.go",
+        "docs/private-path-construction.md#fresh-proof-selection"
       ],
       "implementationScope": "Internal Wi-Fi selector requires a fresh concrete probe from the approved plan and switches new connections without interrupting established flows.",
       "remainingScope": "Other traffic classes and physical modes, full hysteresis and end-to-end device acceptance."

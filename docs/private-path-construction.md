@@ -44,6 +44,8 @@ reservation. Pool/candidate/flow diagnostic formatting redacts route details.
 Real SOCKS/HTTP TCP payloads, local UDP socket ownership, late positive reads,
 partial/panicking dials and close failures are mandatory test cases. Local UDP
 ownership tests are not proof of SOCKS/VLESS UDP protocol acceptance.
+## Fresh proof selection
+
 The internal selection primitive copies one to four validated checks, binds them
 to the full context, group and canonical check-set digest, and runs actual checks
 through the owned candidate. One synchronous pool-wide probe remains occupied
