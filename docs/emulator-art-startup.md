@@ -28,6 +28,13 @@ plus a successful core package inventory and a stable process identity. Host
 fixtures reject every partial/contradictory readiness flag and exercise delayed
 readiness without replaying framework commands.
 
+Preparation restores adbd to ordinary shell UID2000 before instrumentation and
+verifies the same AVD/system_server afterward. The app's debug control provider
+correctly rejects UID0; leaving adbd rooted can prevent synthetic login/fault
+commands from executing. Run43747831129 exposed those timeouts after successful
+framework preparation. Failed/unconfirmed unroot cannot reach tests, and no
+application caller permission is relaxed.
+
 Host fixtures cover owner/device/installed-app fences, root failure, lost
 acknowledgements, stuck/unchanged processes and readiness deadlines. A new
 instrumented `RuntimeHeapTest` checks the running application's actual
