@@ -123,6 +123,7 @@ class LoginControllerTest {
         }
         @Volatile var policyRevision=1L
         @Volatile var activationStatus=204
+        @Volatile var technicalTelemetry=false
         val activationReports=java.util.Collections.synchronizedList(mutableListOf<DeviceActivationReport>())
         @Volatile var engineTag="direct"
         @Volatile var policyStatus=200
@@ -277,7 +278,8 @@ class LoginControllerTest {
                     input+"."+Identity.encode(Identity.derToRaw(Signature.getInstance("SHA256withECDSA").run {initSign(root.private);update(input.toByteArray());sign()}))
                 }
                 val response=reply(text=envelope,timeMs=now()+policyTimeAdvanceMs)
-                return response.copy(headers=response.headers+mapOf("content-type" to listOf("application/jose")))
+                return response.copy(headers=response.headers+mapOf("content-type" to listOf("application/jose"),
+                    "x-syn443-telemetry" to listOf(if(technicalTelemetry)"1" else "0")))
             }
             if(url.endsWith("/identity/devices/revoke")) {
                 Identity.objectJSON(checkNotNull(body).toString(Charsets.UTF_8)).getValue("thumbprints").jsonArray.forEach {activeKeys.remove(it.jsonPrimitive.content)}
@@ -358,6 +360,22 @@ class LoginControllerTest {
             block(f)
         } catch(e:Throwable) {failure=e;throw e}
         finally {try {f.cleanup()} catch(e:Throwable) {if(failure==null)throw e else failure.addSuppressed(e)}}
+    }
+    @Test fun runtimeUploadNeedsExplicitConsentAndCannotBorrowAnArtificialVpnOnHint() {
+        fixture(reportVpnOn={true}) {f->
+            f.server.policyReady=true;f.server.technicalTelemetry=true
+            f.controller.callback(f.begin());f.idle()
+            val before=f.journal.snapshot()
+            assertFalse(f.controller.syncRuntimeObservation())
+            assertTrue(f.controller.chooseTechnicalTelemetry(before.generation,true))
+            assertTrue(f.controller.syncRuntimeObservation());f.idle()
+            // The real controller checkpoint is Off. A test hint alone cannot
+            // acquire its VPN generation or issue a report through another owner.
+            assertFalse(f.server.paths.any {it.endsWith("/device/runtime")})
+            assertEquals(before,f.journal.snapshot())
+            assertTrue(f.controller.chooseTechnicalTelemetry(before.generation,false));f.idle()
+            assertFalse(f.controller.syncRuntimeObservation())
+        }
     }
     @Test fun activationDeliveryUsesDurableDecisionAndCannotChangeLoginOnFailure() {
         val on=java.util.concurrent.atomic.AtomicBoolean()

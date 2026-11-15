@@ -17,6 +17,16 @@ import java.net.Socket
 
 @RunWith(AndroidJUnit4::class)
 class PhysicalIdentityRouteTest {
+    @Test fun runtimeTransportReportsOnlyTheSelectedPhysicalNetworkAndFencesItsClassChanges() {
+        val source=Networks();val wifi=PhysicalIdentityRoute.capture(source)
+        assertEquals("wifi",wifi.networkKind);assertFalse(wifi.unmetered)
+        source.values=listOf(PhysicalSnapshot(1,true,true,false,"mobile",cellular=true))
+        rejected {wifi.check()};val mobile=PhysicalIdentityRoute.capture(source)
+        assertEquals("cellular",mobile.networkKind)
+        source.values=listOf(PhysicalSnapshot(1,true,true,false,"ethernet",unmetered=true))
+        rejected {mobile.check()};val ethernet=PhysicalIdentityRoute.capture(source)
+        assertEquals("unknown",ethernet.networkKind);assertTrue(ethernet.unmetered)
+    }
     @Test fun technicalTelemetryCannotUseMeteredWifiOrCellular() {
         val source=Networks()
         source.values=source.values.map {if(it.handle==1L)it.copy(unmetered=true)else it}

@@ -12,7 +12,7 @@ import java.net.InetAddress
 import java.net.Socket
 
 internal data class PhysicalSnapshot(val handle:Long,val eligible:Boolean,val validated:Boolean,
-    val wifi:Boolean,val signature:String,val unmetered:Boolean=false) {
+    val wifi:Boolean,val signature:String,val unmetered:Boolean=false,val cellular:Boolean=false) {
     override fun toString()="PhysicalSnapshot([redacted])"
 }
 internal interface PhysicalNetworks {
@@ -23,6 +23,8 @@ internal interface PhysicalNetworks {
 /** A request owns one physical route. It never falls back to process DNS or the active VPN. */
 internal class PhysicalIdentityRoute private constructor(private val source:PhysicalNetworks,
     private val selected:PhysicalSnapshot):HttpRoute {
+    val networkKind:String get()=when {selected.wifi->"wifi";selected.cellular->"cellular";else->"unknown"}
+    val unmetered:Boolean get()=selected.unmetered
     companion object {
         private fun unavailable():Nothing=throw DeliveryException(DeliveryFailure.TRANSPORT)
         private fun inventory(source:PhysicalNetworks):List<PhysicalSnapshot> = source.snapshots().also {
@@ -35,7 +37,7 @@ internal class PhysicalIdentityRoute private constructor(private val source:Phys
                 .firstOrNull()?:unavailable()
             return PhysicalIdentityRoute(source,selected).also {it.check()}
         }
-        fun capture(context:Context,wifiOnly:Boolean=false,unmeteredOnly:Boolean=false):HttpRoute {
+        fun capture(context:Context,wifiOnly:Boolean=false,unmeteredOnly:Boolean=false):PhysicalIdentityRoute {
             check(Looper.myLooper()!=Looper.getMainLooper())
             val manager=checkNotNull(context.getSystemService(ConnectivityManager::class.java))
             return capture(object:PhysicalNetworks {
@@ -51,7 +53,8 @@ internal class PhysicalIdentityRoute private constructor(private val source:Phys
                     PhysicalSnapshot(network.networkHandle,eligible,
                         caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)==true,
                         caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)==true,properties?.toString().orEmpty(),
-                        caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)==true)
+                        caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)==true,
+                        caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)==true)
                 }
                 override fun resolve(handle:Long,host:String)=Network.fromNetworkHandle(handle).getAllByName(host).toList()
                 override fun bind(handle:Long,socket:Socket)=Network.fromNetworkHandle(handle).bindSocket(socket)

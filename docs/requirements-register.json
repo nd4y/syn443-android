@@ -1528,7 +1528,8 @@
       "text": "Общие поля: eventId, schemaVersion, время UTC и monotonic time, pseudonymous deviceId, sessionId, app/core/build версии, policyRevision, networkEpoch, pathId, eventType, severity, duration, result, errorCode. Backend добавляет время приёма и обрабатывает расхождение часов. Дополнительно фиксируются algorithm/evaluator revision, cohortId, health profile revision и decisionId; эти поля не требуют раскрытия пользовательского назначения.",
       "status": "partial",
       "evidence": [
-        "docs/technical-telemetry.md"
+        "docs/technical-telemetry.md",
+        "docs/device-runtime-observations.md"
       ],
       "implementationScope": "Typed event envelope carries ID, UTC/monotonic time, build, session and epoch.",
       "remainingScope": "Full build/core/algorithm/policy/cohort/decision metadata and clock-skew analysis."
@@ -1536,8 +1537,10 @@
     {
       "id": "TEL-03",
       "text": "Сетевые события: появление/потеря сети, Wi-Fi/cellular/unknown, metered, captive portal, смена физического пути, выбранный режим, этап определения, причины переключений, reconnect/backoff, активный профиль и цепочка как непрозрачные ID.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/device-runtime-observations.md"
+      ]
     },
     {
       "id": "TEL-04",
@@ -1810,8 +1813,10 @@
     {
       "id": "MOB-02",
       "text": "В 1.0 обязательны встроенные быстрые экраны через API: список/поиск пользователей и устройств, текущий/последний online, активная/желаемая ревизия, причины ошибок, назначение профилей/политики, публикация/откат и диагностика. Для всех остальных административных функций доступна полная адаптивная веб-панель из этой кнопки.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/device-runtime-observations.md"
+      ]
     },
     {
       "id": "MOB-03",
@@ -1828,8 +1833,10 @@
     {
       "id": "MOB-05",
       "text": "Карточка другого клиента показывает назначенные источники, эффективную политику, состояние синхронизации, доступную диагностику и историю. Редактирование явно называет адресата и не меняет VPN на телефоне администратора. Массовое изменение показывает число получателей и поддерживает пилотный rollout.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/device-runtime-observations.md"
+      ]
     },
     {
       "id": "MOB-06",
