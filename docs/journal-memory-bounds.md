@@ -21,8 +21,14 @@ are retained. The v1 nonce/ciphertext/tag layout and2MiB limit remain unchanged.
 Mandatory emulator regressions include the original overflow case, JSON escaping
 that exceeds the byte cap while its character count fits, a large encrypted
 roundtrip and exact legacy-format/Unicode comparison. All previous scenarios and
-the three-API matrix remain required. New Actions and physical upgrade acceptance
-are pending; this design note is not an accepted fix result.
+the three-API matrix remain required. Exact Actions
+[run43663104984](https://github.com/nd4y/syn443-android/actions/runs/43663104984)
+passed all8 jobs and228 actual outcomes per API29/35/37, zero skipped. A same-signer
+v73-to-v74 physical upgrade preserved the encrypted assignment, device key,
+binding, intent and configuration. Native/controller faults and Wi-Fi loss/return
+recovered with active VPN and independent HTTPS204. See the scoped
+[non-LTE evidence](non-lte-acceptance-20261115.md); full-protocol, cellular,
+energy and endurance acceptance remain open.
 
 The same integration run failed an API37 direct-boot fixture when `uiautomator`
 did not produce a hierarchy file. Observation now removes its own stale file and
