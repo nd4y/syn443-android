@@ -9,6 +9,7 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 )
 
 // A real socket owns its candidate reference until confirmed Close. No raw
@@ -34,6 +35,7 @@ func (f *privateFlowOwner) valid() bool {
 }
 
 func (f *privateFlowOwner) validLocked(p *privatePathPool, e *privatePoolEntry) bool {
+	p.expireDrainsLocked()
 	return !f.closed.Load() && !f.hold.closed.Load() && !p.closed && p.ctx.Err() == nil && privateManagedLease(p.lease) && p.entries[e.id] == e && p.scope == e.scope && !e.queued && e.path.ctx.Err() == nil
 }
 func (f *privateFlowOwner) begin() bool {
@@ -113,6 +115,10 @@ type privateTCPFlow struct {
 }
 
 func (f *privateTCPFlow) Close() error { return f.owner.Close() }
+
+// Preserve lazy protocol handshakes without exposing an unwrap/raw socket that
+// could bypass the owner fences. TCP probes must actually contact their target.
+func (f *privateTCPFlow) NeedHandshake() bool { return N.NeedHandshakeForWrite(f.Conn) }
 func (f *privateTCPFlow) Read(b []byte) (n int, err error) {
 	if !f.owner.begin() {
 		return 0, errPrivatePath
@@ -227,6 +233,15 @@ func (c *privatePathCandidate) dialTCP(scope string, parent context.Context, net
 	h, err := c.hold(scope)
 	if err != nil {
 		return nil, err
+	}
+	return h.dialTCP(scope, parent, network, destination)
+}
+
+// Takes ownership of a hold acquired atomically with the current selection.
+func (h *privatePathHold) dialTCP(scope string, parent context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	if parent == nil || parent.Err() != nil || network != "tcp" && network != "tcp4" && network != "tcp6" {
+		_ = h.Close()
+		return nil, errPrivatePath
 	}
 	node, err := h.outbound(scope)
 	if err != nil {
