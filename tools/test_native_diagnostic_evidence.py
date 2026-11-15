@@ -1,6 +1,6 @@
 import json
 import unittest
-from check_native_diagnostic_evidence import REQUIRED, verify
+from check_native_diagnostic_evidence import PATH_REQUIRED, REQUIRED, verify
 
 
 class NativeDiagnosticEvidenceTest(unittest.TestCase):
@@ -9,6 +9,14 @@ class NativeDiagnosticEvidenceTest(unittest.TestCase):
 
     def test_requires_all_real_start_and_pass_records(self):
         self.assertEqual(5, verify(self.rows()))
+
+    def test_private_candidates_require_their_own_package_and_every_real_outcome(self):
+        self.assertEqual(3, verify(self.rows(PATH_REQUIRED, package='io.syn443/bridge'), PATH_REQUIRED, 'io.syn443/bridge'))
+        for rows in [self.rows(PATH_REQUIRED), self.rows(sorted(PATH_REQUIRED)[:-1], package='io.syn443/bridge'),
+                     self.rows(PATH_REQUIRED, terminal='skip', package='io.syn443/bridge'),
+                     self.rows(PATH_REQUIRED, terminal='fail', package='io.syn443/bridge')]:
+            with self.assertRaises(AssertionError):
+                verify(rows, PATH_REQUIRED, 'io.syn443/bridge')
 
     def test_missing_skipped_failed_or_foreign_package_is_not_acceptance(self):
         for rows in [self.rows(sorted(REQUIRED)[:-1]), self.rows(terminal='skip'), self.rows(terminal='fail'), self.rows(package='other')]:

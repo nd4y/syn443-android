@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-from run_route_lifecycle import direct_boot_diagnostics, locked_boot_boundary, resume_blocked
+from run_route_lifecycle import direct_boot_diagnostics, locked_boot_boundary, resume_blocked, completed_route_batch
 from run_vpn_process_faults import vpn_stopped
 
 
@@ -65,6 +65,42 @@ class LockedBootBoundaryTest(unittest.TestCase):
         with patch('run_route_lifecycle.adb',side_effect=[
             b'RUNNING_LOCKED',b'package:synthetic-private-location',b'123',b'No content provider found: synthetic-detail']):
             self.assertEqual({'user0State':'RUNNING_LOCKED','packagePresent':True,'controllerPresent':True,'control':'missing'},direct_boot_diagnostics())
+
+
+class RouteBatchCompletionTest(unittest.TestCase):
+    def report(self):
+        return {'running':False,'requiredReady':True,'routes':[
+            {'id':'route-1','state':'working','ageMs':1,'measuredPath':['route-1']},
+            {'id':'route-2','state':'failed','ageMs':1,'measuredPath':['route-2']},
+            {'id':'route-3','state':'working','ageMs':1,'measuredPath':['route-3','route-1']}]}
+    def check(self,report):
+        with patch('run_route_lifecycle.call',return_value=report):return completed_route_batch()
+    def test_online_with_the_selector_still_checking_is_not_a_complete_batch(self):
+        value=self.report();value['running']=True;value['routes'][2].update(state='checking',ageMs=None,measuredPath=[])
+        self.assertFalse(self.check(value))
+    def test_actual_complete_membership_freshness_and_selected_path_pass(self):
+        self.assertTrue(self.check(self.report()))
+    def test_wrong_completed_outcome_fails_without_waiting_for_a_replacement_batch(self):
+        value=self.report();value['routes'][0]['state']='failed'
+        with self.assertRaisesRegex(AssertionError,'unexpected outcome'):self.check(value)
+    def test_wrong_path_or_missing_duplicate_foreign_membership_never_pass(self):
+        value=self.report();value['routes'][2]['measuredPath']=['route-3','route-2']
+        with self.assertRaisesRegex(AssertionError,'actual selected outbound'):self.check(value)
+        for rows in ([],self.report()['routes'][:2],[self.report()['routes'][0]]*3):
+            with self.subTest(rows=len(rows)),self.assertRaisesRegex(AssertionError,'membership'):
+                self.check(dict(self.report(),routes=rows))
+    def test_inflight_and_unfinished_evidence_cannot_be_called_success(self):
+        self.assertFalse(self.check(dict(self.report(),running=True)))
+        for state in ('checking','unknown','unavailable'):
+            value=self.report();value['routes'][2]['state']=state;self.assertFalse(self.check(value))
+    def test_stale_missing_negative_or_coerced_age_fails(self):
+        for age in (None,True,-1,35_001,'1'):
+            value=self.report();value['routes'][0]['ageMs']=age
+            with self.subTest(age=age),self.assertRaisesRegex(AssertionError,'missing or stale'):self.check(value)
+    def test_missing_required_completion_proof_never_pass(self):
+        for change in ({'running':None},{'requiredReady':False},{'requiredReady':None}):
+            with self.subTest(change=change),self.assertRaisesRegex(AssertionError,'completion proof'):
+                self.check(dict(self.report(),**change))
 
 
 if __name__=='__main__':unittest.main()

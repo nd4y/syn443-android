@@ -12,10 +12,17 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import java.io.IOException
 import java.io.FileInputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -89,6 +96,9 @@ class VpnLifecycleTest {
     private val tunnels = AtomicInteger()
     private val controlProbes = AtomicInteger()
     @Volatile private var serving = true
+    private val peerSockets = ConcurrentHashMap.newKeySet<Socket>()
+    private val fixtureFailure = AtomicReference<Throwable?>()
+    @Volatile private var idleTimeoutMs = 10_000
     private fun shell(command: String) = instrumentation.uiAutomation.executeShellCommand(command).use { fd ->
         FileInputStream(fd.fileDescriptor).use { it.readBytes() }
     }
@@ -96,11 +106,22 @@ class VpnLifecycleTest {
         assertTrue("Control command failed: $method", context.contentResolver.call(uri, method, arg, null)?.getBoolean("ok") == true)
     }
     private fun status() = JSONObject(checkNotNull(context.contentResolver.call(uri, "status", null, null)?.getString("json")))
+    private fun resetReady():Boolean {
+        val reply=context.contentResolver.call(uri,"test-reset-ready",null,null)
+        assertTrue("Read-only fixture readiness command rejected",reply?.getBoolean("ok")==true)
+        return reply!!.getBoolean("ready")
+    }
+    private fun stoppedForFixture():Boolean {
+        val observed=status()
+        return !observed.optBoolean("desiredOn") && observed.optString("phase")=="Off" &&
+            observed.optBoolean("engineStateKnown") && observed.opt("engineActive")==false && pid()==null && resetReady()
+    }
     private fun pid() = context.getSystemService(ActivityManager::class.java).runningAppProcesses
         ?.firstOrNull { it.processName == "${context.packageName}:engine" }?.pid
     private fun await(timeout: Long = 35_000, predicate: () -> Boolean) {
         val end = android.os.SystemClock.elapsedRealtime() + timeout
         while (android.os.SystemClock.elapsedRealtime() < end) {
+            fixtureFailure.get()?.let { throw AssertionError("Unexpected loopback fixture failure",it) }
             if (predicate()) return
             Thread.sleep(200)
         }
@@ -115,19 +136,45 @@ class VpnLifecycleTest {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         assertNull("Emulator harness must grant VPN permission before instrumentation starts", VpnService.prepare(context))
         call("disconnect")
-        await { pid() == null && !status().optBoolean("engineActive") }
+        await { stoppedForFixture() }
         // Each scenario starts with an independent synthetic budget. No reset
         // occurs inside a scenario; real-device and release calls are rejected.
         call("test-reset")
         server = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
-        workers.execute { while (serving) runCatching { val socket = server.accept(); workers.execute { respond(socket) } } }
+        workers.execute {
+            while (serving) {
+                val socket = try { server.accept() } catch(e:IOException) {
+                    if(serving)fixtureFailure.compareAndSet(null,e)
+                    break
+                }
+                peerSockets.add(socket)
+                try {
+                    workers.execute {
+                        try { respond(socket) }
+                        catch(e:IOException) {
+                            // Faulted/frozen clients may leave an idle TCP stream or reset it.
+                            // Closing that stream is not positive VPN/HTTP health evidence.
+                            if(e !is SocketTimeoutException && e !is SocketException)fixtureFailure.compareAndSet(null,e)
+                        } catch(e:Throwable) {fixtureFailure.compareAndSet(null,e)}
+                        finally {closeFixtureSocket(socket)}
+                    }
+                } catch(e:RejectedExecutionException) {
+                    closeFixtureSocket(socket)
+                    if(serving)fixtureFailure.compareAndSet(null,e)
+                }
+            }
+        }
         val config = """{"outbounds":[{"type":"http","tag":"test-proxy","server":"127.0.0.1","server_port":${server.localPort}}],"route":{"final":"test-proxy"}}"""
         call("import", Base64.encodeToString(config.toByteArray(), Base64.NO_WRAP))
         call("test-health", "synthetic-http")
     }
+    private fun closeFixtureSocket(socket:Socket) {
+        try {socket.close();peerSockets.remove(socket)}
+        catch(e:IOException) {fixtureFailure.compareAndSet(null,e)}
+    }
     private fun respond(socket: Socket) {
         socket.use {
-            socket.soTimeout = 10_000
+            socket.soTimeout = idleTimeoutMs
             val reader = socket.getInputStream().bufferedReader()
             val first = reader.readLine() ?: return
             while (!reader.readLine().isNullOrEmpty()) { /* bounded by socket timeout */ }
@@ -147,10 +194,38 @@ class VpnLifecycleTest {
     @After fun cleanup() {
         runCatching { call("disconnect") }
         serving = false
-        if (::server.isInitialized) server.close()
-        workers.shutdownNow()
-        runCatching { call("test-health", "production-https") }
-        if (::scenario.isInitialized) scenario.close()
+        var terminated = false
+        try {
+            if (::server.isInitialized)try {server.close()}catch(e:IOException) {fixtureFailure.compareAndSet(null,e)}
+            workers.shutdownNow()
+            peerSockets.toList().forEach(::closeFixtureSocket)
+            terminated = workers.awaitTermination(2,TimeUnit.SECONDS)
+        } finally {
+            runCatching { call("test-health", "production-https") }
+            if (::scenario.isInitialized) scenario.close()
+        }
+        assertTrue("Loopback fixture workers did not retire",terminated)
+        assertTrue("Loopback fixture left owned sockets",peerSockets.isEmpty())
+        fixtureFailure.get()?.let {throw AssertionError("Unexpected loopback fixture failure",it)}
+    }
+    @Test fun resetReadinessIsReadOnlyAndCannotAuthorizeAnActiveOwner() {
+        val off=status();assertTrue(resetReady());assertEquals(off.getLong("generation"),status().getLong("generation"))
+        connect();val active=status();assertFalse(resetReady())
+        assertFalse(context.contentResolver.call(uri,"test-reset",null,null)!!.getBoolean("ok"))
+        val unchanged=status();assertEquals(active.getLong("generation"),unchanged.getLong("generation"))
+        assertTrue(unchanged.getBoolean("desiredOn"));assertTrue(unchanged.getBoolean("engineActive"))
+        call("disconnect");await {stoppedForFixture()}
+        assertTrue(resetReady());assertEquals(active.getLong("generation")+1,status().getLong("generation"))
+    }
+    @Test fun idleFaultClientClosesWithoutFalseHealthOrEscapingItsWorker() {
+        idleTimeoutMs = 100
+        Socket(InetAddress.getByName("127.0.0.1"),server.localPort).use {client ->
+            client.soTimeout = 2_000
+            assertEquals("An idle fault client must be closed without a response",-1,client.getInputStream().read())
+        }
+        assertEquals(0,tunnels.get())
+        assertEquals(0,controlProbes.get())
+        assertNull(fixtureFailure.get())
     }
     @Test fun realTunTrafficAndExplicitStop() {
         connect()

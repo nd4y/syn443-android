@@ -1,3 +1,9 @@
+[Emulator observation boundaries](emulator-observation-boundaries.md) require240
+actual Android outcomes perAPI29/35/37. The real idle-peer and read-only owner
+readiness cases are mandatory; frozen-host recovery and all original assertions
+remain required. The readiness probe is debug/emulator-only and cannot reset a
+budget or bypass a pending Stop. Test frames use pinned Compose junit4.v2.
+
 # Testing and release gates
 
 [Runtime observations](device-runtime-observations.md) require nine named
