@@ -1981,7 +1981,8 @@
         "docs/support-chat.md",
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/chat-background-fixture.md"
       ],
       "text": "Сжатие выполняется одним заданием вне UI-потока, имеет прогресс, отмену и bounded cleanup, не запускает VPN и уступает его критическим операциям. Приложение не сканирует медиатеку: обрабатываются только явно выбранные пользователем URI. Сохранённая очередь и подготовленные файлы хранятся в зашифрованных SQL BLOB в sandbox/no-backup. Для работы системного кодека допустимы временные файлы в приватном cache с ограничением размера и удалением после завершения, отмены и следующего запуска; после выхода из аккаунта очередь прежней учётной записи не отправляется из новой сессии."
     },
@@ -2036,7 +2037,8 @@
         "docs/support-chat.md",
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/chat-background-fixture.md"
       ],
       "text": "CI проверяет SQL persistence/restart, ownership и отзыв прав, DPoP/replay, атомарность/идемпотентность и конкурентные запросы, лимиты файла/частей/квот, malformed MIME и hash, XSS и безопасные заголовки, восстановление очереди, сжатие/отмену media и согласованность Android/web. Физические проверки USB/Wi-Fi используют только синтетическую переписку и выбранные тестовые файлы. Доступность на restricted LTE относится к отдельным сетевым испытаниям."
     },
