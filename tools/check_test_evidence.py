@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=235
+    minimum=238
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -237,9 +237,10 @@ if mode=="emulator":
     live_engine_required={"savedEngineCheckpointCannotClaimAnUnownedLiveProcess"}
     route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
     route_required.add("adbLocalConfigPreviewDoesNotWriteAndApplyFencesStaleBase")
+    route_required.add("assignmentQuotedStringStreamingMatchesReferenceDefaultsEscapesAndUnicode")
     fatal_required={"competingVpnOwnsTunAndRevokesOriginalWithoutRetryFight","fatalCommandsCannotStartAnOffNativeOwner","uncaughtJavaFaultRecoversRealTunAndRetainsIntent","uncaughtNativeFaultRecoversRealTunAndRetainsIntent","fatalCrashSeriesPreservesRestartBudgetAndStopFencesLateRecovery",
         "exitSnapshotFiltersRolesBoundsAndSortsWithoutIdentifiers","exitCategoriesAreFixedAndUnknownReasonCannotBecomeCrash","exitReadFailureAndInvalidQueryReturnUnavailableWithoutText","exitPidFilterRejectsStaleFutureAndForeignRecords","exitMetadataReadsRealPlatformWithoutChangingIntent","emptyExitHistoryIsAvailableAndDoesNotInventSuccess","engineExitHistoryHasVisibleOnDemandControls"}
-    chat_required={"chatSqlOutboxPersistsCiphertextAndFencesAccountGeneration","chatSqlChunksPreserveTwentyFiveMiBAndRejectOversize","chatOutboxQuotaAndLogoutEraseTheOwnedKey","chatPhotoCompressionAppliesOrientationAndStripsGps","chatTextAndDocumentBoundariesDoNotAcceptInvalidMedia","supportChatHasVisibleTitleAndConnectionStatus"}
+    chat_required={"chatSqlOutboxPersistsCiphertextAndFencesAccountGeneration","chatSqlChunksPreserveTwentyFiveMiBAndRejectOversize","chatOutboxQuotaAndLogoutEraseTheOwnedKey","chatPhotoCompressionAppliesOrientationAndStripsGps","chatTextAndDocumentBoundariesDoNotAcceptInvalidMedia","supportChatHasVisibleTitleAndConnectionStatus","supportChatKeepsItsRootAcrossRepeatedRecreation","supportChatResumesAfterRepeatedBackgroundTransitions"}
     chat_required |= {"chatRestartReclaimsUnsentFilesButPreservesDraftAttachments","chatVideoCompressionProducesBoundedMp4AndStripsLocation","chatCancellingActiveVideoExportRemovesPrivateTemporaryFiles"}
     chat_required |= {"chatReplyIsPrivateAndDenialDoesNotWithdrawAssignedPolicy","cancelledQueuedChatNeverTransmitsAndDoesNotPoisonNextRequest"}
     chat_required |= {"chatCancelledImportRollsBackPartialSqlAndCanBeRetried"}

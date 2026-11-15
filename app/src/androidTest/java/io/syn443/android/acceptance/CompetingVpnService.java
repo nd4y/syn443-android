@@ -21,16 +21,19 @@ public final class CompetingVpnService extends VpnService {
         } catch (IOException error) { throw new IllegalStateException("Fixture state unavailable", error); }
     }
     @Override public int onStartCommand(Intent intent, int flags, int id) {
-        if (intent != null && STOP.equals(intent.getAction())) {
-            // stopService alone cannot destroy a system-bound VpnService.
-            release(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf();
-            return START_NOT_STICKY;
-        }
+        // STOP may create the service when no competing tunnel exists. Fulfil
+        // its foreground-service contract before stopping, without establishing
+        // a TUN just to emit an off marker.
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager == null) throw new IllegalStateException("Notification service unavailable");
         manager.createNotificationChannel(new NotificationChannel("acceptance", "VPN acceptance test", NotificationManager.IMPORTANCE_LOW));
         startForeground(41, new Notification.Builder(this, "acceptance")
             .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("SYN443 temporary VPN test").build());
+        if (intent != null && STOP.equals(intent.getAction())) {
+            // stopService alone cannot destroy a system-bound VpnService.
+            release(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf();
+            return START_NOT_STICKY;
+        }
         if (tun == null) tun = new Builder().setSession("SYN443 acceptance fixture")
             .addAddress("192.0.2.2", 32).addRoute("198.51.100.0", 24).establish();
         mark(tun == null ? "unavailable" : "active");

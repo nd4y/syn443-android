@@ -13,7 +13,6 @@ import io.syn443.identity.AssignmentState
 import io.syn443.identity.AssignmentIdentity
 import io.syn443.policy.Policy
 import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.json.encodeToStream
 import kotlinx.serialization.json.decodeFromStream
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -214,7 +213,7 @@ class LoginJournal(context:Context,private val namespace:String="device-login-v1
         worker();val identity=assignmentIdentity(expected);require(value.identity==identity && value.time!=null)
         synchronized(intentLock) {requireCurrent(expected)}
         AssignmentJsonBuffer(assignmentMaximum).use {plain->
-            Policy.json.encodeToStream(AssignmentState.serializer(),value,plain)
+            AssignmentJsonEncoder.encode(value,plain)
             val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply {
                 init(Cipher.ENCRYPT_MODE,key(true));updateAAD(assignmentAad(expected))
             }
