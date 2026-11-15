@@ -28,5 +28,5 @@ signed device capability. Its callback still needs an independently authorized
 immutable catalogue resolver. It does not grant graph eligibility, resource or
 probe admission, fresh selection proof, active/draining ownership, connection
 pinning, bounded asynchronous retirement or an atomic route switch. Those gates
-must be implemented and accepted before runtime use. Source and executable tests
-remain pending exact-head GitHub Actions acceptance; no physical path is claimed.
+must be implemented and accepted before runtime use. Construction and ordinary/race tests passed [exact c43 Actions43715523260](https://github.com/nd4y/syn443-android/actions/runs/43715523260).
+This accepts the unactivated primitive; no physical adaptive path is claimed.
