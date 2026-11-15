@@ -10,6 +10,14 @@ import time
 from check_emulator_heap import check
 
 
+def framework_booted(raw):
+    assert isinstance(raw, bytes) and len(raw) <= 1_048_576, 'Unbounded framework readiness dump'
+    # API29 AMS publishes these flags only after its startup phases. A bound
+    # package Binder can exist earlier than PackageManagerInternal readiness.
+    expected = {b'mProcessesReady': b'true', b'mSystemReady': b'true', b'mBooted': b'true', b'mBooting': b'false'}
+    return all(re.findall(rb'\b'+key+rb'=(true|false)\b', raw) == [value] for key, value in expected.items())
+
+
 def prepare(adb, *, clock=time.monotonic, sleep=time.sleep, budget=120):
     assert 0 < budget <= 120
     assert os.environ.get('GITHUB_ACTIONS') == 'true'
@@ -73,7 +81,11 @@ def prepare(adb, *, clock=time.monotonic, sleep=time.sleep, budget=120):
         try:
             current = call('shell', 'pidof', 'system_server').strip()
             ready = call('shell', 'service', 'check', 'package')
-            if re.fullmatch(rb'[1-9][0-9]*', current) and current != initial and b': found' in ready:
+            activity = call('shell', 'dumpsys', 'activity', '-a', 'processes')
+            if re.fullmatch(rb'[1-9][0-9]*', current) and current != initial and b': found' in ready and framework_booted(activity):
+                packages = call('shell', 'pm', 'list', 'packages', '--user', '0', 'android')
+                assert b'package:android' in packages.splitlines(), 'Core package inventory unavailable'
+                assert call('shell', 'pidof', 'system_server').strip() == current, 'Framework changed during readiness observation'
                 check(adb)
                 print('Owned API29 framework restarted once; new system_server verified; userdata preserved', flush=True)
                 return

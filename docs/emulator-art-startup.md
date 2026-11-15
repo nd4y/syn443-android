@@ -19,6 +19,15 @@ and bounds the wait. Lost acknowledgements cannot replay stop/start. A failed
 stop observation still dispatches start once. It never resets userdata or
 changes application memory limits.
 
+A bound package Binder alone is insufficient: run43746318520 reached it before
+`PackageManagerInternal` was ready, and APK installation failed in Android's
+storage allocator. Readiness now requires the new system_server to report
+`mProcessesReady`, `mSystemReady`, `mBooted` and cleared `mBooting` through
+[API29 ActivityManagerService](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-10.0.0_r47/services/core/java/com/android/server/am/ActivityManagerService.java),
+plus a successful core package inventory and a stable process identity. Host
+fixtures reject every partial/contradictory readiness flag and exercise delayed
+readiness without replaying framework commands.
+
 Host fixtures cover owner/device/installed-app fences, root failure, lost
 acknowledgements, stuck/unchanged processes and readiness deadlines. A new
 instrumented `RuntimeHeapTest` checks the running application's actual
