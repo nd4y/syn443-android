@@ -108,8 +108,13 @@ class ChatUiTest {
         val reply=checkNotNull(context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null))
         assertTrue("Read-only VPN status must be available",reply.getBoolean("ok"))
         val state=JSONObject(checkNotNull(reply.getString("json")))
-        assertTrue("VPN intent fields must be present",listOf("generation","desiredOn","configRevision").all(state::has))
-        return listOf("generation","desiredOn","configRevision").map {state.opt(it)}
+        assertTrue("VPN generation must be present and numeric",state.has("generation") && state.get("generation") is Number)
+        assertTrue("VPN desired intent must be present and boolean",state.has("desiredOn") && state.get("desiredOn") is Boolean)
+        assertTrue("VPN generation must be nonnegative",state.getLong("generation")>=0)
+        // A fresh installation legitimately has no configuration revision.
+        // Preserve that absence too; MainActivity must not invent a config.
+        return listOf(state.getLong("generation"),state.getBoolean("desiredOn"),
+            state.has("configRevision"),state.opt("configRevision"))
     }
     private fun assertReady() {
         compose.activityRule.scenario.onActivity {activity->
