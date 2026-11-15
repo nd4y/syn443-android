@@ -1,4 +1,5 @@
 import unittest
+import itertools
 import subprocess
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
@@ -84,18 +85,25 @@ class OwnedVpnSettingsTest(unittest.TestCase):
         ):
             self.assertFalse(ui.focused_settings_anr(foreign))
 
+    def test_absent_oversized_and_ambiguous_display_focus_is_not_authority(self):
+        owned=b'  mCurrentFocus=Window{123a u0 Application Not Responding: com.android.settings}\n'
+        for raw in (b'WINDOW MANAGER WINDOWS\nWindow{123a u0 Application Not Responding: com.android.settings}',
+                    b'mCurrentFocus=null\n',owned+owned,owned+b'mCurrentFocus=null\n',owned+b'x'*1_048_576):
+            self.assertFalse(ui.focused_settings_anr(raw))
+
     def test_owned_settings_anr_reopens_activity_without_tapping_dialog(self):
         blocked=ET.Element('hierarchy')
         node(blocked, package='android', resource_id='android:id/aerr_close')
         settings,gear=self.row()
-        launches=[]
+        launches=[];focus_commands=[]
 
         def adb(*args, **kwargs):
             if args[-1]=='ro.hardware':return b'ranchu'
             if args[-1]=='size':return b'1080x1920'
             if 'resolve-activity' in args:return b'com.android.settings/.Settings$VpnSettingsActivity'
             if args[1:3]==('dumpsys','window'):
-                return b'  mCurrentFocus=Window{123a u0 Application Not Responding: com.android.settings}'
+                focus_commands.append(args)
+                return b'  mCurrentFocus=Window{123a u0 Application Not Responding: com.android.settings}' if args[-1]=='displays' else b'WINDOW MANAGER WINDOWS'
             if args[1:3]==('am','start'):launches.append(args)
             return b''
 
@@ -104,6 +112,23 @@ class OwnedVpnSettingsTest(unittest.TestCase):
             tap.assert_called_once_with(gear)
         self.assertEqual(len(launches),2)
         self.assertEqual(launches[0],launches[1])
+        self.assertEqual(focus_commands,[('shell','dumpsys','window','displays')])
+
+    def test_foreign_and_unknown_anr_never_restart_settings_or_tap_a_dialog(self):
+        blocked=ET.Element('hierarchy');node(blocked,package='android',resource_id='android:id/aerr_close')
+        for focus in (b'mCurrentFocus=null',b'mCurrentFocus=Window{123a u0 Application Not Responding: io.syn443.android}'):
+            launches=[]
+            def adb(*args,**kwargs):
+                if args[-1]=='ro.hardware':return b'ranchu'
+                if args[-1]=='size':return b'1080x1920'
+                if 'resolve-activity' in args:return b'com.android.settings/.Settings$VpnSettingsActivity'
+                if args[1:3]==('dumpsys','window'):return focus
+                if args[1:3]==('am','start'):launches.append(args)
+                return b''
+            with patch.object(ui,'adb',side_effect=adb),patch.object(ui,'tree',return_value=blocked),patch.object(ui,'tap')as tap,patch.object(ui.time,'sleep'),patch.object(ui.time,'monotonic',side_effect=itertools.count()):
+                with self.assertRaisesRegex(AssertionError,'Owned VPN settings entry unavailable'):ui.open_policy()
+                tap.assert_not_called()
+            self.assertEqual(len(launches),1)
 
     def test_protected_bouncer_is_never_filled_by_policy_navigation(self):
         root,_=self.row()
