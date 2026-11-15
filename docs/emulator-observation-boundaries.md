@@ -30,3 +30,14 @@ owned socket on teardown and confirms worker retirement. The actual frozen-host
 new-PID/Online/desired-On/tunnel-count assertions are unchanged. A real idle-client
 case proves EOF without any false health counter; all239outcomes are mandatory.
 No client exception, timeout or crash is suppressed by this test-only correction.
+
+Exact861170bec61171440582c050d9c6c28308f26d93/43710262610 passed239onAPI29/37,
+butAPI35 rejected test-reset during setup. The live status intentionally replaces
+an obsolete saved engine sample with current process evidence, while the reset
+guard requires the durable Stop checkpoint to be inactive too. Those are separate
+observations. Setup now polls a read-only, serialized owner snapshot before the
+single reset. It never reads another process's AtomicFile or retries the reset.
+The tiny test-reset-ready command is rejected on release and real hardware,
+returns no private state, and changes no runtime authority. Its real lifecycle
+case proves no intent change and rejection of reset while an engine is active.
+All original cases plus both new fixture cases make240mandatory outcomes.
