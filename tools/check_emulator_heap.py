@@ -20,7 +20,9 @@ def check(adb):
     raw_growth = adb('shell', 'getprop', 'dalvik.vm.heapgrowthlimit').strip()
     growth = megabytes(raw_growth) if raw_growth else maximum
     assert 128 <= maximum <= 2048 and 64 <= growth <= maximum, 'Disposable AVD Java heap is not representative of supported Android devices'
-    print(f'Disposable AVD heap verified: maximum={maximum:g}MiB, growth={growth:g}MiB')
+    # Properties do not prove the maximum already captured by a running ART
+    # process. Storage/UI tests must remain bounded even under a smaller heap.
+    print(f'Disposable AVD heap properties: maximum={maximum:g}MiB, growth={growth:g}MiB')
 
 
 if __name__ == '__main__':
