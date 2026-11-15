@@ -126,9 +126,10 @@ def settings_component(raw):
 
 def focused_settings_anr(windows):
     """The platform attaches the ANR process name to its focused window."""
-    return re.search(
-        rb'(?m)^\s*mCurrentFocus=Window\{[^}\r\n]* Application Not Responding: com\.android\.settings\}\s*$',
-        windows,
+    if len(windows)>1_048_576:return False
+    focus=re.findall(rb'(?m)^\s*mCurrentFocus=([^\r\n]+)',windows)
+    return len(focus)==1 and re.fullmatch(
+        rb'Window\{[^}\r\n]* Application Not Responding: com\.android\.settings\}',focus[0].strip(),
     ) is not None
 
 
@@ -154,6 +155,7 @@ def open_policy():
     end=time.monotonic()+20
     root=None
     relaunched=False
+    last_settings_anr=None
     while time.monotonic()<end:
         root=tree()
         if pin_keys(root):raise AssertionError('Protected emulator keyguard unexpectedly active')
@@ -163,7 +165,10 @@ def open_policy():
         # Settings activity once, after confirming that its own ANR has focus.
         if not relaunched and any(n.get('package')=='android' and n.get('resource-id')=='android:id/aerr_close'
                                    for n in root.iter('node')):
-            if focused_settings_anr(adb('shell','dumpsys','window','windows')):
+            # DisplayContent owns current focus on modern Android. The windows
+            # subcommand lists windows but does not include that owner field.
+            last_settings_anr=focused_settings_anr(adb('shell','dumpsys','window','displays',timeout=5))
+            if last_settings_anr:
                 relaunched=True
                 print('Owned Settings ANR: restarting the VPN settings activity once',flush=True)
                 adb(*launch)
@@ -176,7 +181,7 @@ def open_policy():
     resources=sorted({n.get('resource-id','') for n in nodes if n.get('package') in ('android','com.android.settings','com.android.systemui')})[:32]
     owned=[{'id':n.get('resource-id',''),'bounds':n.get('bounds','')} for n in nodes if n.get('package')=='com.android.settings' and n.get('text')=='SYN443']
     gears=[{'bounds':n.get('bounds',''),'description':('expected' if n.get('content-desc')=='Settings for SYN443' else 'present' if n.get('content-desc') else 'empty')} for n in nodes if n.get('package')=='com.android.settings' and n.get('resource-id','').endswith('/settings_button')]
-    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears}),flush=True)
+    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears,'focusedSettingsANR':last_settings_anr}),flush=True)
     raise AssertionError('Owned VPN settings entry unavailable')
 
 
