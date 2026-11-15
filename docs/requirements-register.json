@@ -935,8 +935,7 @@
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/non-lte-acceptance-20261115.md",
         "docs/emulator-observation-boundaries.md",
-        "docs/emulator-art-startup.md",
-        "docs/chat-background-fixture.md"
+        "docs/emulator-art-startup.md"
       ],
       "text": "Необязательный туннель/peer/outbound может быть недоступен уже при холодном старте: независимые разрешённые маршруты должны запуститься/продолжить работу, а затронутые приватные назначения остаются явно заблокированными без fallback в общий прокси или direct. Восстановление выбирает минимальную неисправную dependency scope; проверяются DNS/bootstrap dependencies, отсутствие потока до установки блокировок и отсутствие утечки при старте, handover, реконфигурации и смерти модуля. Граница отдельного процесса не доказывает независимый startup/recovery outbounds внутри одного native box: engine-api объявляет реальные capabilities, движок/адаптер устраняет fail-fast общего запуска для optional dependency либо использует доказанную архитектуру с теми же гарантиями. Если для восстановления разделяемого runtime всё же нужен общий перезапуск, он bounded, временный разрыв независимых потоков измерен, блокировки установлены до него; это не считается независимым восстановлением и не закрывает соответствующий AC86. Обязательные взаимозависимости не объявляются optional ради прохождения проверки.",
       "implementationScope": "Deferred optional NetBird startup and independent target-route evidence. The dated2026-11-15 checkpoint records exact accepted source, CI and physical/live scope; statuses remain partial.",
@@ -1969,7 +1968,8 @@
         "docs/support-chat.md",
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/chat-background-fixture.md"
       ],
       "text": "Сжатие выполняется одним заданием вне UI-потока, имеет прогресс, отмену и bounded cleanup, не запускает VPN и уступает его критическим операциям. Приложение не сканирует медиатеку: обрабатываются только явно выбранные пользователем URI. Сохранённая очередь и подготовленные файлы хранятся в зашифрованных SQL BLOB в sandbox/no-backup. Для работы системного кодека допустимы временные файлы в приватном cache с ограничением размера и удалением после завершения, отмены и следующего запуска; после выхода из аккаунта очередь прежней учётной записи не отправляется из новой сессии."
     },
@@ -2024,7 +2024,8 @@
         "docs/support-chat.md",
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/chat-background-fixture.md"
       ],
       "text": "CI проверяет SQL persistence/restart, ownership и отзыв прав, DPoP/replay, атомарность/идемпотентность и конкурентные запросы, лимиты файла/частей/квот, malformed MIME и hash, XSS и безопасные заголовки, восстановление очереди, сжатие/отмену media и согласованность Android/web. Физические проверки USB/Wi-Fi используют только синтетическую переписку и выбранные тестовые файлы. Доступность на restricted LTE относится к отдельным сетевым испытаниям."
     },

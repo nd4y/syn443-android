@@ -106,7 +106,9 @@ class ChatUiTest {
     private fun vpnIntent():List<Any?> {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val reply=checkNotNull(context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null))
+        assertTrue("Read-only VPN status must be available",reply.getBoolean("ok"))
         val state=JSONObject(checkNotNull(reply.getString("json")))
+        assertTrue("VPN intent fields must be present",listOf("generation","desiredOn","configRevision").all(state::has))
         return listOf("generation","desiredOn","configRevision").map {state.opt(it)}
     }
     private fun assertReady() {
