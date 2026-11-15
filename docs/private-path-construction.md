@@ -69,15 +69,33 @@ Three required selection cases exercise two real SOCKS-to-HTTP paths and hop
 counters before granting each TCP proof, old-flow continuity, boot-clock drain
 expiry, shared pins, copied/wrong-group/wrong-check/wrong-scope/stale/replayed
 proofs, expired authorization, blocked-probe admission and lazy handshake failure.
-All twelve constructor/pool/traffic/selection cases must pass in ordinary and race JSON evidence.
+## Snapshot construction handoff
+
+The private catalogue owns up to500 canonical normalized profiles, at most64KiB
+per entry and256KiB in aggregate. It binds a content digest and a construction
+context to one native router. Each candidate decodes fresh typed options and
+replaces the imported detour with its previous private adapter. Construction is
+admitted only inside the private registry cloned by `buildPrivatePath`; an old
+catalogue cannot borrow a parent manager or replacement runtime. Imported
+profile aliases, noncanonical/duplicate-key JSON, insecure TLS, filesystem key
+options and unbound references fail closed. No additional SDK or worker is made.
+
+This is a handoff for an independently authorized, fully validated normalized
+snapshot, not the untrusted policy/wire decoder. The closed policy, TLS/SSH,
+graph capability and source/recipient fences remain prerequisites. Tests exercise
+owned SOCKS/HTTP traffic, caller-buffer mutation, runtime replacement/cancellation,
+fresh typed detours, source/profile substitution, file/insecure options and the
+count/per-entry/aggregate bounds. All fifteen constructor/pool/traffic/selection/
+catalogue cases must pass in ordinary and race JSON evidence.
 
 This primitive is not exposed through the Java API, accepted configuration or a
 signed device capability. Socket ownership grants no route selection authority.
 It still needs an independently authorized immutable catalogue resolver, graph
 eligibility, shared priority/energy admission, contextual memory, signed issuance
 and client integration. Those gates must be implemented and
-accepted before runtime use. Source and executable tests
-remain pending exact-head GitHub Actions acceptance; no physical path is claimed.
+accepted before runtime use. No physical adaptive path is claimed.
 
 The earlier construction primitive and ordinary/race cases passed [exact c43 Actions43715523260](https://github.com/nd4y/syn443-android/actions/runs/43715523260).
-The added pool/traffic lifecycle requires its own complete Actions acceptance.
+The constructor/pool/traffic/selection components passed exact [6c9 Actions43759199241](https://github.com/nd4y/syn443-android/actions/runs/43759199241).
+The subsequent catalogue handoff requires its own complete exact-source Actions
+acceptance and does not activate a graph capability.

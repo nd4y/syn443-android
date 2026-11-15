@@ -28,7 +28,8 @@
         "docs/managed-policy.md",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/private-path-construction.md",
-        "docs/private-path-construction.md#fresh-proof-selection"
+        "docs/private-path-construction.md#fresh-proof-selection",
+        "docs/private-path-construction.md#snapshot-construction-handoff"
       ]
     },
     {
@@ -552,7 +553,9 @@
       "id": "CFG-06",
       "text": "Публикуется неизменяемая ревизия эффективного конфига для устройства. Она не содержит чужих профилей и URL исходных подписок, если устройству не требуется собственная загрузка. Собственный конфиг клиента не зависит от формата выдачи Remnawave и версии её API.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/private-path-construction.md#snapshot-construction-handoff"
+      ]
     },
     {
       "id": "PROV-01",
