@@ -4,18 +4,26 @@ Snapshot: 2026-11-16. Specification0.9 contains292 requirements and98 acceptance
 scenarios. Those numbers describe scope, not completed work or test counts.
 This document supersedes repository-wide readiness claims in historical stage notes.
 
-The v83 [signed admin metadata foundation](mobile-admin-bootstrap.md) passed its
-source CI and was protected-merged; its actual-main run is pending at this
-snapshot. Its three new cache Android cases passed on emulators, and this APK
-has not been installed on the physical phone. It preserves device bootstrap
-authority and adds no native administrative session, API or quick UI.
+The v83 [signed admin metadata foundation](mobile-admin-bootstrap.md) passed
+source and actual-main CI. The v84 [separate administrative OAuth core](mobile-admin-auth.md)
+source `110f817ca42dbabb9afe648c465809551a95c9db` passed all eight jobs in
+[Actions43876233986](https://github.com/nd4y/syn443-android/actions/runs/43876233986)
+and was protected-merged as `d4dd7565a836ec4d31672e6c07aa3d336e462635`.
+Its actual-main run is pending at this source snapshot. The three emulator
+matrices each contain287 unique passing Android outcomes;23 new administrative
+JVM methods and all eight handwritten security classes meet the existing90%
+coverage gate. Neither newer APK is installed at this snapshot.
 
-The current v84 / `0.9.56-admin-auth` [administrative OAuth core](mobile-admin-auth.md)
-adds separate process-owned identity/pending/session/refresh logic and23 required
-synthetic JVM cases. Its own CI is pending. Android trust-ticket/controller,
-separate key/journal, callback routing, API actions and native quick screens are
-not connected; no actual native-admin browser login, MFA or device-card result
-is implied by this source.
+Current v85 / `0.9.57-admin-trust` adds [current signed administrative admission](mobile-admin-discovery.md)
+and a [controller-owned adaptive RAM budget](probe-budget-owner.md). A credential
+operation requires the unchanged, current signed trust snapshot and a fresh
+trusted clock; device Bootstrap authority remains separate. The adaptive budget
+survives native/service/coordinator recreation in the same controller process.
+Eleven new JVM and six new Android outcomes are mandatory in Actions; this
+candidate has not yet passed CI. Durable admin controller/key/journal/callback,
+Control API/UI, controller-process-death admission and the common energy
+governor remain open. This is not real mobile-admin login/MFA or managed-chain
+acceptance.
 
 ## Current accepted checkpoint
 

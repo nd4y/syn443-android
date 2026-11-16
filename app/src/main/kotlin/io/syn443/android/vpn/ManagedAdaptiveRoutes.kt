@@ -20,7 +20,8 @@ import java.util.UUID
 
 /** Handler-confined policy coordinator. A plan/score never authorizes packets;
  * only the actual native worker's one-use receipt can commit a path. */
-internal class ManagedAdaptiveRoutes private constructor(private val wire:AdaptiveRuntime,private val priorityTag:String) {
+internal class ManagedAdaptiveRoutes private constructor(private val wire:AdaptiveRuntime,private val priorityTag:String,
+    private val budget:AdaptiveProbeBudget) {
     private data class CurrentFailure(val path:PlannedPath,val attempt:Long,val completedAt:Long,val nativeEpoch:Long,val nativeScope:String)
     private data class Group(var frontier:RouteFrontier?=null,var current:PlannedPath?=null,
         var measuredAt:Long=0,var latency:Long=0,var nextAt:Long=0,var exploreAt:Long=0,
@@ -50,7 +51,6 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private var retireOwner=false
     private var lastCommandAt=Long.MIN_VALUE/2
     private var lastNow=0L
-    private val budget=AdaptiveProbeBudget()
     private val maintenanceCadence=budget.routineCadence(groups.size)
 
     fun bind(scope:RouteScope,networkMode:NetworkMode,revision:Long) {
@@ -313,13 +313,13 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     override fun toString()="ManagedAdaptiveRoutes([redacted])"
     companion object {
         private val checkedFailures=setOf("dial_failed","check_timeout","tls_failed","ssh_banner_mismatch","request_failed","response_failed","exit_evidence_invalid","http_response_mismatch")
-        fun read(raw:String?):ManagedAdaptiveRoutes? {
+        fun read(raw:String?,budget:AdaptiveProbeBudget=AdaptiveProbeBudget()):ManagedAdaptiveRoutes? {
             if(raw==null)return null
             val root=Decision.json.parseToJsonElement(raw).jsonObject
             val adaptive=root["adaptive_routes"] ?: return null
             val wire=AdaptiveRuntime.decode(checkNotNull(protectedAdaptiveWire(raw)))
             val tag=runCatching {JSONObject(raw).getJSONObject("route").getString("final")}.getOrDefault("")
-            return ManagedAdaptiveRoutes(wire,tag)
+            return ManagedAdaptiveRoutes(wire,tag,budget)
         }
     }
 }

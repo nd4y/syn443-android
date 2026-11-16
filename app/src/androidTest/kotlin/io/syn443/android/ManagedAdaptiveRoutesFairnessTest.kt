@@ -4,6 +4,7 @@ import io.syn443.android.vpn.ManagedAdaptiveRoutes
 import io.syn443.android.vpn.AdaptivePolicyBinding
 import io.syn443.android.vpn.RouteSnapshot
 import io.syn443.decision.NetworkMode
+import io.syn443.decision.AdaptiveProbeBudget
 import io.syn443.policy.Policy
 import io.syn443.recovery.RouteScope
 import java.io.Closeable
@@ -57,8 +58,9 @@ class ManagedAdaptiveRoutesFairnessTest {
             .put("route_checks", checks).put("adaptive_routes", wire).toString()
     }
 
-    internal class Harness(val raw: String, binding: AdaptivePolicyBinding? = null) : Closeable {
-        val controller = checkNotNull(ManagedAdaptiveRoutes.read(raw))
+    internal class Harness(val raw: String, binding: AdaptivePolicyBinding? = null,
+        budget: AdaptiveProbeBudget = AdaptiveProbeBudget()) : Closeable {
+        val controller = checkNotNull(ManagedAdaptiveRoutes.read(raw,budget))
         var scope = RouteScope(1, 2, 3, "synthetic-fair-owner", Policy.hash(raw))
         var epoch = 1L
         var nativeScope = Policy.hash("synthetic-fair-native")
@@ -115,6 +117,131 @@ class ManagedAdaptiveRoutesFairnessTest {
         }
         fun view() = RouteSnapshot.read(true, true, scope)
         override fun close() { RouteSnapshot.owner(null); RouteSnapshot.configure(null, "") }
+    }
+
+    @Test fun sharedControllerBudgetSurvivesCoordinatorRecreationWithMinuteDebtAndPendingScopeFences() {
+        val budget=AdaptiveProbeBudget();val raw=config(choices=500)
+        lateinit var retiredReport:JSONObject
+        Harness(raw,budget=budget).use {h ->
+            h.ready(1000)
+            repeat(8) {index ->
+                val at=1000L+index*5000
+                val probe=checkNotNull(h.tick(at))
+                if(index<7)h.failed(probe,at) else {
+                    assertNull(h.tick(at+5000)) // one pending native operation, despite an eligible start interval.
+                    retiredReport=h.status().put("request",probe.getString("request"))
+                        .put("group",probe.getString("group")).put("hops",probe.getJSONArray("hops"))
+                        .put("code","verified").put("probeMs",20).put("receipt",Policy.hash(probe.getString("request")))
+                    h.failed(probe,at+5000)
+                }
+            }
+            assertEquals(8,h.starts.size)
+        }
+        Harness(raw,budget=budget).use {h ->
+            h.scope=h.scope.copy(intent=2,engine="synthetic-recreated-controller-owner")
+            h.epoch=2;h.nativeScope=Policy.hash("synthetic-recreated-native")
+            h.rebind(46000)
+            val before=h.commands.size
+            h.acknowledge(retiredReport,47000)
+            assertEquals(before,h.commands.size);assertFalse(h.view().getBoolean("requiredReady"))
+            h.controller.force();assertNull(h.tick(47000))
+            assertNull(h.tick(60000)) // the first old start is still inside the rolling minute.
+            val probe=checkNotNull(h.tick(61000))
+            assertEquals(1,h.starts.size);assertFalse(h.view().getBoolean("requiredReady"))
+            val foreign=h.status().put("request",probe.getString("request")).put("group",probe.getString("group"))
+                .put("hops",probe.getJSONArray("hops")).put("code","verified").put("probeMs",20)
+                .put("receipt",Policy.hash(probe.getString("request"))).put("scope",Policy.hash("foreign-native-scope"))
+            val commands=h.commands.size;h.acknowledge(foreign,62000)
+            assertEquals(commands,h.commands.size);assertFalse(h.view().getBoolean("requiredReady"))
+            val commit=h.verified(probe,63000)
+            assertEquals("commit",commit.getString("command"));assertFalse(h.view().getBoolean("requiredReady"))
+            val ack=h.status().put("request",probe.getString("request")).put("group",probe.getString("group"))
+                .put("hops",probe.getJSONArray("hops")).put("code","selected").put("probeMs",20)
+                .put("receipt",commit.getString("receipt")).put("groupSelected",false)
+            h.acknowledge(ack,65000)
+            assertNull(h.tick(66000));assertEquals(1,h.starts.size)
+            assertFalse(h.view().getBoolean("requiredReady"))
+            h.acknowledge(ack.put("groupSelected",true),67000)
+            assertTrue(h.view().getBoolean("requiredReady"))
+        }
+    }
+
+    @Test fun sharedControllerBudgetRetainsRoutineReserveAndRollingHourAcrossNativeRecreation() {
+        val budget=AdaptiveProbeBudget();val raw=config(choices=2)
+        val starts=mutableListOf<Long>()
+        fun record(at:Long) {
+            starts+=at
+            assertTrue(starts.count {at-it<60_000}<=8)
+            assertTrue(starts.count {at-it<3_600_000}<=128)
+            if(starts.size>1)assertTrue(at-starts[starts.lastIndex-1]>=5000)
+        }
+        Harness(raw,budget=budget).use {h ->
+            h.ready(1000);h.selected(checkNotNull(h.tick(1000)),1000);record(1000)
+            repeat(96) {index ->
+                val at=6000L+(index/6)*60_000+(index%6)*5000
+                h.controller.force();h.selected(checkNotNull(h.tick(at)),at);record(at)
+                if(index==5) {
+                    h.controller.force();assertNull(h.tick(36000)) // six routine starts, but only seven total.
+                }
+            }
+            assertEquals(97,h.starts.size)
+        }
+        var now=starts.last()+6000
+        Harness(raw,budget=budget).use {h ->
+            h.scope=h.scope.copy(intent=2,engine="synthetic-hourly-recreated-owner")
+            h.epoch=2;h.nativeScope=Policy.hash("synthetic-hourly-recreated-native")
+            h.rebind(now)
+            val recovery=checkNotNull(h.tick(now));h.selected(recovery,now);record(now)
+            h.controller.force();assertNull(h.tick(now+5000)) // all96 routine records survived recreation.
+            repeat(30) {index ->
+                now+=65_000
+                h.epoch++;h.nativeScope=Policy.hash("synthetic-hourly-native-$index")
+                h.rebind(now)
+                h.selected(checkNotNull(h.tick(now)),now);record(now)
+            }
+            assertEquals(128,starts.size)
+        }
+        Harness(raw,budget=budget).use {h ->
+            h.scope=h.scope.copy(intent=3,engine="synthetic-third-hourly-owner")
+            h.epoch=40;h.nativeScope=Policy.hash("synthetic-third-hourly-native")
+            h.rebind(now+65_000)
+            h.controller.force();assertNull(h.tick(now+65_000))
+            assertNull(h.tick(3_600_999));assertTrue(h.starts.isEmpty())
+            val resumed=checkNotNull(h.tick(3_601_000));record(3_601_000)
+            assertEquals(1,h.starts.size)
+            assertFalse(h.view().getBoolean("requiredReady"))
+            h.selected(resumed,3_601_000)
+            assertTrue(h.view().getBoolean("requiredReady"));assertFalse(h.controller.requiresRetirement())
+        }
+    }
+
+    @Test fun sharedControllerBudgetKeepsSpacingAndClockSealWhileIndependentFixturesRemainIsolated() {
+        val budget=AdaptiveProbeBudget();val raw=config(choices=2)
+        Harness(raw,budget=budget).use {h ->
+            h.ready(1000);h.failed(checkNotNull(h.tick(1000)),1000)
+        }
+        Harness(raw,budget=budget).use {h ->
+            h.epoch=2;h.nativeScope=Policy.hash("synthetic-spacing-native")
+            h.rebind(5999);assertNull(h.tick(5999))
+            h.failed(checkNotNull(h.tick(6000)),6000)
+            assertEquals(1,h.starts.size)
+        }
+        Harness(raw,budget=budget).use {h ->
+            h.epoch=3;h.nativeScope=Policy.hash("synthetic-backward-native")
+            h.rebind(5999);assertNull(h.tick(5999))
+            assertTrue(budget.invalidated());assertTrue(h.controller.requiresRetirement())
+            h.epoch++;h.nativeScope=Policy.hash("synthetic-after-seal-native")
+            h.rebind(12000);h.controller.force();assertNull(h.tick(12000));assertTrue(h.starts.isEmpty())
+        }
+        Harness(raw,budget=budget).use {h ->
+            h.epoch=5;h.nativeScope=Policy.hash("synthetic-new-owner-after-seal")
+            h.rebind(18000);assertNull(h.tick(18000))
+            assertTrue(h.controller.requiresRetirement());assertTrue(h.starts.isEmpty())
+        }
+        Harness(raw).use {h ->
+            h.ready(1000);assertNotNull(h.tick(1000)) // independent synthetic fixtures never share production state.
+            assertFalse(h.controller.requiresRetirement())
+        }
     }
 
     @Test fun fiveHundredLastWorkingPathSurvivesTTLAndHourlyPauseWithoutBudgetReset() {

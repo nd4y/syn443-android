@@ -165,9 +165,9 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
         Bootstrap(descriptor.serviceId,descriptor.issuer,descriptor.clientId,descriptor.apiOrigin,
             descriptor.roots.toMap(),controlPanelOrigin=descriptor.controlPanelOrigin).also {it.validate()}
 
-    /** Worker-only signed metadata lookup, not an administrative grant/session.
-     * No device Bootstrap field or authority hash is extended by this cache. */
-    internal fun adminBootstrap(expected:Bootstrap):AdminBootstrap? {
+    /** Worker-only ticket from one locked root/floor/cache snapshot. This
+     * authenticates discovery, not an administrative grant or session. */
+    internal fun adminDiscovery(expected:Bootstrap):AdminDiscovery? {
         worker()
         return synchronized(lock) {try {
             expected.validate()
@@ -176,11 +176,11 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
             val retained=readAdminDescriptor(expected.serviceId) ?: return@synchronized null
             require(retained.floor==current && retained.manifest.length in 1..BootstrapTrust.MAX_MANIFEST)
             val now=maxOf(testAdminNow?.invoke() ?: (System.currentTimeMillis()/1000),state.timeFloor)
-            val (descriptor,floor)=BootstrapTrust.descriptor(retained.manifest,state.anchor,current,now)
-            require(floor==current && deviceBootstrap(descriptor)==expected)
-            descriptor.adminBootstrap
+            BootstrapTrust.adminDiscovery(retained.manifest,state.anchor,current,expected,now)
         }catch(_:Exception){null}}
     }
+    /** Compatibility projection only. Device Bootstrap and its authority are unchanged. */
+    internal fun adminBootstrap(expected:Bootstrap):AdminBootstrap?=adminDiscovery(expected)?.metadata
     fun preview(raw:String):AuthenticatedInvite {worker();return synchronized(lock){
         val state=read();val link=BootstrapTrust.parse(raw)
         BootstrapTrust.authenticate(raw,state.anchor,state.floors[link.serviceId]?:ServiceFloor(),maxOf(System.currentTimeMillis()/1000,state.timeFloor))

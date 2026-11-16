@@ -15,7 +15,7 @@ enum class AdminFailure { CANCELLED, TRANSPORT, INVALID_REPLY, ACCESS_DENIED, RE
 class AdminException(val reason:AdminFailure):Exception(reason.name)
 
 /** Caller supplies metadata only after signed service verification. This is not a device Bootstrap. */
-class AdminIdentity(metadata:AdminBootstrap,val serviceBinding:String) {
+class AdminIdentity internal constructor(metadata:AdminBootstrap,val serviceBinding:String) {
     val metadata:AdminBootstrap=metadata.copy()
     val authority:String
     init {

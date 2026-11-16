@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=287
+    minimum=293
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=23
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=111
+    minimum=122
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -447,3 +447,8 @@ if mode == "identity":
         "io.syn443.identity.AdminProtocol", "io.syn443.identity.AdminIssuerState", "io.syn443.identity.AdminSession",
         "io.syn443.identity.AdminSessionFamily", "io.syn443.identity.AdminLogout",
     })
+
+# Current signed administrative admission and controller-owned RAM budget.
+ADMIN_DISCOVERY_REQUIRED = {'identity': [('io.syn443.identity.AdminDiscoveryTest', 'signedDiscoveryRequiresTheExactCommittedFloorAndFullDeviceProjection'), ('io.syn443.identity.AdminDiscoveryTest', 'metadataRevisionAndTrustRootBindDiscoveryWithoutChangingDeviceBootstrapAuthority'), ('io.syn443.identity.AdminDiscoveryTest', 'absentExpiredTamperedAndUncommittedDescriptorsCannotProduceDiscoveryTickets'), ('io.syn443.identity.AdminDiscoveryTest', 'publicFactoryRequiresSuccessfulFreshDiscoveryBeforeBrowserAuthorization'), ('io.syn443.identity.AdminDiscoveryTest', 'missingChangedOrThrowingDiscoverySourcesFailClosedButLogoutStaysLocal'), ('io.syn443.identity.AdminDiscoveryTest', 'metadataChangeDuringActualDpopSigningCannotDispatchAuthorizationCode'), ('io.syn443.identity.AdminDiscoveryTest', 'changedInflightHttpOrPostJwtTrustCannotPublishSessionOrReplayRefresh'), ('io.syn443.identity.AdminDiscoveryTest', 'entireTrustedWindowRejectsExpiryEvenWhileStoreWallSecondsStillAcceptTheTicket'), ('io.syn443.identity.AdminDiscoveryTest', 'rediscoveryKeepsExplicitAndLastGoodSameBootFloorsAndNeverRevivesOldOwners'), ('io.syn443.identity.AdminDiscoveryTest', 'ownedTicketAndGuardDiagnosticsNeverRevealMetadataOrBinding'), ('io.syn443.identity.AdminDiscoveryTest', 'completedDiscoveryClockPublicationCannotOverwriteANewerSameBootFloor')], 'emulator': [('io.syn443.android.BootstrapTrustStoreTest', 'adminDiscoveryTicketMatchesOneVerifiedSnapshotAndLeavesDeviceJournalUnchanged'), ('io.syn443.android.BootstrapTrustStoreTest', 'signedAdminRevisionChangesDiscoveryBindingWithoutChangingDeviceIdentity'), ('io.syn443.android.BootstrapTrustStoreTest', 'adminDiscoveryRejectsAbsentRemovedExpiredForeignCorruptAndRetiredRootSnapshots'), ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'sharedControllerBudgetSurvivesCoordinatorRecreationWithMinuteDebtAndPendingScopeFences'), ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'sharedControllerBudgetRetainsRoutineReserveAndRollingHourAcrossNativeRecreation'), ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'sharedControllerBudgetKeepsSpacingAndClockSealWhileIndependentFixturesRemainIsolated')]}
+if mode in ADMIN_DISCOVERY_REQUIRED:
+    assert set(ADMIN_DISCOVERY_REQUIRED[mode]) <= set(identities), "Missing current admin discovery or controller-owned budget outcomes"

@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 
 IDENTITY_CLASSES = {'io.syn443.identity.' + name for name in (
     'ChatRefreshGate', 'Identity', 'Bootstrap', 'Pending', 'BoundedHttp', 'BoundedHttpKt', 'BoundedHttp.Scope',
+    'AdminDiscovery', 'AdminDiscoveryGuard', 'AdminProtocol.Companion',
     'RuntimeObservation', 'RuntimeObservation.Report', 'RuntimeObservation.Snapshot',
     'AuthProtocol', 'IdentityScope', 'TrustedTime', 'TrustedTime.Companion',
     'IdentityOperation', 'IdentityOperation.Companion',
