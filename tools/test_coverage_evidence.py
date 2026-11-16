@@ -82,9 +82,12 @@ class CoverageEvidenceTest(unittest.TestCase):
             'AdminLayerInventory', 'AdminLayerDraft', 'AdminLayerDraftSummary', 'AdminLayerDraftList',
             'AdminLayerDiscarded', 'AdminLayerPublishedHead', 'AdminLayerPreview', 'AdminLayerJob',
             'AdminLayerJson', 'AdminLayerJson.Reader', 'AdminLayerJson.Document', 'AdminLayerOwnership',
+            'AdminLayerConflict', 'AdminLayerDifference', 'AdminLayerDiff', 'AdminLayerComparison',
+            'AdminLayerComparison.Inputs', 'AdminLayerComparison.Row', 'AdminLayerComparison.Companion',
+            'AdminLayerProjectionException', 'AdminLayerProjection', 'AdminLayerValues', 'AdminLayerProjector',
         }
         required = {'io.syn443.identity.' + name for name in names}
-        self.assertEqual(19, len(required))
+        self.assertEqual(30, len(required))
         self.assertTrue(required <= IDENTITY_CLASSES)
         gradle = (root / 'core/identity/build.gradle.kts').read_text(encoding='utf-8')
         self.assertTrue(required <= set(re.findall(r'"(io\.syn443\.identity\.[\w.]+)"', gradle)))
@@ -102,7 +105,7 @@ class CoverageEvidenceTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 verify_classes(self.report('<report>' + contents + '</report>'), required)
 
-    def test_layer_editor_roots_match_source_and_retain_exact_added_outcome_floors(self):
+    def test_layer_editor_and_comparison_roots_match_source_and_retain_exact_added_outcome_floors(self):
         root = Path(__file__).resolve().parent.parent
         gate_source = (root / 'tools/check_test_evidence.py').read_text(encoding='utf-8')
         tree = ast.parse(gate_source)
@@ -110,15 +113,29 @@ class CoverageEvidenceTest(unittest.TestCase):
                         any(isinstance(target, ast.Name) and target.id == 'ADMIN_LAYER_EDITOR_REQUIRED'
                             for target in node.targets)]
         self.assertEqual(1, len(declarations))
-        required = ast.literal_eval(declarations[0].value)
+        editor = ast.literal_eval(declarations[0].value)
+        comparison_declarations = [node for node in tree.body if isinstance(node, ast.Assign) and
+                                  any(isinstance(target, ast.Name) and target.id == 'ADMIN_LAYER_COMPARISON_REQUIRED'
+                                      for target in node.targets)]
+        self.assertEqual(1, len(comparison_declarations))
+        comparison = ast.literal_eval(comparison_declarations[0].value)
+        self.assertEqual({'identity', 'emulator'}, set(editor))
+        self.assertEqual({'identity', 'emulator'}, set(comparison))
+        required = {}
+        for mode, old_count, new_count in [('identity', 43, 14), ('emulator', 44, 21)]:
+            self.assertEqual(old_count, len(editor[mode]))
+            self.assertEqual(new_count, len(comparison[mode]))
+            self.assertFalse(set(editor[mode]) & set(comparison[mode]))
+            required[mode] = editor[mode] + comparison[mode]
         expected = {'identity': set(), 'emulator': set()}
         for mode, folder, classes in [
             ('identity', 'core/identity/src/test/kotlin/io/syn443/identity', {
                 'AdminLayerControlTest': 23, 'AdminLayerJsonTest': 4,
-                'AdminLayerProtocolTest': 7, 'AdminLayerOwnershipTest': 4}),
+                'AdminLayerProtocolTest': 7, 'AdminLayerOwnershipTest': 4, 'AdminLayerComparisonTest': 14}),
             ('emulator', 'app/src/androidTest/kotlin/io/syn443/android', {
                 'AdminEditorStoreTest': 12, 'AdminEditorWireTest': 5, 'AdminEditorUiTest': 10,
-                'AdminEditorCoordinatorTest': 10, 'AdminEditorRouteTest': 4}),
+                'AdminEditorCoordinatorTest': 15, 'AdminEditorRouteTest': 4,
+                'AdminComparisonUiTest': 7, 'AdminComparisonWireTest': 5, 'AdminComparisonRouteTest': 4}),
         ]:
             package = 'io.syn443.identity.' if mode == 'identity' else 'io.syn443.android.'
             for class_name, count in classes.items():
@@ -139,8 +156,8 @@ class CoverageEvidenceTest(unittest.TestCase):
             ('io.syn443.android.AdminLoginBrowserTest', 'fixedMaximumAuthenticationAgeRejectsMissingChangedAndDuplicateBrowserParameters'),
         })
         for mode, count, floor, folder in [
-            ('identity', 43, 186, 'core/identity/src/test/kotlin/io/syn443/identity'),
-            ('emulator', 44, 377, 'app/src/androidTest/kotlin/io/syn443/android'),
+            ('identity', 57, 200, 'core/identity/src/test/kotlin/io/syn443/identity'),
+            ('emulator', 65, 398, 'app/src/androidTest/kotlin/io/syn443/android'),
         ]:
             self.assertEqual(count, len(required[mode]))
             self.assertEqual(expected[mode], set(required[mode]))
