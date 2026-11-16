@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=23
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=185
+    minimum=186
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -485,6 +485,7 @@ if mode in ADMIN_SERVICE_REFRESH_REQUIRED:
 # Layer edits require exact encrypted ownership, current admin proof and explicit review.
 ADMIN_LAYER_EDITOR_REQUIRED = {
     'identity': [
+        ('io.syn443.identity.AdminDiscoveryTest', 'typedOperationCancellationPreservesClockButNeverGrantsOrSkipsFreshDiscoveryAdmission'),
         ('io.syn443.identity.AdminLayerControlTest', 'existingActionsBuildOwnedStableBytesWithoutCredentialsAndKeepLostAckIdentity'),
         ('io.syn443.identity.AdminLayerControlTest', 'inventoryHistoryAndDraftsRetainGoShapedProvenanceAndExactRawParents'),
         ('io.syn443.identity.AdminLayerControlTest', 'oneDeviceOverrideKeepsRawEscapesFractionExponentsParentsAndPermissionsUntouched'),

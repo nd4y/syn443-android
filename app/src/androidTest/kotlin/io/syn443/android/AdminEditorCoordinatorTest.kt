@@ -286,8 +286,11 @@ class AdminEditorCoordinatorTest {
     @Test fun invalidLocalTextAndStaleUiCasStayEncryptedWithoutMutationAndSurrogatePagesStayWhole() {
         Fixture().use {f->
             val original=f.run(AdminEditorCoordinator.Kind.OPEN);val raw="x".repeat(8191)+"\uD83D\uDE00"+"tail"
-            var m=f.run(AdminEditorCoordinator.Kind.SAVE_LOCAL,original,listOf(raw));assertEquals(AdminEditorPhase.LOCAL_DIRTY,m.phase)
+            val inputPages=listOf(raw.substring(0,8191),raw.substring(8191))
+            assertTrue(inputPages.all {it.length<=8192 && !it.last().isHighSurrogate() && !it.first().isLowSurrogate()})
+            var m=f.run(AdminEditorCoordinator.Kind.SAVE_LOCAL,original,inputPages);assertEquals(AdminEditorPhase.LOCAL_DIRTY,m.phase)
             assertEquals(raw,m.pages.joinToString(""));assertEquals(2,m.pages.size);assertTrue(m.pages.all {it.length<=8192 && !it.last().isHighSurrogate() && !it.first().isLowSurrogate()})
+            assertEquals(inputPages,m.pages)
             val count=f.sent.size;m=f.run(AdminEditorCoordinator.Kind.PREVIEW,m);assertEquals(AdminEditorPhase.LOCAL_DIRTY,m.phase);assertEquals(count,f.sent.size)
             val stale=f.run(AdminEditorCoordinator.Kind.SAVE_LOCAL,original,listOf("stale"));assertEquals(AdminEditorPhase.CONFLICT,stale.phase)
             assertEquals(raw,f.record().proposal.toString(Charsets.UTF_8))

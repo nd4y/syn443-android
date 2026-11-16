@@ -29,7 +29,14 @@ internal class AdminDiscoveryGuard(private val initial:AdminDiscovery,private va
             if(requireDiscovered && prior==null)throw AdminException(AdminFailure.REAUTHENTICATE)
             if(!anonymous)prior?.let {current.covers(it.window(boot(),elapsed()))}
             time?.let {current.covers(it.window(boot(),elapsed()))}
-        } catch(_:Exception) {throw AdminException(AdminFailure.REAUTHENTICATE)}
+        } catch(error:Exception) {
+            // A controller-owned operation may expire/cancel while its source
+            // lookup is blocked. That failed operation grants nothing and must
+            // not turn a still-valid account into a logout. The next operation
+            // must perform all source/time admission again.
+            if(error is AdminException && error.reason==AdminFailure.CANCELLED)throw error
+            throw AdminException(AdminFailure.REAUTHENTICATE)
+        }
     }
     /** A last-good same-BOOT clock is a floor, not disposable cache after an invalid reply. */
     fun priorTime():TrustedTime? {

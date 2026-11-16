@@ -232,8 +232,8 @@ MFA, jobs and signed-policy activation remain independent gates.
 
 ## Required source evidence
 
-The candidate adds 42 named identity outcomes and 44 Android outcomes, raising
-the mandatory floors to 185 and 377 on each API29/35/37 emulator. All 19 new
+The candidate adds 43 named identity outcomes and 44 Android outcomes, raising
+the mandatory floors to 186 and 377 on each API29/35/37 emulator. All 19 new
 handwritten layer classes require 90% line coverage in both existing verifiers.
 The source tests include the actual Go fixture, exact parent spans, immutable
 DPoP-bound requests, refreshed ownership, encrypted lost-acknowledgement recovery,
