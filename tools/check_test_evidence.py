@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=279
+    minimum=284
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -387,3 +387,8 @@ if mode in CONTINUITY_REQUIRED:
 RECOVERY_RESERVE_REQUIRED = {'jvm': [('io.syn443.decision.AdaptiveProbeBudgetTest', 'routineSixLeavesTwoRecoveryStartsAndMinuteBoundaryRemainsStrict'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'repeatedReadinessAndCpuQuantaDoNotChargeOrRelaxFiveSecondSpacing'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'routineNinetySixReservesHourCapacityButTotalOneTwentyEightStillCapsAllWork'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'sixteenGroupsCanMaintainContinuouslyAndRecoverAtOldFifteenMinuteThirtySixSecondExhaustion'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'invalidOrBackwardBootTimePermanentlySealsWithoutRefillingHistory'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'cadenceIsBoundedAndDiagnosticsNeverExposeAdmissionHistory')], 'emulator': [('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'sixteenHealthyGroupsReserveRecoveryAfterNinetySixForcedRoutineStarts'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'malformedStaleForeignAndOldABASelectionHintsCannotChangeRoutesOrStartWork'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'duplicateHeartbeatsDoNotRequeueACompletedHintOrGrantMissingACKToken'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'busyAndPendingNativeOwnersKeepOneAdmissionAndHungOwnerRequiresRetirement'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'wrongSelectedReceiptCannotMintTokenOrReadinessAndValidACKIsConsumedOnce'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'sixteenGroupsSustainTwoHoursOfPacedMaintenanceWithRecoveryCapacity'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'forceAndRealContextChangesPreserveMinuteAdmissionDebt')]}
 if mode in RECOVERY_RESERVE_REQUIRED:
     assert set(RECOVERY_RESERVE_REQUIRED[mode]) <= set(identities), "Missing actual recovery reserve and passive-hint outcomes"
+
+
+ADMIN_BROWSER_REQUIRED = [('io.syn443.android.AdminPanelBrowserTest', 'currentDeviceTargetBuildsDarkTitledCustomTabWithoutCredentialExtras'), ('io.syn443.android.AdminPanelBrowserTest', 'malformedOriginAndNoncanonicalDeviceCannotBecomeNavigationTarget'), ('io.syn443.android.AdminPanelBrowserTest', 'completeTargetRejectsInjectedPathQueryAuthorityAndFragment'), ('io.syn443.android.AdminPanelBrowserTest', 'unavailableBrowserFailsOneExactCustomTabLaunchWithoutAuthorityFallback'), ('io.syn443.android.LoginControllerTest', 'administrationEntryUsesTrustedMetadataAndCannotOutliveItsLoginGeneration'), ('io.syn443.android.LoginControllerTest', 'cancelledPrequeuePanelDiscoveryCannotExposeOldGenerationTarget')]
+if mode=="emulator":
+    assert set(ADMIN_BROWSER_REQUIRED) <= set(identities), "Missing trusted current-device admin navigation outcomes"

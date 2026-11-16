@@ -413,7 +413,11 @@ class LoginController private constructor(private val context:android.app.Applic
         val hint=panelHint?:return@synchronized null
         if(hint.intent.generation!=s.generation || hint.intent.sessionGeneration!=s.sessionGeneration ||
             hint.intent.ownerTag!=s.ownerTag || hint.intent.deviceId!=s.deviceId || elapsed()>=hint.untilElapsed)return@synchronized null
-        panelOrigin(s)
+        val origin=panelOrigin(s) ?: return@synchronized null
+        if(s.deviceId.isEmpty())return@synchronized null
+        // Origin and device come from the same current authenticated intent,
+        // never from a later UI/status read or a deep-link-supplied target.
+        runCatching {AdminPanelBrowser.target(origin,s.deviceId)}.getOrNull()
     }
     fun pollAdminPanel(expectedGeneration:Long):Boolean {
         lateinit var expected:LoginIntent

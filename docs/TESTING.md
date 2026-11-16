@@ -1,5 +1,11 @@
 # Testing and release gates
 
+[Trusted mobile administrative navigation](mobile-admin-browser.md) adds four
+intent/URL cases and one prequeue-cancellation case; the prior current-generation
+discovery case remains mandatory. All API29/35/37 matrices require284 unique
+actual outcomes with no failures, errors or skips. Actual Custom Tab rendering,
+normal Keycloak login and the live device card remain physical acceptance gates.
+
 [Recovery admission and passive symptoms](managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms)
 add eight ordinary/race native roots (53 total), six budget JVM roots and seven
 Android roots, increasing the actual API29/35/37 floor to279 unique zero-skipped

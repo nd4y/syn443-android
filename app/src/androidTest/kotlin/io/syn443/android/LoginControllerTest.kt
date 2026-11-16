@@ -474,7 +474,14 @@ class LoginControllerTest {
         f.server.panelGrant=true;f.restart()
         assertNull(f.controller.adminPanelUrl(generation))
         assertTrue(f.controller.pollAdminPanel(generation));f.idle()
-        assertEquals("https://control.example.invalid",f.controller.adminPanelUrl(generation))
+        val login=f.journal.snapshot()
+        val target="https://control.example.invalid/#device=${login.deviceId}"
+        assertEquals(target,f.controller.adminPanelUrl(generation))
+        val requests=f.server.paths.toList()
+        assertEquals(target,f.controller.adminPanelUrl(generation))
+        assertEquals(requests,f.server.paths)
+        val status=f.controller.status().toString()
+        assertFalse(status.contains(login.deviceId));assertFalse(status.contains("#device="))
         assertNull(f.controller.adminPanelUrl(generation+1))
         assertTrue(f.controller.status().getBoolean("controlPanelAvailable"))
         f.controller.cancel()
@@ -487,6 +494,29 @@ class LoginControllerTest {
         assertTrue(f.controller.pollAdminPanel(login.generation));f.idle()
         assertNull(f.controller.adminPanelUrl(login.generation))
         assertEquals(login,f.journal.snapshot())
+    }
+    @Test fun cancelledPrequeuePanelDiscoveryCannotExposeOldGenerationTarget() {
+        val pause=AtomicBoolean();val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        fixture(beforeQueue={if(pause.compareAndSet(true,false)) {entered.countDown();check(release.await(5,TimeUnit.SECONDS))}},
+            controlPanelOrigin="https://control.example.invalid") {f->
+            f.server.policyReady=true;f.server.panelGrant=true;f.controller.callback(f.begin());f.idle()
+            val generation=f.journal.snapshot().generation
+            val requests=f.server.paths.count {it=="/v1/device/control-panel"}
+            val caller=java.util.concurrent.Executors.newSingleThreadExecutor()
+            try {
+                pause.set(true)
+                val polling=caller.submit<Boolean> {f.controller.pollAdminPanel(generation)}
+                assertTrue(entered.await(3,TimeUnit.SECONDS))
+                assertTrue(f.controller.status().getBoolean("busy"))
+                assertNull(f.controller.adminPanelUrl(generation))
+                f.controller.cancel()
+                assertNull(f.controller.adminPanelUrl(generation))
+                release.countDown();assertTrue(polling.get(5,TimeUnit.SECONDS));f.idle()
+                assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+                assertNull(f.controller.adminPanelUrl(generation));assertNull(f.controller.adminPanelUrl(generation+1))
+                assertEquals(requests,f.server.paths.count {it=="/v1/device/control-panel"})
+            } finally {release.countDown();caller.shutdownNow();check(caller.awaitTermination(5,TimeUnit.SECONDS))}
+        }
     }
     @Test fun legacyBootstrapDoesNotInventAnAdministrationAddress()=fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle()

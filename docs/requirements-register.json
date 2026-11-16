@@ -1737,7 +1737,8 @@
         "app/src/androidTest/kotlin/io/syn443/android/PrototypeTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/chat-acceptance-20261115.md"
+        "docs/chat-acceptance-20261115.md",
+        "docs/mobile-admin-browser.md"
       ]
     },
     {
@@ -1869,8 +1870,11 @@
     {
       "id": "MOB-03",
       "text": "Полная панель открывается на доверенном HTTPS origin в Custom Tab или системном браузере с существующей Keycloak SSO-сессией. Встроенный WebView не является обязательным условием 1.0. Пароль и OIDC-вход остаются в браузерном контексте; токены не передаются в query, fragment ссылки на панель или JavaScript bridge. [RFC8252](https://www.rfc-editor.org/rfc/rfc8252).",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/mobile-admin-browser.md"
+      ],
+      "remainingScope": "Trusted device-targeted Custom Tab source/intent behavior only; exact CI, physical browser/Keycloak acceptance, full native quick administration, local editing/push and one-hand UX remain separate gates."
     },
     {
       "id": "MOB-04",
@@ -1889,8 +1893,11 @@
     {
       "id": "MOB-06",
       "text": "Мобильная панель пригодна для работы одной рукой: поиск, избранные устройства, фильтр неисправных, короткий путь к смене политики/проверке/откату. Операции с нескольких экранов сохраняются серверным черновиком; возврат из браузера не теряет локальные правки и задание.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/mobile-admin-browser.md"
+      ],
+      "remainingScope": "Trusted device-targeted Custom Tab source/intent behavior only; exact CI, physical browser/Keycloak acceptance, full native quick administration, local editing/push and one-hand UX remain separate gates."
     },
     {
       "id": "MOB-07",
