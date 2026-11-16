@@ -14,8 +14,11 @@
       "evidence": [
         "docs/m1-vpn.md",
         "docs/managed-policy.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
-      ]
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/non-lte-acceptance-20261116.md"
+      ],
+      "implementationScope": "The dated v82 checkpoint records exact source CI, Direct-policy USB/Wi-Fi preservation, two real six-second Wi-Fi cycles and owned native-process/TUN/HTTPS recovery. Coordinator cases on the phone remain virtual; the cleanup exception and later restored-runtime evidence are recorded separately.",
+      "remainingScope": "Physical activated managed chains, full protocol/mode/fault matrix, shared global admission/energy, LTE, natural Doze, unplugged battery and endurance remain open. This Direct-policy checkpoint does not close the vertical gate."
     },
     {
       "id": "ARC-03",
@@ -30,9 +33,10 @@
         "docs/private-path-construction.md",
         "docs/private-path-construction.md#fresh-proof-selection",
         "docs/private-path-construction.md#snapshot-construction-handoff",
-        "docs/managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity"
+        "docs/managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity",
+        "docs/non-lte-acceptance-20261116.md"
       ],
-      "remainingScope": "Bounded TCP source primitive and continuity only; exact Actions and activated managed-chain evidence remain separate. Full mode classification, shared admission/energy, recovery reserve, persistent hints and rollout still required."
+      "remainingScope": "Bounded TCP continuity and per-adaptive recovery-reserve simulations have v82/v83 source CI; activated managed-chain evidence remains separate. Full mode classification, shared global admission/energy, persistent hints and rollout still required."
     },
     {
       "id": "ARC-04",
@@ -49,8 +53,10 @@
       "status": "partial",
       "evidence": [
         "docs/route-frontier.md",
-        "docs/chat-acceptance-20261115.md"
-      ]
+        "docs/chat-acceptance-20261115.md",
+        "docs/non-lte-acceptance-20261116.md"
+      ],
+      "remainingScope": "Bounded cursor completeness/continuity has source CI and virtual-clock phone cases. Activated managed chains, full cross-protocol/four-mode exploration and physical coverage remain open."
     },
     {
       "id": "ARC-06",
@@ -263,7 +269,9 @@
         "tools/run_enrolled_vpn.py",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/managed-overlay.md#stable-default-peer-hostname",
-        "native/engine-netbird/hostname_test.go"
+        "native/engine-netbird/hostname_test.go",
+        "docs/non-lte-acceptance-20261116.md",
+        "docs/mobile-admin-bootstrap.md"
       ]
     },
     {
@@ -918,11 +926,12 @@
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/non-lte-acceptance-20261115.md",
         "docs/journal-memory-bounds.md",
-        "docs/chat-acceptance-20261115.md"
+        "docs/chat-acceptance-20261115.md",
+        "docs/non-lte-acceptance-20261116.md"
       ],
       "text": "Одно нажатие «Подключиться» в приложении или плитке Android транзакционно сохраняет desiredOn=true, ссылку на проверенную желаемую конфигурацию/configRevision, режим и монотонный intentGeneration до запуска побочных эффектов. UI, плитка, уведомление и разрешённый ADB/API используют один сериализованный контракт команд и один источник состояния; создание Activity не является командой подключения. Намерение и конфигурация переживают смерть UI/контроллера/сервиса и допустимый ОС перезапуск, не зависят от памяти процесса и восстанавливаются с проверкой schema/signature/lease/capability и доступности ключей. Ошибка записи намерения явно возвращается, ложное подтверждение отсутствует. Недоступная или невалидная конфигурация не заменяется произвольным профилем и не сбрасывает намерение; серверный desired pointer и пользовательское намерение имеют разные области версионирования.",
-      "implementationScope": " The dated2026-11-15 checkpoint records exact accepted source, CI and physical/live scope; statuses remain partial. Byte-bounded streaming assignment serialization/canonical readback and actual-size file allocation replace full String buffers; current v74 Actions acceptance pending.",
-      "remainingScope": " Full normative clauses and excluded physical/operational gates remain required. Exact corrected three-API and physical upgrade acceptance plus every remaining normative clause stay open."
+      "implementationScope": "Earlier byte-bounded streaming journal and controller contributions remain. The dated v82 source/USB-Wi-Fi checkpoint adds installed-APK upgrade preservation with the same device binding/configuration, consent and check methods; its virtual coordinator cases are not physical lifecycle proofs.",
+      "remainingScope": "Full normative lifecycle and excluded physical/operational gates remain required; the preserved cleanup RuntimeError cause is NOT_VERIFIED despite later independent restored-runtime samples."
     },
     {
       "id": "REC-02",
@@ -933,10 +942,11 @@
         "docs/health-attribution.md",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/non-lte-acceptance-20261115.md",
-        "docs/chat-acceptance-20261115.md"
+        "docs/chat-acceptance-20261115.md",
+        "docs/non-lte-acceptance-20261116.md"
       ],
       "text": "Пока desiredOn=true и нет запрета/необходимого действия пользователя по ENG-01/02, единый reconcile loop повторно приводит фактическое состояние к разрешённому желаемому. DNS timeout/EOF/TLS failure и недоступный узел вызывают классификацию и восстановление, а не окончательный Off; валидация TLS не ослабляется. Reference retry policy v1: base=1секунда, factor=2, cap=60секунд, jitter multiplier в пределах0.8-1.2 с итоговым clamp1-60секунд; floor для досрочной попытки по новому usable network=5секунд между такими попытками, с общим admission limit. Параметры версионируются внутри локальных hard limits. Повторы используют бюджеты AUTO-07/ARC-06; номер попытки, причина, следующий допуск и история тяжёлых запусков переживают рестарт контроллера. При NoNetwork активные сетевые попытки не выполняются: ожидание callback ОС, без polling/wakelock storm. При новой пригодной Network разрешена своевременная попытка с актуальным контекстом и общим rate limit; повторные смены epoch не обнуляют backoff, cooldown и rolling budget. Задержка сбрасывается только после устойчивого успеха (reference policy v1: не менее30секунд и трёх свежих успешных required checks), а не по созданию процесса или одному callback. Исчерпание краткосрочного бюджета откладывает следующую допустимую попытку, не стирая намерение; Doze и ограничения ОС могут отложить её дольше60секунд. Невалидная схема/подпись, истёкшее право или отсутствие разрешения ждут изменения входных условий/действия пользователя без бесполезного частого retry. Повтор транспорта не означает повтор активации отвергнутого bundle вопреки ARC-04.",
-      "implementationScope": " The dated2026-11-15 checkpoint records exact accepted source, CI and physical/live scope; statuses remain partial.",
+      "implementationScope": "Earlier reconcile/recovery contributions remain. The dated v82 checkpoint adds two actual six-second Wi-Fi loss/return cycles and separately confirmed restored Online/TUN/HTTPS state under a Direct policy.",
       "remainingScope": " Full normative clauses and excluded physical/operational gates remain required."
     },
     {
@@ -967,11 +977,12 @@
         "tools/run_enrolled_vpn.py",
         "docs/non-lte-acceptance-20261115.md",
         "docs/emulator-observation-boundaries.md",
-        "docs/chat-acceptance-20261115.md"
+        "docs/chat-acceptance-20261115.md",
+        "docs/non-lte-acceptance-20261116.md"
       ],
       "text": "Supervisor и контроль его прогресса находятся вне управляемого native runtime. Watchdog проверяет полезный прогресс/дедлайны операций, а не только живой PID или ответ отдельного control looper; полный native hang имеет fault-injection сценарий. После bounded graceful stop supervisor вправе завершить только аутентифицированный принадлежащий ему host с проверенными identity token/UID/handle, подтвердить его смерть и освобождение TUN duplicates/identity locks перед новым поколением. Timeout или PID не являются подтверждением. После смерти самого контроллера разрешённый ОС новый экземпляр сначала читает намерение/последний Stop, сверяет реальное владение и незавершённые эффекты, безопасно дожидается/завершает только своего старого host; два владельца TUN/identity и повторное enrollment исключены. Если прекращение владения не доказано, новый host не запускается, отображается блокировка/необходимое действие. Смерть владельца TUN может уничтожить интерфейс и оборвать трафик; отсутствие сети или процесса-владельца не сопровождается обещанием непрерывного соединения. Границы MOD-08/09 и системный lockdown остаются обязательными.",
-      "implementationScope": "Signed route-profile activation pilot requires fresh candidate-scoped native outbound proof, independently of global HTTPS; final worker storage fence, bounded retries and required-route rollback. Optional routes remain independent. The dated2026-11-15 checkpoint records exact accepted source, CI and physical/live scope; statuses remain partial.",
-      "remainingScope": "Full requirement remains open, including complete dependency graph/compiler, overlay account namespaces and all network/energy/operational scenarios. Exact device and CI evidence must be read separately. Full normative clauses and excluded physical/operational gates remain required."
+      "implementationScope": "Earlier supervisor and route-profile activation contributions remain. The dated v82 checkpoint adds actual native-process failure/recovery with fresh owned process identity, active TUN and independent HTTPS204. Later read-only restored-runtime samples do not resolve the retained cleanup RuntimeError cause.",
+      "remainingScope": "Full native hang/controller-death/ownership/lockdown and protocol-mode fault matrix, activated managed chains, operational/energy and excluded physical gates remain required."
     },
     {
       "id": "REC-05",
@@ -1854,9 +1865,10 @@
       "text": "У пользователя с административными правами есть заметная кнопка «Администрирование» на главном экране и в меню. Обычному пользователю она не показывается; прямое открытие admin URL/API всё равно проверяется сервером. Одно приложение совмещает клиентский и административный режимы.",
       "status": "partial",
       "evidence": [
-        "docs/mobile-administration.md"
+        "docs/mobile-administration.md",
+        "docs/non-lte-acceptance-20261116.md"
       ],
-      "implementationScope": "Home screen navigation gated by a short-lived device-bound hint and a trusted HTTPS origin.",
+      "implementationScope": "Home navigation remains gated by a short-lived device-bound hint and trusted origin. Exact-source CI and v82 physical intent cases cover the dark device-targeted Custom Tab launch description; they are not an authenticated browser or native admin session.",
       "remainingScope": "Menu entry, native administration and physical acceptance with the configured control plane."
     },
     {
@@ -1864,7 +1876,9 @@
       "text": "В 1.0 обязательны встроенные быстрые экраны через API: список/поиск пользователей и устройств, текущий/последний online, активная/желаемая ревизия, причины ошибок, назначение профилей/политики, публикация/откат и диагностика. Для всех остальных административных функций доступна полная адаптивная веб-панель из этой кнопки.",
       "status": "partial",
       "evidence": [
-        "docs/device-runtime-observations.md"
+        "docs/device-runtime-observations.md",
+        "docs/non-lte-acceptance-20261116.md",
+        "docs/mobile-admin-bootstrap.md"
       ]
     },
     {
@@ -1872,15 +1886,21 @@
       "text": "Полная панель открывается на доверенном HTTPS origin в Custom Tab или системном браузере с существующей Keycloak SSO-сессией. Встроенный WebView не является обязательным условием 1.0. Пароль и OIDC-вход остаются в браузерном контексте; токены не передаются в query, fragment ссылки на панель или JavaScript bridge. [RFC8252](https://www.rfc-editor.org/rfc/rfc8252).",
       "status": "partial",
       "evidence": [
-        "docs/mobile-admin-browser.md"
+        "docs/mobile-admin-browser.md",
+        "docs/non-lte-acceptance-20261116.md"
       ],
-      "remainingScope": "Trusted device-targeted Custom Tab source/intent behavior only; exact CI, physical browser/Keycloak acceptance, full native quick administration, local editing/push and one-hand UX remain separate gates."
+      "remainingScope": "Exact-source CI and v82 physical URL/intent cases are recorded. Actual browser/Keycloak/MFA/device-card acceptance, full native quick administration, local editing/push and one-hand UX remain separate gates."
     },
     {
       "id": "MOB-04",
       "text": "Native admin API имеет отдельные audience/scopes и проверяет роль на сервере. Обычные scoped правки не требуют повторного входа на каждом экране. Изменение доверия/ролей/integration credentials, широкая публикация, ослабление security ограничений и раскрытие секретов требуют свежей admin re-auth с MFA по SEC-10. Device VPN session и QR enrollment административных полномочий не дают.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/mobile-admin-bootstrap.md",
+        "docs/mobile-admin-auth.md",
+        "docs/non-lte-acceptance-20261116.md"
+      ],
+      "remainingScope": "No accepted native admin API workflow is recorded. Signed metadata/encrypted cache is a v83 source/emulator prerequisite only; the v84 separate OAuth core and23 required synthetic cases remain pending CI and app wiring. Atomic current-trust admission, separate durable key/session, native login/API/UI, server ACL/MFA and capability-refresh acceptance stay open."
     },
     {
       "id": "MOB-05",
@@ -1895,9 +1915,10 @@
       "text": "Мобильная панель пригодна для работы одной рукой: поиск, избранные устройства, фильтр неисправных, короткий путь к смене политики/проверке/откату. Операции с нескольких экранов сохраняются серверным черновиком; возврат из браузера не теряет локальные правки и задание.",
       "status": "partial",
       "evidence": [
-        "docs/mobile-admin-browser.md"
+        "docs/mobile-admin-browser.md",
+        "docs/non-lte-acceptance-20261116.md"
       ],
-      "remainingScope": "Trusted device-targeted Custom Tab source/intent behavior only; exact CI, physical browser/Keycloak acceptance, full native quick administration, local editing/push and one-hand UX remain separate gates."
+      "remainingScope": "Exact-source CI and v82 physical URL/intent cases are recorded. Full one-hand workflows, browser/Keycloak acceptance, native quick administration and local editing/push remain open."
     },
     {
       "id": "MOB-07",

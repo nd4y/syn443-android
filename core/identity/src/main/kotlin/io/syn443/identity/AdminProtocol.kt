@@ -1,0 +1,196 @@
+package io.syn443.identity
+
+import io.syn443.identity.AdminIdentity.Companion.integer
+import io.syn443.identity.AdminIdentity.Companion.text
+import io.syn443.policy.Policy
+import kotlinx.serialization.json.*
+
+/** Synchronous administrative OAuth worker. Android persistence/UI and API actions are separate layers. */
+class AdminProtocol(private val identity:AdminIdentity,private val key:ProofKey,private val exchange:IdentityExchange,
+    private val boot:()->Int,private val elapsed:()->Long) {
+    val authority:String get()=identity.authority
+    val thumbprint:String=Identity.thumbprint(key.publicKey)
+    private val oidc=identity.metadata.issuer+"/protocol/openid-connect"
+    private data class Started(val boot:Int,val elapsed:Long)
+    private fun start()=Started(boot(),elapsed()).also {require(it.boot>=0 && it.elapsed>=0)}
+    private fun observed(reply:Reply,started:Started,floor:TrustedTime?=null):TrustedTime {
+        val ended=elapsed();require(boot()==started.boot)
+        return TrustedTime.observe(requireNotNull(reply.single("date")),started.boot,started.elapsed,ended,floor)
+    }
+    private fun request(scope:IdentityScope,method:String,url:String,body:ByteArray?=null,
+        proof:String?=null,beforeDispatch:()->Unit={}):Reply=scope.request {
+        val headers=linkedMapOf("Cache-Control" to "no-store")
+        if(body!=null)headers["Content-Type"]="application/x-www-form-urlencoded"
+        if(proof!=null)headers["DPoP"]=proof
+        beforeDispatch()
+        exchange.request(method,url,headers.toMap(),body?.copyOf(),it,65_536)
+    }
+    private fun json(reply:Reply):JsonObject {
+        require(reply.body.size in 1..65_536 &&
+            reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+        return Identity.objectJSON(Policy.utf8(reply.body))
+    }
+    private fun status(reply:Reply) {
+        if(reply.status!=200)throw AdminException(when(reply.status) {
+            400,401->AdminFailure.REAUTHENTICATE
+            403->AdminFailure.ACCESS_DENIED
+            else->AdminFailure.INVALID_REPLY
+        })
+    }
+    private inline fun <T> checked(block:()->T):T=try {block()}
+        catch(e:AdminException){throw e}
+        catch(e:DeliveryException){throw AdminException(if(e.reason==DeliveryFailure.CANCELLED)AdminFailure.CANCELLED else AdminFailure.TRANSPORT)}
+        catch(_:Exception){throw AdminException(AdminFailure.INVALID_REPLY)}
+
+    fun newPending(generation:Long):AdminPending=checked {identity.pending(generation,thumbprint,boot(),elapsed())}
+    fun authorization(pending:AdminPending,generation:Long):String=checked {
+        identity.authorization(pending,generation,thumbprint,boot(),elapsed())
+    }
+    /** Discovery is anchored only to the signed administrative issuer. No browser/device-origin fallback. */
+    fun discover(scope:IdentityScope,floor:TrustedTime?=null):AdminIssuerState=checked {
+        floor?.window(boot(),elapsed())
+        val started=start()
+        val reply=request(scope,"GET",identity.metadata.issuer+"/.well-known/openid-configuration")
+        status(reply);val data=json(reply)
+        require(data.getValue("issuer").text()==identity.metadata.issuer &&
+            data.getValue("authorization_endpoint").text()==oidc+"/auth" &&
+            data.getValue("token_endpoint").text()==oidc+"/token" && data.getValue("jwks_uri").text()==oidc+"/certs")
+        fun supports(name:String,value:String) {
+            val values=data.getValue(name).jsonArray.map {it.text()}
+            require(values.size in 1..32 && values.distinct().size==values.size && value in values)
+        }
+        supports("id_token_signing_alg_values_supported","RS256")
+        supports("dpop_signing_alg_values_supported","ES256")
+        supports("code_challenge_methods_supported","S256")
+        val initial=observed(reply,started,floor)
+        val keysStarted=start()
+        val jwks=request(scope,"GET",oidc+"/certs")
+        status(jwks);json(jwks)
+        scope.request {
+            val keys=Identity.rsaKeys(Policy.utf8(jwks.body))
+            val time=observed(jwks,keysStarted,initial)
+            AdminIssuerState(keys,time,authority,thumbprint)
+        }
+    }
+    private fun validateIssuer(issuer:AdminIssuerState) {
+        require(issuer.authority==authority && issuer.keyThumbprint==thumbprint)
+        issuer.time.window(boot(),elapsed())
+    }
+    private data class Delivered(val data:JsonObject,val time:TrustedTime) {
+        override fun toString()="AdminDelivered([redacted])"
+    }
+    private fun token(body:ByteArray,initialFloor:TrustedTime,scope:IdentityScope,
+        guard:()->Unit={},beforeFirstDispatch:()->Unit={}):Delivered {
+        require(body.size in 1..8192)
+        var nonce="";var floor=initialFloor
+        for(attempt in 0..1) {
+            val started=start()
+            require(Identity.thumbprint(key.publicKey)==thumbprint)
+            val proof=Identity.proof(key.publicKey,key::sign,"POST",oidc+"/token",
+                floor.proofSecond(started.boot,started.elapsed),nonce=nonce)
+            val reply=request(scope,"POST",oidc+"/token",body,proof) {
+                val now=elapsed()
+                require(boot()==started.boot && now>=started.elapsed && now-started.elapsed<=20_000 &&
+                    Identity.thumbprint(key.publicKey)==thumbprint)
+                floor.window(started.boot,now)
+                guard()
+                if(attempt==0)beforeFirstDispatch()
+            }
+            if(reply.status in setOf(400,401) && attempt==0 && json(reply)["error"]?.text()=="use_dpop_nonce") {
+                nonce=requireNotNull(reply.single("dpop-nonce")).also {
+                    require(it.length in 1..256 && it.all {c->c.code in 33..126})
+                }
+                floor=observed(reply,started,floor)
+                continue
+            }
+            status(reply)
+            // A successful response is never retried, even if its body, Date or token is invalid.
+            return Delivered(json(reply),observed(reply,started,floor))
+        }
+        throw AdminException(AdminFailure.REAUTHENTICATE)
+    }
+    fun exchangeCallback(raw:String,pending:AdminPending,generation:Long,issuer:AdminIssuerState,scope:IdentityScope):AdminSession=checked {
+        validateIssuer(issuer)
+        val code=identity.callback(raw,pending,generation,thumbprint,boot(),elapsed())
+        val body=Identity.form(linkedMapOf("grant_type" to "authorization_code","client_id" to AdminBootstrap.CLIENT_ID,
+            "redirect_uri" to AdminBootstrap.CALLBACK,"code_verifier" to pending.verifier,"code" to code)).toByteArray(Charsets.UTF_8)
+        val result=token(body,issuer.time,scope,guard={
+            identity.binding(pending,generation,thumbprint,boot(),elapsed())
+            require(pending.consumed.get())
+        })
+        scope.request {session(result,issuer,pending.nonce,null)}
+    }
+    private fun validateSession(session:AdminSession,unused:Boolean=true) {
+        require(session.authority==authority && session.keyThumbprint==thumbprint && session.bootCount==boot())
+        session.time.window(boot(),elapsed())
+        if(session.family.isClosed() || unused && !session.available())throw AdminException(AdminFailure.REAUTHENTICATE)
+        if(elapsed()>=session.sessionUntilElapsedMs)throw AdminException(AdminFailure.SESSION_EXPIRED)
+    }
+    private fun floor(first:TrustedTime,second:TrustedTime):TrustedTime {
+        val now=elapsed();val currentBoot=boot()
+        val a=first.window(currentBoot,now);val b=second.window(currentBoot,now)
+        require(a.lowerMs<=Math.addExact(b.upperMs,30_000) && b.lowerMs<=Math.addExact(a.upperMs,30_000))
+        return TrustedTime(currentBoot,now,maxOf(a.lowerMs,b.lowerMs),maxOf(a.upperMs,b.upperMs))
+    }
+    /** Only a nonce challenge can repeat the same refresh inside one operation. Uncertain dispatch retires it. */
+    fun refresh(previous:AdminSession,issuer:AdminIssuerState,scope:IdentityScope):AdminSession {
+        var dispatched=false
+        try {
+            return checked {
+                validateSession(previous);validateIssuer(issuer)
+                val trusted=floor(previous.time,issuer.time)
+                val body=refreshBody(previous.refreshToken)
+                val result=token(body,trusted,scope,guard={validateSession(previous,false);validateIssuer(issuer)}) {
+                    if(!previous.consume())throw AdminException(AdminFailure.REAUTHENTICATE)
+                    dispatched=true
+                }
+                scope.request {session(result,issuer,previous.originalNonce,previous)}
+            }
+        } catch(e:AdminException) {
+            // The transport cannot prove whether a dispatched rotating refresh was committed.
+            // A new operation must never replay it; cancellation before dispatch remains cancellation.
+            if(dispatched)throw AdminException(AdminFailure.REAUTHENTICATE)
+            throw e
+        }
+    }
+    private fun session(delivered:Delivered,issuer:AdminIssuerState,nonce:String,previous:AdminSession?):AdminSession {
+        if(previous?.family?.isClosed()==true)throw AdminException(AdminFailure.REAUTHENTICATE)
+        val data=delivered.data;require(data.getValue("token_type").text()=="DPoP")
+        val access=data.getValue("access_token").text();val refresh=data.getValue("refresh_token").text()
+        require(access.length in 24..16_384 && refresh.length in 24..16_384 && access!=refresh &&
+            access.all {it.code in 33..126} && refresh.all {it.code in 33..126})
+        require(refreshBody(refresh).size<=8192)
+        require(previous==null || access!=previous.accessToken && refresh!=previous.refreshToken)
+        val expires=data.getValue("expires_in").integer();val refreshExpires=data.getValue("refresh_expires_in").integer()
+        require(expires in 1..600 && refreshExpires in 1..86_400)
+        val id=data["id_token"]?.text()
+        val now=elapsed();val currentBoot=boot();val window=delivered.time.window(currentBoot,now)
+        val principal=identity.tokens(id,access,issuer.keys,thumbprint,nonce,window,previous==null,previous?.subject)
+        val expiry=Math.multiplyExact(principal.accessExpiresSeconds,1000)
+        // expires_in and signed exp must describe the same expiry within HTTPS Date precision/RTT.
+        require(expiry>=Math.addExact(delivered.time.lowerMs,(expires-1)*1000) &&
+            expiry<=Math.addExact(delivered.time.upperMs,(expires+1)*1000))
+        data["scope"]?.let {
+            val scopes=AdminIdentity.scope(it.text())
+            val accessClaims=Identity.objectJSON(Policy.utf8(Policy.decode64(access.split('.')[1])))
+            require(scopes==AdminIdentity.scope(accessClaims.getValue("scope").text()))
+        }
+        val accessDeadline=Math.addExact(now,expiry-window.upperMs)
+        val serverRefreshDeadline=Math.addExact(delivered.time.elapsedMs,
+            Math.addExact(delivered.time.lowerMs,refreshExpires*1000)-delivered.time.upperMs)
+        val deadline=minOf(serverRefreshDeadline,previous?.sessionUntilElapsedMs ?:
+            Math.addExact(delivered.time.elapsedMs,28_800_000-(delivered.time.upperMs-delivered.time.lowerMs)))
+        require(accessDeadline>now && deadline>now)
+        return AdminSession(access,refresh,principal.subject,thumbprint,authority,currentBoot,
+            minOf(accessDeadline,deadline),deadline,delivered.time,nonce,previous?.family?:AdminSessionFamily()).also {
+            if(!it.available())throw AdminException(AdminFailure.REAUTHENTICATE)
+        }
+    }
+    private fun refreshBody(refresh:String)=Identity.form(linkedMapOf("grant_type" to "refresh_token",
+        "client_id" to AdminBootstrap.CLIENT_ID,"refresh_token" to refresh)).toByteArray(Charsets.UTF_8)
+    /** No transport call and no device identity mutation, including after BOOT or expiry. */
+    fun logout(session:AdminSession):AdminLogout=checked {
+        require(session.authority==authority && session.keyThumbprint==thumbprint)
+        session.retire();AdminLogout(authority,thumbprint)
+    }
+}

@@ -4,17 +4,39 @@ Snapshot: 2026-11-16. Specification0.9 contains292 requirements and98 acceptance
 scenarios. Those numbers describe scope, not completed work or test counts.
 This document supersedes repository-wide readiness claims in historical stage notes.
 
-The v83 [signed admin metadata foundation](mobile-admin-bootstrap.md) is a source
-candidate pending GitHub Actions and later integration. It preserves device
-bootstrap authority and adds no native administrative session, API or quick UI.
+The v83 [signed admin metadata foundation](mobile-admin-bootstrap.md) passed its
+source CI and was protected-merged; its actual-main run is pending at this
+snapshot. Its three new cache Android cases passed on emulators, and this APK
+has not been installed on the physical phone. It preserves device bootstrap
+authority and adds no native administrative session, API or quick UI.
+
+The current v84 / `0.9.56-admin-auth` [administrative OAuth core](mobile-admin-auth.md)
+adds separate process-owned identity/pending/session/refresh logic and23 required
+synthetic JVM cases. Its own CI is pending. Android trust-ticket/controller,
+separate key/journal, callback routing, API actions and native quick screens are
+not connected; no actual native-admin browser login, MFA or device-card result
+is implied by this source.
 
 ## Current accepted checkpoint
 
-The [v79 USB/Wi-Fi checkpoint](non-lte-acceptance-20261116.md) records the latest
-installed APK, exact main CI and pilot binary rollout. Signed managed-chain
-acceptance, authenticated administrator readback and full adaptive routing remain
-open. The [v77 chat/source checkpoint](chat-acceptance-20261115.md) retains the
-earlier device-only chat scope.
+The [v82 USB/Wi-Fi checkpoint](non-lte-acceptance-20261116.md) records the latest
+installed APK and its exact eight-job source CI:284 actual Android outcomes per
+API and53 native roots in ordinary/race suites. The phone's final observed-window
+batch has20 outcomes, including11 virtual coordinator cases, plus two real
+six-second Wi-Fi cycles and native-process recovery. Identity/configuration,
+consent, authentication method and empty outbox were preserved and original settings/radios
+restored. The receipt preserves the original sleeping-screen chat failures, a
+guarded precondition stop and the later cleanup RuntimeError with its cause
+`NOT_VERIFIED`. Three subsequent read-only samples over28 seconds establish the
+actual owned TUN/HTTPS204/Online restoration separately from that exception.
+
+The same checkpoint pins v83 source CI at287 actual Android outcomes per API,
+53 native roots and20 newly affected mandatory JVM outcomes, not the total JVM
+count. Signed managed-chain acceptance, normal configuration publication,
+authenticated administrator readback and full adaptive routing remain open.
+Earlier v79 and pilot Control Plane binary rollout evidence stays historical.
+The [v77 chat/source checkpoint](chat-acceptance-20261115.md) retains its earlier
+device-only chat scope.
 
 See the [2026-11-15 source, CI and USB/Wi-Fi checkpoint](non-lte-acceptance-20261115.md)
 for the earlier Android v73 and Control Plane snapshots, delivery provenance,
@@ -90,8 +112,10 @@ contracts by design, not implemented version1.0 requirements.
 
 The registers track product requirements, including cross-component contributions.
 Evidence may point to this pinned cross-repository inventory when implementation
-lives in the other component. Local evidence links are also retained. No register
-text, ID, acceptance row or normative specification hash is changed by this update.
+lives in the other component. Local evidence links are also retained. No normative
+register text, ID, acceptance row or specification hash is changed by this update.
+Targeted evidence/scope notes retain their existing partial or planned status;
+a candidate core is not a full requirement pass.
 
 - `planned`: no accepted implementation contribution recorded for that row.
 - `partial`: concrete code/tests cover a subset; the full requirement is open.
@@ -112,6 +136,9 @@ No full M1-M5 or production-readiness claim is made by these statuses.
 | LOG-01..04, ADB-01..04 | Bounded redacted lifecycle/exit/resource snapshots and [debug ADB client](adb-control.md) | Full log channels/retention, configuration operations, release opt-in and server audit |
 | AUTH/PROV/SEC partial rows | Pilot protocol/Keystore/journals, signed device-key policy and SQL authorization/publication | Full release onboarding, invitation trust, rotation, managed overlays and operational acceptance |
 | CHAT partial rows | SQL message/file integrity and atomicity, Android user/admin and web chat, compression/retry/withdrawal | Complete retention/quota administration, production operations and restricted-network acceptance |
+| ARC-03/05, REC-01/02/04 | Bounded continuity/recovery source CI and v82 Direct-policy USB/Wi-Fi/native recovery; coordinator phone cases remain virtual | Activated managed adaptive chains, full mode/lifecycle matrix and shared global energy/admission remain open |
+| MOB-01/03/06 | Trusted Custom Tab URL/intent source and phone checks; v83 separately signed metadata/encrypted cache accepted in emulator CI | Actual browser/Keycloak/MFA/device-card acceptance, native API screens, local edit/push and complete one-hand workflows |
+| AUTH-02, MOB-04 | v83 metadata preserves device identity; v84 separate admin OAuth source and23 mandatory test methods remain pending CI and app wiring | Atomic current-trust ticket, separate durable key/session, actual native login, server ACL/capability recovery and native administration |
 
 Source/test inventories for review:
 - [Android controller and UI](https://github.com/nd4y/syn443-android/tree/e2291a71fa8491497f342fe26fbdf36788e2b59a/app/src/main/kotlin/io/syn443/android/vpn)
