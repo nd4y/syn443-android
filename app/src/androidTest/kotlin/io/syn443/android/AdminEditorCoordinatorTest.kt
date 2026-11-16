@@ -39,10 +39,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Synthetic server receipts prove coordinator handling, not live ACL/MFA,
  * actual server publication, browser authentication or VPN activation. */
 class AdminEditorCoordinatorTest {
-    private class Fixture:Closeable {
+    private class Fixture(sharedStorage:Fixture?=null):Closeable {
         val context=ApplicationProvider.getApplicationContext<Context>()
-        val namespace="admin-editor-test-"+UUID.randomUUID().toString().replace("-","")
-        val alias="syn443-admin-editor-test-"+Identity.random()
+        val namespace=sharedStorage?.namespace ?:"admin-editor-test-"+UUID.randomUUID().toString().replace("-","")
+        val alias=sharedStorage?.alias ?:"syn443-admin-editor-test-"+Identity.random()
+        private val ownsStorage=sharedStorage==null
         val directory=File(context.noBackupFilesDir,namespace)
         val executor=Executors.newSingleThreadExecutor()
         val busy=AtomicBoolean()
@@ -56,10 +57,11 @@ class AdminEditorCoordinatorTest {
         var revokeNext=false
         var failList=false
         var rejectPreview=""
-        val device="device-a"
+        var device="device-a"
         val owner=Identity.hash("synthetic-device-owner".toByteArray())
         val baseHash="a".repeat(64)
         val calls=mutableListOf<AdminLayerAction>()
+        val requestedDevices=mutableListOf<String>()
         val sent=mutableListOf<Pair<String,ByteArray>>()
         val originals=mutableMapOf<String,Pair<String,String>>()
         val terminals=mutableMapOf<String,String>()
@@ -79,6 +81,8 @@ class AdminEditorCoordinatorTest {
         private lateinit var protocol:AdminProtocol
         private lateinit var session:AdminSession
         private lateinit var pending:AdminPending
+        private var subject="synthetic-admin"
+        private var loginGeneration=0L
         var coordinator:AdminEditorCoordinator
         val wall get()=WALL+now-1000
         val key=object:ProofKey {
@@ -124,9 +128,7 @@ class AdminEditorCoordinatorTest {
                             else->throw AssertionError("unexpected synthetic origin/path")
                         }
                     },{boot},{now})
-                val issuer=protocol.discover(IdentityScope());pending=protocol.newPending(1)
-                protocol.authorization(pending,1)
-                session=protocol.exchangeCallback(AdminBootstrap.CALLBACK+"?"+Identity.form(linkedMapOf("code" to "synthetic-code","state" to pending.state,"iss" to metadata.issuer)),pending,1,issuer,IdentityScope())
+                authenticate()
             }
         }
         fun newCoordinator()=AdminEditorCoordinator({store()},{boot},{now})
@@ -140,10 +142,20 @@ class AdminEditorCoordinatorTest {
                 pages,model?.reviewBinding?:"",model?.reviewDeadlineElapsed?:0),access)
         }
         fun record()=worker {val o=protocol.layerOwnership(session);checkNotNull(store().recoverOwned(o.serviceHash,o.actor))}
+        private fun authenticate() {
+            val issuer=protocol.discover(IdentityScope());loginGeneration++
+            pending=protocol.newPending(loginGeneration);protocol.authorization(pending,loginGeneration)
+            session=protocol.exchangeCallback(AdminBootstrap.CALLBACK+"?"+Identity.form(linkedMapOf("code" to "synthetic-code","state" to pending.state,"iss" to metadata.issuer)),
+                pending,loginGeneration,issuer,IdentityScope())
+        }
+        fun loginAs(nextSubject:String)=worker {
+            protocol.logout(session);subject=nextSubject;authenticate()
+            coordinator=newCoordinator() // Production retirement replaces its RAM coordinator too.
+        }
         private fun tokens():Reply {
             fun jwt(id:Boolean):String {
                 val payload=buildJsonObject {
-                    put("iss",metadata.issuer);put("sub","synthetic-admin");put("aud",if(id)AdminBootstrap.CLIENT_ID else AdminBootstrap.AUDIENCE);put("azp",AdminBootstrap.CLIENT_ID)
+                    put("iss",metadata.issuer);put("sub",subject);put("aud",if(id)AdminBootstrap.CLIENT_ID else AdminBootstrap.AUDIENCE);put("azp",AdminBootstrap.CLIENT_ID)
                     put("iat",wall/1000);put("exp",wall/1000+300);put("jti",Identity.random())
                     if(id){put("nonce",pending.nonce);put("auth_time",wall/1000)}else {put("scope",AdminBootstrap.SCOPE);put("cnf",buildJsonObject {put("jkt",Identity.thumbprint(key.publicKey))})}
                 }
@@ -170,6 +182,7 @@ class AdminEditorCoordinatorTest {
         }
         private fun control(raw:String):String {
             val request=JSONObject(raw);val action=request.getString("action");val id=request.getString("requestId");val payload=request.getJSONObject("payload")
+            if(action in setOf("configuration.inventory.get","configuration.history.get"))requestedDevices+=payload.getString("id")
             val mutation=action in setOf("configuration.layers.draft.put","configuration.layers.draft.discard","configuration.preview.request","configuration.publish")
             if(mutation) {
                 val o=protocol.layerOwnership(session);val durable=checkNotNull(store().recoverOwned(o.serviceHash,o.actor)).pending
@@ -201,9 +214,11 @@ class AdminEditorCoordinatorTest {
             check(!busy.get()) {"actual_worker_not_confirmed_idle"}
             try {worker {
                 protocol.logout(session)
-                KeyStore.getInstance("AndroidKeyStore").apply {load(null)}.deleteEntry(alias)
-                directory.listFiles()?.forEach {file->check(file.name in setOf("editor.bin","editor.bin.bak","editor.bin.new"));check(file.isFile && file.delete())}
-                check(!directory.exists() || directory.delete())
+                if(ownsStorage) {
+                    KeyStore.getInstance("AndroidKeyStore").apply {load(null)}.deleteEntry(alias)
+                    directory.listFiles()?.forEach {file->check(file.name in setOf("editor.bin","editor.bin.bak","editor.bin.new"));check(file.isFile && file.delete())}
+                    check(!directory.exists() || directory.delete())
+                }
             }}finally {executor.shutdown();check(executor.awaitTermination(5,TimeUnit.SECONDS))}
         }
     }
@@ -289,6 +304,52 @@ class AdminEditorCoordinatorTest {
             assertNotNull(f.record().pending)
             f.coordinator=f.newCoordinator();m=f.run(AdminEditorCoordinator.Kind.OPEN);assertEquals(AdminEditorPhase.UNCERTAIN,m.phase)
             val count=f.sent.size;m=f.run(AdminEditorCoordinator.Kind.CLOSE,m);assertEquals(AdminEditorPhase.UNCERTAIN,m.phase);assertEquals(count,f.sent.size)
+        }
+        for(closed in listOf(false,true))Fixture().use {f->
+            val opened=f.run(AdminEditorCoordinator.Kind.OPEN);val original=f.record()
+            if(closed)f.run(AdminEditorCoordinator.Kind.CLOSE,opened)
+            val before=File(f.directory,"editor.bin").readBytes()
+            val previousReads=f.requestedDevices.size
+            f.loginAs("synthetic-second-admin")
+            f.device="device-b"
+            val next=f.run(AdminEditorCoordinator.Kind.OPEN)
+            if(closed) {
+                assertEquals(AdminEditorPhase.EDITING,next.phase);val replacement=f.record()
+                assertEquals(original.owner.serviceHash,replacement.owner.serviceHash);assertNotEquals(original.owner.actor,replacement.owner.actor)
+                assertNotEquals(original.owner.draftId,replacement.owner.draftId);assertTrue(replacement.revision>original.revision+1)
+                assertEquals("device-b",replacement.owner.deviceId)
+            } else {
+                assertEquals(AdminEditorPhase.UNAVAILABLE,next.phase);assertEquals("ACCESS_DENIED",next.error)
+                assertTrue(next.pages.isEmpty());assertTrue(next.parents.isEmpty());assertEquals(0L,next.localRevision)
+                assertArrayEquals(before,File(f.directory,"editor.bin").readBytes())
+                f.worker {assertEquals(original,f.store().load(original.owner))}
+            }
+            assertEquals(listOf("device-b"),f.requestedDevices.drop(previousReads))
+            assertTrue(f.sent.isEmpty()) // Inventory is an authorized read; no mutation escaped.
+        }
+        for(closed in listOf(false,true))Fixture().use {originalService->
+            val opened=originalService.run(AdminEditorCoordinator.Kind.OPEN);val original=originalService.record()
+            if(closed)originalService.run(AdminEditorCoordinator.Kind.CLOSE,opened)
+            val before=File(originalService.directory,"editor.bin").readBytes()
+            // A separately signed service/root binding shares only this test's
+            // exact AES namespace. The outer owner alone performs file cleanup.
+            Fixture(sharedStorage=originalService).use {nextService->
+                nextService.device="device-b"
+                val next=nextService.run(AdminEditorCoordinator.Kind.OPEN)
+                if(closed) {
+                    assertEquals(AdminEditorPhase.EDITING,next.phase);val replacement=nextService.record()
+                    assertNotEquals(original.owner.serviceHash,replacement.owner.serviceHash);assertEquals(original.owner.actor,replacement.owner.actor)
+                    assertTrue(replacement.revision>original.revision+1)
+                    assertEquals("device-b",replacement.owner.deviceId)
+                } else {
+                    assertEquals(AdminEditorPhase.UNAVAILABLE,next.phase);assertEquals("ACCESS_DENIED",next.error)
+                    assertTrue(next.pages.isEmpty());assertTrue(next.parents.isEmpty());assertEquals(0L,next.localRevision)
+                    assertArrayEquals(before,File(originalService.directory,"editor.bin").readBytes())
+                    originalService.worker {assertEquals(original,originalService.store().load(original.owner))}
+                }
+                assertEquals(listOf("device-b"),nextService.requestedDevices)
+                assertTrue(nextService.sent.isEmpty())
+            }
         }
     }
     @Test fun compareAndChangedHeadRebaseFailClosedWithoutFlatteningOrDroppingPrivateEdits() {

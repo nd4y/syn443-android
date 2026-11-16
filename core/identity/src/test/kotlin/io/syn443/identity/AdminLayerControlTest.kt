@@ -199,7 +199,10 @@ class AdminLayerControlTest {
         assertEquals(1L,(AdminLayerControl.parseReply(discard,receipt,f.time) as AdminLayerDiscarded).revision)
         invalid {AdminLayerControl.parseReply(discard,receipt.replace("true","false"),f.time)}
         invalid {AdminLayerControl.parseReply(save,f.draft(p,2),f.time)}
-        invalid {AdminLayerControl.parseReply(save,f.draft(p).replace("\"savedAtMs\":${f.now}","\"savedAtMs\":${f.now+30_002}"),f.time)}
+        val latestAccepted=Math.addExact(f.time.upperMs,30_000)
+        val boundary=f.draft(p).replace("\"savedAtMs\":${f.now}","\"savedAtMs\":$latestAccepted")
+        assertEquals(latestAccepted,(AdminLayerControl.parseReply(save,boundary,f.time) as AdminLayerDraft).savedAtMs)
+        invalid {AdminLayerControl.parseReply(save,boundary.replace("\"savedAtMs\":$latestAccepted","\"savedAtMs\":${latestAccepted+1}"),f.time)}
     }
     @Test fun portableShapesEnforceActualLayerPermissionChangesAndScopeBounds() {
         val f=Fixture();val good=f.proposal().wireJson()

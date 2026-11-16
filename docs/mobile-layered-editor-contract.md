@@ -189,13 +189,20 @@ artifacts.
 
 ## Local ownership and revision domains
 
-Four revision domains remain separate: each published global layer revision,
+Five revision domains remain separate: each published global layer revision,
 the server's private-draft CAS revision, the encrypted local editor CAS revision,
-and each recipient's published desired-head revision. A local text save changes
+each recipient's published desired-head revision, and its issued VPN-policy revision. A local text save changes
 only the local CAS. Private-draft preparation derives its next saved revision
 from a checked server draft; publication checks the captured desired base and
 returns the next desired head. None of these counters is substituted for another
 or inferred from a successful local write. Publication is not VPN activation.
+
+The private same-UID presentation frame uses canonical base64url for UTF-8
+proposal pages and diff summaries. Decoded proposal text remains bounded at
+262144 bytes; individual pages retain the 8192 UTF-16-unit bound. This prevents
+JSON escaping of control characters or incomplete input from making a saved
+editor impossible to reopen. The 524288-byte frame, strict UTF-8, closed schema,
+duplicate rejection and worker-only parsing remain enforced.
 
 `AdminEditorStore` owns one AES-GCM/AtomicFile editor in `no_backup`, under a key
 separate from device identity, administrator DPoP and login journals. Its closed
@@ -230,5 +237,5 @@ the mandatory floors to 185 and 377 on each API29/35/37 emulator. All 19 new
 handwritten layer classes require 90% line coverage in both existing verifiers.
 The source tests include the actual Go fixture, exact parent spans, immutable
 DPoP-bound requests, refreshed ownership, encrypted lost-acknowledgement recovery,
-four revision domains, changed-head refusal and UI review lifetime. These names
+five revision domains, changed-head refusal and UI review lifetime. These names
 and counts are mandatory source gates, not a claim that they have run or passed.

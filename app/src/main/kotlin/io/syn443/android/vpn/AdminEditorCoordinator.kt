@@ -120,7 +120,14 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
         require(command.device.matches(Regex("[A-Za-z0-9_-]{1,64}")))
         clearReview();activeOperation=null;publishedRevision=0
         val owned=admitted(access)
-        val recovered=store.recoverOwned(owned.serviceHash,owned.actor);admitted(access)
+        record=null;base=null;head=null;savedRevision=null;dirty=true
+        val recovered=try {store.recoverOwned(owned.serviceHash,owned.actor)}catch(e:AdminEditorStorageException) {
+            // A foreign owner is opaque. Only explicit create below may ask the
+            // Store to consume a closed tombstone; active records remain intact.
+            if(e.reason!=AdminEditorStorageFailure.OWNER_MISMATCH)throw e
+            null
+        }
+        admitted(access)
         if(recovered!=null) {
             record=recovered;base=null;head=null;savedRevision=null;dirty=true
             if(recovered.pending!=null){phase=AdminEditorPhase.UNCERTAIN;return}
@@ -139,7 +146,13 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
         val candidate=AdminLayerControl.newDeviceDraft(current,draftId,current.approvalUntilMs)
         val owner=AdminEditorOwner(owned.serviceHash,owned.actor,command.device,draftId)
         val bytes=candidate.wireJson().toByteArray(Charsets.UTF_8)
-        try {record=store.create(owner,bytes);admitted(access)}finally {bytes.fill(0)}
+        try {
+            record=try {store.create(owner,bytes)}catch(e:AdminEditorStorageException) {
+                if(e.reason==AdminEditorStorageFailure.ALREADY_EXISTS)fail("ACCESS_DENIED")
+                throw e
+            }
+            admitted(access)
+        }finally {bytes.fill(0)}
         base=current;savedRevision=0;dirty=true;phase=AdminEditorPhase.EDITING
     }
     private fun persistPrepared(candidate:AdminLayerProposal,access:Access) {

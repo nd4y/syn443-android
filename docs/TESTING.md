@@ -12,7 +12,7 @@ line coverage through both Gradle and the independent class-presence verifier.
 Named-root and class-list regressions must match the real source methods.
 
 These v88 outcomes are source-pending, not executed acceptance. They cover the
-four distinct revision domains, exact Go-produced parent bytes, local encrypted
+five distinct revision domains, exact Go-produced parent bytes, local encrypted
 pending envelopes, explicit reconciliation after lost acknowledgements, fresh
 administrative authentication and explicit preview/review/publication. They do
 not establish live mutation/MFA/ACL, physical editor UX or a complete product.
