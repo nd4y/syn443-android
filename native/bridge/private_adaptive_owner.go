@@ -41,22 +41,24 @@ type privateAdaptiveOwner struct {
 }
 
 type privateAdaptiveOwnerReport struct {
-	Request              string   `json:"request"`
-	Running              bool     `json:"running"`
-	NativeEpoch          uint64   `json:"nativeEpoch"`
-	Scope                string   `json:"scope"`
-	PolicyScope          string   `json:"policyScope"`
-	Ready                bool     `json:"ready"`
-	Group                string   `json:"group"`
-	Hops                 []string `json:"hops"`
-	Code                 string   `json:"code"`
-	CheckCode            string   `json:"checkCode"`
-	CheckCompletedBootMS int64    `json:"checkCompletedBootMs,omitempty"`
-	ElapsedMS            int64    `json:"elapsedMs"`
-	ProbeMS              int64    `json:"probeMs"`
-	Receipt              string   `json:"receipt"`
-	GroupSelected        bool     `json:"groupSelected"`
-	WorkAgeMS            int64    `json:"workAgeMs"`
+	Request              string                   `json:"request"`
+	Running              bool                     `json:"running"`
+	NativeEpoch          uint64                   `json:"nativeEpoch"`
+	Scope                string                   `json:"scope"`
+	PolicyScope          string                   `json:"policyScope"`
+	Ready                bool                     `json:"ready"`
+	Group                string                   `json:"group"`
+	Hops                 []string                 `json:"hops"`
+	Code                 string                   `json:"code"`
+	CheckCode            string                   `json:"checkCode"`
+	CheckCompletedBootMS int64                    `json:"checkCompletedBootMs,omitempty"`
+	ElapsedMS            int64                    `json:"elapsedMs"`
+	ProbeMS              int64                    `json:"probeMs"`
+	Receipt              string                   `json:"receipt"`
+	GroupSelected        bool                     `json:"groupSelected"`
+	WorkAgeMS            int64                    `json:"workAgeMs"`
+	SelectionToken       uint64                   `json:"selectionToken,omitempty"`
+	RecheckHints         []privatePathRecheckHint `json:"recheckHints"`
 }
 
 func (privateAdaptiveOwnerReport) String() string     { return "PrivateAdaptiveOwnerReport([redacted])" }
@@ -365,6 +367,10 @@ func (o *privateAdaptiveOwner) snapshot() string {
 	}
 	o.hub.mu.Lock()
 	o.hub.pool.mu.Lock()
+	report.RecheckHints = []privatePathRecheckHint{}
+	if report.Ready {
+		report.RecheckHints = o.hub.pool.recheckHintsLocked(o.hub.pool.lease.clock())
+	}
 	if selector := o.hub.groups[report.Group]; selector != nil {
 		report.GroupSelected = selector.validLocked() && selector.active != nil
 	}
@@ -372,6 +378,7 @@ func (o *privateAdaptiveOwner) snapshot() string {
 	o.hub.mu.Unlock()
 	if !report.Ready {
 		report.Receipt = ""
+		report.SelectionToken = 0
 	}
 	raw, err := json.Marshal(report)
 	if err != nil || len(raw) > 32768 {
@@ -398,6 +405,10 @@ func (o *privateAdaptiveOwner) commit(request, token string, expectedEpoch uint6
 		return false
 	}
 	o.report.Code = "selected"
+	// Echo the consumed receipt in this acknowledgement only. o.receipt stays
+	// nil, so the diagnostic echo cannot authorize a second commit.
+	o.report.Receipt = token
+	o.report.SelectionToken = r.proof.selectionToken
 	return true
 }
 

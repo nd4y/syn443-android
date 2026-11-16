@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=272
+    minimum=287
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -381,3 +381,30 @@ if mode in ADAPTIVE_REQUIRED:
 CONTINUITY_REQUIRED = {'jvm': [('io.syn443.decision.RouteFrontierResumeTest', 'fiveHundredCandidatesResumeAcrossExpiryWithoutPrefixReplay'), ('io.syn443.decision.RouteFrontierResumeTest', 'positionBindsGraphInstanceGroupModeEveryContextFieldAndHints'), ('io.syn443.decision.RouteFrontierResumeTest', 'unsafeContextAndClockInvalidationCannotBecomeRenewableExpiry'), ('io.syn443.decision.RouteFrontierResumeTest', 'warmHintsAndSixtyFourOverlappingTemplatesStayDeduplicatedAfterRenewal'), ('io.syn443.decision.RouteFrontierResumeTest', 'fourSlotsAnd4096RawPositionsResumePastIneligibleAndDuplicateQuanta'), ('io.syn443.decision.RouteFrontierResumeTest', 'positionAndGraphOwnershipSurviveCallerBufferAndHintMutation')], 'policy': [('io.syn443.policy.PolicyLeaseSemanticsTest', 'exactlyFiveSignedLeaseFieldsMayChangeWithoutChangingContentOrAuthority'), ('io.syn443.policy.PolicyLeaseSemanticsTest', 'parentContentPredicateRetainsEveryOtherFieldAndExactEngine'), ('io.syn443.policy.PolicyLeaseSemanticsTest', 'authorityChangesForSignedCriticalPayloadChanges'), ('io.syn443.policy.PolicyLeaseSemanticsTest', 'realSignerRotationRootSetBootstrapAndInstallationAnchorAreIndependentFences'), ('io.syn443.policy.PolicyLeaseSemanticsTest', 'authorityRejectsUnknownMalformedSignerAndMismatchedVerifiedCopies')], 'emulator': [('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'fiveHundredLastWorkingPathSurvivesTTLAndHourlyPauseWithoutBudgetReset'), ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'emptyCPUQuantumYieldsToAnotherDueGroupWithoutAnotherProbe'), ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'cooldownCPUQuantumYieldsWithoutBypassingHalfOpenOrHealthyGroup'), ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'realContextNativeEpochAndClockChangesDoNotBorrowPositionsOrResetBudgets'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'signedPureLeaseUsesWorkerAuthorityAndCurrentReceiptWithoutHandlerHashing'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'missingCorruptAndMalformedAnchorKeepStrictEnvelopeIdentityAndParentPermission'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'preparedBindingsFenceBootDeadlineClockRawLoginAndCurrentTicket'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'stagedCandidateCannotRunAndApplyingBindingUsesParentActivationDeadline'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'sameTicketPreparedReplacementCannotLeakStaleAnchorBinding'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'selectedAAndPendingBReceiptSurvivePureRenewalWithSingleNativeAcknowledgement'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'signerAnchorAndNonLeaseFieldsResetScopeAndDiscardOldPendingProof'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'downgradeScopeModeAndBootCannotBorrowStableExecutionOrReviveOwner'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'persistedAnchorFingerprintExcludesFloorsButRotatesAndCorruptionFailsClosed')]}
 if mode in CONTINUITY_REQUIRED:
     assert set(CONTINUITY_REQUIRED[mode]) <= set(identities), "Missing actual policy/search continuity outcomes"
+
+
+# Passive symptoms request a budgeted fresh check and never establish failure.
+RECOVERY_RESERVE_REQUIRED = {'jvm': [('io.syn443.decision.AdaptiveProbeBudgetTest', 'routineSixLeavesTwoRecoveryStartsAndMinuteBoundaryRemainsStrict'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'repeatedReadinessAndCpuQuantaDoNotChargeOrRelaxFiveSecondSpacing'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'routineNinetySixReservesHourCapacityButTotalOneTwentyEightStillCapsAllWork'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'sixteenGroupsCanMaintainContinuouslyAndRecoverAtOldFifteenMinuteThirtySixSecondExhaustion'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'invalidOrBackwardBootTimePermanentlySealsWithoutRefillingHistory'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'cadenceIsBoundedAndDiagnosticsNeverExposeAdmissionHistory')], 'emulator': [('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'sixteenHealthyGroupsReserveRecoveryAfterNinetySixForcedRoutineStarts'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'malformedStaleForeignAndOldABASelectionHintsCannotChangeRoutesOrStartWork'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'duplicateHeartbeatsDoNotRequeueACompletedHintOrGrantMissingACKToken'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'busyAndPendingNativeOwnersKeepOneAdmissionAndHungOwnerRequiresRetirement'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'wrongSelectedReceiptCannotMintTokenOrReadinessAndValidACKIsConsumedOnce'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'sixteenGroupsSustainTwoHoursOfPacedMaintenanceWithRecoveryCapacity'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'forceAndRealContextChangesPreserveMinuteAdmissionDebt')]}
+if mode in RECOVERY_RESERVE_REQUIRED:
+    assert set(RECOVERY_RESERVE_REQUIRED[mode]) <= set(identities), "Missing actual recovery reserve and passive-hint outcomes"
+
+
+ADMIN_BROWSER_REQUIRED = [('io.syn443.android.AdminPanelBrowserTest', 'currentDeviceTargetBuildsDarkTitledCustomTabWithoutCredentialExtras'), ('io.syn443.android.AdminPanelBrowserTest', 'malformedOriginAndNoncanonicalDeviceCannotBecomeNavigationTarget'), ('io.syn443.android.AdminPanelBrowserTest', 'completeTargetRejectsInjectedPathQueryAuthorityAndFragment'), ('io.syn443.android.AdminPanelBrowserTest', 'unavailableBrowserFailsOneExactCustomTabLaunchWithoutAuthorityFallback'), ('io.syn443.android.LoginControllerTest', 'administrationEntryUsesTrustedMetadataAndCannotOutliveItsLoginGeneration'), ('io.syn443.android.LoginControllerTest', 'cancelledPrequeuePanelDiscoveryCannotExposeOldGenerationTarget')]
+if mode=="emulator":
+    assert set(ADMIN_BROWSER_REQUIRED) <= set(identities), "Missing trusted current-device admin navigation outcomes"
+
+# Signed administrative discovery is separate from device/bootstrap/session authority.
+ADMIN_BOOTSTRAP_REQUIRED = {
+    "identity": [("io.syn443.identity.BootstrapTrustTest", name) for name in {
+        "signedAdminMetadataPreservesLegacyBytesAndDeviceBootstrapAuthority",
+        "signedAdminMetadataIsBoundToSignatureRevisionAndDescriptorExpiry",
+        "sharedAdminBootstrapVectorsRequireClosedSignedMetadataAndExactLegacyBytes",
+    }],
+    "emulator": [("io.syn443.android.BootstrapTrustStoreTest", name) for name in {
+        "adminDescriptorCacheIsEncryptedProjectionBoundAndIndependentOfDeviceAuthority",
+        "removedAdminMetadataAndCacheReplayCannotBypassCommittedRevisionOrRetiredRoot",
+        "adminCacheExpiryAbsenceAndOversizeFailClosedWithoutChangingDeviceJournal",
+    }],
+}
+if mode in ADMIN_BOOTSTRAP_REQUIRED:
+    assert set(ADMIN_BOOTSTRAP_REQUIRED[mode]) <= set(identities), "Missing signed administrative metadata trust outcomes"

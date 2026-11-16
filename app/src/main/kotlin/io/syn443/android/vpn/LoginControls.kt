@@ -4,10 +4,12 @@ import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -20,10 +22,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import io.syn443.identity.Identity
 
 @Composable fun LoginControls(vpnStopped:Boolean) {
     val context=LocalContext.current;val scope=rememberCoroutineScope()
+    val panelToolbarColor=MaterialTheme.colorScheme.surface.toArgb()
+    val panelNavigationColor=MaterialTheme.colorScheme.background.toArgb()
     val uri=remember {"content://io.syn443.control".toUri()}
     var status by remember {mutableStateOf(JSONObject())}
     var message by remember {mutableStateOf("")}
@@ -125,8 +128,7 @@ import io.syn443.identity.Identity
             val url=reply?.getString("url")
             if(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                 if(reply?.getBoolean("ok")==true && url!=null)runCatching {
-                    Identity.controlOrigin(url)
-                    context.startActivity(Intent(Intent.ACTION_VIEW,url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
+                    AdminPanelBrowser.open(context,url,panelToolbarColor,panelNavigationColor)
                 }.onSuccess {message=""}.onFailure {message="Не удалось открыть панель управления."}
                 else message="Доступ к панели нужно подтвердить заново. Подождите и повторите попытку."
             }

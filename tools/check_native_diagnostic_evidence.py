@@ -59,6 +59,9 @@ PATH_REQUIRED = {
 }
 
 
+PATH_REQUIRED.update({'TestPrivatePathHintSixteenSelectorSlotsAndFiniteErrorClassification', 'TestPrivatePathHintRequiresThreeFailuresInsideOneCompletionWindow', 'TestPrivatePathHintLifetimeSurvivesExpiredDialBudgetAndThirtySecondAge', 'TestPrivatePathHintRealTCPFailuresAreDistinctBoundedAndNonVerdict', 'TestPrivatePathHintDrainingAAndReselectedARejectOldFlowTokens', 'TestPrivatePathHintClockRollbackAndSafeIntegerOverflowDisableOnlyHintLane', 'TestPrivatePathHintCancellationQuotaDeadlinesEOFUnknownAndPanicStayLocal', 'TestPrivatePathHintIOUsesOnlyPoolLockAndHeartbeatKeepsExactSelectedACK'})
+
+
 def verify(lines, required=REQUIRED, expected_package='io.syn443/engine-netbird'):
     state = {}
     for line in lines:

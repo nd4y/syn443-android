@@ -83,7 +83,7 @@ class ManagedAdaptiveRoutesTest {
         fun result(probe: JSONObject, code: String, latency: Long = 100, elapsed: Long = 9000, selected: Boolean = false): JSONObject = status()
             .put("request", probe.getString("request")).put("group", probe.getString("group")).put("hops", JSONArray(probe.getJSONArray("hops").toString()))
             .put("code", code).put("elapsedMs", elapsed).put("probeMs", if (code in setOf("verified", "selected", "discarded")) latency else 0)
-            .put("receipt", if (code == "verified") Policy.hash(probe.getString("request") + "-receipt") else "").put("groupSelected", selected)
+            .put("receipt", if (code in setOf("verified", "selected")) Policy.hash(probe.getString("request") + "-receipt") else "").put("groupSelected", selected)
         fun measured(probe: JSONObject, now: Long, latency: Long, elapsed: Long = 9000): JSONObject {
             val before = commands.size
             report(result(probe, "verified", latency, elapsed), now)
@@ -419,16 +419,22 @@ class ManagedAdaptiveRoutesTest {
         Harness(config(groupCount=2)).use {h->
             h.ready()
             val a=checkNotNull(h.tick(1000));h.selected(a,1000)
-            h.selected(checkNotNull(h.tick(6000)),6000)
+            val other=checkNotNull(h.tick(6000));h.selected(other,6000)
             for(i in 1..4) {
                 val now=1000L+i*60000
+                h.controller.force() // explicit routine check, still charged to the bounded shared budget.
                 h.selected(checkNotNull(h.tick(now)),now)
                 h.selected(checkNotNull(h.tick(now+5000)),now+5000)
             }
+            h.controller.force()
             val current=checkNotNull(h.tick(301000,false,false));assertEquals(a.getString("group"),current.getString("group"))
             failed(h,current,301000)
-            val unrelated=checkNotNull(h.tick(306000));assertNotEquals(current.getString("group"),unrelated.getString("group"))
-            assertEquals("discard",h.measured(unrelated,306000,500).getString("command"))
+            val replacement=checkNotNull(h.tick(306000));assertEquals(current.getString("group"),replacement.getString("group"))
+            assertFalse(samePath(a,replacement)) // confirmed recovery precedes unrelated maintenance.
+            val before=h.commands.size
+            h.report(h.result(replacement,"verified",500).put("group",other.getString("group")),306000)
+            assertEquals(before,h.commands.size) // foreign-group success cannot authorize this replacement.
+            assertEquals("commit",h.measured(replacement,306000,500).getString("command"))
         }
         Harness(config()).use {h->
             val a=prepareHealthy(h)

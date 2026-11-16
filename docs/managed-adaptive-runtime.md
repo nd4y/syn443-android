@@ -100,3 +100,50 @@ These changes require named signed-policy, cursor and Android continuity outcome
 in Actions. They do not by themselves establish actual managed-chain acceptance,
 unlimited search under changing network conditions, a common energy governor or
 a recovery reserve after routine checks consume the hourly budget.
+
+## Recovery capacity and passive symptoms
+
+The next candidate keeps the hard8/minute,128/hour and five-second start spacing.
+Routine maintenance/exploration has an additional6/minute and96/hour ceiling.
+No-route and confirmed recovery work may use the remaining capacity; routine
+work cannot consume it. Due recovery groups precede routine groups. The same
+bounded128-record ledger survives force and context changes, and an invalid or
+backward clock seals admission. Maintenance is spread over the group count:
+max(60s, ceil(groups * 3600s / 96)), giving600s for16 groups. These are local TCP
+coordinator limits, not a common SDK/diagnostic/telemetry governor.
+
+A group that spends a CPU quantum without starting I/O yields to other due
+groups before competing again, even if it needs recovery. This fair-round state
+is bounded by16 groups and cannot be erased by force. A manual refresh requests
+a routine current-path check without discarding its actual measurement time or
+borrowing recovery capacity.
+
+Actual admitted TCP read/write failures can request a fresh check through the
+existing heartbeat. A selector has one bounded hint slot. Three independent
+owned flows must complete with a finite recognized network error inside30s;
+each flow counts once. EOF, cancellation, caller deadlines, local refusal,
+panic and unknown errors contribute no evidence. There is no destination history,
+traffic content, extra timer, worker or I/O. Dial failures and silent blackholes
+are deliberately outside this passive signal; paced active checks remain needed.
+
+Every actual native commit captures a safe-integer selection token in its exact
+consumed proof. The selected acknowledgement echoes that token and the consumed
+receipt; the latter is diagnostic data and cannot authorize a replay. Captures
+from draining A or an earlier A->B->A selection cannot affect the current path.
+Read/write observation takes only the existing pool mutex and retains real
+operation/flow ownership. The stream lifetime, not its initial30s dial budget,
+controls eligibility. Token/sequence exhaustion disables only the hint lane.
+
+The controller accepts at most16 closed hint records, under the current native
+epoch/scope and matching acknowledged selection token. A newer sequence and a
+fresh actual BOOTTIME completion are required. Duplicate heartbeats do not refresh
+the timestamp or mint work. A hint changes no verdict, quarantine, selection or
+readiness: it schedules a budgeted current-path check. Any replacement still
+requires fresh native proof and the exact matching selected acknowledgement.
+Busy or pending work keeps its admission until actual completion/retirement.
+
+Actions requires eight additional actual native roots in both ordinary/race
+suites (53 total), six budget JVM roots and seven Android controller roots.
+Each API29/35/37 matrix requires279 unique actual outcomes without failures or
+skips. Synthetic controller reports do not establish packet or physical proof;
+signed managed-policy deployment and actual USB/Wi-Fi chain recovery stay separate.

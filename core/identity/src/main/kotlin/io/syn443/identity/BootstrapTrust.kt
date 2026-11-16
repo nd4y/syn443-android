@@ -21,11 +21,26 @@ import java.util.Base64
     override fun toString()="TrustAnchor([redacted])"
 }
 @Serializable data class ServiceFloor(val serviceId:String="",val revision:Long=0,val hash:String="")
+/** Shape only. Administrative authority still requires its own user/key/session
+ * flow; signed metadata never becomes part of the device Bootstrap identity. */
+@Serializable data class AdminBootstrap(val issuer:String,val clientId:String,val audience:String,
+    val apiOrigin:String,val assuranceAcr:String) {
+    fun validate()=BootstrapTrust.validateAdminBootstrap(this)
+    override fun toString()="AdminBootstrap([redacted])"
+    companion object {
+        const val CLIENT_ID="syn443-control-mobile"
+        const val AUDIENCE="syn443-control-api"
+        const val ASSURANCE_ACR="urn:syn443:loa:2"
+        const val SCOPE="openid syn443.control"
+        const val CALLBACK="syn443://admin/oauth/callback"
+    }
+}
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable data class ServiceDescriptor(val schemaVersion:Int,val audience:String,val rootEpoch:Long,val revision:Long,
     val serviceId:String,val issuer:String,val clientId:String,val apiOrigin:String,val roots:Map<String,String>,
     val issuedAt:Long,val notBefore:Long,val expires:Long,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val controlPanelOrigin:String="") {
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val controlPanelOrigin:String="",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val adminBootstrap:AdminBootstrap?=null) {
     override fun toString()="ServiceDescriptor([redacted])"
 }
 @Serializable data class RootTransition(val schemaVersion:Int,val audience:String,val from:String,val to:String,
@@ -97,12 +112,18 @@ object BootstrapTrust {
             !u.host.endsWith('.') && !u.rawAuthority.endsWith(':') && u.port!=443)
         require(if(path) !u.path.endsWith('/') else u.path.isEmpty())
     }
+    internal fun validateAdminBootstrap(value:AdminBootstrap) {
+        require(value.clientId==AdminBootstrap.CLIENT_ID && value.audience==AdminBootstrap.AUDIENCE &&
+            value.assuranceAcr==AdminBootstrap.ASSURANCE_ACR)
+        secureURL(value.issuer,true);secureURL(value.apiOrigin,false)
+    }
     private fun validate(descriptor:ServiceDescriptor,anchor:TrustAnchor,now:Long) {
         require(descriptor.schemaVersion==1 && descriptor.audience=="syn443-client-bootstrap" &&
             descriptor.rootEpoch==anchor.epoch && descriptor.revision in 1..SAFE &&
             identifier.matches(descriptor.serviceId) && identifier.matches(descriptor.clientId))
         secureURL(descriptor.apiOrigin,false); secureURL(descriptor.issuer,true)
         if(descriptor.controlPanelOrigin.isNotEmpty())Identity.controlOrigin(descriptor.controlPanelOrigin)
+        descriptor.adminBootstrap?.validate()
         require(descriptor.issuedAt>0 && descriptor.issuedAt<=now+30 && descriptor.notBefore>=descriptor.issuedAt &&
             descriptor.notBefore<=now && descriptor.expires>now && descriptor.expires-descriptor.issuedAt<=30*86400)
         require(descriptor.roots.size in 1..4)
@@ -129,6 +150,12 @@ object BootstrapTrust {
     }
     fun descriptor(raw:String,anchor:TrustAnchor,floor:ServiceFloor,now:Long):Pair<ServiceDescriptor,ServiceFloor> {
         val text=signed(raw,"syn443-bootstrap+jws",anchor)
+        val document=Canonical.parse(text).jsonObject
+        if("adminBootstrap" in document) {
+            val admin=document.getValue("adminBootstrap")
+            require(admin is JsonObject && admin.keys==setOf("issuer","clientId","audience","apiOrigin","assuranceAcr") &&
+                admin.values.all {it is JsonPrimitive && it.isString})
+        }
         val value=Canonical.json.decodeFromString<ServiceDescriptor>(text);validate(value,anchor,now)
         val hash=Identity.hash(text.toByteArray(Charsets.UTF_8))
         require(floor.revision in 0..SAFE && (if(floor.revision==0L) floor.hash.isEmpty()&&floor.serviceId.isEmpty()

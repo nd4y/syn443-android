@@ -26,6 +26,7 @@ type privateFlowOwner struct {
 	closeConfirmed bool
 	released       bool
 	probe          *privateProbeDialObservation
+	hint           privatePathHintFlow
 }
 
 func (f *privateFlowOwner) valid() bool {
@@ -54,9 +55,15 @@ func (f *privateFlowOwner) begin() bool {
 	return true
 }
 func (f *privateFlowOwner) end() bool {
+	return f.endObserved(nil, false)
+}
+func (f *privateFlowOwner) endObserved(err error, panicked bool) bool {
 	p, e := f.hold.pool, f.hold.entry
 	p.mu.Lock()
 	valid := f.validLocked(p, e)
+	if valid {
+		f.hint.observeLocked(p, e, err, panicked)
+	}
 	f.operations--
 	p.operations--
 	release := f.closeConfirmed && f.operations == 0 && !f.released
@@ -128,12 +135,14 @@ func (f *privateTCPFlow) Read(b []byte) (n int, err error) {
 		return 0, errPrivatePath
 	}
 	defer func() {
+		panicked := false
 		if recover() != nil {
+			panicked = true
 			f.owner.hold.retain()
 			n = 0
 			err = errPrivatePath
 		}
-		if !f.owner.end() {
+		if !f.owner.endObserved(err, panicked) {
 			n = 0
 			err = errPrivatePath
 		}
@@ -145,12 +154,14 @@ func (f *privateTCPFlow) Write(b []byte) (n int, err error) {
 		return 0, errPrivatePath
 	}
 	defer func() {
+		panicked := false
 		if recover() != nil {
+			panicked = true
 			f.owner.hold.retain()
 			n = 0
 			err = errPrivatePath
 		}
-		if !f.owner.end() {
+		if !f.owner.endObserved(err, panicked) {
 			n = 0
 			err = errPrivatePath
 		}

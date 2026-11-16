@@ -20,26 +20,43 @@ import javax.crypto.spec.GCMParameterSpec
 
 @Serializable private data class TrustRecord(val revision:Long=0,val anchor:TrustAnchor,
     val floors:Map<String,ServiceFloor> = emptyMap(),val timeFloor:Long=0,val installationHash:String="")
+@Serializable private data class RetainedAdminDescriptor(val floor:ServiceFloor,val manifest:String) {
+    override fun toString()="RetainedAdminDescriptor([redacted])"
+}
 
 /** Controller worker only. Corruption is a blocked state, never a fresh install.
  * The installation asset is public and cannot be replaced by an incoming URI.
  * Root/floor state survives logout and is excluded from Android backup. */
 class BootstrapTrustStore(private val context:Context,private val namespace:String="installation-trust-v1",
-    private val testAnchor:TrustAnchor?=null,private val testProfile:InstallationProfile?=null) {
+    private val testAnchor:TrustAnchor?=null,private val testProfile:InstallationProfile?=null,
+    private val testAdminNow:(()->Long)?=null) {
     private val file:AtomicFile
     init {
         require(namespace.matches(Regex("[a-z0-9-]{1,48}")))
         if(testAnchor!=null || testProfile!=null)require((testAnchor==null || testProfile==null) &&
             io.syn443.android.BuildConfig.DEBUG && namespace.startsWith("test-") && android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        // Only the existing synthetic emulator trust fixture may override this
+        // metadata lookup clock. Device admission and VPN lease clocks stay real.
+        if(testAdminNow!=null)require(testAnchor!=null || testProfile!=null)
         file=AtomicFile(File(context.noBackupFilesDir,"$namespace.bin"))
     }
-    companion object {private val lock=Any();private const val alias="syn443-bootstrap-trust-v1"}
+    companion object {
+        private val lock=Any()
+        private const val alias="syn443-bootstrap-trust-v1"
+        private const val adminCacheLimit=8192
+    }
     private val installationProfile by lazy {
         testProfile?:io.syn443.android.BuildConfig.INSTALLATION_PROFILE.takeIf {testAnchor==null && it.isNotEmpty()}
             ?.let(BootstrapTrust::installationProfile)
     }
     private fun worker(){check(Looper.myLooper()!=Looper.getMainLooper() && !Thread.currentThread().name.startsWith("Binder:"))}
     private fun aad()="SYN443-BOOTSTRAP-TRUST-1\n$namespace".toByteArray(Charsets.US_ASCII)
+    private fun adminFile(service:String):AtomicFile {
+        require(service.matches(Regex("[A-Za-z0-9_-]{1,64}")))
+        val id=Identity.hash(service.toByteArray(Charsets.US_ASCII))
+        return AtomicFile(File(context.noBackupFilesDir,"$namespace-admin-$id.bin"))
+    }
+    private fun adminAAD(service:String)="SYN443-ADMIN-DESCRIPTOR-1\n$namespace\n$service".toByteArray(Charsets.US_ASCII)
     private fun key(create:Boolean):SecretKey {
         val store=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
         (store.getKey(alias,null) as? SecretKey)?.let {return it};check(create)
@@ -81,8 +98,10 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
         val next=BootstrapTrust.advance(upgrade.rotation,record.anchor,now)
         require(next.copy(lastTransition="")==installation)
         val (descriptor,floor)=defaultDescriptor(checkNotNull(profile).service,record.copy(anchor=next),now)
-        return write(record.copy(revision=Math.addExact(record.revision,1),anchor=next,
+        val committed=write(record.copy(revision=Math.addExact(record.revision,1),anchor=next,
             floors=record.floors+(floor.serviceId to floor),timeFloor=maxOf(record.timeFloor,descriptor.issuedAt)))
+        retainAdminDescriptor(profile.service,descriptor,floor)
+        return committed
     }
     private fun readRecord():TrustRecord? {
         if(!file.baseFile.exists() && !File(file.baseFile.path+".bak").exists() && !File(file.baseFile.path+".new").exists())return null
@@ -104,6 +123,64 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
         require(readRecord()==bound)
         return bound
     }
+    /** The committed floor is authoritative. This optional cache is written
+     * afterwards, so an interrupted/missing write can only remove admin metadata
+     * availability. It cannot change a valid device bootstrap or its journal. */
+    private fun retainAdminDescriptor(raw:String,descriptor:ServiceDescriptor,floor:ServiceFloor) {
+        try {
+            require(floor.serviceId==descriptor.serviceId && raw.length in 1..BootstrapTrust.MAX_MANIFEST)
+            val target=adminFile(descriptor.serviceId)
+            if(descriptor.adminBootstrap==null) {target.delete();return}
+            val plain=Canonical.encode(Canonical.parse(Canonical.json.encodeToString(RetainedAdminDescriptor(floor,raw))))
+                .toByteArray(Charsets.UTF_8)
+            val data=try {
+                require(plain.size<=adminCacheLimit-29)
+                Cipher.getInstance("AES/GCM/NoPadding").run {
+                    init(Cipher.ENCRYPT_MODE,key(false));updateAAD(adminAAD(descriptor.serviceId));byteArrayOf(1)+iv+doFinal(plain)
+                }
+            }finally {plain.fill(0)}
+            try {
+                val output=target.startWrite()
+                try {output.write(data);target.finishWrite(output)}catch(e:Exception){target.failWrite(output);throw e}
+            }finally {data.fill(0)}
+        }catch(_:Exception) {
+            // The next reader requires the exact current committed floor and
+            // full signed projection. An old/partial cache is never a fallback.
+        }
+    }
+    private fun readAdminDescriptor(service:String):RetainedAdminDescriptor? {
+        val file=adminFile(service)
+        if(!file.baseFile.exists() && !File(file.baseFile.path+".bak").exists() && !File(file.baseFile.path+".new").exists())return null
+        val bytes=bounded(file.openRead(),adminCacheLimit)
+        val plain=try {
+            require(bytes.size>=30 && bytes[0]==1.toByte())
+            Cipher.getInstance("AES/GCM/NoPadding").run {
+                init(Cipher.DECRYPT_MODE,key(false),GCMParameterSpec(128,bytes.copyOfRange(1,13)));updateAAD(adminAAD(service))
+                doFinal(bytes.copyOfRange(13,bytes.size))
+            }
+        }finally {bytes.fill(0)}
+        return try {Canonical.json.decodeFromString<RetainedAdminDescriptor>(Policy.utf8(plain))}finally {plain.fill(0)}
+    }
+    private fun deviceBootstrap(descriptor:ServiceDescriptor)=
+        Bootstrap(descriptor.serviceId,descriptor.issuer,descriptor.clientId,descriptor.apiOrigin,
+            descriptor.roots.toMap(),controlPanelOrigin=descriptor.controlPanelOrigin).also {it.validate()}
+
+    /** Worker-only signed metadata lookup, not an administrative grant/session.
+     * No device Bootstrap field or authority hash is extended by this cache. */
+    internal fun adminBootstrap(expected:Bootstrap):AdminBootstrap? {
+        worker()
+        return synchronized(lock) {try {
+            expected.validate()
+            val state=read()
+            val current=state.floors[expected.serviceId] ?: return@synchronized null
+            val retained=readAdminDescriptor(expected.serviceId) ?: return@synchronized null
+            require(retained.floor==current && retained.manifest.length in 1..BootstrapTrust.MAX_MANIFEST)
+            val now=maxOf(testAdminNow?.invoke() ?: (System.currentTimeMillis()/1000),state.timeFloor)
+            val (descriptor,floor)=BootstrapTrust.descriptor(retained.manifest,state.anchor,current,now)
+            require(floor==current && deviceBootstrap(descriptor)==expected)
+            descriptor.adminBootstrap
+        }catch(_:Exception){null}}
+    }
     fun preview(raw:String):AuthenticatedInvite {worker();return synchronized(lock){
         val state=read();val link=BootstrapTrust.parse(raw)
         BootstrapTrust.authenticate(raw,state.anchor,state.floors[link.serviceId]?:ServiceFloor(),maxOf(System.currentTimeMillis()/1000,state.timeFloor))
@@ -113,7 +190,7 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
         val verified=BootstrapTrust.authenticate(raw,state.anchor,state.floors[link.serviceId]?:ServiceFloor(),maxOf(System.currentTimeMillis()/1000,state.timeFloor))
         require(verified.floor.serviceId in state.floors || state.floors.size<32)
         val next=state.copy(revision=Math.addExact(state.revision,1),floors=state.floors+(verified.floor.serviceId to verified.floor),timeFloor=maxOf(state.timeFloor,verified.descriptor.issuedAt))
-        write(next);verified
+        write(next);retainAdminDescriptor(link.manifest,verified.descriptor,verified.floor);verified
     }}
 
     fun defaultBootstrap():Bootstrap = acceptDefaultDescriptor(checkNotNull(installationProfile).service)
@@ -145,10 +222,10 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
             val state=read()
             val now=maxOf(System.currentTimeMillis()/1000,state.timeFloor)
             val (descriptor,floor)=defaultDescriptor(raw,state,now)
-            val bootstrap=Bootstrap(descriptor.serviceId,descriptor.issuer,descriptor.clientId,descriptor.apiOrigin,
-                descriptor.roots.toMap(),controlPanelOrigin=descriptor.controlPanelOrigin).also {it.validate()}
+            val bootstrap=deviceBootstrap(descriptor)
             if(floor!=state.floors[floor.serviceId])write(state.copy(revision=Math.addExact(state.revision,1),
                 floors=state.floors+(floor.serviceId to floor),timeFloor=maxOf(state.timeFloor,descriptor.issuedAt)))
+            retainAdminDescriptor(raw,descriptor,floor)
             bootstrap
         }
     }

@@ -4,6 +4,10 @@ Snapshot: 2026-11-16. Specification0.9 contains292 requirements and98 acceptance
 scenarios. Those numbers describe scope, not completed work or test counts.
 This document supersedes repository-wide readiness claims in historical stage notes.
 
+The v83 [signed admin metadata foundation](mobile-admin-bootstrap.md) is a source
+candidate pending GitHub Actions and later integration. It preserves device
+bootstrap authority and adds no native administrative session, API or quick UI.
+
 ## Current accepted checkpoint
 
 The [v79 USB/Wi-Fi checkpoint](non-lte-acceptance-20261116.md) records the latest

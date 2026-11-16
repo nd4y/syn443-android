@@ -13,6 +13,69 @@ import java.security.spec.ECGenParameterSpec
 import java.util.Base64
 
 class BootstrapTrustTest {
+    @Test fun signedAdminMetadataPreservesLegacyBytesAndDeviceBootstrapAuthority() {
+        val legacy=descriptor()
+        val bytes=Canonical.encode(Canonical.parse(Canonical.json.encodeToString(legacy)))
+        assertFalse(Canonical.parse(bytes).jsonObject.containsKey("adminBootstrap"))
+        assertEquals(bytes,Canonical.encode(Canonical.parse(Canonical.json.encodeToString(legacy.copy(adminBootstrap=null)))))
+        val metadata=AdminBootstrap("https://admin-id.example.invalid/realms/control",AdminBootstrap.CLIENT_ID,
+            AdminBootstrap.AUDIENCE,"https://admin-api.example.invalid",AdminBootstrap.ASSURANCE_ACR)
+        val raw=manifest(legacy.copy(adminBootstrap=metadata))
+        val (accepted,floor)=BootstrapTrust.descriptor(raw,anchor,ServiceFloor(),now)
+        assertEquals(metadata,accepted.adminBootstrap)
+        val device=AuthenticatedInvite(legacy,ServiceFloor(),"").bootstrap()
+        val withAdmin=AuthenticatedInvite(accepted,floor,"").bootstrap()
+        assertEquals(device,withAdmin)
+        assertEquals(Identity.bootstrapAuthority(device),Identity.bootstrapAuthority(withAdmin))
+        assertEquals(Canonical.json.encodeToString(device),Canonical.json.encodeToString(withAdmin))
+        assertEquals("openid syn443.control",AdminBootstrap.SCOPE)
+        assertEquals("syn443://admin/oauth/callback",AdminBootstrap.CALLBACK)
+        assertEquals("AdminBootstrap([redacted])",metadata.toString())
+        assertFalse(Canonical.parse(Canonical.json.encodeToString(withAdmin)).jsonObject.containsKey("adminBootstrap"))
+    }
+    @Test fun signedAdminMetadataIsBoundToSignatureRevisionAndDescriptorExpiry() {
+        val metadata=AdminBootstrap("https://admin-id.example.invalid/realms/control",AdminBootstrap.CLIENT_ID,
+            AdminBootstrap.AUDIENCE,"https://admin-api.example.invalid",AdminBootstrap.ASSURANCE_ACR)
+        val value=descriptor().copy(adminBootstrap=metadata)
+        val raw=manifest(value)
+        val (_,floor)=BootstrapTrust.descriptor(raw,anchor,ServiceFloor(),now)
+        val tampered=raw.split('.').toMutableList()
+        val changed=Canonical.json.encodeToString(value.copy(adminBootstrap=metadata.copy(apiOrigin="https://other.example.invalid")))
+        tampered[1]=Identity.encode(Canonical.encode(Canonical.parse(changed)).toByteArray())
+        fail {BootstrapTrust.descriptor(tampered.joinToString("."),anchor,floor,now)}
+        val removed=manifest(value.copy(revision=2,adminBootstrap=null))
+        val (withoutAdmin,newFloor)=BootstrapTrust.descriptor(removed,anchor,floor,now)
+        assertNull(withoutAdmin.adminBootstrap)
+        fail {BootstrapTrust.descriptor(raw,anchor,newFloor,now)}
+        fail {BootstrapTrust.descriptor(manifest(value.copy(expires=now+1)),anchor,ServiceFloor(),now+1)}
+        fail {BootstrapTrust.descriptor(manifest(value.copy(notBefore=now+1)),anchor,ServiceFloor(),now)}
+    }
+    @Test fun sharedAdminBootstrapVectorsRequireClosedSignedMetadataAndExactLegacyBytes() {
+        val raw=requireNotNull(javaClass.classLoader.getResourceAsStream("bootstrap-admin-vectors.json"))
+            .use {it.readBytes().toString(Charsets.UTF_8)}
+        val vectors=Canonical.parse(raw).jsonObject
+        assertEquals(1,vectors.getValue("version").jsonPrimitive.int)
+        assertEquals(4,vectors.getValue("valid").jsonArray.size)
+        assertEquals(54,vectors.getValue("invalid").jsonArray.size)
+        val at=vectors.getValue("now").jsonPrimitive.long
+        val legacy=vectors.getValue("legacyDescriptorJson").jsonPrimitive.content
+        val decoded=Canonical.json.decodeFromString<ServiceDescriptor>(legacy)
+        assertEquals(legacy,Canonical.encode(Canonical.parse(Canonical.json.encodeToString(decoded))))
+        assertNull(decoded.adminBootstrap)
+        val header=Canonical.encode(buildJsonObject {put("alg","ES256");put("kid",anchor.id);put("typ","syn443-bootstrap+jws")})
+        for(case in vectors.getValue("valid").jsonArray) {
+            val body=case.jsonObject.getValue("descriptorJson").jsonPrimitive.content
+            val (accepted,floor)=BootstrapTrust.descriptor(signRaw(header,body,old),anchor,ServiceFloor(),at)
+            assertEquals(body,Canonical.encode(Canonical.parse(Canonical.json.encodeToString(accepted))))
+            assertEquals(AuthenticatedInvite(decoded,ServiceFloor(),"").bootstrap(),AuthenticatedInvite(accepted,floor,"").bootstrap())
+        }
+        for(case in vectors.getValue("invalid").jsonArray) {
+            val member=case.jsonObject.getValue("adminBootstrapJson").jsonPrimitive.content
+            val canonical=runCatching {Canonical.encode(Canonical.parse(member))}.getOrDefault(member)
+            val body="{\"adminBootstrap\":"+canonical+","+legacy.substring(1)
+            fail {BootstrapTrust.descriptor(signRaw(header,body,old),anchor,ServiceFloor(),at)}
+        }
+    }
     @Test fun administrationOriginIsRootAuthenticatedAndAbsentInLegacyAuthorityBytes() {
         val old=descriptor()
         assertFalse(Canonical.parse(Canonical.json.encodeToString(old)).jsonObject.containsKey("controlPanelOrigin"))
