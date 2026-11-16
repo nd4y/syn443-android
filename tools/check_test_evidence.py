@@ -408,3 +408,42 @@ ADMIN_BOOTSTRAP_REQUIRED = {
 }
 if mode in ADMIN_BOOTSTRAP_REQUIRED:
     assert set(ADMIN_BOOTSTRAP_REQUIRED[mode]) <= set(identities), "Missing signed administrative metadata trust outcomes"
+
+# The native administrative core has its own identity/key/session and no app UI exposure.
+ADMIN_AUTH_REQUIRED = {
+    ("io.syn443.identity.AdminIdentityTest", name) for name in {
+        "administrativeAuthorityBindsMetadataAndServiceWithoutConstructingDeviceBootstrap",
+        "browserAuthorizationUsesFixedAdministrativeCallbackScopePkceAndDpopKey",
+        "callbackShapeRejectsDeviceForeignDuplicateInjectedAndMalformedResponses",
+        "pendingAuthorityKeyGenerationBootClockAndFiveMinuteBoundaryAreIndependentFences",
+        "validatedOauthDenialIsConsumedRedactedAndNeverBecomesCredentials",
+    }
+} | {
+    ("io.syn443.identity.AdminProtocolTest", name) for name in {
+        "administrativeDiscoveryPinsKeycloakEndpointsAlgorithmsAndHttpsDateBeforeTokenDispatch",
+        "codeExchangeAndRefreshUseSeparatePkceDpopAndNeverExtendOriginalEightHourLease",
+        "refreshAllowsMissingIdTokenButRejectsChangedSubjectNonceAudienceOrKey",
+        "optionalIdTokenAccessHashMustMatchBothInitialAndRotatedAccessTokens",
+        "refreshMustRotateItsPairAndCanOnlyShortenTheRemainingSessionLease",
+        "signedTokenSubstitutionsCannotTurnDeviceAudienceOrForeignClaimsIntoAdminAuthority",
+        "tokenReplyTypesBoundsDuplicateJsonSignatureAndExpiryConsistencyAreRequired",
+        "issuerNonceChallengeIsOneRetryWithFreshProofAndIdenticalCodeRequest",
+        "refreshNonceChallengeKeepsOneDispatchOwnerAndMissingOrStaleChallengeCannotRetry",
+        "uncertainRefreshTransportPermanentlyRetiresPairInsteadOfReplayingIt",
+        "cancellationBeforeDispatchRetainsPairButLateCancellationRequiresNewAuthentication",
+        "callbackReplayGenerationBootAndDeadlineCannotDispatchAuthorizationCode",
+        "bootClockOrPendingExpiryDuringProofCannotDispatchExpiredCodeOrRefresh",
+        "issuerAndSessionCannotCrossAdministrativeAuthorityOrSeparateDpopKey",
+        "expiredSessionBootRollbackAndStaleHttpsDateCannotResurrectCredentials",
+        "concurrentRefreshHasOneOwnerAndLocalLogoutDoesNotCallServerOrDeviceIdentity",
+        "localLogoutClosesTheFamilyDuringInflightRefreshAndAcrossCompletedRotations",
+        "cancelledOrRebootedDiscoveryAndMalformedKeysNeverReturnAdministrativeState",
+    }
+}
+if mode == "identity":
+    assert len(ADMIN_AUTH_REQUIRED) == 23 and ADMIN_AUTH_REQUIRED <= set(identities), "Missing separate administrative OAuth identity outcomes"
+    verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", {
+        "io.syn443.identity.AdminIdentity", "io.syn443.identity.AdminIdentity.Companion", "io.syn443.identity.AdminPending",
+        "io.syn443.identity.AdminProtocol", "io.syn443.identity.AdminIssuerState", "io.syn443.identity.AdminSession",
+        "io.syn443.identity.AdminSessionFamily", "io.syn443.identity.AdminLogout",
+    })
