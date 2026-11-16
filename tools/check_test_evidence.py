@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=284
+    minimum=287
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -392,3 +392,19 @@ if mode in RECOVERY_RESERVE_REQUIRED:
 ADMIN_BROWSER_REQUIRED = [('io.syn443.android.AdminPanelBrowserTest', 'currentDeviceTargetBuildsDarkTitledCustomTabWithoutCredentialExtras'), ('io.syn443.android.AdminPanelBrowserTest', 'malformedOriginAndNoncanonicalDeviceCannotBecomeNavigationTarget'), ('io.syn443.android.AdminPanelBrowserTest', 'completeTargetRejectsInjectedPathQueryAuthorityAndFragment'), ('io.syn443.android.AdminPanelBrowserTest', 'unavailableBrowserFailsOneExactCustomTabLaunchWithoutAuthorityFallback'), ('io.syn443.android.LoginControllerTest', 'administrationEntryUsesTrustedMetadataAndCannotOutliveItsLoginGeneration'), ('io.syn443.android.LoginControllerTest', 'cancelledPrequeuePanelDiscoveryCannotExposeOldGenerationTarget')]
 if mode=="emulator":
     assert set(ADMIN_BROWSER_REQUIRED) <= set(identities), "Missing trusted current-device admin navigation outcomes"
+
+# Signed administrative discovery is separate from device/bootstrap/session authority.
+ADMIN_BOOTSTRAP_REQUIRED = {
+    "identity": [("io.syn443.identity.BootstrapTrustTest", name) for name in {
+        "signedAdminMetadataPreservesLegacyBytesAndDeviceBootstrapAuthority",
+        "signedAdminMetadataIsBoundToSignatureRevisionAndDescriptorExpiry",
+        "sharedAdminBootstrapVectorsRequireClosedSignedMetadataAndExactLegacyBytes",
+    }],
+    "emulator": [("io.syn443.android.BootstrapTrustStoreTest", name) for name in {
+        "adminDescriptorCacheIsEncryptedProjectionBoundAndIndependentOfDeviceAuthority",
+        "removedAdminMetadataAndCacheReplayCannotBypassCommittedRevisionOrRetiredRoot",
+        "adminCacheExpiryAbsenceAndOversizeFailClosedWithoutChangingDeviceJournal",
+    }],
+}
+if mode in ADMIN_BOOTSTRAP_REQUIRED:
+    assert set(ADMIN_BOOTSTRAP_REQUIRED[mode]) <= set(identities), "Missing signed administrative metadata trust outcomes"

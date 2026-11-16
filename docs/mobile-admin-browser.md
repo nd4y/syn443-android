@@ -20,8 +20,10 @@ and creates no new OAuth client, WebView or JavaScript bridge. A missing browser
 produces the existing finite launch error.
 
 Actions requires four new intent/URL cases, the new prequeue-cancellation case
-and the existing current-generation administrative-entry case. Each API29/35/37
-matrix requires284 unique actual outcomes without failures or skips. These tests
+and the existing current-generation administrative-entry case. The v82 API 29/35/37
+matrix required 284 unique actual outcomes without failures or skips. The
+[signed admin metadata foundation](mobile-admin-bootstrap.md) raises the current
+gate to 287 and adds separate trust outcomes. These browser tests
 inspect intents and scoped discovery; they do not establish actual browser
 rendering, Keycloak authentication or a live administrative card. Those remain
 physical acceptance steps.

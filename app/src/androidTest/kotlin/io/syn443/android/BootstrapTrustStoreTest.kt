@@ -28,6 +28,119 @@ class BootstrapTrustStoreTest {
         val der=Signature.getInstance("SHA256withECDSA").run {initSign(key.private);update(text.toByteArray());sign()}
         return text+"."+Identity.encode(Identity.derToRaw(der))
     }
+    private inner class AdminFixture : java.io.Closeable {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val namespace="test-admin-"+UUID.randomUUID().toString().replace("-","").take(20)
+        val root=pair()
+        val online=pair()
+        val anchor=TrustAnchor("admin-fixture-root",Base64.getEncoder().encodeToString(root.public.encoded),1)
+        val now=System.currentTimeMillis()/1000
+        var lookupNow=now
+        val metadata=AdminBootstrap("https://admin-id.example.invalid/realms/control",AdminBootstrap.CLIENT_ID,
+            AdminBootstrap.AUDIENCE,"https://admin-api.example.invalid",AdminBootstrap.ASSURANCE_ACR)
+        val descriptor=ServiceDescriptor(1,"syn443-client-bootstrap",1,1,"service-a",
+            "https://id.example.invalid/realms/device","syn443-android","https://api.example.invalid",
+            mapOf("online" to Base64.getEncoder().encodeToString(online.public.encoded)),now,now,now+3600,
+            adminBootstrap=metadata)
+        val journal=File(context.noBackupFilesDir,"$namespace.bin")
+        private val executor=Executors.newSingleThreadExecutor()
+        fun store()=BootstrapTrustStore(context,namespace,testAnchor=anchor,testAdminNow={lookupNow})
+        fun manifest(value:ServiceDescriptor=descriptor,key:KeyPair=root,id:String=anchor.id)=
+            signed(key,id,Canonical.json.encodeToJsonElement(value),"syn443-bootstrap+jws")
+        fun caches()=context.noBackupFilesDir.listFiles {file -> file.name.startsWith("$namespace-admin-") && file.name.endsWith(".bin")}
+            ?.toList().orEmpty()
+        fun worker(action:()->Unit) {executor.submit {action()}.get(30,TimeUnit.SECONDS)}
+        override fun close() {
+            executor.shutdownNow();check(executor.awaitTermination(5,TimeUnit.SECONDS))
+            context.noBackupFilesDir.listFiles {file -> file.name=="$namespace.bin" || file.name.startsWith("$namespace.bin.") || file.name.startsWith("$namespace-admin-")}
+                ?.forEach {check(it.delete())}
+        }
+    }
+    @Test fun adminDescriptorCacheIsEncryptedProjectionBoundAndIndependentOfDeviceAuthority() {
+        assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        AdminFixture().use {f -> f.worker {
+            val store=f.store()
+            val manifest=f.manifest()
+            val bootstrap=store.acceptDefaultDescriptor(manifest)
+            val authority=Identity.bootstrapAuthority(bootstrap)
+            val journal=f.journal.readBytes()
+            val rootIdentity=store.adaptiveAuthorityFingerprint()
+            assertEquals(f.metadata,store.adminBootstrap(bootstrap))
+            assertEquals(f.metadata,f.store().adminBootstrap(bootstrap))
+            val cache=f.caches().single();val bytes=cache.readBytes()
+            assertFalse(bytes.toString(Charsets.ISO_8859_1).contains(f.metadata.issuer))
+            assertFalse(bytes.toString(Charsets.ISO_8859_1).contains(manifest))
+            for(detached in listOf(bootstrap.copy(serviceId="service-b"),bootstrap.copy(issuer="https://other-id.example.invalid/realms/device"),
+                bootstrap.copy(clientId="foreign-device-client"),bootstrap.copy(apiOrigin="https://other-api.example.invalid"),
+                bootstrap.copy(controlPanelOrigin="https://other-console.example.invalid"),
+                bootstrap.copy(roots=mapOf("foreign-online" to bootstrap.roots.values.single())))) {
+                assertNull(store.adminBootstrap(detached))
+            }
+            assertArrayEquals(journal,f.journal.readBytes())
+            val changed=f.descriptor.copy(revision=2,adminBootstrap=f.metadata.copy(issuer="https://other-admin.example.invalid/realms/control"))
+            val stillDevice=store.acceptDefaultDescriptor(f.manifest(changed))
+            assertEquals(bootstrap,stillDevice);assertEquals(authority,Identity.bootstrapAuthority(stillDevice))
+            assertEquals(rootIdentity,store.adaptiveAuthorityFingerprint())
+            assertEquals(changed.adminBootstrap,store.adminBootstrap(bootstrap))
+            val before=f.caches().toSet()
+            val other=store.acceptDefaultDescriptor(f.manifest(changed.copy(serviceId="service-b")))
+            val otherCache=(f.caches().toSet()-before).single()
+            otherCache.writeBytes(cache.readBytes()) // same AES key, foreign service AAD/floor.
+            assertNull(store.adminBootstrap(other));assertEquals(changed.adminBootstrap,store.adminBootstrap(bootstrap))
+        }}
+    }
+    @Test fun removedAdminMetadataAndCacheReplayCannotBypassCommittedRevisionOrRetiredRoot() {
+        assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        AdminFixture().use {f -> f.worker {
+            val store=f.store();val first=f.manifest()
+            val bootstrap=store.acceptDefaultDescriptor(first)
+            val cache=f.caches().single();val old=cache.readBytes()
+            val removed=store.acceptDefaultDescriptor(f.manifest(f.descriptor.copy(revision=2,adminBootstrap=null)))
+            assertEquals(bootstrap,removed);assertNull(store.adminBootstrap(removed));assertTrue(f.caches().isEmpty())
+            val committed=f.journal.readBytes()
+            cache.writeBytes(old)
+            assertNull(f.store().adminBootstrap(bootstrap));assertArrayEquals(committed,f.journal.readBytes())
+            assertTrue(runCatching {store.acceptDefaultDescriptor(first)}.isFailure)
+            val fresh=f.manifest(f.descriptor.copy(revision=3))
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(fresh));assertEquals(f.metadata,store.adminBootstrap(bootstrap))
+            val current=f.journal.readBytes();val cipher=cache.readBytes()
+            cache.writeBytes(cipher.copyOf().apply {this[lastIndex]=(this[lastIndex].toInt() xor 1).toByte()})
+            assertNull(store.adminBootstrap(bootstrap));assertArrayEquals(current,f.journal.readBytes())
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(fresh)) // same-floor cache repair changes no device journal.
+            assertArrayEquals(current,f.journal.readBytes());assertEquals(f.metadata,store.adminBootstrap(bootstrap))
+            val next=pair();val nextAnchor=TrustAnchor("admin-fixture-next",Base64.getEncoder().encodeToString(next.public.encoded),2)
+            val transition=RootTransition(1,"syn443-root-transition",f.anchor.id,nextAnchor.id,nextAnchor.spki,2,f.now,f.now,f.now+3600)
+            val body=Canonical.json.encodeToJsonElement(transition)
+            val rotation=RootRotation(signed(f.root,f.anchor.id,body,"syn443-root-transition+jws"),
+                signed(next,nextAnchor.id,body,"syn443-root-transition+jws"))
+            store.rotate(Canonical.json.encodeToString(rotation))
+            assertNull(store.adminBootstrap(bootstrap))
+            val updated=f.manifest(f.descriptor.copy(rootEpoch=2,revision=4),next,nextAnchor.id)
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(updated));assertEquals(f.metadata,store.adminBootstrap(bootstrap))
+        }}
+    }
+    @Test fun adminCacheExpiryAbsenceAndOversizeFailClosedWithoutChangingDeviceJournal() {
+        assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        AdminFixture().use {f -> f.worker {
+            assertTrue(runCatching {BootstrapTrustStore(f.context,f.namespace+"-bad",testAdminNow={f.now})}.isFailure)
+            val store=f.store()
+            val legacy=store.acceptDefaultDescriptor(f.manifest(f.descriptor.copy(adminBootstrap=null)))
+            assertNull(store.adminBootstrap(legacy));assertTrue(f.caches().isEmpty())
+            val bootstrap=store.acceptDefaultDescriptor(f.manifest(f.descriptor.copy(revision=2)))
+            val before=f.journal.readBytes();val cache=f.caches().single()
+            f.lookupNow=f.now-3600 // committed signed issuance floor clamps the fixture clock.
+            assertEquals(f.metadata,store.adminBootstrap(bootstrap))
+            f.lookupNow=f.descriptor.expires
+            assertNull(store.adminBootstrap(bootstrap));assertArrayEquals(before,f.journal.readBytes())
+            val renewed=f.manifest(f.descriptor.copy(revision=3,expires=f.now+7200))
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(renewed));assertEquals(f.metadata,store.adminBootstrap(bootstrap))
+            val active=f.journal.readBytes()
+            cache.writeBytes(ByteArray(8193))
+            assertNull(store.adminBootstrap(bootstrap));assertArrayEquals(active,f.journal.readBytes())
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(renewed));assertArrayEquals(active,f.journal.readBytes())
+            assertEquals(f.metadata,store.adminBootstrap(bootstrap))
+        }}
+    }
     @Test fun installationUpgradeCommitsBothSignaturesAndKeepsTheRevisionFloor() {
         assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
         val context=InstrumentationRegistry.getInstrumentation().targetContext
