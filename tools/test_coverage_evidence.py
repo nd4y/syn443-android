@@ -127,6 +127,7 @@ class CoverageEvidenceTest(unittest.TestCase):
                 self.assertEqual(len(methods), len(set(methods)), class_name)
                 expected[mode].update((package + class_name, name) for name in methods)
         expected['identity'].update({
+            ('io.syn443.identity.AdminDiscoveryTest', 'typedOperationCancellationPreservesClockButNeverGrantsOrSkipsFreshDiscoveryAdmission'),
             ('io.syn443.identity.AdminIdentityTest', 'initialAuthenticationTimeHonorsBothTrustedWindowEdgesAtExactSecondBoundaries'),
             ('io.syn443.identity.AdminProtocolTest', 'initialIdTokenRejectsMissingMalformedUnsafeAndStaleAuthenticationTimeDespiteFreshIssueTime'),
             ('io.syn443.identity.AdminProtocolTest', 'refreshKeepsOldAuthenticationTimeOptionalWithoutRenewingMfaOrTheOriginalSessionLease'),
@@ -138,7 +139,7 @@ class CoverageEvidenceTest(unittest.TestCase):
             ('io.syn443.android.AdminLoginBrowserTest', 'fixedMaximumAuthenticationAgeRejectsMissingChangedAndDuplicateBrowserParameters'),
         })
         for mode, count, floor, folder in [
-            ('identity', 42, 185, 'core/identity/src/test/kotlin/io/syn443/identity'),
+            ('identity', 43, 186, 'core/identity/src/test/kotlin/io/syn443/identity'),
             ('emulator', 44, 377, 'app/src/androidTest/kotlin/io/syn443/android'),
         ]:
             self.assertEqual(count, len(required[mode]))

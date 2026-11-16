@@ -1,8 +1,8 @@
 # Testing and release gates
 
 [Native layered administration](mobile-layered-editor-contract.md) v88 source
-adds 42 required identity outcomes and 44 Android outcomes. The identity floor
-is 185; every API29/35/37 emulator must report at least 377 unique passing actual
+adds 43 required identity outcomes and 44 Android outcomes. The identity floor
+is 186; every API29/35/37 emulator must report at least 377 unique passing actual
 outcomes. The additions are 23 codec, four layer-reader, seven authenticated
 layer-protocol, four ownership and four fresh-authentication JVM cases; Android
 adds 12 encrypted-store, five private-wire, ten presentation, ten coordinator,

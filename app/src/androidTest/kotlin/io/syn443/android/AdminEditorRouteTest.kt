@@ -102,7 +102,19 @@ class AdminEditorRouteTest {
         compose.setContent {MaterialTheme(colorScheme=darkColorScheme()) {if(mounted.value)AdminRoute(bridge)}}
     }
     private fun open(bridge:Bridge) {
-        waitNode("admin-title");adminScroll("admin-device-${bridge.device}")
+        val tag="admin-device-${bridge.device}"
+        // A title can precede the foreground status/page response. Wait for
+        // the actual authorized row; scrolling never dispatches a command.
+        compose.waitUntil(5000) {
+            val containers=compose.onAllNodesWithTag("admin-content").fetchSemanticsNodes(atLeastOneRootRequired=false)
+            if(containers.size!=1)false else {
+                try {
+                    adminScroll(tag)
+                    val row=compose.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired=false).singleOrNull()
+                    row!=null && !row.config.contains(SemanticsProperties.Disabled)
+                }catch(_:AssertionError) {false}
+            }
+        }
         compose.onNodeWithTag("admin-device-${bridge.device}").assertIsEnabled().performClick()
         adminScroll("admin-edit-configuration");compose.onNodeWithTag("admin-edit-configuration").assertIsEnabled().performClick()
         waitNode("editor-title");phase("Локальная копия готова к редактированию")
@@ -150,13 +162,13 @@ class AdminEditorRouteTest {
         compose.runOnIdle {assertEquals(0,bridge.commands.count {it.kind==Kind.CLOSE})}
         editorScroll("editor-close");compose.onNodeWithTag("editor-close").performClick()
         compose.onNodeWithTag("editor-close-confirm").performClick()
-        phase("Загружена конфигурация и её происхождение")
+        waitNode("admin-title")
+        compose.onNodeWithTag("editor-content").assertDoesNotExist()
         compose.onNodeWithTag("editor-page-input").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(listOf(Kind.OPEN,Kind.SAVE_LOCAL,Kind.PREVIEW,Kind.PUBLISH,Kind.CLOSE),bridge.commands.map {it.kind})
             assertEquals("document-3",bridge.commands.last().binding);assertEquals(3L,bridge.commands.last().localRevision)
         }
-        editorScroll("editor-back");compose.onNodeWithTag("editor-back").performClick();waitNode("admin-title")
         compose.onNodeWithTag("vpn-connect").assertDoesNotExist();compose.onNodeWithTag("vpn-disconnect").assertDoesNotExist()
     }
 
@@ -187,8 +199,10 @@ class AdminEditorRouteTest {
         compose.runOnIdle {
             assertEquals(1,bridge.webCalls.get());assertEquals(listOf(Kind.OPEN,Kind.OPEN),bridge.commands.map {it.kind})
         }
+        val pagesBeforeStop=bridge.reads.count {it=="devices"}
         compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
         compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+        compose.waitUntil(5000) {bridge.reads.count {it=="devices"}==pagesBeforeStop+1}
         waitNode("admin-title");compose.onNodeWithTag("editor-title").assertDoesNotExist()
         compose.runOnIdle {assertEquals(listOf(Kind.OPEN,Kind.OPEN),bridge.commands.map {it.kind})}
         open(bridge);assertInput("{\"synthetic\":1}");change("private unsaved input before removal")

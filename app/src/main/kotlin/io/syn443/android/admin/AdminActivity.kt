@@ -55,6 +55,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
     val navigation=MaterialTheme.colorScheme.background.toArgb()
     var model by remember {mutableStateOf(AdminUiModel())}
     var visible by remember {mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))}
+    var foregroundEpoch by remember {mutableLongStateOf(0L)}
     var operation by remember {mutableStateOf<Job?>(null)}
     var sequence by remember {mutableStateOf(0L)}
     fun current(ticket:Long,generation:Long?=null)=visible && sequence==ticket &&
@@ -107,7 +108,11 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
     }
     DisposableEffect(lifecycle) {
         val observer=LifecycleEventObserver {_,_->
-            visible=lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            val nextVisible=lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            // STOP/START may arrive before Compose observes the intermediate
+            // false value. Keep a transition key so cleared RAM is reread once.
+            if(nextVisible && !visible)foregroundEpoch++
+            visible=nextVisible
             if(!visible) {
                 sequence++;operation?.cancel();operation=null
                 model=AdminUiModel(status=model.status)
@@ -116,7 +121,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         lifecycle.addObserver(observer)
         onDispose {sequence++;operation?.cancel();lifecycle.removeObserver(observer)}
     }
-    LaunchedEffect(visible) {if(visible)execute {refresh(it)}}
+    LaunchedEffect(visible,foregroundEpoch) {if(visible)execute {refresh(it)}}
     fun editCommand(kind:io.syn443.android.vpn.AdminEditorCoordinator.Kind,pages:List<String> = emptyList(),
         review:String="",deadline:Long=0) {
         val captured=model.editor?:return
@@ -225,7 +230,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         else if(status.reason.isNotEmpty())item {Text(adminErrorText(status.reason),Modifier.testTag("admin-reason"))}
         if(authenticated) {
             item {HorizontalDivider();Text("Доступные устройства",Modifier.testTag("admin-devices-title"),style=MaterialTheme.typography.titleLarge)}
-            item {Text("Права проверяются сервером. Отчёт о применении политики не является проверкой соединения.")}
+            item {Text("Показаны последние полученные данные. Для нового чтения нажмите «Обновить». Права проверяются сервером. Отчёт о применении политики не является проверкой соединения.")}
             if(model.page==null)item {Text("Список устройств ещё не загружен.",Modifier.testTag("admin-devices-unknown"))}
             else if(model.page.devices.isEmpty())item {Text("У вас нет доступных устройств.",Modifier.testTag("admin-devices-empty"))}
             items(model.page?.devices.orEmpty(),key={"device-"+it.id}) {device->

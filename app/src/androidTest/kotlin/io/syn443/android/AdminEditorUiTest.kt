@@ -149,6 +149,13 @@ class AdminEditorUiTest {
         compose.runOnIdle {state.value=model(phase=AdminEditorPhase.NEEDS_REAUTH,error=raw)}
         scroll("editor-page-input");input("unsaved local buffer")
         scroll("editor-login");compose.onNodeWithTag("editor-login").assertIsEnabled().performClick()
+        compose.onNodeWithText("Оставить несохранённый ввод?").assertIsDisplayed()
+        compose.runOnIdle {assertEquals(0,login)}
+        compose.onNodeWithText("Продолжить редактирование").performClick()
+        scroll("editor-page-input");input("unsaved local buffer")
+        compose.runOnIdle {assertEquals(0,login)}
+        scroll("editor-login");compose.onNodeWithTag("editor-login").performClick()
+        compose.onNodeWithTag("editor-leave-confirm").assertIsEnabled().performClick()
         compose.onNodeWithText(raw).assertDoesNotExist()
         compose.runOnIdle {assertEquals(1,login);assertEquals(adminEditorErrorText("unknown"),adminEditorErrorText(raw))}
         scroll("editor-error");compose.onNodeWithTag("editor-error").assertTextEquals("Данные временно недоступны. Проверьте состояние и повторите действие.")
