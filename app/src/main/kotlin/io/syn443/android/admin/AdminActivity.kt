@@ -40,14 +40,14 @@ class AdminActivity:ComponentActivity() {
 internal data class AdminUiModel(val status:AdminUiStatus=AdminUiStatus(),val working:Boolean=false,
     val page:AdminDevicesPage?=null,val after:String="",val selected:String="",
     val configuration:AdminDocument?=null,val runtime:AdminDocument?=null,
-    val showConfiguration:Boolean=false,val showRuntime:Boolean=false,val message:String="") {
+    val showConfiguration:Boolean=false,val showRuntime:Boolean=false,val message:String="",val editor:AdminEditorModel?=null) {
     override fun toString()="AdminUiModel([redacted])"
 }
 internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={},val logout:()->Unit={},
     val refresh:()->Unit={},val page:(String)->Unit={},val select:(String)->Unit={},val web:()->Unit={},
-    val toggleConfiguration:()->Unit={},val toggleRuntime:()->Unit={})
+    val toggleConfiguration:()->Unit={},val toggleRuntime:()->Unit={},val edit:()->Unit={})
 
-@Composable private fun AdminRoute(bridge:AdminUiBridge) {
+@Composable internal fun AdminRoute(bridge:AdminUiBridge) {
     val context=LocalContext.current
     val lifecycle=(context as LifecycleOwner).lifecycle
     val scope=rememberCoroutineScope()
@@ -55,6 +55,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
     val navigation=MaterialTheme.colorScheme.background.toArgb()
     var model by remember {mutableStateOf(AdminUiModel())}
     var visible by remember {mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))}
+    var foregroundEpoch by remember {mutableLongStateOf(0L)}
     var operation by remember {mutableStateOf<Job?>(null)}
     var sequence by remember {mutableStateOf(0L)}
     fun current(ticket:Long,generation:Long?=null)=visible && sequence==ticket &&
@@ -65,7 +66,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         sequence++
         val ticket=sequence
         operation=scope.launch {
-            model=model.copy(working=true,message="")
+            model=model.copy(working=true,message="",editor=model.editor?.withBusy(true))
             try {block(ticket)}
             catch(e:CancellationException){throw e}
             catch(e:Exception) {if(current(ticket)) {
@@ -76,9 +77,9 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
                 else if(model.status.phase==AdminUiPhase.INITIALIZING)
                     AdminUiModel(status=model.status.copy(phase=AdminUiPhase.UNAVAILABLE,busy=false),
                         working=true,message=adminErrorText(code))
-                else model.copy(message=adminErrorText(code))
+                else model.copy(message=adminErrorText(code),editor=model.editor?.withFailure(code))
             }}
-            finally {if(sequence==ticket){model=model.copy(working=false);operation=null}}
+            finally {if(sequence==ticket){model=model.copy(working=false,editor=model.editor?.withBusy(false));operation=null}}
         }
     }
     suspend fun status(ticket:Long):AdminUiStatus {
@@ -107,7 +108,11 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
     }
     DisposableEffect(lifecycle) {
         val observer=LifecycleEventObserver {_,_->
-            visible=lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            val nextVisible=lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            // STOP/START may arrive before Compose observes the intermediate
+            // false value. Keep a transition key so cleared RAM is reread once.
+            if(nextVisible && !visible)foregroundEpoch++
+            visible=nextVisible
             if(!visible) {
                 sequence++;operation?.cancel();operation=null
                 model=AdminUiModel(status=model.status)
@@ -116,7 +121,19 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         lifecycle.addObserver(observer)
         onDispose {sequence++;operation?.cancel();lifecycle.removeObserver(observer)}
     }
-    LaunchedEffect(visible) {if(visible)execute {refresh(it)}}
+    LaunchedEffect(visible,foregroundEpoch) {if(visible)execute {refresh(it)}}
+    fun editCommand(kind:io.syn443.android.vpn.AdminEditorCoordinator.Kind,pages:List<String> = emptyList(),
+        review:String="",deadline:Long=0) {
+        val captured=model.editor?:return
+        val generation=model.status.generation
+        execute {ticket->
+            val command=io.syn443.android.vpn.AdminEditorCoordinator.Command(kind,captured.device,captured.documentBinding,
+                captured.localRevision,pages,review,deadline)
+            val next=bridge.editor(generation,command)
+            if(current(ticket,generation) && model.editor?.documentBinding==captured.documentBinding)
+                model=model.copy(editor=if(kind==io.syn443.android.vpn.AdminEditorCoordinator.Kind.CLOSE && next.localRevision==0L)null else next)
+        }
+    }
     val actions=AdminUiActions(
         login={execute {ticket->
             val observed=status(ticket)
@@ -155,8 +172,31 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         }},
         toggleConfiguration={model=model.copy(showConfiguration=!model.showConfiguration)},
         toggleRuntime={model=model.copy(showRuntime=!model.showRuntime)},
+        edit={val selected=model.selected;val generation=model.status.generation;execute {ticket->
+            val next=bridge.editor(generation,io.syn443.android.vpn.AdminEditorCoordinator.Command(
+                io.syn443.android.vpn.AdminEditorCoordinator.Kind.OPEN,device=selected))
+            if(current(ticket,generation))model=model.copy(editor=next)
+        }},
     )
-    AdminScreen(model,actions)
+    val editor=model.editor
+    if(editor==null)AdminScreen(model,actions)
+    else AdminEditorScreen(editor,AdminEditorActions(
+        saveLocal={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.SAVE_LOCAL,it)},
+        saveDraft={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.SAVE_DRAFT)},
+        preview={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.PREVIEW)},
+        publish={binding,deadline->editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.PUBLISH,review=binding,deadline=deadline)},
+        poll={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.POLL)},
+        retryExact={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.RETRY_EXACT)},
+        comparison={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.COMPARE)},
+        rebase={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.REBASE)},
+        login={val generation=model.status.generation;model=model.copy(editor=null);execute {ticket->
+            if(!bridge.logout(generation))throw AdminUiFailure("BUSY")
+            refresh(ticket,load=false)
+            val observed=status(ticket)
+            if(!bridge.login(observed.generation))throw AdminUiFailure("BUSY")
+            refresh(ticket)
+        }},
+        web=actions.web,back={model=model.copy(editor=null)},close={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.CLOSE)}))
 }
 
 @Composable internal fun AdminScreen(model:AdminUiModel,actions:AdminUiActions) {
@@ -190,7 +230,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         else if(status.reason.isNotEmpty())item {Text(adminErrorText(status.reason),Modifier.testTag("admin-reason"))}
         if(authenticated) {
             item {HorizontalDivider();Text("Доступные устройства",Modifier.testTag("admin-devices-title"),style=MaterialTheme.typography.titleLarge)}
-            item {Text("Права проверяются сервером. Отчёт о применении политики не является проверкой соединения.")}
+            item {Text("Показаны последние полученные данные. Для нового чтения нажмите «Обновить». Права проверяются сервером. Отчёт о применении политики не является проверкой соединения.")}
             if(model.page==null)item {Text("Список устройств ещё не загружен.",Modifier.testTag("admin-devices-unknown"))}
             else if(model.page.devices.isEmpty())item {Text("У вас нет доступных устройств.",Modifier.testTag("admin-devices-empty"))}
             items(model.page?.devices.orEmpty(),key={"device-"+it.id}) {device->
@@ -208,6 +248,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
             }}
             if(model.selected.isNotEmpty()) {
                 item {HorizontalDivider();Text("Устройство: "+model.selected,Modifier.testTag("admin-selected"),style=MaterialTheme.typography.titleMedium)}
+                item {OutlinedButton(actions.edit,enabled=!busy,modifier=Modifier.testTag("admin-edit-configuration")) {Text("Редактировать конфигурацию")}}
                 item {Text("Конфигурация",style=MaterialTheme.typography.titleMedium)}
                 if(model.configuration==null)item {Text("Конфигурация ещё не получена.",Modifier.testTag("admin-config-unknown"))}
                 else {

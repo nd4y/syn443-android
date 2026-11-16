@@ -237,32 +237,58 @@ class LoginController private constructor(private val context:android.app.Applic
         require(stopped)
     }
     internal fun loginIntent()=journal.snapshot()
-    /** Read-only worker adapter. It borrows no VPN/device session credential and
-     * never starts, refreshes, cancels or retires ordinary device authentication. */
-    internal fun adminDiscoveryContext():AdminDeviceContext? {
+    private fun adminContextWorker() {
         check(android.os.Looper.myLooper()!=android.os.Looper.getMainLooper() &&
             !Thread.currentThread().name.startsWith("Binder:"))
-        fun active(s:LoginIntent)=s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING) &&
-            s.maybeRegistered && s.deviceId.isNotEmpty() && cancelledGeneration!=s.generation
-        fun fence(s:LoginIntent)=Identity.hash(Canonical.encode(buildJsonObject {
-            put("domain","syn443.admin-device-context.v1");put("generation",s.generation);put("reauthRevision",s.reauthRevision)
-            put("authority",s.authority);put("device",s.deviceId);put("owner",s.ownerTag)
-            put("keyAlias",s.keyAlias);put("thumbprint",s.thumbprint)
-        }).toByteArray(Charsets.UTF_8))
+    }
+    private fun activeAdminContext(s:LoginIntent)=s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING) &&
+        s.maybeRegistered && s.deviceId.isNotEmpty() && cancelledGeneration!=s.generation
+    private fun adminContextBinding(s:LoginIntent)=Identity.hash(Canonical.encode(buildJsonObject {
+        put("domain","syn443.admin-device-context.v1");put("generation",s.generation);put("reauthRevision",s.reauthRevision)
+        put("authority",s.authority);put("device",s.deviceId);put("owner",s.ownerTag)
+        put("keyAlias",s.keyAlias);put("thumbprint",s.thumbprint)
+    }).toByteArray(Charsets.UTF_8))
+    private fun currentAdminContext(binding:String):Boolean=synchronized(commands) {
+        val state=journal.snapshot();val owned=cached
+        activeAdminContext(state) && adminContextBinding(state)==binding && owned!=null &&
+            adminContextBinding(owned.first)==binding
+    }
+    /** Worker-only ordinary context. Validation/KeyFactory happens outside the
+     * command lock; only public intent fields and copied roots are captured there. */
+    internal fun adminBootstrapContext():AdminBootstrapContext? {
+        adminContextWorker()
         return try {
             val captured=synchronized(commands) {
                 val state=journal.snapshot();val owned=cached
-                if(!active(state) || owned==null ||
-                    fence(owned.first)!=fence(state))return@synchronized null
+                if(!activeAdminContext(state) || owned==null ||
+                    adminContextBinding(owned.first)!=adminContextBinding(state))return@synchronized null
                 val bootstrap=owned.second.bootstrap.copy(roots=owned.second.bootstrap.roots.toMap())
-                if(Identity.bootstrapAuthority(bootstrap)!=state.authority)return@synchronized null
-                fence(state) to bootstrap
+                Triple(adminContextBinding(state),state.authority,bootstrap)
             } ?: return null
-            val discovery=bootstrapTrust.adminDiscovery(captured.second) ?: return null
-            synchronized(commands) {
-                val current=journal.snapshot()
-                if(active(current) && fence(current)==captured.first)AdminDeviceContext(captured.first,discovery) else null
-            }
+            if(Identity.bootstrapAuthority(captured.third)!=captured.second || !currentAdminContext(captured.first))return null
+            AdminBootstrapContext(captured.first,captured.third)
+        }catch(_:Exception){null}
+    }
+    /** Read-only worker adapter. It borrows no VPN/device session credential and
+     * never starts, refreshes, cancels or retires ordinary device authentication. */
+    internal fun adminDiscoveryContext():AdminDeviceContext? {
+        adminContextWorker()
+        return try {
+            val ordinary=adminBootstrapContext() ?:return null
+            val discovery=bootstrapTrust.adminDiscovery(ordinary.bootstrap) ?:return null
+            if(currentAdminContext(ordinary.binding))AdminDeviceContext(ordinary.binding,discovery) else null
+        }catch(_:Exception){null}
+    }
+    /** Explicit signed public-metadata update, not device provisioning. A
+     * service-global floor can advance during an owner race, but its ticket
+     * must never be published into a different ordinary authentication context. */
+    internal fun applyAdminDescriptor(expectedBinding:String,raw:String):AdminDeviceContext? {
+        adminContextWorker()
+        return try {
+            val ordinary=adminBootstrapContext() ?:return null
+            if(ordinary.binding!=expectedBinding)return null
+            if(!bootstrapTrust.refreshAdminDescriptor(raw,ordinary.bootstrap))return null
+            adminDiscoveryContext()?.takeIf {it.binding==expectedBinding}
         }catch(_:Exception){null}
     }
     /** Memory/public-intent reads only. Never call StateStore, Keystore or network in this block. */

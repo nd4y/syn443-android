@@ -171,7 +171,7 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
         worker()
         return synchronized(lock) {try {
             expected.validate()
-            val state=read()
+            val state=adminStateWithoutUpgrade()
             val current=state.floors[expected.serviceId] ?: return@synchronized null
             val retained=readAdminDescriptor(expected.serviceId) ?: return@synchronized null
             require(retained.floor==current && retained.manifest.length in 1..BootstrapTrust.MAX_MANIFEST)
@@ -181,6 +181,31 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
     }
     /** Compatibility projection only. Device Bootstrap and its authority are unchanged. */
     internal fun adminBootstrap(expected:Bootstrap):AdminBootstrap?=adminDiscovery(expected)?.metadata
+
+    /** Administrative lookup and refresh cannot drive an installation upgrade.
+     * A pending upgrade must first pass the existing ordinary trust flow. */
+    private fun adminStateWithoutUpgrade():TrustRecord {
+        val installation=installed().also(BootstrapTrust::validateAnchor)
+        return (readRecord()?:TrustRecord(anchor=installation)).also {validate(it,installation)}
+    }
+    /** Signed metadata-only publication. Reject every ordinary projection
+     * difference before committing a floor, advancing time or touching cache. */
+    internal fun refreshAdminDescriptor(raw:String,expected:Bootstrap):Boolean {
+        worker()
+        val owned=expected.copy(roots=expected.roots.toMap()).also {it.validate()}
+        return synchronized(lock) {
+            val state=adminStateWithoutUpgrade()
+            val now=maxOf(System.currentTimeMillis()/1000,state.timeFloor)
+            val (descriptor,floor)=defaultDescriptor(raw,state,now)
+            require(deviceBootstrap(descriptor)==owned)
+            val timeFloor=maxOf(state.timeFloor,descriptor.issuedAt)
+            if(floor!=state.floors[floor.serviceId] || timeFloor!=state.timeFloor)
+                write(state.copy(revision=Math.addExact(state.revision,1),
+                    floors=state.floors+(floor.serviceId to floor),timeFloor=timeFloor))
+            retainAdminDescriptor(raw,descriptor,floor)
+            true
+        }
+    }
     fun preview(raw:String):AuthenticatedInvite {worker();return synchronized(lock){
         val state=read();val link=BootstrapTrust.parse(raw)
         BootstrapTrust.authenticate(raw,state.anchor,state.floors[link.serviceId]?:ServiceFloor(),maxOf(System.currentTimeMillis()/1000,state.timeFloor))

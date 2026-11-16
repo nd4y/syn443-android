@@ -15,7 +15,8 @@ import java.util.concurrent.atomic.AtomicInteger
 internal class AdminController private constructor(private val context:Application,private val namespace:String,
     private val test:TestDependencies?=null) {
     private class TestDependencies(val encryptionAlias:String,val source:()->AdminDeviceContext?,
-        val exchange:IdentityExchange,val boot:()->Int,val elapsed:()->Long)
+        val exchange:IdentityExchange,val boot:()->Int,val elapsed:()->Long,
+        val refreshDiscovery:(()->AdminDeviceContext?)?,val editorStore:(()->AdminEditorStore)?)
     companion object {
         @Volatile private var instance:AdminController?=null
         @Synchronized fun get(context:Context):AdminController {
@@ -23,12 +24,13 @@ internal class AdminController private constructor(private val context:Applicati
             return instance ?: AdminController(context.applicationContext as Application,"admin-login-v1").also {instance=it}
         }
         internal fun isolatedForTest(context:Context,namespace:String,encryptionAlias:String,
-            source:()->AdminDeviceContext?,exchange:IdentityExchange,boot:()->Int,elapsed:()->Long):AdminController {
+            source:()->AdminDeviceContext?,exchange:IdentityExchange,boot:()->Int,elapsed:()->Long,
+            refreshDiscovery:(()->AdminDeviceContext?)?=null,editorStore:(()->AdminEditorStore)?=null):AdminController {
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") &&
                 namespace.matches(Regex("test-[a-z0-9-]{1,43}")) &&
                 encryptionAlias.matches(Regex("syn443-admin-store-test-[A-Za-z0-9_-]{43}")))
             return AdminController(context.applicationContext as Application,namespace,
-                TestDependencies(encryptionAlias,source,exchange,boot,elapsed))
+                TestDependencies(encryptionAlias,source,exchange,boot,elapsed,refreshDiscovery,editorStore))
         }
         private val operationID=Regex("[a-f0-9]{32}")
         private val targetID=Regex("[A-Za-z0-9_-]{1,64}")
@@ -64,6 +66,8 @@ internal class AdminController private constructor(private val context:Applicati
     private var epoch=0L
     private var busy=true
     private var owner:Owner?=null
+    // A RAM view may be retired freely; its encrypted outbox must survive logout.
+    private var editorCoordinator:AdminEditorCoordinator?=null
     private var activeScope:IdentityScope?=null
     private var activeRead=""
     private var activeBrowser=""
@@ -80,7 +84,7 @@ internal class AdminController private constructor(private val context:Applicati
     private fun requireCurrent(expected:Long) {
         if(!current(expected))throw AdminException(AdminFailure.CANCELLED)
         synchronized(commands) {
-            if(activeRead.isNotEmpty() && mailbox?.let {it.id==activeRead && it.generation==generation}!=true)
+            if(activeRead.isNotEmpty() && mailbox?.let {it.id==activeRead && it.generation==generation && elapsed() in it.createdAt..it.expiresAt}!=true)
                 throw AdminException(AdminFailure.CANCELLED)
             if(activeBrowser.isNotEmpty() && browserTicket?.let {it.id==activeBrowser && it.generation==generation && it.epoch==expected}!=true)
                 throw AdminException(AdminFailure.CANCELLED)
@@ -163,7 +167,7 @@ internal class AdminController private constructor(private val context:Applicati
                 return // Keep retirementRequested set: a new sign-in cannot bypass an unknown cleanup.
             }
             synchronized(commands) {
-                owner=null;clearMailbox();clearBrowser();retirementRequested=false;phase=retirementPhase;reason=retirementReason
+                owner=null;editorCoordinator=null;clearMailbox();clearBrowser();retirementRequested=false;phase=retirementPhase;reason=retirementReason
             }
         }
     }
@@ -188,11 +192,56 @@ internal class AdminController private constructor(private val context:Applicati
         }}
         if(method=="POST" && url.endsWith("/protocol/openid-connect/token"))posts.incrementAndGet()
         val reply=test?.exchange?.request(method,url,headers,body,child,maxBody)
-            ?:http.exchange(method,url,headers,body,child,maxBody=maxBody,route=checkNotNull(route),maxRequestBody=8192)
+            ?:http.exchange(method,url,headers,body,child,maxBody=maxBody,route=checkNotNull(route),
+                maxRequestBody=if(url==metadata.apiOrigin+"/v1/control/action")262_144 else 8192)
         admitted();reply
     }
     fun status():JSONObject=synchronized(commands) {JSONObject().put("generation",generation).put("phase",phase.name)
         .put("busy",busy).put("reason",reason)}
+    /** Explicit administrative sign-in only. This anonymous metadata request is
+     * never a VPN operation or a replacement for the pinned-root store verifier. */
+    private fun loginDiscovery(expected:Long):AdminDeviceContext {
+        requireCurrent(expected)
+        source()?.let {return it}
+        fun accepted(selected:AdminDeviceContext?):AdminDeviceContext {
+            requireCurrent(expected)
+            val current=source() ?:throw AdminException(AdminFailure.REAUTHENTICATE)
+            if(selected==null || current.binding!=selected.binding || current.discovery.binding!=selected.discovery.binding)
+                throw AdminException(AdminFailure.REAUTHENTICATE)
+            requireCurrent(expected)
+            return current
+        }
+        if(test!=null) {
+            val refreshed=test.refreshDiscovery?.invoke()
+            return accepted(refreshed)
+        }
+        val login=LoginController.get(context)
+        val original=login.adminBootstrapContext() ?:throw AdminException(AdminFailure.REAUTHENTICATE)
+        fun admitted() {
+            requireCurrent(expected)
+            val current=login.adminBootstrapContext() ?:throw AdminException(AdminFailure.REAUTHENTICATE)
+            if(current.binding!=original.binding || current.bootstrap!=original.bootstrap)
+                throw AdminException(AdminFailure.REAUTHENTICATE)
+            requireCurrent(expected)
+        }
+        val target=original.bootstrap.apiOrigin+"/.well-known/syn443/bootstrap/"+original.bootstrap.serviceId
+        val transport=IdentityExchange {method,url,headers,body,child,maxBody->
+            admitted()
+            require(method=="GET" && url==target && body==null && maxBody==BootstrapTrust.MAX_MANIFEST &&
+                headers==mapOf("Accept" to "application/jose","Cache-Control" to "no-store"))
+            val physical=PhysicalIdentityRoute.capture(context)
+            val route=object:HttpRoute {
+                override fun resolve(host:String)=physical.resolve(host)
+                override fun bind(socket:java.net.Socket)=physical.bind(socket)
+                override fun check() {admitted();physical.check()}
+            }
+            http.exchange(method,url,headers,null,child,maxBody=maxBody,route=route).also {admitted()}
+        }
+        val fetched=withScope(expected) {scope->AdminServiceDiscovery(original.bootstrap,transport).fetch(scope)}
+        admitted()
+        val selected=login.applyAdminDescriptor(original.binding,fetched.raw)
+        return accepted(selected)
+    }
     fun start(expectedGeneration:Long):Boolean {
         val admitted=synchronized(commands) {
             if(busy || retirementRequested || generation!=expectedGeneration || phase !in setOf(Phase.SIGNED_OUT,Phase.REAUTHENTICATE))return false
@@ -201,7 +250,7 @@ internal class AdminController private constructor(private val context:Applicati
         return enqueue {
             try {
                 requireCurrent(admitted)
-                val selected=source() ?:throw AdminException(AdminFailure.REAUTHENTICATE)
+                val selected=loginDiscovery(admitted)
                 require(digest.matches(selected.binding));requireCurrent(admitted)
                 val initial=journal.read();publishRecord(initial)
                 check(initial.phase==AdminKeyPhase.SIGNED_OUT)
@@ -375,6 +424,69 @@ internal class AdminController private constructor(private val context:Applicati
             return@synchronized ReadResult("gone","")
         if(now !in ticket.createdAt..ticket.expiresAt) {clearMailbox();return@synchronized ReadResult("gone","")}
         ReadResult(ticket.state,ticket.reason,ticket.body)
+    }
+    /** Same single controller worker and consume-once mailbox as administrative
+     * reads. Binder never opens an editor, parses JSON or performs Keystore I/O. */
+    fun editorStart(id:String,expectedGeneration:Long,command:AdminEditorCoordinator.Command):Boolean {
+        if(!operationID.matches(id))return false
+        val selected=synchronized(commands) {
+            if(busy || retirementRequested || phase!=Phase.AUTHENTICATED || generation!=expectedGeneration)return false
+            val owned=owner?.takeIf {it.session!=null} ?:return false
+            val now=elapsed();if(now<0 || now>Long.MAX_VALUE-60_000)return false
+            clearMailbox();mailbox=Mailbox(id,expectedGeneration,now,now+60_000)
+            busy=true;activeRead=id;epoch to owned
+        }
+        return enqueue {
+            val (admitted,owned)=selected
+            try {withScope(admitted) {scope->
+                fun checkedSession(refresh:Boolean):AdminSession {
+                    context(admitted,owned.deviceBinding,owned.discoveryBinding)
+                    var session=checkNotNull(owned.session)
+                    val now=elapsed()
+                    if(now<0 || now>Long.MAX_VALUE-30_000)throw AdminException(AdminFailure.SESSION_EXPIRED)
+                    if(refresh && session.accessUntilElapsedMs<=now+30_000) {
+                        val rotated=owned.protocol.refresh(session,owned.issuer,scope)
+                        try {
+                            context(admitted,owned.deviceBinding,owned.discoveryBinding)
+                            synchronized(commands) {requireCurrent(admitted);check(owner===owned);owned.session=rotated;session=rotated}
+                        }catch(error:Exception) {
+                            owned.protocol.logout(rotated);requestRetirement(admitted,"REAUTHENTICATE");throw error
+                        }
+                    }
+                    owned.protocol.layerOwnership(session)
+                    return session
+                }
+                // Offline writes use the original account lease; network commands
+                // refresh before the coordinator can prepare a durable mutation.
+                checkedSession(command.kind !in setOf(AdminEditorCoordinator.Kind.SAVE_LOCAL,AdminEditorCoordinator.Kind.CLOSE))
+                val access=object:AdminEditorCoordinator.Access {
+                    override fun ownership()=owned.protocol.layerOwnership(checkedSession(false))
+                    override fun check() {checkedSession(false)}
+                    override fun action(request:AdminLayerRequest)=owned.protocol.layerAction(request,checkedSession(true),scope)
+                    override fun reviewDeadline(preview:AdminLayerPreview)=owned.protocol.layerReviewDeadline(preview,checkedSession(false))
+                }
+                val coordinator=editorCoordinator ?:AdminEditorCoordinator({
+                    if(test==null)AdminEditorStore(context)
+                    else checkNotNull(test.editorStore) {"isolated_editor_store_required"}.invoke()
+                },::boot,::elapsed).also {editorCoordinator=it}
+                val model=coordinator.execute(command,access)
+                access.check()
+                val body=io.syn443.android.admin.AdminEditorWire.encode(model)
+                try {
+                    context(admitted,owned.deviceBinding,owned.discoveryBinding)
+                    synchronized(commands) {
+                        val ticket=mailbox;val ended=elapsed()
+                        if(current(admitted) && ticket?.id==id && ticket.generation==expectedGeneration && ended in ticket.createdAt..ticket.expiresAt) {
+                            ticket.body=body.copyOf();ticket.state="done"
+                        }
+                    }
+                }finally {body.fill(0)}
+            }}catch(error:Exception) {
+                if(error is AdminException && error.reason in setOf(AdminFailure.REAUTHENTICATE,AdminFailure.SESSION_EXPIRED))
+                    requestRetirement(admitted,finite(error))
+                else synchronized(commands) {mailbox?.takeIf {it.id==id && it.generation==expectedGeneration}?.let {it.state="failed";it.reason=finite(error)}}
+            }
+        }
     }
     fun readCancel(id:String,expectedGeneration:Long):Boolean {
         val scope=synchronized(commands) {

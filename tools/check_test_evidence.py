@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=327
+    minimum=377
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=23
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=135
+    minimum=186
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -457,3 +457,124 @@ if mode in ADMIN_DISCOVERY_REQUIRED:
 NATIVE_ADMIN_REQUIRED = {'identity': [('io.syn443.identity.AdminControlTest', 'threeReadActionsBindExactSignedOriginBodyAccessTokenAndFreshDpopProofs'), ('io.syn443.identity.AdminControlTest', 'paginationRequiresAtMostThirtyTwoUniqueOrderedDevicesAndExactContinuation'), ('io.syn443.identity.AdminControlTest', 'configurationPreservesTheEntireUtf8ReplyAndRejectsMismatchedOuterMetadata'), ('io.syn443.identity.AdminControlTest', 'runtimeReadsValidateRequestedIdentityReportClockAndRecentStaleNoneSemantics'), ('io.syn443.identity.AdminControlTest', 'expiredAccessCannotUseAnOtherwiseLiveRefreshFamilyOrStartAHiddenRefresh'), ('io.syn443.identity.AdminControlTest', 'foreignKeyBootClockLogoutConsumedAndUnguardedOwnersCannotSendControlRequests'), ('io.syn443.identity.AdminControlTest', 'revokedTrustDuringSigningOrResponseCannotDispatchOrPublishARead'), ('io.syn443.identity.AdminControlTest', 'cancellationAndLogoutDuringReadNeverPublishDataOrConsumeRefreshOwnership'), ('io.syn443.identity.AdminControlTest', 'finiteServerErrorsAndDpopNonceChallengesNeverRetryOrRotateTokens'), ('io.syn443.identity.AdminControlTest', 'replyBoundsDuplicateJsonWrongContentAndStaleDatesCannotReachThePrivateMailbox'), ('io.syn443.identity.AdminControlTest', 'newApiClockCanRejectAccessButCannotExtendLeaseOrRollBackItsAcceptedFloor'), ('io.syn443.identity.AdminControlTest', 'configurationInventoryAcceptsWideLayersAnd4096EffectiveOriginsWithoutTruncation'), ('io.syn443.identity.AdminControlTest', 'configurationJsonKeepsExactBoundsGrammarAndUnrelatedParserLimits')], 'emulator': [('io.syn443.android.AdminControllerTest', 'signedAdminLoginAndThreePrivateReadsKeepDeviceVpnAndPublicStatusUnchanged'), ('io.syn443.android.AdminControllerTest', 'foreignCallbackPreservesUnusedAttemptWhileDenialAndCodeReplayNeverReuseCredentials'), ('io.syn443.android.AdminControllerTest', 'revokedContextAfterRealSignedCodeDispatchCannotPublishLateSessionOrAdmitAnotherOwner'), ('io.syn443.android.AdminControllerTest', 'logoutDuringBlockedRotatingRefreshRetainsBusyUntilActualExitAndRejectsItsLatePair'), ('io.syn443.android.AdminControllerTest', 'exactReadCancellationAndMailboxExpiryNeverReleaseABlockedOwnerOrRetireAValidSession'), ('io.syn443.android.AdminControllerTest', 'recreatedReservedBrowserAuthenticatedAndRetiringRecordsRequireFreshOwnedKeyRetirement'), ('io.syn443.android.AdminControllerTest', 'corruptOrMissingAdminAesKeyNeverResetsTheJournalOrCreatesANewOwner'), ('io.syn443.android.AdminControllerTest', 'dueRefreshRotatesOnceWhileUncertainDeliveryCannotReplayTheOldPair'), ('io.syn443.android.AdminControllerTest', 'readDenialAndTransportFailurePreserveValidSessionButUnauthorizedReadRetiresIt'), ('io.syn443.android.AdminControllerTest', 'browserHandoffsExpireConsumeOnceAndCancelOnlyTheirBlockedFreshAuthorization'), ('io.syn443.android.AdminControllerTest', 'bootClockRollbackAndNewDeviceContextCannotBorrowAnAuthenticatedOwner'), ('io.syn443.android.AdminControllerTest', 'cancelledPublicationOfAnAlreadyReturnedRefreshRetiresItsConsumedFamilyImmediately'), ('io.syn443.android.AdminKeyJournalTest', 'adminOwnershipRetirementDeletesOnlyItsPersistedKeyAndPreservesDeviceSentinel'), ('io.syn443.android.AdminKeyJournalTest', 'recreatedAdminPhaseRecordsContainNoCredentialsAndRequireExplicitOwnedRetirement'), ('io.syn443.android.AdminKeyJournalTest', 'adminJournalCasRejectsStaleWritersInvalidCountersAliasesAndPhaseShortcuts'), ('io.syn443.android.AdminKeyJournalTest', 'adminJournalCiphertextRejectsTamperingTruncationOversizeAndForeignNamespace'), ('io.syn443.android.AdminKeyJournalTest', 'missingAdminAesKeyAndOrphanedAtomicWritesNeverResetOwnership'), ('io.syn443.android.AdminKeyJournalTest', 'adminKeystoreAndJournalRejectMainBinderWorkAndForeignAliases'), ('io.syn443.android.AdminKeyJournalTest', 'cancelledAdminKeyCreationCannotOutrunPersistedRetirementOrRecreateItsAlias'), ('io.syn443.android.AdminNativeUiTest', 'signedOutOffersSeparateAdminLoginAndFullPanelWithoutVpnActions'), ('io.syn443.android.AdminNativeUiTest', 'authorizedPageUsesExplicitNextCursorAndReadOnlyDeviceSelection'), ('io.syn443.android.AdminNativeUiTest', 'configurationAndStaleRuntimeStayReadOnlyCollapsedAndExplicitlyLastReported'), ('io.syn443.android.AdminNativeUiTest', 'busyReadBlocksAnotherReadButLeavesAdministrativeLogoutAvailable'), ('io.syn443.android.AdminNativeUiTest', 'unknownErrorsRenderFiniteRussianTextWithoutRawControllerReason'), ('io.syn443.android.AdminNativeUiTest', 'documentDecoderBoundsUtf8AndSplitsFullTextOffMainWithoutBreakingSurrogates'), ('io.syn443.android.AdminNativeUiTest', 'devicePageDecoderKeepsThirtyTwoRowBoundOrderingAndCursor'), ('io.syn443.android.AdminLoginBrowserTest', 'trustedControllerAdminLoginUsesDarkTitledCustomTabWithoutAppHeaders'), ('io.syn443.android.AdminLoginBrowserTest', 'unsafeOriginsInjectedFieldsDeviceCallbacksAndWeakProofsNeverBecomeBrowserIntents'), ('io.syn443.android.AdminLoginBrowserTest', 'explicitSeparateIssuerIsPreservedWithoutDeviceOrWebPanelFallback'), ('io.syn443.android.AdminLoginBrowserTest', 'unavailableBrowserAttemptsOneExactCustomTabAndDoesNotFallback'), ('io.syn443.android.AdminEntryControlsTest', 'separateAdminAccountDoesNotRequireWebGrantAndStaysCollapsedByDefault'), ('io.syn443.android.AdminEntryControlsTest', 'currentWebGrantShowsHomeShortcutAndUnprovisionedAccountCannotOfferSeparateLogin'), ('io.syn443.android.LoginControllerTest', 'signedAdminDiscoveryContextPreservesDeviceIdentityAndFencesTrustAndReauthentication'), ('io.syn443.android.LoginControllerTest', 'adminDiscoveryContextRejectsMainAndBinderNamedThreadsWithoutChangingDeviceState')]}
 if mode in NATIVE_ADMIN_REQUIRED:
     assert set(NATIVE_ADMIN_REQUIRED[mode]) <= set(identities), "Missing native administrative ownership, API, storage or UI outcomes"
+
+# Explicit anonymous service refresh is not a token, role or device-authority update.
+ADMIN_SERVICE_REFRESH_REQUIRED = {
+    'identity': [
+        ('io.syn443.identity.AdminServiceDiscoveryTest', 'fixedOwnedBootstrapFetchesOneAnonymousJoseEnvelopeWithOneScopedChild'),
+        ('io.syn443.identity.AdminServiceDiscoveryTest', 'completeSixKiBCompactEnvelopeFitsExactlyButEmptyAndOversizedBodiesFail'),
+        ('io.syn443.identity.AdminServiceDiscoveryTest', 'invalidBootstrapOriginPathIdentifierRootsOrOperatorCaNeverDispatches'),
+        ('io.syn443.identity.AdminServiceDiscoveryTest', 'malformedCompactJwsUtf8OrJoseHeadersCannotBecomeManifestValues'),
+        ('io.syn443.identity.AdminServiceDiscoveryTest', 'unavailableStatusesTransportFailuresAndNonceChallengesNeverRetryOrAuthenticate'),
+        ('io.syn443.identity.AdminServiceDiscoveryTest', 'cancellationBeforeOrDuringResponsePreventsAValueAndKeepsTransportOwnershipBounded'),
+        ('io.syn443.identity.AdminServiceDiscoveryTest', 'bootstrapAndReplyMutationCannotAlterOwnedTargetValueOrRedactedDiagnostics'),
+        ('io.syn443.identity.AdminServiceDiscoveryTest', 'fetchedEnvelopeNeverReplacesTheExistingRootOrCommitsAdministrativeAuthority'),
+    ],
+    'emulator': [
+        ('io.syn443.android.BootstrapTrustStoreTest', 'signedAdminDescriptorRefreshAddsRemovesAndRepairsMetadataWithoutChangingDeviceAuthority'),
+        ('io.syn443.android.BootstrapTrustStoreTest', 'adminDescriptorRefreshRejectsEveryProjectionChangeBeforeAnyFloorOrCacheWrite'),
+        ('io.syn443.android.LoginControllerTest', 'adminDescriptorRefreshUsesOrdinaryContextWithoutMetadataAndRejectsCapturedReauthenticationBinding'),
+        ('io.syn443.android.AdminControllerTest', 'missingMetadataWaitsForFreshVerifiedSourceBeforeReservingAnAdminKey'),
+        ('io.syn443.android.AdminControllerTest', 'failedInvalidOrAbsentMetadataCannotCreateKeysSessionsOrAutomaticRetries'),
+        ('io.syn443.android.AdminControllerTest', 'logoutOrChangedContextDuringMetadataLoadCannotPublishALateAdminOwner'),
+    ],
+}
+if mode in ADMIN_SERVICE_REFRESH_REQUIRED:
+    assert set(ADMIN_SERVICE_REFRESH_REQUIRED[mode]) <= set(identities), "Missing anonymous transport, signed store refresh or pre-key admission outcomes"
+
+# Layer edits require exact encrypted ownership, current admin proof and explicit review.
+ADMIN_LAYER_EDITOR_REQUIRED = {
+    'identity': [
+        ('io.syn443.identity.AdminDiscoveryTest', 'typedOperationCancellationPreservesClockButNeverGrantsOrSkipsFreshDiscoveryAdmission'),
+        ('io.syn443.identity.AdminLayerControlTest', 'existingActionsBuildOwnedStableBytesWithoutCredentialsAndKeepLostAckIdentity'),
+        ('io.syn443.identity.AdminLayerControlTest', 'inventoryHistoryAndDraftsRetainGoShapedProvenanceAndExactRawParents'),
+        ('io.syn443.identity.AdminLayerControlTest', 'oneDeviceOverrideKeepsRawEscapesFractionExponentsParentsAndPermissionsUntouched'),
+        ('io.syn443.identity.AdminLayerControlTest', 'deviceHelpersDistinguishDeletionInheritanceAndExplicitBoundNewLocalLayer'),
+        ('io.syn443.identity.AdminLayerControlTest', 'previewPublicationAndPollingBindActorRecipientBaseAndDesiredRevisionExactly'),
+        ('io.syn443.identity.AdminLayerControlTest', 'expiredRejectedUnknownAndLegacyJobsNeverMintPublicationOrActivation'),
+        ('io.syn443.identity.AdminLayerControlTest', 'substitutedPreviewScopeRecipientTimeAndPurposeCannotEnablePublication'),
+        ('io.syn443.identity.AdminLayerControlTest', 'savedCopiesOrderingDiscardReceiptsAndRevisionCasRemainOwned'),
+        ('io.syn443.identity.AdminLayerControlTest', 'portableShapesEnforceActualLayerPermissionChangesAndScopeBounds'),
+        ('io.syn443.identity.AdminLayerControlTest', 'validFractionalInheritedValuesRetainLexemesAndIntegerMetadataStaysStrict'),
+        ('io.syn443.identity.AdminLayerControlTest', 'repliesRejectUnknownNullDuplicateCrossScopeAndInvalidOriginBindings'),
+        ('io.syn443.identity.AdminLayerControlTest', 'bodyAndReplyUtf8BoundsDoNotTruncateOrResetStableOperationIdentity'),
+        ('io.syn443.identity.AdminLayerControlTest', 'everyFixedOperationRestoresExactAuthenticatedBodyAndOwnedContextWithoutNewAuthority'),
+        ('io.syn443.identity.AdminLayerControlTest', 'replayedPreviewAndPublishCanOnlyReconcileOriginalOperationEvenAfterTicketExpiry'),
+        ('io.syn443.identity.AdminLayerControlTest', 'replayRejectsBodyContextProposalActorOriginTicketAndUtf8Substitution'),
+        ('io.syn443.identity.AdminLayerControlTest', 'actualGoTicketHeaderOrderWorksButMalformedPurposeShapeOrPayloadNeverMintsPreview'),
+        ('io.syn443.identity.AdminLayerControlTest', 'wireBoundsAcceptSixtyFourRecipientsTwentyLayersAndExactAggregateChangePermissionLimits'),
+        ('io.syn443.identity.AdminLayerControlTest', 'newAssignedDraftCopiesRawAuthoritativeLayersWithoutChangingAnyLayerRevision'),
+        ('io.syn443.identity.AdminLayerControlTest', 'preparePrivateDraftBatchesOwnEditsIntoOneLayerRevisionAndSeparateSavedDraftCas'),
+        ('io.syn443.identity.AdminLayerControlTest', 'protectedParentPrettyPrintingUsesExactDecimalSemanticsAndRestoresServerRawBytes'),
+        ('io.syn443.identity.AdminLayerControlTest', 'preparationRejectsProtectedParentsPermissionsRecipientsAndBaseButAddsEmptyPermissionOwnLayer'),
+        ('io.syn443.identity.AdminLayerControlTest', 'acceptedGoLayerWireHashesScenariosAndPortableEditorRequestsConformWithoutParentReencoding'),
+        ('io.syn443.identity.AdminLayerControlTest', 'ownedFreshAndRestoredJobOperationsPollWithoutResendingOrReplacingPendingIdentity'),
+        ('io.syn443.identity.AdminLayerJsonTest', 'rawSpansKeepWholeObjectsValuesChoiceEscapesAndNumericLexemesExactly'),
+        ('io.syn443.identity.AdminLayerJsonTest', 'recursiveBoundsDuplicatesUnicodeAndMalformedNumbersFailBeforeUnboundedTrees'),
+        ('io.syn443.identity.AdminLayerJsonTest', 'onlyExplicitInventoryRootOriginMapCanExceedGenericObjectLimits'),
+        ('io.syn443.identity.AdminLayerJsonTest', 'exactByteAndMathematicalNodeBoundsCoverTheWholeBoundedJsonTree'),
+        ('io.syn443.identity.AdminLayerProtocolTest', 'mutationUsesOnlyCurrentSignedOriginAndExactImmutableBodyWithFreshVerifiedDpop'),
+        ('io.syn443.identity.AdminLayerProtocolTest', 'lostMutationAcknowledgementRequiresExplicitSameBodyRetryAndNewProofWithoutTokenRotation'),
+        ('io.syn443.identity.AdminLayerProtocolTest', 'full256KiBPrivateDraftUsesItsScopedProofBoundWithoutRelaxingOtherIdentityRequests'),
+        ('io.syn443.identity.AdminLayerProtocolTest', 'layerErrorCodesKeepConflictValidationQuotaAndFreshAuthenticationDistinctWithoutNonceRetry'),
+        ('io.syn443.identity.AdminLayerProtocolTest', 'foreignActorOriginConsumedOrExpiredAccessCannotSignOrDispatchALayerOperation'),
+        ('io.syn443.identity.AdminLayerProtocolTest', 'revokedTrustOrCancellationDuringSigningAndResponseCannotReturnAReadOrMutationResult'),
+        ('io.syn443.identity.AdminLayerProtocolTest', 'malformedOversizedOrStaleLayerRepliesCannotReachCallerOrExtendTheAccessLease'),
+        ('io.syn443.identity.AdminLayerOwnershipTest', 'offlineOwnershipOutlivesAccessWithoutIoSigningOrExtendingOriginalSessionLease'),
+        ('io.syn443.identity.AdminLayerOwnershipTest', 'ownershipRejectsRemovedExpiredForeignBootClockAndConsumedFamiliesWithoutIo'),
+        ('io.syn443.identity.AdminLayerOwnershipTest', 'ownershipUsesAcceptedTimeFloorAndRefreshPreservesOriginalLeaseAndLogoutFamilyFence'),
+        ('io.syn443.identity.AdminLayerOwnershipTest', 'parsedPreviewReviewDeadlineNeverRenewsAndRejectsForeignActorOriginAndReplay'),
+        ('io.syn443.identity.AdminIdentityTest', 'initialAuthenticationTimeHonorsBothTrustedWindowEdgesAtExactSecondBoundaries'),
+        ('io.syn443.identity.AdminProtocolTest', 'initialIdTokenRejectsMissingMalformedUnsafeAndStaleAuthenticationTimeDespiteFreshIssueTime'),
+        ('io.syn443.identity.AdminProtocolTest', 'refreshKeepsOldAuthenticationTimeOptionalWithoutRenewingMfaOrTheOriginalSessionLease'),
+        ('io.syn443.identity.AdminProtocolTest', 'catalogReauthenticationRequiresExactBoundedJsonAndNeverRetriesANonceOrWrongCode'),
+    ],
+    'emulator': [
+        ('io.syn443.android.AdminEditorStoreTest', 'explicitEditorCreationOwnsUtf8AndCiphertextWithoutCredentialOrKeyMutation'),
+        ('io.syn443.android.AdminEditorStoreTest', 'pendingEnvelopeSurvivesLostAckAndBlocksEditCloseOrReplacementUntilExactResolution'),
+        ('io.syn443.android.AdminEditorStoreTest', 'actualConcurrentCasAndForeignOwnersCannotReplaceTheSingleEditor'),
+        ('io.syn443.android.AdminEditorStoreTest', 'ownedRecoveryDiscoversFullDurableDraftAndPendingWithoutIdsOrMutation'),
+        ('io.syn443.android.AdminEditorStoreTest', 'ownedRecoveryRejectsForeignOrNoncanonicalAccountsBeforeExposingTombstoneState'),
+        ('io.syn443.android.AdminEditorStoreTest', 'ownedRecoveryPreservesCorruptFramesAndMissingKeysWithoutResetOrOwnerDisclosure'),
+        ('io.syn443.android.AdminEditorStoreTest', 'ownedRecoveryRejectsMainAndBinderBeforeReadingEvenAnInvalidAccount'),
+        ('io.syn443.android.AdminEditorStoreTest', 'closedTombstoneAllowsNextOwnerOnlyWithoutPendingAndPreservesRevisionAndAesKey'),
+        ('io.syn443.android.AdminEditorStoreTest', 'textEnvelopeAndEncryptedFrameBoundsRejectBeforeAnyPersistentReplacement'),
+        ('io.syn443.android.AdminEditorStoreTest', 'authenticatedBinaryGrammarIsClosedBoundedAndNeverParsesProposalAsJson'),
+        ('io.syn443.android.AdminEditorStoreTest', 'missingAesOrNamespaceOrOrphanNeverCreatesAFreshEditorAndKnownBackupOnlyRecoversCommit'),
+        ('io.syn443.android.AdminEditorStoreTest', 'namespaceBindingThreadGuardsAndTestFactoryCannotExposeOrResetAnotherEditor'),
+        ('io.syn443.android.AdminEditorWireTest', 'closedModelRoundTripRetainsEveryFieldLocalRevisionEscapesAndOwnedCollections'),
+        ('io.syn443.android.AdminEditorWireTest', 'exactUtf8TransportLimitAndAllCollectionBoundariesRoundTripWithoutTruncation'),
+        ('io.syn443.android.AdminEditorWireTest', 'duplicateUnknownNullCoercedAndNestedFieldsNeverProduceAStateSnapshot'),
+        ('io.syn443.android.AdminEditorWireTest', 'malformedUtf8SurrogatesEscapesAndWideOrRepeatedCollectionsFailFinitely'),
+        ('io.syn443.android.AdminEditorWireTest', 'mainAndBinderCannotSerializeOrParseEvenMalformedOrOversizedInput'),
+        ('io.syn443.android.AdminEditorUiTest', 'smallEditorSeparatesLocalSaveServerDraftAndPreviewAndShowsParentProvenance'),
+        ('io.syn443.android.AdminEditorUiTest', 'sixtyFourPagesExposeFullRangeWithoutTruncatingOrJoiningProposalOnMain'),
+        ('io.syn443.android.AdminEditorUiTest', 'localEditPermanentlyInvalidatesSameReviewAcrossAcknowledgementAndBusyPhaseUpdates'),
+        ('io.syn443.android.AdminEditorUiTest', 'publicationNeedsExplicitRecipientConfirmationAndSendsOriginalBindingOnlyOnce'),
+        ('io.syn443.android.AdminEditorUiTest', 'lateConfirmationExpiryAndSameBindingDeadlineExtensionNeverPublish'),
+        ('io.syn443.android.AdminEditorUiTest', 'busyAndReadOnlyStatesBlockMutationWhilePhaseAndClockCannotBypassReview'),
+        ('io.syn443.android.AdminEditorUiTest', 'reauthenticationRetainsUnacknowledgedDraftAndUnknownErrorsStayFinite'),
+        ('io.syn443.android.AdminEditorUiTest', 'uncertainAndConflictRequireExplicitReconciliationAndNeverAutomaticallySend'),
+        ('io.syn443.android.AdminEditorUiTest', 'unassignedAndLimitedModesOfferFullPanelWithoutFirstConfigurationOrVpnClaims'),
+        ('io.syn443.android.AdminEditorUiTest', 'presentationModelOwnsBoundedPagesAndRejectsInvalidUtf16BeforeRendering'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'actualEncryptedEditorCompletesExplicitSavePreviewPublishWithFourRevisionDomainsSeparate'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'freshQueuedJobsNeedExplicitPollAndOriginalReviewBindingBeforePublication'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'processRecreationRecoversPendingWithoutSendingAndRestoredReadyRequiresNewPreview'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'uncertainDraftSaveReplaysExactBodyIdAndNeverInventsAJobOrSavedCas'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'invalidLocalTextAndStaleUiCasStayEncryptedWithoutMutationAndSurrogatePagesStayWhole'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'accessRevokedAfterDispatchKeepsDurablePendingAndDoesNotFollowAnotherAuthority'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'compareAndChangedHeadRebaseFailClosedWithoutFlatteningOrDroppingPrivateEdits'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'recoveredPrivateDraftCasRequiresCompleteListAndCheckedGetRatherThanLocalRevisionGuess'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'verifiedServerTerminalErrorsResolveExactPendingAndExposeOnlyFiniteUppercaseCodes'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'rollbackAndCorruptEncryptedRecoveryCannotWriteSendOrReplaceTheUnknownOwner'),
+        ('io.syn443.android.AdminEditorRouteTest', 'routeReadsDeviceAndExplicitlySavesPreviewsAndConfirmsOneBoundPublication'),
+        ('io.syn443.android.AdminEditorRouteTest', 'stopRemovalAndHostRecreationClearUnsavedRamWithoutAutomaticEditorCommands'),
+        ('io.syn443.android.AdminEditorRouteTest', 'busyPreviewBlocksDuplicatesAndStopCancelsItBeforeLateResultCanReopenEditor'),
+        ('io.syn443.android.AdminEditorRouteTest', 'finiteEditorErrorPreservesDisplayAndReauthenticationClearsPrivilegedRamWithoutAutoLogin'),
+        ('io.syn443.android.AdminControllerTest', 'catalogFreshAuthenticationChallengeRetiresAdminOwnerWithoutRetryOrDeviceVpnChanges'),
+        ('io.syn443.android.AdminControllerTest', 'mailboxLeaseExpiryBeforeDispatchRejectsLateHttpWithoutLazyPollingOrReleasingBlockedOwner'),
+        ('io.syn443.android.AdminLoginBrowserTest', 'fixedMaximumAuthenticationAgeRejectsMissingChangedAndDuplicateBrowserParameters'),
+    ],
+}
+if mode in ADMIN_LAYER_EDITOR_REQUIRED:
+    assert set(ADMIN_LAYER_EDITOR_REQUIRED[mode]) <= set(identities), "Missing layered editor, durable pending ownership or fresh-authentication outcomes"

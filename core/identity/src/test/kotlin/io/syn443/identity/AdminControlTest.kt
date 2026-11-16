@@ -303,7 +303,7 @@ class AdminControlTest {
 }
 
 /** Generated signed discovery/JWTs and injected transport. No live browser, server ACL or device evidence. */
-private class AdminControlFixture(lifetime:Long=3600) {
+internal class AdminControlFixture(lifetime:Long=3600) {
     data class Call(val method:String,val url:String,val headers:Map<String,String>,val body:ByteArray?,val max:Int)
     val oauth=AdminAuthFixture()
     val device="synthetic-device"

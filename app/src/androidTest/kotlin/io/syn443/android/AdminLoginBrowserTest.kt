@@ -22,7 +22,8 @@ class AdminLoginBrowserTest {
     private val toolbar=0xff20242a.toInt();private val navigation=0xff101419.toInt()
     private fun parameters()=linkedMapOf("client_id" to AdminBootstrap.CLIENT_ID,"redirect_uri" to AdminBootstrap.CALLBACK,
         "response_type" to "code","scope" to AdminBootstrap.SCOPE,"state" to digest,"nonce" to digest,
-        "code_challenge_method" to "S256","code_challenge" to digest,"dpop_jkt" to digest,"acr_values" to AdminBootstrap.ASSURANCE_ACR)
+        "code_challenge_method" to "S256","code_challenge" to digest,"dpop_jkt" to digest,"acr_values" to AdminBootstrap.ASSURANCE_ACR,
+        "max_age" to "300")
     private fun url()=issuer+"/protocol/openid-connect/auth?"+Identity.form(parameters())
 
     @Test fun trustedControllerAdminLoginUsesDarkTitledCustomTabWithoutAppHeaders() {
@@ -52,6 +53,17 @@ class AdminLoginBrowserTest {
         }
         invalid+=issuer+"/protocol/openid-connect/auth?"+Identity.form(parameters().apply {remove("nonce")})
         for(target in invalid)assertThrows(Exception::class.java) {AdminLoginBrowser.customTab(target,toolbar,navigation)}
+    }
+    @Test fun fixedMaximumAuthenticationAgeRejectsMissingChangedAndDuplicateBrowserParameters() {
+        assertEquals("300",parameters()["max_age"])
+        assertEquals(url(),AdminLoginBrowser.customTab(url(),toolbar,navigation).intent.dataString)
+        for(value in listOf("0","299","301","0300","+300","300.0","300e0"," 300","300 ","")) {
+            val raw=issuer+"/protocol/openid-connect/auth?"+Identity.form(parameters().apply {put("max_age",value)})
+            assertThrows(Exception::class.java) {AdminLoginBrowser.customTab(raw,toolbar,navigation)}
+        }
+        val absent=issuer+"/protocol/openid-connect/auth?"+Identity.form(parameters().apply {remove("max_age")})
+        for(raw in listOf(absent,url()+"&max_age=300",url()+"&max%5Fage=300"))
+            assertThrows(Exception::class.java) {AdminLoginBrowser.customTab(raw,toolbar,navigation)}
     }
     @Test fun explicitSeparateIssuerIsPreservedWithoutDeviceOrWebPanelFallback() {
         val target=url().replace("https://admin-id.example.invalid","https://separate-control.example.invalid:8443")

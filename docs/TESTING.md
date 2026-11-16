@@ -1,23 +1,52 @@
 # Testing and release gates
 
-Native administrative v86 source requires13 new identity JVM cases and34 new
-Android cases, including actual isolated Keystore/journal/controller ownership,
-refresh/cancellation and process-recreation paths, signed ordinary-device
-context fencing, private UI/browser and separate-account entry. The three API
-matrices require327 unique passing actual outcomes; the identity floor is135.
-Ten new handwritten API/JSON
-security classes also require independently verified90% line coverage. Existing
-names and gates remain mandatory. The configuration-only JSON reader has real
-wide-card, exact4096-origin and negative boundary cases; OAuth/signature/default
-JSON limits remain unchanged. All product builds and executable suites run in
-GitHub Actions. These synthetic tests are not live Keycloak/MFA/ACL, cellular,
-Doze, battery, endurance or physical managed-chain evidence.
+[Native layered administration](mobile-layered-editor-contract.md) v88 source
+adds 43 required identity outcomes and 44 Android outcomes. The identity floor
+is 186; every API29/35/37 emulator must report at least 377 unique passing actual
+outcomes. The additions are 23 codec, four layer-reader, seven authenticated
+layer-protocol, four ownership and four fresh-authentication JVM cases; Android
+adds 12 encrypted-store, five private-wire, ten presentation, ten coordinator,
+four route and three existing-controller/browser cases. The 19 handwritten layer
+classes, including their owned DTOs and scoped JSON reader/document, require 90%
+line coverage through both Gradle and the independent class-presence verifier.
+Named-root and class-list regressions must match the real source methods.
+
+These v88 outcomes are source-pending, not executed acceptance. They cover the
+five distinct revision domains, exact Go-produced parent bytes, local encrypted
+pending envelopes, explicit reconciliation after lost acknowledgements, fresh
+administrative authentication and explicit preview/review/publication. They do
+not establish live mutation/MFA/ACL, physical editor UX or a complete product.
+Changed-head rebase is unsupported and fails closed; initial assignment and
+remaining administration still require the full web panel. No existing required
+outcome, skip/failure check, threshold or API matrix is removed.
+
+[Administrative service refresh](admin-service-discovery.md) v87 source adds
+eight required identity JVM outcomes and six Android outcomes: two signed Store
+cases, one ordinary-context adapter case and three controller fallback cases.
+The API29/35/37 matrices now require 333 unique passing actual outcomes; the
+identity floor is 143. The three transport classes require 90% line coverage in
+both Gradle and the independent class-presence/coverage verifier. Named outcome
+and class-list regression tests retain the exact required source methods.
+This candidate is source-pending: these new executable outcomes have not been
+verified for v87, and no live descriptor publication/login is implied.
+
+All v86 native-administration roots remain mandatory: 13 identity JVM cases,
+34 Android cases and ten API/JSON security classes. They cover isolated
+Keystore/journal/controller ownership, refresh/cancellation and recreation,
+signed ordinary-device fencing, private UI/browser and separate-account entry.
+The configuration-only JSON reader retains wide-card, exact 4096-origin and
+negative boundary cases; OAuth/signature/default JSON limits remain unchanged.
+No existing name, failure/skip check or coverage threshold is relaxed. All
+product builds and executable suites run in GitHub Actions. Synthetic tests are
+not live Keycloak/MFA/ACL, cellular, Doze, battery, endurance or physical
+managed-chain evidence.
 
 
 [Trusted mobile administrative navigation](mobile-admin-browser.md) adds four
 intent/URL cases and one prequeue-cancellation case; the prior current-generation
-discovery case remains mandatory. All API29/35/37 matrices require284 unique
-actual outcomes with no failures, errors or skips. Actual Custom Tab rendering,
+discovery case remains mandatory. Its earlier 284-outcome baseline is retained
+within the current API29/35/37 floor above, with no failures, errors or skips.
+Actual Custom Tab rendering,
 normal Keycloak login and the live device card remain physical acceptance gates.
 
 [Recovery admission and passive symptoms](managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms)

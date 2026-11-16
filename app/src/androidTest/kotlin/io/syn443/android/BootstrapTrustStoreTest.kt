@@ -49,12 +49,115 @@ class BootstrapTrustStoreTest {
             signed(key,id,Canonical.json.encodeToJsonElement(value),"syn443-bootstrap+jws")
         fun caches()=context.noBackupFilesDir.listFiles {file -> file.name.startsWith("$namespace-admin-") && file.name.endsWith(".bin")}
             ?.toList().orEmpty()
+        fun trustBytes()=context.noBackupFilesDir.listFiles {file -> file.isFile &&
+            (file.name=="$namespace.bin" || file.name.startsWith("$namespace.bin.") || file.name.startsWith("$namespace-admin-"))}
+            .orEmpty().associate {it.name to it.readBytes()}
+        fun unchanged(before:Map<String,ByteArray>) {
+            val after=trustBytes();assertEquals(before.keys,after.keys)
+            before.forEach {(name,bytes)->assertArrayEquals(name,bytes,after.getValue(name))}
+        }
         fun worker(action:()->Unit) {executor.submit {action()}.get(30,TimeUnit.SECONDS)}
         override fun close() {
             executor.shutdownNow();check(executor.awaitTermination(5,TimeUnit.SECONDS))
             context.noBackupFilesDir.listFiles {file -> file.name=="$namespace.bin" || file.name.startsWith("$namespace.bin.") || file.name.startsWith("$namespace-admin-")}
                 ?.forEach {check(it.delete())}
         }
+    }
+    @Test fun signedAdminDescriptorRefreshAddsRemovesAndRepairsMetadataWithoutChangingDeviceAuthority() {
+        assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        AdminFixture().use {f -> f.worker {
+            val store=f.store();val legacy=f.descriptor.copy(adminBootstrap=null)
+            val ordinary=Bootstrap(legacy.serviceId,legacy.issuer,legacy.clientId,legacy.apiOrigin,legacy.roots.toMap(),
+                controlPanelOrigin=legacy.controlPanelOrigin)
+            val authority=Identity.bootstrapAuthority(ordinary)
+            assertTrue(store.refreshAdminDescriptor(f.manifest(legacy),ordinary)) // first committed service floor, metadata absent.
+            assertNull(store.adminDiscovery(ordinary))
+            val root=store.adaptiveAuthorityFingerprint();assertNotNull(root)
+            val enriched=legacy.copy(revision=2,adminBootstrap=f.metadata)
+            val raw=f.manifest(enriched)
+            assertTrue(store.refreshAdminDescriptor(raw,ordinary))
+            val first=checkNotNull(store.adminDiscovery(ordinary));assertEquals(f.metadata,first.metadata)
+            val cache=f.caches().single();val older=cache.readBytes();val committed=f.journal.readBytes()
+            assertTrue(cache.delete());assertNull(store.adminDiscovery(ordinary))
+            assertTrue(store.refreshAdminDescriptor(raw,ordinary)) // exact signed floor repairs availability only.
+            assertArrayEquals(committed,f.journal.readBytes())
+            assertEquals(first.binding,checkNotNull(store.adminDiscovery(ordinary)).binding)
+            assertEquals(root,store.adaptiveAuthorityFingerprint())
+            val removed=legacy.copy(revision=3)
+            assertTrue(store.refreshAdminDescriptor(f.manifest(removed),ordinary));assertTrue(f.caches().isEmpty())
+            assertNull(store.adminDiscovery(ordinary))
+            cache.writeBytes(older)
+            val removedBytes=f.trustBytes()
+            assertNull(store.adminDiscovery(ordinary))
+            assertTrue(runCatching {store.refreshAdminDescriptor(raw,ordinary)}.isFailure)
+            f.unchanged(removedBytes)
+            val newer=enriched.copy(revision=4,adminBootstrap=f.metadata.copy(apiOrigin="https://next-admin-api.example.invalid"))
+            assertTrue(store.refreshAdminDescriptor(f.manifest(newer),ordinary))
+            assertNotEquals(first.binding,checkNotNull(store.adminDiscovery(ordinary)).binding)
+            assertEquals(authority,Identity.bootstrapAuthority(ordinary));assertEquals(root,store.adaptiveAuthorityFingerprint())
+            val nextKey=pair();val next=TrustAnchor("admin-refresh-next",Base64.getEncoder().encodeToString(nextKey.public.encoded),2)
+            val transition=RootTransition(1,"syn443-root-transition",f.anchor.id,next.id,next.spki,2,f.now,f.now,f.now+3600)
+            val body=Canonical.json.encodeToJsonElement(transition)
+            store.rotate(Canonical.json.encodeToString(RootRotation(
+                signed(f.root,f.anchor.id,body,"syn443-root-transition+jws"),signed(nextKey,next.id,body,"syn443-root-transition+jws"))))
+            val rotatedRoot=store.adaptiveAuthorityFingerprint();val rotatedBytes=f.trustBytes()
+            assertNull(store.adminDiscovery(ordinary))
+            assertTrue(runCatching {store.refreshAdminDescriptor(f.manifest(newer.copy(revision=5)),ordinary)}.isFailure)
+            f.unchanged(rotatedBytes)
+            assertTrue(store.refreshAdminDescriptor(f.manifest(newer.copy(rootEpoch=2,revision=5),nextKey,next.id),ordinary))
+            assertEquals(newer.adminBootstrap,checkNotNull(store.adminDiscovery(ordinary)).metadata)
+            assertEquals(rotatedRoot,store.adaptiveAuthorityFingerprint());assertEquals(authority,Identity.bootstrapAuthority(ordinary))
+        }}
+    }
+    @Test fun adminDescriptorRefreshRejectsEveryProjectionChangeBeforeAnyFloorOrCacheWrite() {
+        assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        AdminFixture().use {f -> f.worker {
+            val store=f.store();val baseline=f.descriptor.copy(apiOrigin="https://127.0.0.1")
+            val ordinary=Bootstrap(baseline.serviceId,baseline.issuer,baseline.clientId,baseline.apiOrigin,baseline.roots.toMap(),
+                controlPanelOrigin=baseline.controlPanelOrigin)
+            assertTrue(runCatching {store.refreshAdminDescriptor(f.manifest(baseline.copy(serviceId="foreign-service")),ordinary)}.isFailure)
+            assertFalse(f.journal.exists());assertTrue(f.caches().isEmpty())
+            assertTrue(store.refreshAdminDescriptor(f.manifest(baseline),ordinary))
+            val root=store.adaptiveAuthorityFingerprint();val authority=Identity.bootstrapAuthority(ordinary)
+            val committed=f.trustBytes()
+            val other=pair();val otherSpki=Base64.getEncoder().encodeToString(other.public.encoded)
+            val changes=listOf(baseline.copy(serviceId="foreign-service"),baseline.copy(issuer="https://foreign-id.example.invalid/realms/device"),
+                baseline.copy(clientId="foreign-device-client"),baseline.copy(apiOrigin="https://foreign-api.example.invalid"),
+                baseline.copy(roots=mapOf("online" to otherSpki)),baseline.copy(roots=mapOf("renamed-online" to baseline.roots.values.single())),
+                baseline.copy(controlPanelOrigin="https://foreign-panel.example.invalid"))
+            changes.forEachIndexed {index,value->
+                assertTrue(runCatching {store.refreshAdminDescriptor(f.manifest(value.copy(revision=100+index.toLong())),ordinary)}.isFailure)
+                f.unchanged(committed)
+            }
+            // The signed descriptor cannot introduce or borrow the ordinary
+            // development CA field, even when a loopback bootstrap permits it.
+            val higher=f.manifest(baseline.copy(revision=200))
+            val withCa=ordinary.copy(tlsCaDer="synthetic-ordinary-ca").also {it.validate()}
+            assertTrue(runCatching {store.refreshAdminDescriptor(higher,withCa)}.isFailure);f.unchanged(committed)
+            val foreign=pair()
+            assertTrue(runCatching {store.refreshAdminDescriptor(f.manifest(baseline.copy(revision=201),foreign,"foreign-root"),ordinary)}.isFailure)
+            f.unchanged(committed)
+            assertTrue(runCatching {store.refreshAdminDescriptor(f.manifest(baseline.copy(revision=202,expires=f.now)),ordinary)}.isFailure)
+            f.unchanged(committed)
+            val nextKey=pair();val next=TrustAnchor("admin-refresh-upgrade",Base64.getEncoder().encodeToString(nextKey.public.encoded),2)
+            val transition=RootTransition(1,"syn443-root-transition",f.anchor.id,next.id,next.spki,2,f.now,f.now,f.now+3600)
+            val body=Canonical.json.encodeToJsonElement(transition)
+            val rotation=RootRotation(signed(f.root,f.anchor.id,body,"syn443-root-transition+jws"),
+                signed(nextKey,next.id,body,"syn443-root-transition+jws"))
+            val nextDescriptor=f.manifest(baseline.copy(rootEpoch=2,revision=300),nextKey,next.id)
+            val profile=InstallationProfile(2,next,nextDescriptor,InstallationUpgrade(f.anchor,rotation))
+            val pending=BootstrapTrustStore(f.context,f.namespace,testProfile=profile)
+            assertNull(pending.adminDiscovery(ordinary))
+            f.unchanged(committed)
+            assertNull(pending.adminBootstrap(ordinary))
+            f.unchanged(committed)
+            assertTrue(runCatching {pending.refreshAdminDescriptor(nextDescriptor,ordinary)}.isFailure)
+            f.unchanged(committed) // Lookup and fetched metadata cannot commit a pending installation root upgrade.
+            assertNull(pending.adminDiscovery(ordinary))
+            f.unchanged(committed)
+            assertEquals(root,store.adaptiveAuthorityFingerprint());assertEquals(authority,Identity.bootstrapAuthority(ordinary))
+            assertNotNull(store.adminDiscovery(ordinary))
+        }}
     }
     @Test fun adminDiscoveryTicketMatchesOneVerifiedSnapshotAndLeavesDeviceJournalUnchanged() {
         assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))

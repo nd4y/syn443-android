@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "hashAlgorithm": "sha256-lowercase-hex",
+  "layers": [
+    {
+      "name": "template-parent",
+      "layerWire": "{\"id\":\"fixture-template\",\"kind\":\"template\",\"priority\":0,\"revision\":1,\"changes\":[{\"path\":\"/schemaVersion\",\"operation\":\"set\",\"value\":1.00},{\"path\":\"/graph\",\"operation\":\"set\",\"value\":{\"final\":\"direct\",\"balancers\":{},\"chains\":{},\"profiles\":{}}},{\"path\":\"/network\",\"operation\":\"set\",\"value\":{\"dnsStrategy\":\"prefer_ipv4\\u003c\\u0026\\u003eé\\u2028\\u2029\",\"dnsFinal\":\"syst\\u0065m\",\"requiredNetworks\":[\"tcp\",\"udp\"],\"schemaVersion\":1e0}},{\"path\":\"/activation\",\"operation\":\"set\",\"value\":{\"timeoutSeconds\":30.125,\"checks\":[{\"required\":true,\"target\":\"https://health.example.invalid/generate_204\",\"type\":\"https_204\",\"id\":\"intern\\u0061l\"}]}}],\"permissions\":[{\"path\":\"/schemaVersion\",\"mode\":\"free\"},{\"path\":\"/graph\",\"mode\":\"free\"},{\"path\":\"/network\",\"mode\":\"free\"},{\"path\":\"/activation\",\"mode\":\"free\"}]}",
+      "globalLayerHash": "e21d500d61be4e1517585c87356d895d6ff9fde6d2825c7514e27997341fa3ba",
+      "knownFieldPaths": [
+        "/activation/timeoutSeconds",
+        "/graph/final",
+        "/network/dnsFinal",
+        "/network/dnsStrategy"
+      ]
+    },
+    {
+      "name": "device-before",
+      "layerWire": "{\"id\":\"fixture-device\",\"kind\":\"device\",\"priority\":0,\"revision\":1,\"changes\":[{\"path\":\"/schemaVersion\",\"operation\":\"set\",\"value\":1},{\"path\":\"/network/schemaVersion\",\"operation\":\"set\",\"value\":1},{\"path\":\"/network/dnsStrategy\",\"operation\":\"set\",\"value\":\"prefer_ipv4\"},{\"path\":\"/activation/timeoutSeconds\",\"operation\":\"set\",\"value\":30}],\"permissions\":[]}",
+      "globalLayerHash": "7f28d7450897422e594f04ac7a5e54a5b4311a07f8cbe63b6f99d9c3038b2dd1",
+      "knownFieldPaths": [
+        "/activation/timeoutSeconds",
+        "/network/dnsStrategy"
+      ]
+    },
+    {
+      "name": "device-after",
+      "layerWire": "{\"id\":\"fixture-device\",\"kind\":\"device\",\"priority\":0,\"revision\":2,\"changes\":[{\"path\":\"/schemaVersion\",\"operation\":\"set\",\"value\":1},{\"path\":\"/network/schemaVersion\",\"operation\":\"set\",\"value\":1},{\"path\":\"/network/dnsStrategy\",\"operation\":\"set\",\"value\":\"prefer_ipv6\"},{\"path\":\"/activation/timeoutSeconds\",\"operation\":\"set\",\"value\":30}],\"permissions\":[]}",
+      "globalLayerHash": "9de9751fc6c1b83a4b4bc126e366354fe92cdf8b74b6e6638cddfa91bf12566a",
+      "knownFieldPaths": [
+        "/activation/timeoutSeconds",
+        "/network/dnsStrategy"
+      ]
+    },
+    {
+      "name": "local-before",
+      "layerWire": "{\"id\":\"fixture-device\",\"kind\":\"local\",\"priority\":0,\"revision\":1,\"changes\":[{\"path\":\"/activation/timeoutSeconds\",\"operation\":\"set\",\"value\":45}],\"permissions\":[]}",
+      "globalLayerHash": "3c6f6fd57c1f3182570b5e20e0cf637f9291ee80d09301e6a3039b6b7d32aa76",
+      "knownFieldPaths": [
+        "/activation/timeoutSeconds"
+      ]
+    },
+    {
+      "name": "local-after",
+      "layerWire": "{\"id\":\"fixture-device\",\"kind\":\"local\",\"priority\":0,\"revision\":2,\"changes\":[{\"path\":\"/activation/timeoutSeconds\",\"operation\":\"set\",\"value\":60}],\"permissions\":[]}",
+      "globalLayerHash": "6ce2e344a8dc53c7f4f84d6e06ddc36101c0ec15b83712b159868311ffd8c96e",
+      "knownFieldPaths": [
+        "/activation/timeoutSeconds"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "before-device-edit",
+      "layerNames": [
+        "template-parent",
+        "device-before"
+      ],
+      "unchangedParents": [
+        "template-parent"
+      ],
+      "editedLayers": [
+        "device-before"
+      ],
+      "effectiveWire": "{\"activation\":{\"checks\":[{\"id\":\"internal\",\"required\":true,\"target\":\"https://health.example.invalid/generate_204\",\"type\":\"https_204\"}],\"timeoutSeconds\":30},\"graph\":{\"balancers\":{},\"chains\":{},\"final\":\"direct\",\"profiles\":{}},\"network\":{\"dnsFinal\":\"system\",\"dnsStrategy\":\"prefer_ipv4\",\"requiredNetworks\":[\"tcp\",\"udp\"],\"schemaVersion\":1},\"schemaVersion\":1}",
+      "knownFieldPaths": [
+        "/activation/timeoutSeconds",
+        "/graph/final",
+        "/network/dnsFinal",
+        "/network/dnsStrategy"
+      ]
+    },
+    {
+      "name": "after-device-edit",
+      "layerNames": [
+        "template-parent",
+        "device-after"
+      ],
+      "unchangedParents": [
+        "template-parent"
+      ],
+      "editedLayers": [
+        "device-after"
+      ],
+      "effectiveWire": "{\"activation\":{\"checks\":[{\"id\":\"internal\",\"required\":true,\"target\":\"https://health.example.invalid/generate_204\",\"type\":\"https_204\"}],\"timeoutSeconds\":30},\"graph\":{\"balancers\":{},\"chains\":{},\"final\":\"direct\",\"profiles\":{}},\"network\":{\"dnsFinal\":\"system\",\"dnsStrategy\":\"prefer_ipv6\",\"requiredNetworks\":[\"tcp\",\"udp\"],\"schemaVersion\":1},\"schemaVersion\":1}",
+      "knownFieldPaths": [
+        "/activation/timeoutSeconds",
+        "/graph/final",
+        "/network/dnsFinal",
+        "/network/dnsStrategy"
+      ]
+    },
+    {
+      "name": "before-local-edit",
+      "layerNames": [
+        "template-parent",
+        "device-after",
+        "local-before"
+      ],
+      "unchangedParents": [
+        "template-parent",
+        "device-after"
+      ],
+      "editedLayers": [
+        "local-before"
+      ],
+      "effectiveWire": "{\"activation\":{\"checks\":[{\"id\":\"internal\",\"required\":true,\"target\":\"https://health.example.invalid/generate_204\",\"type\":\"https_204\"}],\"timeoutSeconds\":45},\"graph\":{\"balancers\":{},\"chains\":{},\"final\":\"direct\",\"profiles\":{}},\"network\":{\"dnsFinal\":\"system\",\"dnsStrategy\":\"prefer_ipv6\",\"requiredNetworks\":[\"tcp\",\"udp\"],\"schemaVersion\":1},\"schemaVersion\":1}",
+      "knownFieldPaths": [
+        "/activation/timeoutSeconds",
+        "/graph/final",
+        "/network/dnsFinal",
+        "/network/dnsStrategy"
+      ]
+    },
+    {
+      "name": "after-local-edit",
+      "layerNames": [
+        "template-parent",
+        "device-after",
+        "local-after"
+      ],
+      "unchangedParents": [
+        "template-parent",
+        "device-after"
+      ],
+      "editedLayers": [
+        "local-after"
+      ],
+      "effectiveWire": "{\"activation\":{\"checks\":[{\"id\":\"internal\",\"required\":true,\"target\":\"https://health.example.invalid/generate_204\",\"type\":\"https_204\"}],\"timeoutSeconds\":60},\"graph\":{\"balancers\":{},\"chains\":{},\"final\":\"direct\",\"profiles\":{}},\"network\":{\"dnsFinal\":\"system\",\"dnsStrategy\":\"prefer_ipv6\",\"requiredNetworks\":[\"tcp\",\"udp\"],\"schemaVersion\":1},\"schemaVersion\":1}",
+      "knownFieldPaths": [
+        "/activation/timeoutSeconds",
+        "/graph/final",
+        "/network/dnsFinal",
+        "/network/dnsStrategy"
+      ]
+    }
+  ]
+}

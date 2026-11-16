@@ -273,7 +273,9 @@
         "docs/non-lte-acceptance-20261116.md",
         "docs/mobile-admin-bootstrap.md",
         "docs/mobile-admin-controller.md",
-        "docs/mobile-admin-key-journal.md"
+        "docs/mobile-admin-key-journal.md",
+        "docs/admin-service-discovery.md",
+        "docs/admin-service-discovery-store.md"
       ]
     },
     {
@@ -541,7 +543,11 @@
       "id": "CFG-03",
       "text": "Слои: базовый шаблон сервиса, назначения групп, пользовательская политика, политика устройства, разрешённые локальные значения. Для групп задаётся явный приоритет. Коллизия одинакового приоритета или конфликт взаимоисключающих маршрутов блокирует публикацию. Наследование прав может сужать, но не обходить запрет вышестоящей политики. Для каждого итогового поля панель объясняет источник.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/mobile-layered-editor-contract.md"
+      ],
+      "implementationScope": "v88 source-pending native layer codecs retain exact authoritative parent spans and field provenance, preserve SET/DELETE/INHERIT, and keep global-layer, private-draft, local-editor and desired-head revision domains separate. The actual Go wire fixture producer is accepted; new Android conformance outcomes await Actions.",
+      "remainingScope": "Full native layer/priority/permission administration, live publication and complete effective-policy explanation remain required; this source contribution changes no requirement status."
     },
     {
       "id": "CFG-04",
@@ -549,8 +555,11 @@
       "status": "partial",
       "evidence": [
         "docs/managed-policy.md",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
-      ]
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/mobile-layered-editor-contract.md"
+      ],
+      "implementationScope": "v88 source-pending single-device editing preserves protected parent/permission bytes and uses the current separate administrator session plus server ACL/MFA. Debug, local CAS, stored pending bytes and ADB confer no publication right.",
+      "remainingScope": "Live administrator mutation/ACL/MFA, all field permission modes and complete local-value update semantics remain separate acceptance gates."
     },
     {
       "id": "CFG-05",
@@ -1871,7 +1880,8 @@
         "docs/non-lte-acceptance-20261116.md",
         "docs/mobile-admin-native-ui.md",
         "docs/mobile-admin-controller.md",
-        "docs/mobile-admin-control-api.md"
+        "docs/mobile-admin-control-api.md",
+        "docs/mobile-layered-editor-contract.md"
       ],
       "implementationScope": "Current v86 source preserves the granted home shortcut and adds separate-account authentication inside initially collapsed account settings. This entry grants no role and never reuses the VPN device session. Source tests are pending Actions.",
       "remainingScope": "Accepted native and physical login/capability visibility, full menu/user administration and live configured control-plane acceptance."
@@ -1886,10 +1896,11 @@
         "docs/mobile-admin-bootstrap.md",
         "docs/mobile-admin-native-ui.md",
         "docs/mobile-admin-controller.md",
-        "docs/mobile-admin-control-api.md"
+        "docs/mobile-admin-control-api.md",
+        "docs/mobile-layered-editor-contract.md"
       ],
-      "implementationScope": "v86 source offers a bounded read-only authorized-device page and complete configuration/runtime views. Thirteen new JVM and34 Android cases are pending Actions; no live native workflow is accepted yet.",
-      "remainingScope": "User search, profile/policy assignment, editing, preview, publish/rollback, diagnosis actions, mobile UX and live authorization/physical acceptance."
+      "implementationScope": "v88 source-pending native workflow edits one already assigned device through explicit local save, server private-draft save, preview, recipient review and publication. Existing read-only device/configuration/runtime views remain. The candidate adds42 named identity and44 Android outcomes (floors185/377); no new execution or live editor acceptance is claimed.",
+      "remainingScope": "Initial assignment, changed-head rebase, user search and complete policy/profile administration, rollback/diagnosis actions, physical mobile UX and live server authorization remain open; unsupported workflows use the full web panel."
     },
     {
       "id": "MOB-03",
@@ -1914,9 +1925,13 @@
         "docs/non-lte-acceptance-20261116.md",
         "docs/mobile-admin-native-ui.md",
         "docs/mobile-admin-controller.md",
-        "docs/mobile-admin-control-api.md"
+        "docs/mobile-admin-control-api.md",
+        "docs/admin-service-discovery.md",
+        "docs/admin-service-discovery-store.md",
+        "docs/mobile-layered-editor-contract.md"
       ],
-      "remainingScope": "v84/v85 OAuth/current-trust source gates passed. v86 key/controller/callback/read-only API/UI source and its required tests await Actions and physical/live Keycloak/ACL/MFA acceptance; mutation scopes and full capability handling remain open. RAM credentials require new administrative login after controller-process death."
+      "implementationScope": "v88 source-pending mutations use exact owned UTF-8 bodies and fresh DPoP bound to the current signed administrator API origin, actor and access session. Fixed maximum authentication age and finite reauthentication challenges retire only the separate admin owner. Four new fresh-authentication JVM and three existing Android controller/browser outcomes accompany layer/store/coordinator/UI tests; Actions/live acceptance remains pending.",
+      "remainingScope": "Live Keycloak authentication, server MFA/ACL/capability acceptance and the full mutation scope remain required. RAM credentials require new administrative login after controller death; the encrypted editor retains pending operation bytes without retaining authority."
     },
     {
       "id": "MOB-05",
@@ -1926,8 +1941,11 @@
         "docs/device-runtime-observations.md",
         "docs/mobile-admin-native-ui.md",
         "docs/mobile-admin-controller.md",
-        "docs/mobile-admin-control-api.md"
-      ]
+        "docs/mobile-admin-control-api.md",
+        "docs/mobile-layered-editor-contract.md"
+      ],
+      "implementationScope": "v88 source-pending native editor names one assigned recipient, retains exact raw parents and uses separate local/private/global/head revisions. Explicit review is invalidated by edits; a pending mutation survives lost replies without replay or replacement, and administration does not mutate the phone VPN identity/desired state.",
+      "remainingScope": "Live assigned-device mutation, physical editor acceptance, complete source/effective-policy/history/diagnosis views and broad pilot rollout remain open. Initial assignment and changed-head rebase use the web panel."
     },
     {
       "id": "MOB-06",
@@ -1938,9 +1956,11 @@
         "docs/non-lte-acceptance-20261116.md",
         "docs/mobile-admin-native-ui.md",
         "docs/mobile-admin-controller.md",
-        "docs/mobile-admin-control-api.md"
+        "docs/mobile-admin-control-api.md",
+        "docs/mobile-layered-editor-contract.md"
       ],
-      "remainingScope": "Exact-source CI and v82 physical URL/intent cases are recorded. Full one-hand workflows, browser/Keycloak acceptance, native quick administration and local editing/push remain open."
+      "remainingScope": "One-hand UX on the physical device, authenticated browser/Keycloak integration, initial assignment, changed-head rebase and complete quick-administration workflows remain required; source/presentation tests are not their acceptance.",
+      "implementationScope": "v88 source-pending coordinator and route tests cover explicit save/preview/publish, bounded review, encrypted restart recovery, unsaved-RAM removal and finite conflict/reauthentication presentation. All builds and executable suites remain GitHub Actions only."
     },
     {
       "id": "MOB-07",
@@ -1949,9 +1969,11 @@
       "evidence": [
         "docs/mobile-admin-native-ui.md",
         "docs/mobile-admin-controller.md",
-        "docs/mobile-admin-control-api.md"
+        "docs/mobile-admin-control-api.md",
+        "docs/mobile-layered-editor-contract.md"
       ],
-      "remainingScope": "v86 source fences access/session/trust expiry and server denial without borrowing VPN credentials. Source tests, live role/scope revocation and complete UI capability refresh remain open."
+      "remainingScope": "Actions verification of this candidate, live role/scope/MFA revocation and full UI capability refresh remain required; locally retained drafts/pending bodies are values rather than authorization.",
+      "implementationScope": "v88 source-pending layer operations recheck current signed metadata, owner/session/clock and server denial. Revocation or uncertain transport preserves the encrypted exact pending envelope but never schedules retries or reuses device VPN credentials."
     },
     {
       "id": "MOB-08",
@@ -3320,6 +3342,6 @@
     "inventory": "docs/implementation-status.md",
     "androidSource": "69ca262301bf08490e816a782881bb10cda613a6",
     "controlPlaneSource": "63067b67e5c13ed74109b0ea855b7e77bfb7530c",
-    "scope": "Accepted component source checkpoints, not full-product or physical acceptance; current native86 source remains pending Actions and live integration."
+    "scope": "Accepted component source checkpoints remain distinct from full-product and physical acceptance. Current v88 layered-editor source and required new185 identity/377 per-API emulator floors are pending Actions and live integration; prior accepted source hashes are retained here."
   }
 }

@@ -174,6 +174,33 @@ class AdminDiscoveryTest {
         f.oauth.boot++
         AdminAuthFixture.failure(AdminFailure.REAUTHENTICATE){guard.record(earlier)}
     }
+    @Test fun typedOperationCancellationPreservesClockButNeverGrantsOrSkipsFreshDiscoveryAdmission() {
+        val f=AdminTicketFixture();val ticket=checkNotNull(f.ticket())
+        val guard=AdminDiscoveryGuard(ticket,f.source,{f.oauth.boot},{f.oauth.elapsed})
+        val accepted=TrustedTime(f.oauth.boot,f.oauth.elapsed,AdminAuthFixture.NOW,AdminAuthFixture.NOW+1000)
+        guard.check(time=accepted,anonymous=true);guard.record(accepted)
+        f.onRead={throw AdminException(AdminFailure.CANCELLED)}
+        val cancelled=assertThrows(AdminException::class.java){guard.check(requireDiscovered=true)}
+        assertEquals(AdminFailure.CANCELLED,cancelled.reason);assertEquals("CANCELLED",cancelled.message);assertNull(cancelled.cause)
+        assertEquals(accepted,guard.priorTime())
+        val fresh=AdminDiscoveryGuard(ticket,f.source,{f.oauth.boot},{f.oauth.elapsed})
+        AdminAuthFixture.failure(AdminFailure.CANCELLED){fresh.check(requireDiscovered=true)}
+        assertNull(fresh.priorTime())
+        f.onRead=null
+        AdminAuthFixture.failure(AdminFailure.REAUTHENTICATE){fresh.check(requireDiscovered=true)}
+        guard.check(requireDiscovered=true)
+        for(failure in listOf(AdminFailure.TRANSPORT,AdminFailure.INVALID_REPLY,AdminFailure.ACCESS_DENIED,AdminFailure.REAUTHENTICATE)) {
+            f.onRead={throw AdminException(failure)}
+            AdminAuthFixture.failure(AdminFailure.REAUTHENTICATE){guard.check(requireDiscovered=true)}
+        }
+        f.onRead={throw IllegalArgumentException("synthetic-invalid-source")}
+        AdminAuthFixture.failure(AdminFailure.REAUTHENTICATE){guard.check(requireDiscovered=true)}
+        f.onRead=null;f.enabled=false
+        AdminAuthFixture.failure(AdminFailure.REAUTHENTICATE){guard.check(requireDiscovered=true)}
+        f.enabled=true;f.advance()
+        AdminAuthFixture.failure(AdminFailure.REAUTHENTICATE){guard.check(requireDiscovered=true)}
+        assertEquals(accepted,guard.priorTime())
+    }
 }
 
 /** Generated offline signatures over closed synthetic service descriptors, with an ordinary device projection. */
