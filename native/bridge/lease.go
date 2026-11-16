@@ -127,5 +127,8 @@ func (e *Runtime) SetLeaseDeadline(deadline int64) error {
 	if e.routes != nil && deadline > 0 && (previous == nil || previous.deadline == 0 || deadline < previous.deadline) {
 		e.routes.stop()
 	}
+	if e.adaptive != nil && deadline == 1 {
+		e.adaptive.Close()
+	}
 	return nil
 }

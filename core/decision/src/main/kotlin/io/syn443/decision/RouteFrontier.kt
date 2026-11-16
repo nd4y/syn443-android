@@ -17,7 +17,14 @@ data class RouteHop(
     val entryModes: Set<NetworkMode>,
     val exit: ExitClass?,
     val features: Set<PathFeature>,
-)
+    val publicCandidate: Boolean = false,
+) {
+    init { require(!publicCandidate || exit == null) }
+
+    /** Candidate eligibility only; a public declaration is never exit proof. */
+    internal fun declaresExit(intent: ExitClass): Boolean =
+        exit == intent || publicCandidate && (intent == ExitClass.RU || intent == ExitClass.NON_RU)
+}
 
 /** Directed transition in traffic order, from physical entry toward the exit. */
 data class RouteEdge(val from: String, val to: String, val features: Set<PathFeature>)
@@ -98,7 +105,7 @@ class RouteFrontier(
     private fun eligible(path: List<String>): Boolean {
         if (path.toSet().size != path.size) return false
         val head = byId[path.first()] ?: return false
-        if (mode !in head.entryModes || byId[path.last()]?.exit != intent) return false
+        if (mode !in head.entryModes || byId[path.last()]?.declaresExit(intent) != true) return false
         return path.all { byId[it]?.features?.containsAll(required) == true } &&
             path.zipWithNext().all { byEdge[it]?.containsAll(required) == true }
     }

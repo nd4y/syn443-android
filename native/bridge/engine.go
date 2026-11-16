@@ -49,6 +49,7 @@ type Runtime struct {
 	cancel   context.CancelFunc
 	platform *platform
 	routes   *routeRunner
+	adaptive *privateAdaptiveOwner
 }
 
 func NewRuntime(config, routeSelection string, fd int32, protector Protector, name string, index int32, leaseDeadline int64) (*Runtime, error) {
@@ -58,6 +59,10 @@ func NewRuntime(config, routeSelection string, fd int32, protector Protector, na
 	guard := &leaseGuard{clock: bootMillis}
 	if err := guard.set(leaseDeadline); err != nil {
 		return nil, err
+	}
+	engineConfig, adaptiveInput, err := adaptiveRuntimeConfig(config, routeSelection)
+	if err != nil || adaptiveInput != nil && leaseDeadline <= 0 {
+		return nil, errors.New("invalid managed route configuration")
 	}
 	netbird.DiagnosticsAllowed = guard.allowed
 	installOverlayPlatform(protector)
@@ -72,6 +77,9 @@ func NewRuntime(config, routeSelection string, fd int32, protector Protector, na
 	group.RegisterSelector(or)
 	group.RegisterURLTest(or)
 	netbird.RegisterOutbound(or)
+	if adaptiveInput != nil {
+		registerPrivateAdaptiveOutbound(or)
+	}
 	dr := dns.NewTransportRegistry()
 	registerPhysicalDNS(dr, protector)
 	netbird.RegisterDNSTransport(dr)
@@ -82,9 +90,28 @@ func NewRuntime(config, routeSelection string, fd int32, protector Protector, na
 	p := &platform{fd: int(fd), protector: protector, iface: control.Interface{Index: int(index), Name: name, MTU: 1500, Flags: net.FlagUp}, lease: guard}
 	p.mon = &monitor{iface: p.iface}
 	service.MustRegister[adapter.PlatformInterface](ctx, p)
-	var options option.Options
-	if err := options.UnmarshalJSONContext(ctx, []byte(config)); err != nil {
+	var adaptiveReference *privateAdaptiveReference
+	if adaptiveInput != nil {
+		bindings := make(map[string]string, len(adaptiveInput.wire.groups))
+		for group, tag := range adaptiveInput.wire.groups {
+			bindings[tag] = group
+		}
+		adaptiveReference, err = newPrivateAdaptiveReference(ctx, bindings)
+		if err != nil {
+			cancel()
+			return nil, errors.New("managed route ownership failed")
+		}
+		ctx = adaptiveReference.ctx
+	}
+	cleanup := func() {
+		if adaptiveReference != nil {
+			adaptiveReference.Close()
+		}
 		cancel()
+	}
+	var options option.Options
+	if err := options.UnmarshalJSONContext(ctx, engineConfig); err != nil {
+		cleanup()
 		return nil, errors.New("invalid engine configuration")
 	}
 	routes := newRouteRunner(ctx, nil)
@@ -110,17 +137,48 @@ func NewRuntime(config, routeSelection string, fd int32, protector Protector, na
 			routes.selectors[node.Tag] = members
 		}
 	}
-	if !routes.configureSelection(routeSelection) {
-		cancel()
+	legacySelection := routeSelection
+	if adaptiveInput != nil {
+		legacySelection = ""
+	}
+	if !routes.configureSelection(legacySelection) {
+		cleanup()
 		return nil, errors.New("invalid route selection plan")
 	}
 	instance, err := box.New(box.Options{Options: options, Context: ctx})
 	if err != nil {
-		cancel()
+		cleanup()
 		return nil, errors.New("engine construction failed")
 	}
 	routes.lookup = func(tag string) (adapter.Outbound, bool) { return instance.Outbound().Outbound(tag) }
 	r := &Runtime{box: instance, cancel: cancel, platform: p, routes: routes}
+	if adaptiveInput != nil {
+		wire := adaptiveInput.wire
+		catalogue, err := newPrivatePathCatalogue(ctx, instance.Router(), wire.catalogue)
+		if err != nil {
+			cleanup()
+			_ = instance.Close()
+			return nil, errors.New("managed catalogue validation failed")
+		}
+		hub, err := newPrivateAdaptiveHub(catalogue, wire.graphRaw, adaptiveInput.plans, adaptiveInput.scope, adaptiveInput.mode, 128, guard)
+		if err != nil {
+			cleanup()
+			_ = instance.Close()
+			return nil, errors.New("managed graph validation failed")
+		}
+		if !adaptiveReference.initialize(hub) {
+			hub.Close()
+			cleanup()
+			_ = instance.Close()
+			return nil, errors.New("managed graph binding failed")
+		}
+		r.adaptive, err = newPrivateAdaptiveOwner(adaptiveReference, adaptiveInput.scope, adaptiveInput.mode, wire.hash, nil)
+		if err != nil {
+			cleanup()
+			_ = instance.Close()
+			return nil, errors.New("managed graph owner failed")
+		}
+	}
 	r.routes.limit = func() time.Duration {
 		if !guard.allowed() {
 			return 0
@@ -138,7 +196,13 @@ func NewRuntime(config, routeSelection string, fd int32, protector Protector, na
 	return r, nil
 }
 func (e *Runtime) Start() error { return e.box.Start() }
-func (e *Runtime) Cancel()      { e.routes.stop(); e.cancel() }
+func (e *Runtime) Cancel() {
+	if e.adaptive != nil {
+		e.adaptive.Close()
+	}
+	e.routes.stop()
+	e.cancel()
+}
 func (e *Runtime) Close() error { e.Cancel(); return e.box.Close() }
 
 // Bounded asynchronous probes never run on the native control/heartbeat worker.
@@ -169,6 +233,7 @@ func (e *Runtime) NetBirdIdentityProof() string {
 }
 func (e *Runtime) DiagnoseNetBird() bool { return netbird.RequestDiagnostics() }
 func (e *Runtime) UpdateNetwork(name string, index int32) {
+	e.InvalidateAdaptiveContext()
 	e.routes.networkChanged()
 	e.platform.mu.Lock()
 	e.platform.iface.Name = name

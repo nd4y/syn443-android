@@ -124,9 +124,11 @@ object Policy {
     const val ROUTE_EXIT_IP = "route.exit-ip.v1"
     const val ROUTE_EXIT_COUNTRY = "route.exit-country.v1"
     const val ROUTE_DECISION = "route.decision.v1"
+    const val ROUTE_ADAPTIVE_TCP = "route.adaptive-tcp.v1"
     const val BASELINE_ALGORITHM = "m1-local-v1"
     const val CONFIRMED_ALGORITHM = "m4-confirmed-v1"
-    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1", RESERVE_PROBE_COOLDOWN, ROUTE_EXIT_IP, ROUTE_EXIT_COUNTRY, ROUTE_DECISION)
+    const val ADAPTIVE_ALGORITHM = "m4-graph-tcp-v1"
+    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1", RESERVE_PROBE_COOLDOWN, ROUTE_EXIT_IP, ROUTE_EXIT_COUNTRY, ROUTE_DECISION, ROUTE_ADAPTIVE_TCP)
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     fun decode64(value: String): ByteArray {
         require(value.matches(Regex("[A-Za-z0-9_-]+")))
@@ -178,11 +180,21 @@ object Policy {
         require(p.revision in 1..9_007_199_254_740_991L && p.securityEpoch in 0..9_007_199_254_740_991L && p.revocationFloor in 0..p.revision)
         require(p.issuedAtMs in 1..now + 300_000 && p.notBeforeMs >= p.issuedAtMs && p.notBeforeMs <= now)
         require(p.refreshAfterMs in p.notBeforeMs..p.offlineUntilMs && p.offlineUntilMs > now && p.offlineUntilMs - p.issuedAtMs <= 604_800_000)
-        require(p.algorithmRevision in setOf(BASELINE_ALGORITHM, CONFIRMED_ALGORITHM) && p.requiredCapabilities.containsAll(setOf("engine-config.v1", "tun.lease.v1")) && p.requiredCapabilities.size <= 16 && p.requiredCapabilities.toSet().size == p.requiredCapabilities.size && capabilities.containsAll(p.requiredCapabilities))
+        require(p.algorithmRevision in setOf(BASELINE_ALGORITHM, CONFIRMED_ALGORITHM, ADAPTIVE_ALGORITHM) && p.requiredCapabilities.containsAll(setOf("engine-config.v1", "tun.lease.v1")) && p.requiredCapabilities.size <= 16 && p.requiredCapabilities.toSet().size == p.requiredCapabilities.size && capabilities.containsAll(p.requiredCapabilities))
         val engine = utf8(decode64(p.engineConfigB64)); require(engine.toByteArray().size in 1..262_144 && hash(engine) == p.contentHash)
         val engineConfig = json.parseToJsonElement(engine) as? JsonObject
         val decisionVariant = p.algorithmRevision == CONFIRMED_ALGORITHM
-        require(decisionVariant == (ROUTE_DECISION in p.requiredCapabilities))
+        val adaptiveVariant = p.algorithmRevision == ADAPTIVE_ALGORITHM
+        require((decisionVariant || adaptiveVariant) == (ROUTE_DECISION in p.requiredCapabilities))
+        val hasAdaptive = engineConfig?.containsKey("adaptive_routes") == true
+        require(hasAdaptive == adaptiveVariant && hasAdaptive == (ROUTE_ADAPTIVE_TCP in p.requiredCapabilities))
+        if (adaptiveVariant) {
+            require(p.schemaVersion == 2 && p.operation == "configure" &&
+                "route.health.v1" in p.requiredCapabilities &&
+                "route.failover.v1" !in p.requiredCapabilities && RESERVE_PROBE_COOLDOWN !in p.requiredCapabilities &&
+                "route_failover" !in engineConfig.orEmpty() &&
+                engineConfig?.get("adaptive_routes") is JsonObject)
+        }
         if (decisionVariant) {
             require(p.schemaVersion == 2 && p.operation == "configure" &&
                 p.requiredCapabilities.containsAll(setOf("route.health.v1", "route.failover.v1")) &&

@@ -11,7 +11,7 @@ class NativeDiagnosticEvidenceTest(unittest.TestCase):
         self.assertEqual(5, verify(self.rows()))
 
     def test_private_candidates_require_their_own_package_and_every_real_outcome(self):
-        self.assertEqual(32, verify(self.rows(PATH_REQUIRED, package='io.syn443/bridge'), PATH_REQUIRED, 'io.syn443/bridge'))
+        self.assertEqual(45, verify(self.rows(PATH_REQUIRED, package='io.syn443/bridge'), PATH_REQUIRED, 'io.syn443/bridge'))
         for rows in [self.rows(PATH_REQUIRED), self.rows(sorted(PATH_REQUIRED)[:-1], package='io.syn443/bridge'),
                      self.rows(PATH_REQUIRED, terminal='skip', package='io.syn443/bridge'),
                      self.rows(PATH_REQUIRED, terminal='fail', package='io.syn443/bridge')]:
@@ -33,3 +33,9 @@ class NativeDiagnosticEvidenceTest(unittest.TestCase):
         for malformed in ['[]', '{}', json.dumps({'Action': 'pass', 'Package': 'io.syn443/engine-netbird', 'Test': []})]:
             with self.assertRaises(AssertionError):
                 verify([malformed])
+
+    def test_public_candidate_requires_actual_native_graph_package_outcome(self):
+        required={'TestPublicCandidateSeparatesDeclaredExitFromGroupIntent'}
+        self.assertEqual(1,verify(self.rows(required,package='io.syn443/routegraph'),required,'io.syn443/routegraph'))
+        for rows in ([],self.rows(required,terminal='skip',package='io.syn443/routegraph'),self.rows(required,package='io.syn443/bridge')):
+            with self.assertRaises(AssertionError):verify(rows,required,'io.syn443/routegraph')

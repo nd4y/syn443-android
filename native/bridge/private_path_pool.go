@@ -126,7 +126,7 @@ func (p *privatePathPool) prepare(scope string, hops []string, create func(conte
 }
 
 func (p *privatePathPool) prepareWithContext(work context.Context, scope string, hops []string, create func(context.Context, string, string, string) (adapter.Outbound, error)) (*privatePathCandidate, error) {
-	if work == nil || work.Err() != nil || len(hops) < 1 || len(hops) > 4 || create == nil {
+	if !privateAdaptiveWorkCurrent(work, p.lease.clock) || len(hops) < 1 || len(hops) > 4 || create == nil {
 		return nil, errPrivatePath
 	}
 	ownedHops := append([]string(nil), hops...)
@@ -147,6 +147,13 @@ func (p *privatePathPool) prepareWithContext(work context.Context, scope string,
 		return nil, errPrivatePath
 	}
 	deadlineBoot := started + duration.Milliseconds()
+	if aggregate, ok := work.Value(privateAdaptiveWorkDeadlineKey{}).(int64); ok && aggregate < deadlineBoot {
+		deadlineBoot = aggregate
+	}
+	if deadlineBoot <= started {
+		p.mu.Unlock()
+		return nil, errPrivatePath
+	}
 	p.next++
 	child, cancel := context.WithCancel(p.ctx)
 	e := &privatePoolEntry{id: p.next, scope: scope, cost: len(ownedHops), cancel: cancel, flows: map[*privateFlowOwner]struct{}{}}
@@ -170,7 +177,7 @@ func (p *privatePathPool) prepareWithContext(work context.Context, scope string,
 	}()
 	withinBudget := func() bool {
 		now := p.lease.clock()
-		return budget.Err() == nil && work.Err() == nil && child.Err() == nil && now >= started && now < deadlineBoot && privateManagedLease(p.lease)
+		return budget.Err() == nil && privateAdaptiveWorkCurrent(work, p.lease.clock) && child.Err() == nil && now >= started && now < deadlineBoot && privateManagedLease(p.lease)
 	}
 	if !withinBudget() {
 		cancel()

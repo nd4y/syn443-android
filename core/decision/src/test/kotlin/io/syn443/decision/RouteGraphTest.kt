@@ -5,6 +5,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RouteGraphTest {
+    @Test fun publicCandidatePreservesGroupIntentAndCapabilityFences() {
+        val vector = fixture().getValue("validCases").jsonArray.map { it.jsonObject }
+            .first { it.getValue("name").jsonPrimitive.content == "public-candidate-shared-exit-class" }
+        val graph = graph(vector)
+        assertEquals(listOf("foreign", "inside", "ru"), graph.groupIDs())
+        assertEquals(ExitClass.RU, graph.groupInfo("ru")?.intent)
+        assertEquals(ExitClass.NON_RU, graph.groupInfo("foreign")?.intent)
+        assertEquals(ExitClass.privateRoute, graph.groupInfo("inside")?.intent)
+        for (mode in NetworkMode.entries) {
+            assertTrue(graph.isDeclaredPath("ru", mode, listOf("public")))
+            assertTrue(graph.isDeclaredPath("foreign", mode, listOf("public")))
+            assertFalse(graph.isDeclaredPath("inside", mode, listOf("public")))
+        }
+        assertEquals(3, ExitClass.entries.size)
+        val raw = vector.getValue("graph").toString()
+        val unknownIntent = raw.replace("\"intent\":\"RU\"", "\"intent\":\"PUBLIC\"")
+        rejected(unknownIntent.toByteArray(), listOf("public"))
+        val nullExit = RouteGraph.decode(raw.replace("\"exitClass\":\"PUBLIC\"", "\"exitClass\":null").toByteArray(), listOf("public"))
+        for (group in graph.groupIDs()) assertFalse(nullExit.isDeclaredPath(group, NetworkMode.WIFI, listOf("public")))
+    }
+
     @Test fun groupInfoReturnsOwnedBoundedDeclarations() {
         val raw="""{"schemaVersion":1,"hops":[{"id":"entry","entryModes":["WIFI"],"exitClass":null,"features":["TCP","IPV4"]},{"id":"exit","entryModes":["WIFI"],"exitClass":"INTERNAL","features":["TCP","IPV4"]}],"edges":[{"from":"entry","to":"exit","features":["TCP","IPV4"]}],"templates":[{"id":"two","slots":[["entry"],["exit"]]},{"id":"one","slots":[["exit"]]}],"groups":[{"id":"inside","intent":"INTERNAL","features":["TCP","IPV4"],"templates":["two","one"]}]}"""
         val graph=RouteGraph.decode(raw.toByteArray(),listOf("entry","exit"))

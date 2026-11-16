@@ -37,6 +37,20 @@ type privateAdaptiveReceipt struct {
 	scope, mode, group string
 }
 
+type privateAdaptiveWorkDeadlineKey struct{}
+
+func privateAdaptiveWorkCurrent(ctx context.Context, clock func() int64) bool {
+	if ctx == nil || ctx.Err() != nil {
+		return false
+	}
+	deadline, exists := ctx.Value(privateAdaptiveWorkDeadlineKey{}).(int64)
+	if !exists {
+		return true
+	} // legacy private callers retain their own hard budget
+	now := clock()
+	return deadline >= 30_000 && now >= deadline-30_000 && now < deadline
+}
+
 func newPrivateAdaptiveHub(c *privatePathCatalogue, metadata []byte, plans map[string][]routeCheck, scope, mode string, capacity int, lease *leaseGuard) (*privateAdaptiveHub, error) {
 	if c == nil || !privateScopeID.MatchString(scope) || !privateAdaptiveMode(mode) {
 		return nil, errPrivatePath
@@ -111,7 +125,7 @@ func (h *privateAdaptiveHub) makeGroupsLocked() bool {
 // One global receipt is enough: policy ranking consumes it before exploring the
 // next candidate. Successful checks do not switch a healthy current route.
 func (h *privateAdaptiveHub) prepareProbe(work context.Context, group string, path []string) (receipt *privateAdaptiveReceipt, err error) {
-	if work == nil || work.Err() != nil {
+	if !privateAdaptiveWorkCurrent(work, h.pool.lease.clock) {
 		return nil, errPrivatePath
 	}
 	path = append([]string(nil), path...)
@@ -171,9 +185,12 @@ func (h *privateAdaptiveHub) prepareProbe(work context.Context, group string, pa
 		h.cache[key] = candidate
 		h.mu.Unlock()
 	}
+	if !privateAdaptiveWorkCurrent(ctx, h.pool.lease.clock) {
+		return nil, errPrivatePath
+	}
 	proof, err := selector.probe(ctx, candidate)
 	if err != nil {
-		return nil, errPrivatePath
+		return nil, err
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()

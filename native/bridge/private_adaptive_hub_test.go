@@ -461,9 +461,11 @@ func TestPrivateAdaptiveHubBoundedCacheRetainsActualOwnership(t *testing.T) {
 		}
 		// The synthetic owner returns a normal negative dial result, leaving
 		// one unselected resident whose later Close really blocks.
-		if r, e := h.prepareProbe(context.Background(), "inside", paths[0]); r != nil || e != errPrivatePath {
+		r, e := h.prepareProbe(context.Background(), "inside", paths[0])
+		if r != nil {
 			t.Fatal("non-dialing synthetic owner gained a receipt")
 		}
+		requirePrivateCheckedFailure(t, e, "dial_failed")
 		if r, e := h.prepareProbe(context.Background(), "inside", paths[1]); r != nil || e != errPrivatePath {
 			t.Fatal("blocked retirement lent capacity")
 		}

@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=243
+    minimum=259
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -16,7 +16,7 @@ elif mode=="recovery":
     minimum=15
 elif mode=="policy":
     paths=list((root/"core/policy/build/test-results/test").glob("TEST-*.xml"))
-    minimum=17
+    minimum=20
 elif mode=="observability":
     paths=list((root/"core/observability/build/test-results/test").glob("TEST-*.xml"))
     minimum=10
@@ -366,3 +366,10 @@ if mode=="emulator":
     assert required <= {case.attrib.get("name") for case in cases}, "Required UI/process cases missing"
 print(f"{mode}: {len(cases)} SYN443 test cases passed, zero skipped/failures/errors")
 
+
+# Closed managed runtime outcomes are mandatory even if the aggregate count is green.
+ADAPTIVE_REQUIRED = {'emulator': [('io.syn443.android.AdaptiveEngineConfigTest', 'managedCatalogueValidatesEveryProtocolAndRetainsNativeExtractionMetadata'), ('io.syn443.android.AdaptiveEngineConfigTest', 'managedMappingsChecksAndEnvelopeTypesFailClosed'), ('io.syn443.android.AdaptiveEngineConfigTest', 'unsafeNormalizedCredentialsTlsSshAndTransportsCannotEnterAdaptiveCatalogue'), ('io.syn443.android.AdaptiveEngineConfigTest', 'ordinaryDependenciesAndNetBirdKeepOwnedBoundedPaths'), ('io.syn443.android.AdaptiveEngineConfigTest', 'fiveHundredProfilesAndUtf8BoundsRemainExplicit'), ('io.syn443.android.AdaptiveEngineConfigTest', 'renderCopiesAndLegacyBehaviorRemainUnchanged'), ('io.syn443.android.ManagedAdaptiveRoutesTest', 'contextEpochAndNewEngineFenceRejectStaleReports'), ('io.syn443.android.ManagedAdaptiveRoutesTest', 'protectedWireBoundsPreserveOriginalSyntaxAndEscapedRootKeys'), ('io.syn443.android.ManagedAdaptiveRoutesTest', 'nativeBusyAndLostAcknowledgementsNeverReleaseAnUnknownOwner'), ('io.syn443.android.ManagedAdaptiveRoutesTest', 'freshBoundReceiptCommitsOnceAndRejectsWrongPaths'), ('io.syn443.android.ManagedAdaptiveRoutesTest', 'roundRobinAndMinuteBudgetRemainSharedAcrossGroups'), ('io.syn443.android.ManagedAdaptiveRoutesTest', 'hourBudgetSurvivesContextRebindAndForce'), ('io.syn443.android.ManagedAdaptiveRoutesTest', 'healthyMeteredModesConfirmCurrentWithoutExploration'), ('io.syn443.android.ManagedAdaptiveRoutesTest', 'latencySwitchRequiresTwoFreshSignificantComparableSamples'), ('io.syn443.android.ManagedAdaptiveRoutesTest', 'failedReserveCannotOverwriteHealthyRouteOrLeakEndpoints')], 'policy': [('io.syn443.policy.AdaptivePolicyTest', 'signedAdaptiveConfigurationRequiresExactKeyBoundCapabilityAndAlgorithm'), ('io.syn443.policy.AdaptivePolicyTest', 'adaptiveFieldPresenceNullAndLegacyFailoverCannotDowngradeAuthority'), ('io.syn443.policy.AdaptivePolicyTest', 'countryPredicatesKeepIndependentCapabilitiesOnAdaptivePolicies')], 'jvm': [('io.syn443.decision.AdaptiveRuntimeTest', 'closedWireOwnsCanonicalProfilesMappingsAndHash'), ('io.syn443.decision.AdaptiveRuntimeTest', 'strictShapeAndCanonicalBase64CannotBeCoerced'), ('io.syn443.decision.AdaptiveRuntimeTest', 'catalogueAndGroupGuardsRejectUnsafeOrUnboundInputs'), ('io.syn443.decision.AdaptiveRuntimeTest', 'goCanonicalStringsAndNumberLexemesArePreserved'), ('io.syn443.decision.AdaptiveRuntimeTest', 'fiveHundredProfilesFitWithoutTruncation'), ('io.syn443.decision.AdaptiveRuntimeTest', 'wholeWireAndPerProfileByteBoundariesRemainExact'), ('io.syn443.decision.AdaptiveRuntimeTest', 'dedicatedParserBoundsDepthArraysObjectsAndSharedTokens'), ('io.syn443.decision.AdaptiveRuntimeTest', 'publicGraphKeepsSeparateGroupMappingsAndNoObservedExitAuthority')]}
+if mode in ADAPTIVE_REQUIRED:
+    if mode == 'emulator':
+        ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'currentCheckFailureRequiresFreshBoundReplacementAndMonotonicTime'))
+    assert set(ADAPTIVE_REQUIRED[mode]) <= {(c.get("classname"),c.get("name")) for c in cases}, "Missing actual managed adaptive outcome"

@@ -217,4 +217,190 @@ class OwnedVpnSettingsTest(unittest.TestCase):
             ui.open_policy();tap.assert_called_once_with(gear)
         self.assertTrue(any('query-activities' in x for x in calls))
 
+class AnrOwnerDiagnosticTest(unittest.TestCase):
+    def observations(self,name=b'com.android.systemui',uid=10034,pid=2468,user=0):
+        focus=b'mCurrentFocus=Window{abc123 u'+str(user).encode()+b' Application Not Responding: '+name+b'}\n'
+        events=(b'1699999900.000  660  700 I am_proc_start: ['+str(user).encode()+b','+str(pid).encode()+b','+str(uid).encode()+b','+name+b',service,synthetic]\n'
+                b'1699999998.123  660  700 I am_anr: ['+str(user).encode()+b','+str(pid).encode()+b','+name+b',0,private-detail]\n')
+        app_id=uid%100_000
+        descriptor=str(uid) if uid<10_000 else f'u{user}{"a" if app_id>=10_000 else "s"}{app_id-10_000 if app_id>=10_000 else app_id}'
+        processes=(b'ACTIVITY MANAGER RUNNING PROCESSES (dumpsys activity processes)\n All known processes:\n'
+                   b'  *PERS* UID '+str(uid).encode()+b' ProcessRecord{def456 '+str(pid).encode()+b':'+name+b'/'+descriptor.encode()+b'}\n'
+                   b'    user #'+str(user).encode()+b' uid='+str(uid).encode()+b' gids={3003}\n'
+                   b'    pid='+str(pid).encode()+b'\n'
+                   b'    mCrashing=false null mNotResponding=true [com.android.server.am.AppNotRespondingDialog@fed123] bad=false\n')
+        return focus,focus,events,processes,1700000000,1700000002
+
+    def unknown(self,observations):
+        result=ui.correlated_anr_owner(*observations)
+        self.assertEqual(result,{'category':'unknown','correlated':False})
+        for private in ('private-detail','2468','10034','abc123','def456','fed123'):
+            self.assertNotIn(private,repr(result))
+
+    def test_known_owner_needs_exact_recent_event_uid_pid_process_and_active_dialog(self):
+        cases={b'com.android.settings':'settings',b'com.android.systemui':'system_ui',
+               b'com.android.launcher3':'launcher',b'com.google.android.apps.nexuslauncher':'launcher',
+               b'com.android.permissioncontroller':'permission_controller',b'com.google.android.permissioncontroller':'permission_controller',
+               b'com.google.android.gms':'google_services',b'com.android.vending':'play_store',
+               b'io.syn443.android':'syn443_app',b'io.syn443.android:controller':'syn443_controller',b'io.syn443.android:engine':'syn443_engine'}
+        for name,category in cases.items():
+            with self.subTest(category=category,name=name):
+                self.assertEqual(ui.correlated_anr_owner(*self.observations(name)),{'category':category,'correlated':True})
+        # The event's first field is user ID; target UID comes from the start
+        # event and must agree with both forms in the current ProcessRecord.
+        for uid,user in ((1000,0),(110034,1)):
+            self.assertEqual(ui.correlated_anr_owner(*self.observations(uid=uid,user=user)),{'category':'system_ui','correlated':True})
+
+    def test_foreign_lookalikes_and_unknown_labels_remain_redacted_unknown(self):
+        for name in (b'com.android.settings.other',b'io.syn443.android.other',b'private-label-fixture',b'SYN443'):
+            values=self.observations(name)
+            self.unknown(values)
+            self.assertNotIn(name.decode(),repr(ui.correlated_anr_owner(*values)))
+
+    def test_stale_future_and_multiple_recent_events_cannot_become_current_owner(self):
+        values=list(self.observations())
+        for events in (
+            values[2].replace(b'1699999998.123',b'1699999870.123'),
+            values[2].replace(b'1699999998.123',b'1700000003.000'),
+            values[2]+values[2].splitlines(keepends=True)[1],
+            values[2]+values[2].splitlines(keepends=True)[1].replace(b'com.android.systemui',b'com.android.settings'),
+        ):
+            changed=values.copy();changed[2]=events;self.unknown(changed)
+        for started,finished in ((1700000003,1700000002),(1699999980,1700000002),(True,1700000002)):
+            changed=values.copy();changed[4:]=started,finished;self.unknown(changed)
+
+    def test_absent_start_reused_pid_and_user_uid_mismatch_are_not_owner_proof(self):
+        values=list(self.observations())
+        start,anr=values[2].splitlines(keepends=True)
+        for events in (anr,start+start+anr,
+                       start+anr+start.replace(b'1699999900.000',b'1700000001.000'),
+                       values[2].replace(b',10034,',b',110034,'),
+                       values[2].replace(b'[0,2468,10034',b'[1,2468,10034'),
+                       values[2].replace(b'1699999900.000',b'1699999998.123'),
+                       start.replace(b'com.android.systemui',b'com.android.settings')+anr):
+            changed=values.copy();changed[2]=events;self.unknown(changed)
+
+    def test_focus_must_be_single_exact_and_stable_through_observation(self):
+        values=list(self.observations())
+        for focus in (b'mCurrentFocus=null\n',values[0]+values[0],
+                      values[0].replace(b'abc123',b'abc124'),
+                      values[0].replace(b'com.android.systemui',b'com.android.settings'),
+                      values[0].replace(b'u0 ',b'u1 '),
+                      values[0].replace(b'mCurrentFocus',b'mPreviousFocus')):
+            changed=values.copy();changed[1]=focus;self.unknown(changed)
+
+    def test_current_process_requires_same_identity_single_active_anr_and_dialog(self):
+        values=list(self.observations())
+        for processes in (
+            values[3].replace(b'UID 10034',b'UID 10035'),
+            values[3].replace(b'uid=10034',b'uid=10035'),
+            values[3].replace(b'2468:',b'2469:'),
+            values[3].replace(b'pid=2468',b'pid=2469'),
+            values[3].replace(b'/u0a34}',b'/u0a35}'),
+            values[3].replace(b'user #0 uid=',b'user #1 uid='),
+            values[3].replace(b'uid=10034 gids=',b'uid=10034 ISOLATED uid=99000 gids='),
+            values[3].replace(b'mNotResponding=true',b'mNotResponding=false'),
+            values[3].replace(b'mCrashing=false',b'mCrashing=true'),
+            values[3].replace(b'[com.android.server.am.AppNotRespondingDialog@fed123]',b'null'),
+            values[3]+b'    mCrashing=false null mNotResponding=true null bad=false\n',
+            values[3]+values[3][values[3].index(b'  *PERS*'):],
+            values[3].replace(b'ProcessRecord{def456',b'PreviousRecord{def456'),
+        ):
+            changed=values.copy();changed[3]=processes;self.unknown(changed)
+        # A historical lastanr task snapshot is not a live process ownership
+        # record, even if its text happens to mention the matching process.
+        changed=values.copy();changed[3]=b'ACTIVITY MANAGER LAST ANR (dumpsys activity lastanr)\n'+values[3][values[3].index(b' All known'):]
+        self.unknown(changed)
+
+    def test_malformed_unbounded_and_injected_log_data_fail_without_echo(self):
+        values=list(self.observations())
+        other_starts=b''.join(b'1699999900.000 660 700 I am_proc_start: [0,'+str(3000+i).encode()+b',10035,synthetic.process,service,synthetic]\n' for i in range(254))
+        boundary=values.copy();boundary[2]=other_starts+values[2]
+        self.assertEqual(ui.correlated_anr_owner(*boundary),{'category':'system_ui','correlated':True})
+        boundary[2]=b'1699999900.000 660 700 I am_proc_start: [0,3999,10035,synthetic.process,service,synthetic]\n'+boundary[2]
+        self.unknown(boundary)
+        for index in range(4):
+            for raw in (None,'private-label-fixture',b'x'*1_048_577):
+                changed=values.copy();changed[index]=raw;self.unknown(changed)
+        for events in (values[2].replace(b' I am_anr:',b' E am_anr:'),
+                       values[2].replace(b',2468,com.android.systemui',b',0,com.android.systemui'),
+                       values[2].replace(b',10034,',b',9999999999,'),
+                       values[2].replace(b'com.android.systemui',b'com.android.systemui;touch /synthetic'),
+                       values[2]+b'1700000001.000 660 700 I am_anr: [malformed]\n',
+                       values[2]+b'x'*16_385+b'\n'):
+            changed=values.copy();changed[2]=events;self.unknown(changed)
+
+    def diagnostic_adb(self,calls,values=None):
+        values=self.observations() if values is None else values
+        def observe(*args,**kwargs):
+            calls.append((args,kwargs));self.assertGreater(kwargs['timeout'],0);self.assertLessEqual(kwargs['timeout'],2)
+            if args==('shell','getprop','ro.hardware'):return b'ranchu\n'
+            if args==('shell','date','+%s'):return b'1700000002\n'
+            if args==('shell','dumpsys','window','displays'):return values[0]
+            if args==('shell','logcat','-d','-b','events','-v','epoch','-t','256','am_anr:I','am_proc_start:I',"'*:S'"):return values[2]
+            if args==('shell','dumpsys','activity','-a','processes'):return values[3]
+            self.fail('Unexpected diagnostic command')
+        return observe
+
+    def test_diagnostic_reads_only_constant_commands_with_bounded_timeouts(self):
+        calls=[]
+        with patch.object(ui,'adb',side_effect=self.diagnostic_adb(calls)),patch.object(ui.time,'monotonic',return_value=0),patch.object(ui,'tap')as tap:
+            self.assertEqual(ui.anr_owner_diagnostic(),{'category':'system_ui','correlated':True})
+            tap.assert_not_called()
+        self.assertEqual(len(calls),7)
+        self.assertFalse(any(any(value in args for value in ('am','input','kill','force-stop','sh','rm')) for args,_ in calls))
+        self.assertFalse(any(b'com.android.systemui'.decode() in repr(args) for args,_ in calls))
+
+    def test_diagnostic_refuses_physical_device_and_exhausted_budget_without_actions(self):
+        with patch.object(ui,'adb',return_value=b'physical-phone')as adb:
+            self.assertEqual(ui.anr_owner_diagnostic(),{'category':'unknown','correlated':False})
+        self.assertEqual(adb.call_count,1)
+        self.assertEqual(adb.call_args.args,('shell','getprop','ro.hardware'))
+        with patch.object(ui,'adb',return_value=b'goldfish')as adb,patch.object(ui.time,'monotonic',side_effect=[0,1,9]):
+            self.assertEqual(ui.anr_owner_diagnostic(),{'category':'unknown','correlated':False})
+        self.assertEqual(adb.call_count,1)
+
+    def test_diagnostic_observation_failure_and_bad_clock_cannot_mask_original_failure(self):
+        for error in (subprocess.TimeoutExpired('synthetic',2),subprocess.CalledProcessError(1,['synthetic'],output=b'private-detail'),OSError('private-detail')):
+            with patch.object(ui,'adb',side_effect=error),patch('builtins.print')as output:
+                self.assertEqual(ui.anr_owner_diagnostic(),{'category':'unknown','correlated':False})
+                output.assert_not_called()
+        calls=[];observe=self.diagnostic_adb(calls)
+        def bad_clock(*args,**kwargs):return b'private-detail' if args==('shell','date','+%s') else observe(*args,**kwargs)
+        with patch.object(ui,'adb',side_effect=bad_clock):
+            self.assertEqual(ui.anr_owner_diagnostic(),{'category':'unknown','correlated':False})
+        self.assertEqual(len(calls),1)
+
+    def test_failure_branch_reports_correlated_owner_but_never_recovers_foreign_anr(self):
+        blocked=ET.Element('hierarchy');node(blocked,package='android',resource_id='android:id/aerr_close')
+        calls=[];values=self.observations();diagnostic=self.diagnostic_adb(calls,values);launches=[]
+        def adb(*args,**kwargs):
+            if args[-1]=='size':return b'1080x1920'
+            if 'resolve-activity' in args:return b'com.android.settings/.Settings$VpnSettingsActivity'
+            if args[1:3]==('am','start'):launches.append(args);return b''
+            if args[1:3]==('input','keyevent') or args[1:3]==('input','swipe'):return b''
+            if args==('shell','dumpsys','window','displays') and kwargs.get('timeout')==5:return values[0]
+            # The preexisting navigation reads do not set a timeout for getprop.
+            return diagnostic(*args,**({'timeout':2}|kwargs))
+        with patch.object(ui,'adb',side_effect=adb),patch.object(ui,'tree',return_value=blocked),patch.object(ui,'tap')as tap,patch.object(ui.time,'sleep'),patch.object(ui.time,'monotonic',side_effect=itertools.count()),patch('builtins.print')as output:
+            with self.assertRaisesRegex(AssertionError,'Owned VPN settings entry unavailable'):ui.open_policy()
+            tap.assert_not_called();output.assert_called_once()
+        self.assertEqual(len(launches),1)
+        message=output.call_args.args[0]
+        self.assertIn("'anrOwner': {'category': 'system_ui', 'correlated': True}",message)
+        self.assertIn("'focusedSettingsANR': False",message)
+        for private in ('com.android.systemui','private-detail','abc123','def456','fed123','2468','10034'):
+            self.assertNotIn(private,message)
+
+    def test_successful_navigation_does_not_read_anr_logs(self):
+        root,gear=OwnedVpnSettingsTest().row()
+        def adb(*args,**kwargs):
+            if args[-1]=='ro.hardware':return b'ranchu'
+            if args[-1]=='size':return b'1080x1920'
+            if 'resolve-activity' in args:return b'com.android.settings/.Settings$VpnSettingsActivity'
+            return b''
+        with patch.object(ui,'adb',side_effect=adb),patch.object(ui,'tree',return_value=root),patch.object(ui,'tap')as tap,patch.object(ui,'anr_owner_diagnostic')as diagnostic:
+            ui.open_policy();tap.assert_called_once_with(gear);diagnostic.assert_not_called()
+
+
 if __name__=='__main__':unittest.main()

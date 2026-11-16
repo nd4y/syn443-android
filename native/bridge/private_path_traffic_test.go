@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +18,106 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/service"
 )
+
+func TestPrivateProbeDialObservationRejectsLocalQuotaPanicAndNilResults(t *testing.T) {
+	t.Run("operation quota after a real connection stays local", func(t *testing.T) {
+		target := listenWire(t, func(c net.Conn) { _, _ = io.WriteString(c, "SSH-2.0-fixture\r\n") })
+		var pool *privatePathPool
+		var observed *privateProbeDialObservation
+		node := &privateTrafficTestNode{dial: func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
+			conn, e := routeTestDial(ctx, network, dst)
+			if e == nil {
+				observed, _ = ctx.Value(privateProbeDialKey{}).(*privateProbeDialObservation)
+				pool.mu.Lock()
+				pool.operations = 256
+				pool.mu.Unlock()
+			}
+			return conn, e
+		}}
+		p, c, scope := privateTrafficCandidate(t, node)
+		pool = p
+		// Isolate the existing operation-cap predicate; no fabricated operation
+		// owns a socket, and the exact counter is restored before fixture cleanup.
+		defer func() { p.mu.Lock(); p.operations = 0; p.mu.Unlock() }()
+		s, e := newPrivatePathSelector(p, scope, "one", []routeCheck{{Method: "ssh_banner", Target: target.listener.Addr().String()}})
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer s.Close()
+		if proof, e := s.probe(context.Background(), c); proof != nil || e != errPrivatePath || observed == nil || !observed.validConn.Load() || !observed.localRefusal.Load() || observed.observedFailure() {
+			t.Fatal("known local operation pressure became target attribution")
+		}
+	})
+	t.Run("hold quota cannot dispatch or mint check failure", func(t *testing.T) {
+		echo := listenWire(t, func(c net.Conn) { _, _ = io.Copy(c, c) })
+		address := echo.listener.Addr().String()
+		var calls atomic.Int32
+		node := &privateTrafficTestNode{dial: func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
+			calls.Add(1)
+			return routeTestDial(ctx, network, dst)
+		}}
+		p, c, scope := privateTrafficCandidate(t, node)
+		s, e := newPrivatePathSelector(p, scope, "one", []routeCheck{{Method: "tcp", Target: address}})
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer s.Close()
+		holds := make([]*privatePathHold, 0, 127)
+		for i := 0; i < 127; i++ {
+			hold, e := c.hold(scope)
+			if e != nil {
+				t.Fatal(e)
+			}
+			holds = append(holds, hold)
+		}
+		t.Cleanup(func() {
+			for _, hold := range holds {
+				_ = hold.Close()
+			}
+		})
+		if proof, e := s.probe(context.Background(), c); proof != nil || e != errPrivatePath || calls.Load() != 0 || p.snapshot().Holds != 127 {
+			t.Fatal("local hold pressure was attributed to a target or dispatched an adapter")
+		}
+		observation := &privateProbeDialObservation{}
+		ctx := context.WithValue(context.Background(), privateProbeDialKey{}, observation)
+		if conn, e := c.dialTCP(scope, ctx, "udp", M.ParseSocksaddr(address)); conn != nil || e != errPrivatePath || observation.dispatched.Load() {
+			t.Fatal("unsupported local transport dispatched a check")
+		}
+		for _, hold := range holds {
+			_ = hold.Close()
+		}
+		if proof, e := s.probe(context.Background(), c); proof == nil || e != nil || calls.Load() != 1 {
+			t.Fatal("local quota refusal poisoned later valid target checking", e)
+		}
+	})
+	for _, mode := range []string{"nil result", "panic"} {
+		t.Run(mode, func(t *testing.T) {
+			var observation *privateProbeDialObservation
+			node := &privateTrafficTestNode{dial: func(ctx context.Context, _ string, _ M.Socksaddr) (net.Conn, error) {
+				observation, _ = ctx.Value(privateProbeDialKey{}).(*privateProbeDialObservation)
+				if mode == "panic" {
+					panic("synthetic details must stay private")
+				}
+				return nil, nil
+			}}
+			p, c, scope := privateTrafficCandidate(t, node)
+			s, e := newPrivatePathSelector(p, scope, "one", []routeCheck{{Method: "tcp", Target: "192.0.2.9:443"}})
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer s.Close()
+			if proof, e := s.probe(context.Background(), c); proof != nil || e != errPrivatePath {
+				t.Fatal("unknown adapter contract outcome acquired an attributed failure")
+			}
+			if observation == nil || !observation.dispatched.Load() || observation.observedFailure() {
+				t.Fatal("unknown adapter outcome became admitted target evidence")
+			}
+			if mode == "panic" && p.snapshot().Retained != 1 {
+				t.Fatal("panic lost its uncertain reservation")
+			}
+		})
+	}
+}
 
 func TestPrivateTrafficRealTCPLeaseAndGracefulDrain(t *testing.T) {
 	target := listenWire(t, func(c net.Conn) { _, _ = io.Copy(c, c) })

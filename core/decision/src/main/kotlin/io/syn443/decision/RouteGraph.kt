@@ -57,7 +57,7 @@ class RouteGraph private constructor(
         val group = groups[groupID] ?: return false
         if (path.size !in 1..4 || path.toSet().size != path.size) return false
         val head = hopByID[path.first()] ?: return false
-        if (mode !in head.entryModes || hopByID[path.last()]?.exit != group.intent) return false
+        if (mode !in head.entryModes || hopByID[path.last()]?.declaresExit(group.intent) != true) return false
         if (path.any { hopByID[it]?.features?.containsAll(group.features) != true } ||
             path.zipWithNext().any { edgeByPair[it]?.containsAll(group.features) != true }) return false
         return group.templates.any { id ->
@@ -112,8 +112,10 @@ class RouteGraph private constructor(
                 require(hopIDs.toSet() == authorized.toSet())
                 val hops = wire.hops.map { hop ->
                     require(hop.entryModes.size <= 4 && hop.entryModes.toSet().size == hop.entryModes.size)
+                    val publicCandidate = hop.exitClass == "PUBLIC"
                     RouteHop(hop.id, hop.entryModes.map(NetworkMode::valueOf).toSet(),
-                        hop.exitClass?.let(ExitClass::valueOf), features(hop.features))
+                        if (publicCandidate) null else hop.exitClass?.let(ExitClass::valueOf),
+                        features(hop.features), publicCandidate)
                 }
                 val byID = hops.associateBy { it.id }
                 require(wire.edges.map { it.from to it.to }.toSet().size == wire.edges.size)

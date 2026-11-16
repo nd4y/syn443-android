@@ -2,12 +2,13 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$root/native/build"
-# Pure graph metadata validation is not yet advertised or activated at runtime.
-# Keep the native decoder under the same shared vectors and mandatory race gate.
+# The managed runtime decoder retains the shared vectors and actual native race gate.
+mkdir -p "$work"
 (
     cd "$root/native/routegraph"
     test -z "$(gofmt -l .)"
-    go test -race -count=1 ./...
+    go test -race -count=1 -json ./... | tee "$work/routegraph-tests.jsonl"
+    python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/routegraph-tests.jsonl" --route-graph
     go test -run '^$' -fuzz '^FuzzRouteGraphDecode$' -fuzztime=15s -parallel=2
 )
 mkdir -p "$work"

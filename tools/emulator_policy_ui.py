@@ -151,6 +151,119 @@ def classified_focus_snapshot(windows):
     return {'focusCount':count,'category':category}
 
 
+def _anr_focus(windows):
+    if not isinstance(windows,bytes) or len(windows)>1_048_576:return None
+    focus=re.findall(rb'(?m)^\s*mCurrentFocus=([^\r\n]+)',windows)
+    if len(focus)!=1:return None
+    value=focus[0].strip()
+    match=re.fullmatch(rb'Window\{[0-9a-f]+ u([0-9]{1,5}) Application Not Responding: ([A-Za-z0-9_.:]{1,160})\}',value)
+    return (value,int(match[1]),match[2]) if match else None
+
+
+def correlated_anr_owner(before,after,events,processes,started,finished):
+    """Return fixed categories only, never a title, process, PID, UID or reason.
+
+    am_anr's first field is a user ID, NOT a UID. Bind its PID/process to
+    am_proc_start's UID and the current, still-not-responding ProcessRecord.
+    Historical lastanr activity snapshots alone cannot establish that owner.
+    Unknown formats, replaced focus/processes and multiple recent ANRs fail
+    closed. This diagnostic never authorizes a UI action or recovery.
+    """
+    unknown={'category':'unknown','correlated':False}
+    focus=_anr_focus(before)
+    if focus is None or focus!=_anr_focus(after):return unknown
+    if any(not isinstance(raw,bytes) or len(raw)>1_048_576 for raw in (events,processes)):return unknown
+    if type(started) is not int or type(finished) is not int or not 0<=finished-started<=10:return unknown
+    # Device wall time has second precision; allow its current second, not
+    # another clock's time. A recent event must be at most two minutes old.
+    oldest=(finished-120)*1_000_000;newest=(finished+1)*1_000_000
+    parsed=[]
+    for line in events.splitlines():
+        if len(line)>16_384:return unknown
+        if not re.search(rb'\bam_(?:anr|proc_start)\s*:',line):continue
+        match=re.fullmatch(rb'([0-9]{9,12})\.([0-9]{3,6})\s+[0-9]+\s+[0-9]+\s+I\s+(am_anr|am_proc_start)\s*:\s*\[([^\r\n]*)\]',line.strip())
+        if match is None:return unknown
+        stamp=int(match[1])*1_000_000+int(match[2].ljust(6,b'0'))
+        fields=match[4].split(b',',4)
+        if len(fields)!=5 or not all(re.fullmatch(rb'[0-9]{1,10}',field) for field in fields[:2]):return unknown
+        user,pid=map(int,fields[:2])
+        if user>9999 or not 0<pid<=2_147_483_647:return unknown
+        if match[3]==b'am_anr':
+            if not re.fullmatch(rb'[A-Za-z0-9_.:]{1,160}',fields[2]) or not re.fullmatch(rb'[0-9]{1,10}',fields[3]):return unknown
+            parsed.append((stamp,'anr',user,pid,fields[2],None))
+        else:
+            if not re.fullmatch(rb'[0-9]{1,10}',fields[2]) or not re.fullmatch(rb'[A-Za-z0-9_.:]{1,160}',fields[3]):return unknown
+            uid=int(fields[2])
+            if uid>2_147_483_647 or uid//100_000!=user:return unknown
+            parsed.append((stamp,'start',user,pid,fields[3],uid))
+        if len(parsed)>256:return unknown
+    recent=[row for row in parsed if row[1]=='anr' and oldest<=row[0]<newest]
+    if len(recent)!=1:return unknown
+    event=recent[0]
+    if (event[2],event[4])!=focus[1:]:return unknown
+    starts=[row for row in parsed if row[1]=='start' and row[3]==event[3]]
+    if len(starts)!=1:return unknown
+    source=starts[0]
+    if source[0]>=event[0] or source[2:5]!=event[2:5]:return unknown
+    # Dump format from ProcessList/ProcessRecord/ProcessErrorStateRecord. A
+    # package prefix, a previous process or an isolated UID is not ownership.
+    if processes.count(b'ACTIVITY MANAGER RUNNING PROCESSES (dumpsys activity processes)')!=1:return unknown
+    headers=list(re.finditer(rb'(?m)^\s*\*(?:APP|PERS)\* UID ([0-9]{1,10}) ProcessRecord\{[0-9a-f]+ ([0-9]{1,10}):([A-Za-z0-9_.:]{1,160})/([A-Za-z0-9]{1,32})\}\s*$',processes))
+    if not headers or len(headers)!=len(re.findall(rb'(?m)^\s*\*(?:APP|PERS)\* UID ',processes)):return unknown
+    if len(re.findall(rb'\bmNotResponding=true\b',processes))!=1:return unknown
+    candidates=[]
+    for index,header in enumerate(headers):
+        block=processes[header.end():headers[index+1].start() if index+1<len(headers) else len(processes)]
+        flags=re.findall(rb'(?m)^\s*mCrashing=false [^\r\n]{0,2048}\bmNotResponding=true \[com\.android\.server\.am\.AppNotRespondingDialog@[0-9a-f]+\] bad=false(?: [^\r\n]*)?$',block)
+        if len(flags)!=1:continue
+        uid,pid=int(header[1]),int(header[2]);name=header[3]
+        user=uid//100_000;app_id=uid%100_000
+        descriptor=(str(uid).encode() if uid<10_000 else f'u{user}{"a" if app_id>=10_000 else "s"}{app_id-10_000 if app_id>=10_000 else app_id}'.encode())
+        if header[4]!=descriptor:continue
+        identities=re.findall(rb'(?m)^\s*user #([0-9]{1,5}) uid=([0-9]{1,10}) gids=\{[^\r\n]*\}\s*$',block)
+        pids=re.findall(rb'(?m)^\s*pid=([0-9]{1,10})(?: starting=(?:true|false))?\s*$',block)
+        if identities!=[(str(user).encode(),str(uid).encode())] or pids!=[str(pid).encode()]:continue
+        if (user,pid,name,uid)==(event[2],event[3],event[4],source[5]):candidates.append(name)
+    if len(candidates)!=1:return unknown
+    categories={
+        b'com.android.settings':'settings',b'com.android.systemui':'system_ui',
+        b'com.android.launcher3':'launcher',b'com.google.android.apps.nexuslauncher':'launcher',
+        b'com.android.permissioncontroller':'permission_controller',b'com.google.android.permissioncontroller':'permission_controller',
+        b'com.google.android.gms':'google_services',b'com.android.vending':'play_store',
+        b'io.syn443.android':'syn443_app',b'io.syn443.android:controller':'syn443_controller',b'io.syn443.android:engine':'syn443_engine',
+    }
+    category=categories.get(candidates[0])
+    return {'category':category,'correlated':True} if category is not None else unknown
+
+
+def anr_owner_diagnostic():
+    """Read-only, disposable-emulator failure diagnostic with an eight-second budget."""
+    unknown={'category':'unknown','correlated':False}
+    deadline=time.monotonic()+8
+    def observe(*args):
+        remaining=deadline-time.monotonic()
+        if remaining<=0:raise subprocess.TimeoutExpired('bounded ANR owner observation',8)
+        raw=adb(*args,timeout=min(2,remaining))
+        if not isinstance(raw,bytes) or len(raw)>1_048_576:raise ValueError('Unusable diagnostic observation')
+        return raw
+    try:
+        if observe('shell','getprop','ro.hardware').strip() not in (b'ranchu',b'goldfish'):return unknown
+        started=observe('shell','date','+%s').strip()
+        if not re.fullmatch(rb'[0-9]{9,12}',started):return unknown
+        before=observe('shell','dumpsys','window','displays')
+        if _anr_focus(before) is None:return unknown
+        # All command arguments are constants. Neither titles nor log fields
+        # are interpolated into a shell command, package filter or file path.
+        events=observe('shell','logcat','-d','-b','events','-v','epoch','-t','256','am_anr:I','am_proc_start:I',"'*:S'")
+        processes=observe('shell','dumpsys','activity','-a','processes')
+        after=observe('shell','dumpsys','window','displays')
+        finished=observe('shell','date','+%s').strip()
+        if not re.fullmatch(rb'[0-9]{9,12}',finished):return unknown
+        return correlated_anr_owner(before,after,events,processes,int(started),int(finished))
+    except (OSError,subprocess.SubprocessError,ValueError,UnicodeError):
+        return unknown
+
+
 def open_policy():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
     # Reboots can leave a nonsecure keyguard or a previously restored Settings
@@ -202,7 +315,8 @@ def open_policy():
     resources=sorted({n.get('resource-id','') for n in nodes if n.get('package') in ('android','com.android.settings','com.android.systemui')})[:32]
     owned=[{'id':n.get('resource-id',''),'bounds':n.get('bounds','')} for n in nodes if n.get('package')=='com.android.settings' and n.get('text')=='SYN443']
     gears=[{'bounds':n.get('bounds',''),'description':('expected' if n.get('content-desc')=='Settings for SYN443' else 'present' if n.get('content-desc') else 'empty')} for n in nodes if n.get('package')=='com.android.settings' and n.get('resource-id','').endswith('/settings_button')]
-    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears,'focusedSettingsANR':last_settings_anr,'focusSnapshot':last_focus_snapshot}),flush=True)
+    owner=anr_owner_diagnostic() if any(n.get('package')=='android' and n.get('resource-id')=='android:id/aerr_close' for n in nodes) else {'category':'unknown','correlated':False}
+    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears,'focusedSettingsANR':last_settings_anr,'focusSnapshot':last_focus_snapshot,'anrOwner':owner}),flush=True)
     raise AssertionError('Owned VPN settings entry unavailable')
 
 

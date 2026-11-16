@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math"
 	"net"
 	"regexp"
@@ -16,6 +17,39 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
+
+var errPrivateExitMismatch = errors.New("verified exit predicate mismatch")
+
+// An observed failed check, never a proxy verdict or a selection proof. The
+// only payload is a compiled finite code and its actual BOOTTIME completion;
+// source errors/targets are not kept.
+type privateCheckedFailure struct {
+	code            string
+	completedBootMS int64
+}
+
+type privateProbeDialKey struct{}
+
+// Ephemeral evidence of admitted final-adapter dispatch, not proof that bytes
+// reached a physical network. No endpoint, raw error or credentials are kept.
+type privateProbeDialObservation struct {
+	dispatched, completed, returnedError, validConn, localRefusal atomic.Bool
+}
+
+func (o *privateProbeDialObservation) observedFailure() bool {
+	return o != nil && !o.localRefusal.Load() && o.dispatched.Load() && o.completed.Load() && (o.validConn.Load() || o.returnedError.Load())
+}
+
+func privateCheckedProbeCode(code string) bool {
+	switch code {
+	case "dial_failed", "check_timeout", "tls_failed", "ssh_banner_mismatch", "request_failed", "response_failed", "exit_evidence_invalid", "http_response_mismatch":
+		return true
+	}
+	return false
+}
+func (*privateCheckedFailure) Error() string      { return "private route check failed" }
+func (*privateCheckedFailure) String() string     { return "PrivateCheckedFailure([redacted])" }
+func (e *privateCheckedFailure) GoString() string { return e.String() }
 
 var privateGroupID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
@@ -108,7 +142,17 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 	p.probing = true
 	s.proof = nil
 	p.mu.Unlock()
-	ctx, cancel := context.WithTimeout(parent, 12*time.Second)
+	duration := 12 * time.Second
+	if deadline, ok := parent.Value(privateAdaptiveWorkDeadlineKey{}).(int64); ok {
+		remaining := deadline - p.lease.clock()
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining < 12_000 {
+			duration = time.Duration(remaining) * time.Millisecond
+		}
+	}
+	ctx, cancel := context.WithTimeout(parent, duration)
 	stop := context.AfterFunc(candidate.entry.path.ctx, cancel)
 	defer func() {
 		stop()
@@ -125,20 +169,34 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 		// A normal timer may not advance while suspended. Check the aggregate
 		// BOOTTIME budget before every target, not only before publishing proof.
 		now := p.lease.clock()
-		if ctx.Err() != nil || now < started || now-started >= 12_000 {
+		if !privateAdaptiveWorkCurrent(ctx, p.lease.clock) || now < started || now-started >= 12_000 {
 			return nil, errPrivatePath
 		}
-		code, complete := probeRouteWithClock(ctx, func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
+		observation := &privateProbeDialObservation{}
+		checkContext := context.WithValue(ctx, privateProbeDialKey{}, observation)
+		code, complete := probeRouteWithClock(checkContext, func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
 			return candidate.dialTCP(s.scope, ctx, network, dst)
 		}, check, roots, p.lease.clock)
 		if !complete || code != "ok" || ctx.Err() != nil {
 			if complete && ctx.Err() == nil && (check.Method == "https_exit_country" && code == "exit_country_mismatch" ||
 				check.Method == "https_exit_ip" && code == "exit_ip_mismatch") {
 				p.mu.Lock()
-				if _, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started); previous == candidate.entry && fresh {
+				_, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started)
+				if previous == candidate.entry && fresh {
 					s.withdrawLocked()
 				}
 				p.mu.Unlock()
+				if fresh {
+					return nil, errPrivateExitMismatch
+				}
+			}
+			if complete && ctx.Err() == nil && observation.observedFailure() && privateCheckedProbeCode(code) {
+				p.mu.Lock()
+				completed, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started)
+				p.mu.Unlock()
+				if fresh {
+					return nil, &privateCheckedFailure{code: code, completedBootMS: completed}
+				}
 			}
 			return nil, errPrivatePath
 		}
@@ -160,7 +218,7 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 func (s *privatePathSelector) freshProbeLocked(ctx context.Context, e, previous *privatePoolEntry, epoch uint64, started int64) (int64, bool) {
 	p := s.pool
 	now := p.lease.clock()
-	return now, s.validLocked() && ctx.Err() == nil && s.active == previous && s.flowEpoch == epoch &&
+	return now, s.validLocked() && privateAdaptiveWorkCurrent(ctx, p.lease.clock) && s.active == previous && s.flowEpoch == epoch &&
 		now >= started && now-started < 12_000 && e.scope == s.scope && p.entries[e.id] == e &&
 		!e.draining && !e.queued && !e.retained && !e.closed && e.path.ctx.Err() == nil
 }
