@@ -2,6 +2,7 @@
     <!-- No uses-permission, activity, service, network or storage capability. -->
     <application
         android:label="SYN443 CI VM Probe"
+        android:icon="@android:drawable/ic_menu_info_details"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
