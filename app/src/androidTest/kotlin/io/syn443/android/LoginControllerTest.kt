@@ -489,16 +489,114 @@ class LoginControllerTest {
     @Test fun adminDiscoveryContextRejectsMainAndBinderNamedThreadsWithoutChangingDeviceState()=fixture {f->
         val before=f.journal.snapshot();val paths=f.server.paths.toList()
         assertNull(f.controller.adminDiscoveryContext()) // Actual instrumentation worker, not the main looper.
+        assertNull(f.controller.adminBootstrapContext())
         androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
             assertThrows(IllegalStateException::class.java){f.controller.adminDiscoveryContext()}
+            assertThrows(IllegalStateException::class.java){f.controller.adminBootstrapContext()}
+            assertThrows(IllegalStateException::class.java){f.controller.applyAdminDescriptor("unowned","not-a-manifest")}
         }
         val binder=java.util.concurrent.Executors.newSingleThreadExecutor {r->Thread(r,"Binder:synthetic-admin-context")}
         try {
             assertTrue(binder.submit<Boolean> {
                 try {f.controller.adminDiscoveryContext();false}catch(_:IllegalStateException){true}
             }.get(5,TimeUnit.SECONDS))
+            assertTrue(binder.submit<Boolean> {
+                try {f.controller.adminBootstrapContext();false}catch(_:IllegalStateException){true}
+            }.get(5,TimeUnit.SECONDS))
+            assertTrue(binder.submit<Boolean> {
+                try {f.controller.applyAdminDescriptor("unowned","not-a-manifest");false}catch(_:IllegalStateException){true}
+            }.get(5,TimeUnit.SECONDS))
         } finally {binder.shutdownNow();check(binder.awaitTermination(5,TimeUnit.SECONDS))}
         assertEquals(before,f.journal.snapshot());assertEquals(paths,f.server.paths)
+    }
+    @Test fun adminDescriptorRefreshUsesOrdinaryContextWithoutMetadataAndRejectsCapturedReauthenticationBinding() {
+        val offline=KeyPairGenerator.getInstance("EC").apply {initialize(ECGenParameterSpec("secp256r1"))}.generateKeyPair()
+        val anchor=TrustAnchor("synthetic-admin-refresh-root",Base64.getEncoder().encodeToString(offline.public.encoded),1)
+        fun signed(value:ServiceDescriptor):String {
+            val header="""{"alg":"ES256","kid":"${anchor.id}","typ":"syn443-bootstrap+jws"}"""
+            val input=Identity.encode(header.toByteArray(Charsets.US_ASCII))+"."+
+                Identity.encode(Canonical.encode(Canonical.parse(Canonical.json.encodeToString(value))).toByteArray(Charsets.UTF_8))
+            val signature=Signature.getInstance("SHA256withECDSA").run {initSign(offline.private);update(input.toByteArray(Charsets.US_ASCII));sign()}
+            return input+"."+Identity.encode(Identity.derToRaw(signature))
+        }
+        fixture(testTrustAnchor=anchor) {f->
+            assertNull(f.controller.adminBootstrapContext())
+            f.server.policyReady=true;f.controller.callback(f.begin());f.idle()
+            assertEquals(LoginPhase.POLICY_CACHED,f.journal.snapshot().phase)
+            val ordinary=checkNotNull(f.controller.adminBootstrapContext())
+            assertEquals(f.server.bootstrap,ordinary.bootstrap);assertNull(f.controller.adminDiscoveryContext())
+            val before=f.journal.snapshot();val publicKey=DeviceKey.open(before.keyAlias).publicKey.encoded
+            val protectedBody=f.journal.readProtected(before);val authority=Identity.bootstrapAuthority(ordinary.bootstrap)
+            val consent=context.getSharedPreferences(f.namespace+"-consent",Context.MODE_PRIVATE).all.toMap()
+            fun deviceBytes()=File(context.noBackupFilesDir,"login/${f.namespace}").listFiles().orEmpty()
+                .filter {it.isFile}.associate {it.name to it.readBytes()}
+            fun unchangedDevice(bytes:Map<String,ByteArray>) {
+                val current=deviceBytes();assertEquals(bytes.keys,current.keys)
+                bytes.forEach {(name,value)->assertArrayEquals(name,value,current.getValue(name))}
+            }
+            val original=deviceBytes();val paths=f.server.paths.toList()
+            val now=System.currentTimeMillis()/1000
+            val bootstrap=ordinary.bootstrap
+            val legacy=ServiceDescriptor(1,"syn443-client-bootstrap",1,1,bootstrap.serviceId,bootstrap.issuer,
+                bootstrap.clientId,bootstrap.apiOrigin,bootstrap.roots.toMap(),now,now,now+3600,
+                controlPanelOrigin=bootstrap.controlPanelOrigin)
+            val store=BootstrapTrustStore(context,f.namespace+"-trust",anchor)
+            assertTrue(store.refreshAdminDescriptor(signed(legacy),bootstrap))
+            val root=store.adaptiveAuthorityFingerprint()
+            assertNull(f.controller.adminDiscoveryContext())
+            assertEquals(ordinary.binding,checkNotNull(f.controller.adminBootstrapContext()).binding)
+            val meta=AdminBootstrap("https://admin-id.example.invalid/realms/control",AdminBootstrap.CLIENT_ID,
+                AdminBootstrap.AUDIENCE,"https://admin-api.example.invalid",AdminBootstrap.ASSURANCE_ACR)
+            val raw=signed(legacy.copy(revision=2,adminBootstrap=meta))
+            val applied=checkNotNull(f.controller.applyAdminDescriptor(ordinary.binding,raw))
+            assertEquals(ordinary.binding,applied.binding);assertEquals(meta,applied.discovery.metadata)
+            val trustFile=File(context.noBackupFilesDir,f.namespace+"-trust.bin")
+            val committed=trustFile.readBytes()
+            assertEquals(applied.discovery.binding,checkNotNull(f.controller.applyAdminDescriptor(ordinary.binding,raw)).discovery.binding)
+            assertArrayEquals(committed,trustFile.readBytes())
+            assertEquals(before,f.journal.snapshot());unchangedDevice(original)
+            assertEquals(protectedBody,f.journal.readProtected(before));assertEquals(authority,f.journal.snapshot().authority)
+            assertArrayEquals(publicKey,DeviceKey.open(before.keyAlias).publicKey.encoded)
+            assertEquals(consent,context.getSharedPreferences(f.namespace+"-consent",Context.MODE_PRIVATE).all)
+            assertEquals(paths,f.server.paths);assertEquals(root,store.adaptiveAuthorityFingerprint())
+            fun trustBytes()=context.noBackupFilesDir.listFiles().orEmpty().filter {it.isFile &&
+                (it.name.startsWith(f.namespace+"-trust.") || it.name.startsWith(f.namespace+"-trust-admin-"))}
+                .associate {it.name to it.readBytes()}
+            fun unchangedTrust(expected:Map<String,ByteArray>) {
+                val current=trustBytes();assertEquals(expected.keys,current.keys)
+                expected.forEach {(name,value)->assertArrayEquals(name,value,current.getValue(name))}
+            }
+            val trusted=trustBytes()
+            assertNull(f.controller.applyAdminDescriptor(Identity.random(),signed(legacy.copy(revision=3,adminBootstrap=meta))))
+            unchangedTrust(trusted)
+            assertNull(f.controller.applyAdminDescriptor(ordinary.binding,signed(legacy.copy(revision=3))))
+            assertNull(f.controller.adminDiscoveryContext())
+            assertEquals(ordinary.binding,checkNotNull(f.controller.adminBootstrapContext()).binding)
+            assertNotNull(f.controller.applyAdminDescriptor(ordinary.binding,signed(legacy.copy(revision=4,adminBootstrap=meta))))
+            val sameOwner=f.journal.snapshot()
+            f.server.policyStatus=409;f.server.policyProblem="reauthentication_required"
+            f.controller.retry(sameOwner.generation);f.idle()
+            assertEquals(LoginPhase.NEEDS_REAUTH,f.journal.snapshot().phase)
+            val beforeReauth=trustBytes()
+            assertNull(f.controller.adminBootstrapContext())
+            assertNull(f.controller.applyAdminDescriptor(ordinary.binding,signed(legacy.copy(revision=5,adminBootstrap=meta))))
+            unchangedTrust(beforeReauth)
+            val callback=f.repeatLogin();assertNull(f.controller.adminBootstrapContext())
+            f.server.policyStatus=200;f.controller.callback(callback);f.idle()
+            val reauthenticated=f.journal.snapshot();val current=checkNotNull(f.controller.adminBootstrapContext())
+            assertEquals(sameOwner.generation,reauthenticated.generation);assertTrue(reauthenticated.reauthRevision>sameOwner.reauthRevision)
+            assertEquals(before.keyAlias,reauthenticated.keyAlias);assertEquals(before.thumbprint,reauthenticated.thumbprint)
+            assertEquals(before.deviceId,reauthenticated.deviceId);assertEquals(authority,reauthenticated.authority)
+            assertNotEquals(ordinary.binding,current.binding);assertEquals(bootstrap,current.bootstrap)
+            val trustAfterReauth=trustBytes();val deviceAfterReauth=deviceBytes();val currentPaths=f.server.paths.toList()
+            val next=signed(legacy.copy(revision=5,adminBootstrap=meta))
+            assertNull(f.controller.applyAdminDescriptor(ordinary.binding,next));unchangedTrust(trustAfterReauth)
+            assertNotNull(f.controller.applyAdminDescriptor(current.binding,next))
+            assertEquals(reauthenticated,f.journal.snapshot());unchangedDevice(deviceAfterReauth)
+            assertArrayEquals(publicKey,DeviceKey.open(reauthenticated.keyAlias).publicKey.encoded)
+            assertEquals(root,store.adaptiveAuthorityFingerprint());assertEquals(currentPaths,f.server.paths)
+            assertFalse(current.toString().contains(current.binding))
+        }
     }
     @Test fun runtimeUploadNeedsExplicitConsentAndCannotBorrowAnArtificialVpnOnHint() {
         fixture(reportVpnOn={true}) {f->

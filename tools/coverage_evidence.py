@@ -5,6 +5,7 @@ IDENTITY_CLASSES = {'io.syn443.identity.' + name for name in (
     'ChatRefreshGate', 'Identity', 'Bootstrap', 'Pending', 'BoundedHttp', 'BoundedHttpKt', 'BoundedHttp.Scope',
     'AdminDiscovery', 'AdminDiscoveryGuard', 'AdminProtocol.Companion',
     'AdminControl', 'AdminControl.Read', 'AdminActivation', 'AdminDeviceSummary', 'AdminDevicePage', 'AdminDeviceConfiguration', 'AdminRuntimeReport', 'AdminDeviceRuntime', 'AdminControlJson', 'AdminControlJson.Reader',
+    'AdminServiceDiscovery', 'AdminServiceDiscovery.Companion', 'AdminServiceManifest',
     'RuntimeObservation', 'RuntimeObservation.Report', 'RuntimeObservation.Snapshot',
     'AuthProtocol', 'IdentityScope', 'TrustedTime', 'TrustedTime.Companion',
     'IdentityOperation', 'IdentityOperation.Companion',

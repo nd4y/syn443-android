@@ -273,7 +273,9 @@
         "docs/non-lte-acceptance-20261116.md",
         "docs/mobile-admin-bootstrap.md",
         "docs/mobile-admin-controller.md",
-        "docs/mobile-admin-key-journal.md"
+        "docs/mobile-admin-key-journal.md",
+        "docs/admin-service-discovery.md",
+        "docs/admin-service-discovery-store.md"
       ]
     },
     {
@@ -1914,8 +1916,11 @@
         "docs/non-lte-acceptance-20261116.md",
         "docs/mobile-admin-native-ui.md",
         "docs/mobile-admin-controller.md",
-        "docs/mobile-admin-control-api.md"
+        "docs/mobile-admin-control-api.md",
+        "docs/admin-service-discovery.md",
+        "docs/admin-service-discovery-store.md"
       ],
+      "implementationScope": "Additional v87 source-only contribution: anonymous fixed-origin descriptor transport, installed-root/exact ordinary-projection Store refresh and fresh same-owner admission before admin-key reservation. Eight new JVM and six Android outcomes are mandatory but unexecuted for this candidate; fetched metadata grants no role or session.",
       "remainingScope": "v84/v85 OAuth/current-trust source gates passed. v86 key/controller/callback/read-only API/UI source and its required tests await Actions and physical/live Keycloak/ACL/MFA acceptance; mutation scopes and full capability handling remain open. RAM credentials require new administrative login after controller-process death."
     },
     {

@@ -15,7 +15,8 @@ import java.util.concurrent.atomic.AtomicInteger
 internal class AdminController private constructor(private val context:Application,private val namespace:String,
     private val test:TestDependencies?=null) {
     private class TestDependencies(val encryptionAlias:String,val source:()->AdminDeviceContext?,
-        val exchange:IdentityExchange,val boot:()->Int,val elapsed:()->Long)
+        val exchange:IdentityExchange,val boot:()->Int,val elapsed:()->Long,
+        val refreshDiscovery:(()->AdminDeviceContext?)?)
     companion object {
         @Volatile private var instance:AdminController?=null
         @Synchronized fun get(context:Context):AdminController {
@@ -23,12 +24,13 @@ internal class AdminController private constructor(private val context:Applicati
             return instance ?: AdminController(context.applicationContext as Application,"admin-login-v1").also {instance=it}
         }
         internal fun isolatedForTest(context:Context,namespace:String,encryptionAlias:String,
-            source:()->AdminDeviceContext?,exchange:IdentityExchange,boot:()->Int,elapsed:()->Long):AdminController {
+            source:()->AdminDeviceContext?,exchange:IdentityExchange,boot:()->Int,elapsed:()->Long,
+            refreshDiscovery:(()->AdminDeviceContext?)?=null):AdminController {
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") &&
                 namespace.matches(Regex("test-[a-z0-9-]{1,43}")) &&
                 encryptionAlias.matches(Regex("syn443-admin-store-test-[A-Za-z0-9_-]{43}")))
             return AdminController(context.applicationContext as Application,namespace,
-                TestDependencies(encryptionAlias,source,exchange,boot,elapsed))
+                TestDependencies(encryptionAlias,source,exchange,boot,elapsed,refreshDiscovery))
         }
         private val operationID=Regex("[a-f0-9]{32}")
         private val targetID=Regex("[A-Za-z0-9_-]{1,64}")
@@ -193,6 +195,50 @@ internal class AdminController private constructor(private val context:Applicati
     }
     fun status():JSONObject=synchronized(commands) {JSONObject().put("generation",generation).put("phase",phase.name)
         .put("busy",busy).put("reason",reason)}
+    /** Explicit administrative sign-in only. This anonymous metadata request is
+     * never a VPN operation or a replacement for the pinned-root store verifier. */
+    private fun loginDiscovery(expected:Long):AdminDeviceContext {
+        requireCurrent(expected)
+        source()?.let {return it}
+        fun accepted(selected:AdminDeviceContext?):AdminDeviceContext {
+            requireCurrent(expected)
+            val current=source() ?:throw AdminException(AdminFailure.REAUTHENTICATE)
+            if(selected==null || current.binding!=selected.binding || current.discovery.binding!=selected.discovery.binding)
+                throw AdminException(AdminFailure.REAUTHENTICATE)
+            requireCurrent(expected)
+            return current
+        }
+        if(test!=null) {
+            val refreshed=test.refreshDiscovery?.invoke()
+            return accepted(refreshed)
+        }
+        val login=LoginController.get(context)
+        val original=login.adminBootstrapContext() ?:throw AdminException(AdminFailure.REAUTHENTICATE)
+        fun admitted() {
+            requireCurrent(expected)
+            val current=login.adminBootstrapContext() ?:throw AdminException(AdminFailure.REAUTHENTICATE)
+            if(current.binding!=original.binding || current.bootstrap!=original.bootstrap)
+                throw AdminException(AdminFailure.REAUTHENTICATE)
+            requireCurrent(expected)
+        }
+        val target=original.bootstrap.apiOrigin+"/.well-known/syn443/bootstrap/"+original.bootstrap.serviceId
+        val transport=IdentityExchange {method,url,headers,body,child,maxBody->
+            admitted()
+            require(method=="GET" && url==target && body==null && maxBody==BootstrapTrust.MAX_MANIFEST &&
+                headers==mapOf("Accept" to "application/jose","Cache-Control" to "no-store"))
+            val physical=PhysicalIdentityRoute.capture(context)
+            val route=object:HttpRoute {
+                override fun resolve(host:String)=physical.resolve(host)
+                override fun bind(socket:java.net.Socket)=physical.bind(socket)
+                override fun check() {admitted();physical.check()}
+            }
+            http.exchange(method,url,headers,null,child,maxBody=maxBody,route=route).also {admitted()}
+        }
+        val fetched=withScope(expected) {scope->AdminServiceDiscovery(original.bootstrap,transport).fetch(scope)}
+        admitted()
+        val selected=login.applyAdminDescriptor(original.binding,fetched.raw)
+        return accepted(selected)
+    }
     fun start(expectedGeneration:Long):Boolean {
         val admitted=synchronized(commands) {
             if(busy || retirementRequested || generation!=expectedGeneration || phase !in setOf(Phase.SIGNED_OUT,Phase.REAUTHENTICATE))return false
@@ -201,7 +247,7 @@ internal class AdminController private constructor(private val context:Applicati
         return enqueue {
             try {
                 requireCurrent(admitted)
-                val selected=source() ?:throw AdminException(AdminFailure.REAUTHENTICATE)
+                val selected=loginDiscovery(admitted)
                 require(digest.matches(selected.binding));requireCurrent(admitted)
                 val initial=journal.read();publishRecord(initial)
                 check(initial.phase==AdminKeyPhase.SIGNED_OUT)

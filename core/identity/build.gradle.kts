@@ -24,6 +24,7 @@ tasks.jacocoTestCoverageVerification {
             "io.syn443.identity.AdminControl", "io.syn443.identity.AdminControl.Read", "io.syn443.identity.AdminActivation", "io.syn443.identity.AdminDeviceSummary", "io.syn443.identity.AdminDevicePage",
             "io.syn443.identity.AdminDeviceConfiguration", "io.syn443.identity.AdminRuntimeReport", "io.syn443.identity.AdminDeviceRuntime",
             "io.syn443.identity.AdminControlJson", "io.syn443.identity.AdminControlJson.Reader",
+            "io.syn443.identity.AdminServiceDiscovery", "io.syn443.identity.AdminServiceDiscovery.Companion", "io.syn443.identity.AdminServiceManifest",
             "io.syn443.identity.IdentityOperation", "io.syn443.identity.IdentityOperation.Companion",
             "io.syn443.identity.LoginRecovery", "io.syn443.identity.LoginIntent", "io.syn443.identity.RegistrationTombstone",
             "io.syn443.identity.LoginPayload", "io.syn443.identity.LoginPayload.Companion", "io.syn443.identity.CapabilityNegotiation",

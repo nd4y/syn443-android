@@ -63,7 +63,8 @@ class AdminNativeUiTest {
         compose.onNodeWithText("synthetic runtime text").assertDoesNotExist()
         scroll("admin-config-toggle");compose.onNodeWithTag("admin-config-toggle").performClick()
         scroll("admin-config-chunk-0");compose.onNodeWithTag("admin-config-chunk-0").assertTextEquals("synthetic configuration text")
-        scroll("admin-runtime-summary");compose.onNodeWithTag("admin-runtime-summary").assertTextContains("устарел")
+        scroll("admin-runtime-summary");compose.onNodeWithTag("admin-runtime-summary")
+            .assertTextEquals("Последний отчёт устройства устарел. Текущее состояние неизвестно.")
         scroll("admin-runtime-toggle");compose.onNodeWithTag("admin-runtime-toggle").performClick()
         scroll("admin-runtime-chunk-0");compose.onNodeWithTag("admin-runtime-chunk-0").assertTextEquals("synthetic runtime text")
         compose.onNodeWithText("Подключено").assertDoesNotExist()
@@ -77,7 +78,8 @@ class AdminNativeUiTest {
         compose.setContent {MaterialTheme(colorScheme=darkColorScheme()) {AdminScreen(model.value,AdminUiActions(logout={logout++}))}}
         compose.onNodeWithTag("admin-refresh").assertIsNotEnabled()
         scroll("admin-device-device-a");compose.onNodeWithTag("admin-device-device-a").assertIsNotEnabled()
-        scroll("admin-runtime-unknown");compose.onNodeWithTag("admin-runtime-unknown").assertTextContains("неизвестно")
+        scroll("admin-runtime-unknown");compose.onNodeWithTag("admin-runtime-unknown")
+            .assertTextEquals("Текущее состояние неизвестно: отчёт ещё не получен.")
         scroll("admin-logout");compose.onNodeWithTag("admin-logout").assertIsEnabled().performClick()
         compose.runOnIdle {assertEquals(1,logout)}
         compose.runOnIdle {model.value=model.value.copy(working=false,status=authenticated.copy(busy=true))}

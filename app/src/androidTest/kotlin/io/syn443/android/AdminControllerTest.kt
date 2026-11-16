@@ -73,6 +73,8 @@ class AdminControllerTest {
         @Volatile var deviceBinding=Identity.hash("synthetic-device-context-one".toByteArray())
         @Volatile var onSource:(()->Unit)?=null
         @Volatile var onExchange:((Call)->Reply)?=null
+        @Volatile var onMetadata:(()->AdminDeviceContext?)?=null
+        val metadataCalls=AtomicInteger()
         private val calls=Collections.synchronizedList(mutableListOf<Call>())
         private val gates=Collections.synchronizedList(mutableListOf<Gate>())
         private val aliases=Collections.synchronizedSet(mutableSetOf<String>())
@@ -131,8 +133,18 @@ class AdminControllerTest {
                     assertTrue(maxBody in 1..524_288)
                     reply
                 }catch(error:AssertionError) {verifierFailure.compareAndSet(null,error);throw error}
-            },{boot},{elapsed})
+            },{boot},{elapsed},refreshDiscovery={metadataCalls.incrementAndGet();onMetadata?.invoke()})
             idle()
+        }
+        fun verifiedContext()=checkNotNull(BootstrapTrust.adminDiscovery(manifest,anchor,floor,projected,wall/1000))
+            .let {AdminDeviceContext(deviceBinding,it)}
+        fun trustFingerprint()=Identity.hash(Canonical.encode(buildJsonObject {
+            put("root",anchor.spki);put("epoch",anchor.epoch);put("service",floor.serviceId);put("revision",floor.revision)
+            put("floor",floor.hash);put("ordinary",Identity.bootstrapAuthority(projected))
+        }).toByteArray())
+        fun assertNoAdminReservation() {
+            assertEquals(AdminKeyRecord(),record());assertFalse(directory.exists());assertFalse(file.exists())
+            onWorker {assertFalse(keyStore().containsAlias(aes))}
         }
         fun restart() {assertTrue(controller.shutdownForTest());active=null;createController()}
         fun snapshot()=controller.status()
@@ -521,6 +533,70 @@ class AdminControllerTest {
             assertEquals(1,f.refreshCalls());assertEquals(0,f.controlCalls());f.signedOutKeyAbsent(owned.alias)
             assertEquals(AdminKeyPhase.SIGNED_OUT,f.record().phase)
             assertFalse(f.controller.readStart(id(),f.gen(),"devices",""))
+        }
+    }
+    @Test fun missingMetadataWaitsForFreshVerifiedSourceBeforeReservingAnAdminKey() {
+        Fixture().use {f ->
+            f.enabled=false;val trust=f.trustFingerprint();val gate=f.gate()
+            f.onMetadata={
+                val captured=f.verifiedContext()
+                gate.hold();f.enabled=true;captured
+            }
+            assertTrue(f.controller.start(f.gen()));gate.reached()
+            assertTrue(f.snapshot().getBoolean("busy"));f.assertNoAdminReservation()
+            assertEquals(0,f.callCount());assertEquals(0,f.tokenCalls());assertEquals(1,f.metadataCalls.get())
+            assertFalse(f.controller.start(f.gen()));f.assertVpnPreserved()
+            gate.release.countDown();f.phase("BROWSER")
+            val owner=f.record();assertEquals(1L,owner.generation);assertEquals(AdminKeyPhase.BROWSER,owner.phase)
+            assertTrue(f.onWorker {keyStore().containsAlias(owner.alias)})
+            assertEquals(2,f.callCount());assertEquals(1,f.metadataCalls.get());assertEquals(trust,f.trustFingerprint())
+            f.handoff();assertTrue(f.controller.callback(f.callback()));f.phase("AUTHENTICATED")
+            assertEquals(1,f.tokenCalls());assertEquals(trust,f.trustFingerprint())
+        }
+        Fixture().use {f ->
+            f.enabled=false
+            // A genuine descriptor/ticket returned by the loader is still not a
+            // published current source. Raw fetched bytes would establish even less.
+            f.onMetadata={f.verifiedContext()}
+            assertTrue(f.controller.start(f.gen()));f.phase("REAUTHENTICATE")
+            f.assertNoAdminReservation();assertEquals(1,f.metadataCalls.get());assertEquals(0,f.callCount())
+            assertFalse(f.controller.readStart(id(),f.gen(),"devices",""))
+        }
+    }
+    @Test fun failedInvalidOrAbsentMetadataCannotCreateKeysSessionsOrAutomaticRetries() {
+        for(kind in 0..2)Fixture().use {f ->
+            f.enabled=false;val trust=f.trustFingerprint()
+            f.onMetadata=when(kind) {
+                0->null
+                1->({throw AdminException(AdminFailure.INVALID_REPLY)})
+                else->({throw DeliveryException(DeliveryFailure.TLS)})
+            }
+            assertTrue(f.controller.start(f.gen()));f.phase("REAUTHENTICATE")
+            assertEquals(1,f.metadataCalls.get());assertEquals(0,f.callCount());assertEquals(0,f.tokenCalls())
+            f.assertNoAdminReservation();assertEquals(trust,f.trustFingerprint());f.assertVpnPreserved()
+            repeat(4) {assertFalse(f.snapshot().getBoolean("busy"));assertEquals("REAUTHENTICATE",f.snapshot().getString("phase"))}
+            assertFalse(f.controller.prepareBrowser(id(),f.gen()));assertFalse(f.controller.callback(AdminBootstrap.CALLBACK+"?code=untrusted"))
+            assertFalse(f.controller.readStart(id(),f.gen(),"devices",""))
+            assertEquals(1,f.metadataCalls.get());assertEquals(0,f.callCount());assertEquals(trust,f.trustFingerprint())
+        }
+    }
+    @Test fun logoutOrChangedContextDuringMetadataLoadCannotPublishALateAdminOwner() {
+        for(logout in listOf(true,false))Fixture().use {f ->
+            f.enabled=false;val trust=f.trustFingerprint();val gate=f.gate()
+            f.onMetadata={
+                val captured=f.verifiedContext()
+                gate.hold();f.enabled=true;captured
+            }
+            val gen=f.gen();assertTrue(f.controller.start(gen));gate.reached();f.assertNoAdminReservation()
+            if(logout)assertTrue(f.controller.logout(gen))
+            else f.deviceBinding=Identity.hash("changed-while-owned-metadata-was-loading".toByteArray())
+            assertTrue(f.snapshot().getBoolean("busy"));assertFalse(f.controller.shutdownForTest())
+            assertFalse(f.controller.start(gen));assertFalse(f.controller.prepareBrowser(id(),gen))
+            assertEquals(0,f.callCount());assertEquals(1,f.metadataCalls.get());f.assertVpnPreserved()
+            gate.release.countDown();f.phase(if(logout)"SIGNED_OUT" else "REAUTHENTICATE")
+            f.assertNoAdminReservation();assertEquals(gen,f.gen())
+            assertEquals(1,f.metadataCalls.get());assertEquals(0,f.callCount());assertEquals(0,f.tokenCalls())
+            assertNull(f.controller.browserResult(id(),f.gen()).url);assertEquals(trust,f.trustFingerprint())
         }
     }
 }

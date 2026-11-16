@@ -19,7 +19,7 @@ outcomes and53 native roots each ordinary/race. Its protected merge is
 `f9af8f8186da7c5b7409aac445a698e6cc92db56`; actual-main CI remains pending at
 this source snapshot. Its APK has not been installed.
 
-Current v86 / `0.9.58-native-admin` connects a separate
+The v86 / `0.9.58-native-admin` source connects a separate
 [administrative controller](mobile-admin-controller.md),
 [owned key journal](mobile-admin-key-journal.md),
 [three read-only Control API actions](mobile-admin-control-api.md) and
@@ -40,6 +40,17 @@ preview/publication/rollback, full mobile administration and physical acceptance
 remain separate. Main shortcut visibility still uses the existing web grant;
 explicit separate-account login is available in initially collapsed account
 settings without promoting that device session into an admin role.
+
+Current v87 / `0.9.59-admin-discovery` is source-pending. It adds
+[anonymous fixed-origin descriptor transport](admin-service-discovery.md),
+[installed-root and exact ordinary-projection Store refresh](admin-service-discovery-store.md)
+and explicit login fallback before administrative-key reservation. Eight new
+JVM and six Android outcomes are mandatory; current floors are 143 identity and
+333 unique Android outcomes on each API29/35/37, plus three additional 90%
+transport-class checks. Existing gates remain mandatory. No execution result,
+live public descriptor publication or physical native-admin acceptance is
+recorded for this candidate. The installed v84 Direct-policy checkpoint above
+is not changed by these source additions.
 
 ## Earlier physical/source checkpoints - v82 and v83
 
@@ -162,7 +173,7 @@ No full M1-M5 or production-readiness claim is made by these statuses.
 | CHAT partial rows | SQL message/file integrity and atomicity, Android user/admin and web chat, compression/retry/withdrawal | Complete retention/quota administration, production operations and restricted-network acceptance |
 | ARC-03/05, REC-01/02/04 | Bounded continuity/recovery source CI and v82 Direct-policy USB/Wi-Fi/native recovery; coordinator phone cases remain virtual | Activated managed adaptive chains, full mode/lifecycle matrix and shared global energy/admission remain open |
 | MOB-01/03/06 | Trusted Custom Tab URL/intent source and phone checks; v83 separately signed metadata/encrypted cache accepted in emulator CI | Actual browser/Keycloak/MFA/device-card acceptance, native API screens, local edit/push and complete one-hand workflows |
-| AUTH-02, MOB-04 | v83 metadata preserves device identity; v84 separate admin OAuth source and23 mandatory test methods remain pending CI and app wiring | Atomic current-trust ticket, separate durable key/session, actual native login, server ACL/capability recovery and native administration |
+| AUTH-02, MOB-04 | v87 source joins anonymous descriptor transport, installed-root/exact-projection Store refresh and same-owner pre-key admission; eight JVM and six Android outcomes are source-pending | Actual HTTPS/Keycloak mobile login, live ACL/MFA/capability recovery, mutation workflows and physical native administration; metadata is not credential or role authority |
 
 Source/test inventories for review:
 - [Android controller and UI](https://github.com/nd4y/syn443-android/tree/e2291a71fa8491497f342fe26fbdf36788e2b59a/app/src/main/kotlin/io/syn443/android/vpn)
