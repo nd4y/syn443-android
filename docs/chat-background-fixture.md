@@ -22,6 +22,30 @@ revision, so navigation cannot silently create or change a configuration.
 This tests ordinary foreground navigation without relying on an auxiliary
 library activity's NEW_TASK launch/broadcast lifecycle transition. It does not
 relax production lifecycle behavior, permissions, test counts or ownership gates.
-All241 actual outcomes remain mandatory on API29/35/37. Exact-source Actions and
-the three safe UI methods on Xperia remain separate acceptance gates; no LTE or
-real message is involved.
+All earlier242 actual outcomes plus the negative readiness case remain mandatory
+on API29/35/37, raising the minimum to243. Exact-source Actions and the four safe
+UI methods on Xperia remain separate acceptance gates; no LTE or real message is
+involved.
+
+## Bounded root readiness
+
+A later physical cold-start observation failed inside the semantics fetch before
+the five-second wait could poll: the default fetch required an existing Compose
+root and threw immediately when no hierarchy had registered yet. Manual chat
+navigation still showed its title and connection status. This observation does
+not establish an application crash or replace the pending exact-source checks.
+
+Only the semantics fetch inside the existing bounded wait now passes
+`atLeastOneRootRequired=false`. The five-second limit, native content-child
+assertion and final displayed title/status assertions are unchanged. The three
+original tests still require five recreations and five actual stop/resume cycles,
+with the same instance and unchanged VPN intent.
+
+The fourth test replaces only its owned SupportActivity content with a native
+TextView and requires the precise ComposeTimeoutException from the bounded wait.
+It recreates the real screen, then installs a synthetic Compose title without a
+status and requires an assertion failure. A final recreation must restore the
+real title and status. Native idle synchronization avoids a separate operation
+that itself requires a Compose root. The fixture never sends a message, modifies
+VPN intent or changes production UI. Source, Actions and physical acceptance for
+this change are pending until independently recorded.
