@@ -6,6 +6,7 @@ import io.syn443.android.vpn.BootstrapTrustStore
 import androidx.test.platform.app.InstrumentationRegistry
 import io.syn443.decision.NetworkMode
 import io.syn443.identity.*
+import io.syn443.identity.TrustedTime
 import io.syn443.policy.*
 import java.io.Closeable
 import java.io.File
