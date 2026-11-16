@@ -6,6 +6,7 @@ import androidx.core.net.toUri
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.syn443.android.vpn.DeviceKey
+import io.syn443.android.vpn.BootstrapTrustStore
 import io.syn443.android.vpn.LoginController
 import io.syn443.android.vpn.LoginJournal
 import io.syn443.android.vpn.LoginStorageException
@@ -298,9 +299,10 @@ class LoginControllerTest {
         val end=SystemClock.elapsedRealtime()+20_000
         while(!predicate()) {check(SystemClock.elapsedRealtime()<end) {"isolated login timed out"};Thread.sleep(50)}
     }
-    private inner class Fixture(val server:Server=Server(),val beforeQueue:(()->Unit)?=null,val reportVpnOn:(()->Boolean)?=null) {
+    private inner class Fixture(val server:Server=Server(),val beforeQueue:(()->Unit)?=null,val reportVpnOn:(()->Boolean)?=null,
+        val testTrustAnchor:TrustAnchor?=null) {
         val namespace="test-"+UUID.randomUUID().toString()
-        var controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,reportVpnOn=reportVpnOn)
+        var controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,anchor=testTrustAnchor,reportVpnOn=reportVpnOn)
         val journal=LoginJournal(context,namespace)
         fun idle()=until {!controller.status().getBoolean("busy")}
         fun begin():String {
@@ -321,14 +323,14 @@ class LoginControllerTest {
             return Identity.callback+"?"+Identity.form(mapOf("state" to checkNotNull(uri.getQueryParameter("state")),
                 "iss" to server.bootstrap.issuer,"code" to "synthetic-code"))
         }
-        fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,reportVpnOn=reportVpnOn);controller.recover();idle()}
+        fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,anchor=testTrustAnchor,reportVpnOn=reportVpnOn);controller.recover();idle()}
         fun legacyCache() {
             idle();controller.shutdownTest()
             val s=journal.snapshot();val p=LoginPayload.decode(journal.readProtected(s),s).copy(advertisedCapabilities=null)
             journal.prepare(s,p.encode()).use {prepared->journal.commit(s,LoginRecovery.capabilitiesRecorded(s,s.generation,prepared.hash),prepared)}
             server.capabilities[s.thumbprint]=IdentityOperation.requiredCapabilities
             server.capabilityVersions.remove(s.thumbprint)
-            controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,reportVpnOn=reportVpnOn)
+            controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,anchor=testTrustAnchor,reportVpnOn=reportVpnOn)
         }
         fun cleanup() {
             server.release.countDown();server.releaseRevoke.countDown();server.releaseOverlayFetch.countDown();controller.cancel();idle();check(journal.snapshot().phase==LoginPhase.SIGNED_OUT)
@@ -336,9 +338,18 @@ class LoginControllerTest {
             val bootstrap=File(context.noBackupFilesDir,"$namespace-bootstrap.json")
             android.util.AtomicFile(bootstrap).delete()
             check(listOf(bootstrap,File(bootstrap.path+".bak"),File(bootstrap.path+".new")).none {it.exists()})
+            if(testTrustAnchor!=null) {
+                val owned=Regex(Regex.escape("$namespace-trust")+"(?:-admin-[A-Za-z0-9_-]{43})?\\.bin(?:\\.bak|\\.new)?")
+                val parent=context.noBackupFilesDir.canonicalFile
+                context.noBackupFilesDir.listFiles().orEmpty().filter {it.isFile && owned.matches(it.name)}.forEach {
+                    check(it.parentFile?.canonicalFile==parent && it.delete())
+                }
+                check(context.noBackupFilesDir.listFiles().orEmpty().none {it.isFile && owned.matches(it.name)})
+            }
         }
     }
-    private fun fixture(beforeQueue:(()->Unit)?=null,controlPanelOrigin:String="",reportVpnOn:(()->Boolean)?=null,block:(Fixture)->Unit) {
+    private fun fixture(beforeQueue:(()->Unit)?=null,controlPanelOrigin:String="",reportVpnOn:(()->Boolean)?=null,
+        testTrustAnchor:TrustAnchor?=null,block:(Fixture)->Unit) {
         check(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
         context.contentResolver.call("content://io.syn443.control".toUri(),"disconnect",null,null)
         until {
@@ -348,7 +359,7 @@ class LoginControllerTest {
                     it.optBoolean("engineStateKnown") && !it.getBoolean("engineActive")
             }
         }
-        val f=Fixture(server=Server(controlPanelOrigin),beforeQueue=beforeQueue,reportVpnOn=reportVpnOn)
+        val f=Fixture(server=Server(controlPanelOrigin),beforeQueue=beforeQueue,reportVpnOn=reportVpnOn,testTrustAnchor=testTrustAnchor)
         var failure:Throwable?=null
         try {
             f.controller.configure(Canonical.json.encodeToString(f.server.bootstrap));f.idle()
@@ -360,6 +371,134 @@ class LoginControllerTest {
             block(f)
         } catch(e:Throwable) {failure=e;throw e}
         finally {try {f.cleanup()} catch(e:Throwable) {if(failure==null)throw e else failure.addSuppressed(e)}}
+    }
+    @Test fun signedAdminDiscoveryContextPreservesDeviceIdentityAndFencesTrustAndReauthentication() {
+        val offline=KeyPairGenerator.getInstance("EC").apply {initialize(ECGenParameterSpec("secp256r1"))}.generateKeyPair()
+        val anchor=TrustAnchor("synthetic-admin-context-root",Base64.getEncoder().encodeToString(offline.public.encoded),1)
+        fun signed(value:Any,root:TrustAnchor,key:java.security.KeyPair,type:String):String {
+            val document=when(value) {
+                is ServiceDescriptor->Canonical.json.encodeToString(value)
+                is RootTransition->Canonical.json.encodeToString(value)
+                else->error("unsupported synthetic signed object")
+            }
+            val header="""{"alg":"ES256","kid":"${root.id}","typ":"$type"}"""
+            val input=Identity.encode(header.toByteArray(Charsets.US_ASCII))+"."+
+                Identity.encode(Canonical.encode(Canonical.parse(document)).toByteArray(Charsets.UTF_8))
+            val signature=Signature.getInstance("SHA256withECDSA").run {initSign(key.private);update(input.toByteArray(Charsets.US_ASCII));sign()}
+            return input+"."+Identity.encode(Identity.derToRaw(signature))
+        }
+        fixture(testTrustAnchor=anchor) {f->
+            val store=BootstrapTrustStore(context,f.namespace+"-trust",anchor)
+            val meta=AdminBootstrap("https://admin-id.example.invalid/realms/control",AdminBootstrap.CLIENT_ID,
+                AdminBootstrap.AUDIENCE,"https://admin-api.example.invalid",AdminBootstrap.ASSURANCE_ACR)
+            val device=f.server.bootstrap
+            fun descriptor(revision:Long,admin:AdminBootstrap?,bootstrap:Bootstrap=device,rootEpoch:Long=1):ServiceDescriptor {
+                val now=System.currentTimeMillis()/1000
+                return ServiceDescriptor(1,"syn443-client-bootstrap",rootEpoch,revision,bootstrap.serviceId,bootstrap.issuer,
+                    bootstrap.clientId,bootstrap.apiOrigin,bootstrap.roots.toMap(),now,now,now+3600,
+                    controlPanelOrigin=bootstrap.controlPanelOrigin,adminBootstrap=admin)
+            }
+            fun accept(value:ServiceDescriptor,root:TrustAnchor=anchor,key:java.security.KeyPair=offline)=
+                store.acceptDefaultDescriptor(signed(value,root,key,"syn443-bootstrap+jws"))
+            fun bytes():Map<String,ByteArray> {
+                val directory=File(context.noBackupFilesDir,"login/${f.namespace}")
+                return directory.listFiles().orEmpty().filter {it.isFile}.associate {it.name to it.readBytes()}
+            }
+            fun unchanged(before:Map<String,ByteArray>) {
+                val after=bytes();assertEquals(before.keys,after.keys)
+                before.forEach {(name,value)->assertTrue("owned device journal bytes changed",value.contentEquals(after.getValue(name)))}
+            }
+            assertNull(f.controller.adminDiscoveryContext())
+            assertEquals(device,accept(descriptor(1,meta)))
+            assertNotNull(store.adminDiscovery(device))
+            assertNull(f.controller.adminDiscoveryContext())
+            f.controller.callback(f.begin());f.idle()
+            assertEquals(LoginPhase.PROVISIONING,f.journal.snapshot().phase)
+            assertNotNull(store.adminDiscovery(device))
+            assertNull(f.controller.adminDiscoveryContext())
+            assertEquals(device,accept(descriptor(2,null)))
+            f.server.policyReady=true;f.server.technicalTelemetry=true
+            f.controller.retry(f.journal.snapshot().generation);f.idle()
+            assertEquals(LoginPhase.POLICY_CACHED,f.journal.snapshot().phase)
+            assertNull(f.controller.adminDiscoveryContext())
+            assertTrue(f.controller.chooseTechnicalTelemetry(f.journal.snapshot().generation,true));f.idle()
+            val before=f.journal.snapshot();val original=bytes();val paths=f.server.paths.toList()
+            val protectedBody=f.journal.readProtected(before)
+            val authority=Identity.bootstrapAuthority(LoginPayload.decode(protectedBody,before).bootstrap)
+            val publicKey=DeviceKey.open(before.keyAlias).publicKey.encoded
+            val consent=context.getSharedPreferences(f.namespace+"-consent",Context.MODE_PRIVATE).all.toMap()
+            assertTrue(f.controller.status().getBoolean("telemetryEnabled"))
+            assertEquals(device,accept(descriptor(3,meta)))
+            val first=checkNotNull(f.controller.adminDiscoveryContext())
+            assertEquals(meta,first.discovery.metadata)
+            assertEquals(32,Policy.decode64(first.binding).size);assertEquals(32,Policy.decode64(first.discovery.binding).size)
+            assertEquals(device,accept(descriptor(4,meta.copy(apiOrigin="https://other-admin-api.example.invalid"))))
+            val changed=checkNotNull(f.controller.adminDiscoveryContext())
+            assertEquals(first.binding,changed.binding);assertNotEquals(first.discovery.binding,changed.discovery.binding)
+            assertEquals(before,f.journal.snapshot());unchanged(original)
+            assertTrue("owned device payload changed",protectedBody==f.journal.readProtected(before))
+            assertEquals(authority,f.journal.snapshot().authority)
+            assertArrayEquals(publicKey,DeviceKey.open(before.keyAlias).publicKey.encoded)
+            assertTrue("device consent changed",consent==context.getSharedPreferences(f.namespace+"-consent",Context.MODE_PRIVATE).all)
+            assertEquals(paths,f.server.paths)
+            assertFalse(first.toString().contains(first.binding))
+            val publicStatus=f.controller.status().toString()
+            assertFalse(publicStatus.contains(first.binding));assertFalse(publicStatus.contains(first.discovery.binding))
+            assertFalse(publicStatus.contains(meta.issuer))
+            accept(descriptor(5,meta,device.copy(apiOrigin="https://foreign-device-api.example.invalid")))
+            assertNull(f.controller.adminDiscoveryContext());unchanged(original)
+            assertEquals(device,accept(descriptor(6,meta)))
+            val restored=checkNotNull(f.controller.adminDiscoveryContext())
+            assertEquals(first.binding,restored.binding)
+            assertEquals(before,f.journal.snapshot());unchanged(original);assertEquals(paths,f.server.paths)
+            f.restart()
+            val restarted=checkNotNull(f.controller.adminDiscoveryContext())
+            assertEquals(restored.binding,restarted.binding);assertEquals(restored.discovery.binding,restarted.discovery.binding)
+            val sameOwner=f.journal.snapshot()
+            f.server.policyStatus=409;f.server.policyProblem="reauthentication_required"
+            f.controller.retry(sameOwner.generation);f.idle()
+            assertEquals(LoginPhase.NEEDS_REAUTH,f.journal.snapshot().phase);assertNull(f.controller.adminDiscoveryContext())
+            val callback=f.repeatLogin()
+            assertNull(f.controller.adminDiscoveryContext())
+            f.server.policyStatus=200;f.controller.callback(callback);f.idle()
+            val reauthenticated=f.journal.snapshot();assertEquals(LoginPhase.POLICY_CACHED,reauthenticated.phase)
+            assertEquals(sameOwner.generation,reauthenticated.generation)
+            assertTrue(reauthenticated.reauthRevision>sameOwner.reauthRevision)
+            assertEquals(sameOwner.keyAlias,reauthenticated.keyAlias);assertEquals(sameOwner.thumbprint,reauthenticated.thumbprint)
+            assertEquals(sameOwner.deviceId,reauthenticated.deviceId);assertEquals(sameOwner.authority,reauthenticated.authority)
+            assertArrayEquals(publicKey,DeviceKey.open(reauthenticated.keyAlias).publicKey.encoded)
+            val current=checkNotNull(f.controller.adminDiscoveryContext())
+            assertNotEquals(restarted.binding,current.binding);assertEquals(restarted.discovery.binding,current.discovery.binding)
+            val reauthBytes=bytes();val reauthPaths=f.server.paths.toList()
+            val nextKey=KeyPairGenerator.getInstance("EC").apply {initialize(ECGenParameterSpec("secp256r1"))}.generateKeyPair()
+            val next=TrustAnchor("synthetic-next-admin-root",Base64.getEncoder().encodeToString(nextKey.public.encoded),2)
+            val now=System.currentTimeMillis()/1000
+            val transition=RootTransition(1,"syn443-root-transition",anchor.id,next.id,next.spki,2,now,now,now+3600)
+            store.rotate(Canonical.json.encodeToString(RootRotation(
+                signed(transition,anchor,offline,"syn443-root-transition+jws"),signed(transition,next,nextKey,"syn443-root-transition+jws"))))
+            assertNull(f.controller.adminDiscoveryContext())
+            assertEquals(device,accept(descriptor(7,meta,rootEpoch=2),next,nextKey))
+            val rotated=checkNotNull(f.controller.adminDiscoveryContext())
+            assertEquals(current.binding,rotated.binding);assertNotEquals(current.discovery.binding,rotated.discovery.binding)
+            assertEquals(device,accept(descriptor(8,null,rootEpoch=2),next,nextKey))
+            assertNull(f.controller.adminDiscoveryContext())
+            assertEquals(reauthenticated,f.journal.snapshot());unchanged(reauthBytes)
+            assertEquals(reauthPaths,f.server.paths)
+        }
+    }
+    @Test fun adminDiscoveryContextRejectsMainAndBinderNamedThreadsWithoutChangingDeviceState()=fixture {f->
+        val before=f.journal.snapshot();val paths=f.server.paths.toList()
+        assertNull(f.controller.adminDiscoveryContext()) // Actual instrumentation worker, not the main looper.
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            assertThrows(IllegalStateException::class.java){f.controller.adminDiscoveryContext()}
+        }
+        val binder=java.util.concurrent.Executors.newSingleThreadExecutor {r->Thread(r,"Binder:synthetic-admin-context")}
+        try {
+            assertTrue(binder.submit<Boolean> {
+                try {f.controller.adminDiscoveryContext();false}catch(_:IllegalStateException){true}
+            }.get(5,TimeUnit.SECONDS))
+        } finally {binder.shutdownNow();check(binder.awaitTermination(5,TimeUnit.SECONDS))}
+        assertEquals(before,f.journal.snapshot());assertEquals(paths,f.server.paths)
     }
     @Test fun runtimeUploadNeedsExplicitConsentAndCannotBorrowAnArtificialVpnOnHint() {
         fixture(reportVpnOn={true}) {f->
@@ -443,7 +582,7 @@ class LoginControllerTest {
         f.journal.commit(s,s.copy(revision=s.revision+1,operation=oldOp))
         f.server.receipts.clear();f.server.enrollBodies.clear();f.server.capabilities.remove(s.thumbprint);f.server.capabilityVersions.remove(s.thumbprint)
         f.server.requireCapabilityApproval=true;f.server.holdCapabilities=true
-        f.controller=LoginController.isolatedForTest(context,f.namespace,f.server)
+        f.controller=LoginController.isolatedForTest(context,f.namespace,f.server,anchor=f.testTrustAnchor)
         f.controller.recover();f.idle();val pending=f.journal.snapshot()
         assertEquals(LoginPhase.ENROLLING,pending.phase);assertEquals("PENDING",f.controller.status().getString("reason"))
         assertEquals(oldOp.body,f.server.enrollBodies[0]);assertNotEquals(oldOp.body,pending.operation!!.body)

@@ -34,6 +34,15 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/enrollment_camera_paths" />
         </provider>
         <activity android:name=".chat.SupportActivity" android:exported="false" />
+        <activity android:name=".admin.AdminActivity" android:exported="false" />
+        <activity android:name=".admin.AdminCallbackActivity" android:exported="true" android:excludeFromRecents="true" android:noHistory="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="syn443" android:host="admin" android:path="/oauth/callback" />
+            </intent-filter>
+        </activity>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -271,7 +271,9 @@
         "docs/managed-overlay.md#stable-default-peer-hostname",
         "native/engine-netbird/hostname_test.go",
         "docs/non-lte-acceptance-20261116.md",
-        "docs/mobile-admin-bootstrap.md"
+        "docs/mobile-admin-bootstrap.md",
+        "docs/mobile-admin-controller.md",
+        "docs/mobile-admin-key-journal.md"
       ]
     },
     {
@@ -1866,10 +1868,13 @@
       "status": "partial",
       "evidence": [
         "docs/mobile-administration.md",
-        "docs/non-lte-acceptance-20261116.md"
+        "docs/non-lte-acceptance-20261116.md",
+        "docs/mobile-admin-native-ui.md",
+        "docs/mobile-admin-controller.md",
+        "docs/mobile-admin-control-api.md"
       ],
-      "implementationScope": "Home navigation remains gated by a short-lived device-bound hint and trusted origin. Exact-source CI and v82 physical intent cases cover the dark device-targeted Custom Tab launch description; they are not an authenticated browser or native admin session.",
-      "remainingScope": "Menu entry, native administration and physical acceptance with the configured control plane."
+      "implementationScope": "Current v86 source preserves the granted home shortcut and adds separate-account authentication inside initially collapsed account settings. This entry grants no role and never reuses the VPN device session. Source tests are pending Actions.",
+      "remainingScope": "Accepted native and physical login/capability visibility, full menu/user administration and live configured control-plane acceptance."
     },
     {
       "id": "MOB-02",
@@ -1878,8 +1883,13 @@
       "evidence": [
         "docs/device-runtime-observations.md",
         "docs/non-lte-acceptance-20261116.md",
-        "docs/mobile-admin-bootstrap.md"
-      ]
+        "docs/mobile-admin-bootstrap.md",
+        "docs/mobile-admin-native-ui.md",
+        "docs/mobile-admin-controller.md",
+        "docs/mobile-admin-control-api.md"
+      ],
+      "implementationScope": "v86 source offers a bounded read-only authorized-device page and complete configuration/runtime views. Thirteen new JVM and34 Android cases are pending Actions; no live native workflow is accepted yet.",
+      "remainingScope": "User search, profile/policy assignment, editing, preview, publish/rollback, diagnosis actions, mobile UX and live authorization/physical acceptance."
     },
     {
       "id": "MOB-03",
@@ -1887,9 +1897,12 @@
       "status": "partial",
       "evidence": [
         "docs/mobile-admin-browser.md",
-        "docs/non-lte-acceptance-20261116.md"
+        "docs/non-lte-acceptance-20261116.md",
+        "docs/mobile-admin-native-ui.md",
+        "docs/mobile-admin-controller.md",
+        "docs/mobile-admin-control-api.md"
       ],
-      "remainingScope": "Exact-source CI and v82 physical URL/intent cases are recorded. Actual browser/Keycloak/MFA/device-card acceptance, full native quick administration, local editing/push and one-hand UX remain separate gates."
+      "remainingScope": "Exact84 source/main CI and20 physical UI/intent/simulation cases are accepted. Real authenticated browser/Keycloak/MFA/device-card acceptance, full native quick administration, editing/push and one-hand UX remain separate gates."
     },
     {
       "id": "MOB-04",
@@ -1898,16 +1911,22 @@
       "evidence": [
         "docs/mobile-admin-bootstrap.md",
         "docs/mobile-admin-auth.md",
-        "docs/non-lte-acceptance-20261116.md"
+        "docs/non-lte-acceptance-20261116.md",
+        "docs/mobile-admin-native-ui.md",
+        "docs/mobile-admin-controller.md",
+        "docs/mobile-admin-control-api.md"
       ],
-      "remainingScope": "No accepted native admin API workflow is recorded. Signed metadata/encrypted cache is a v83 source/emulator prerequisite only; the v84 separate OAuth core and23 required synthetic cases remain pending CI and app wiring. Atomic current-trust admission, separate durable key/session, native login/API/UI, server ACL/MFA and capability-refresh acceptance stay open."
+      "remainingScope": "v84/v85 OAuth/current-trust source gates passed. v86 key/controller/callback/read-only API/UI source and its required tests await Actions and physical/live Keycloak/ACL/MFA acceptance; mutation scopes and full capability handling remain open. RAM credentials require new administrative login after controller-process death."
     },
     {
       "id": "MOB-05",
       "text": "Карточка другого клиента показывает назначенные источники, эффективную политику, состояние синхронизации, доступную диагностику и историю. Редактирование явно называет адресата и не меняет VPN на телефоне администратора. Массовое изменение показывает число получателей и поддерживает пилотный rollout.",
       "status": "partial",
       "evidence": [
-        "docs/device-runtime-observations.md"
+        "docs/device-runtime-observations.md",
+        "docs/mobile-admin-native-ui.md",
+        "docs/mobile-admin-controller.md",
+        "docs/mobile-admin-control-api.md"
       ]
     },
     {
@@ -1916,7 +1935,10 @@
       "status": "partial",
       "evidence": [
         "docs/mobile-admin-browser.md",
-        "docs/non-lte-acceptance-20261116.md"
+        "docs/non-lte-acceptance-20261116.md",
+        "docs/mobile-admin-native-ui.md",
+        "docs/mobile-admin-controller.md",
+        "docs/mobile-admin-control-api.md"
       ],
       "remainingScope": "Exact-source CI and v82 physical URL/intent cases are recorded. Full one-hand workflows, browser/Keycloak acceptance, native quick administration and local editing/push remain open."
     },
@@ -1924,13 +1946,22 @@
       "id": "MOB-07",
       "text": "При отзыве административной роли, истечении сессии либо изменении области прав следующая операция получает отказ и UI обновляет capabilities. Локальный кэш роли не является разрешением на изменение сервера; ранее выданные короткоживущие сессии ограничены сроком и серверной проверкой статуса.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/mobile-admin-native-ui.md",
+        "docs/mobile-admin-controller.md",
+        "docs/mobile-admin-control-api.md"
+      ],
+      "remainingScope": "v86 source fences access/session/trust expiry and server denial without borrowing VPN credentials. Source tests, live role/scope revocation and complete UI capability refresh remain open."
     },
     {
       "id": "MOB-08",
       "text": "В интерфейсе доступны создание, отзыв и подтверждение привязки QR/ссылкой, контроль результата регистрации и быстрая блокировка потерянного устройства. Копирование приглашения - отдельное явное действие; клиент не отправляет приглашения другим людям автоматически.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/mobile-admin-native-ui.md",
+        "docs/mobile-admin-controller.md",
+        "docs/mobile-admin-control-api.md"
+      ]
     },
     {
       "id": "CHAT-01",
@@ -3285,10 +3316,10 @@
     "verified": "All clauses and required acceptance proved for the declared scope."
   },
   "evidenceSnapshot": {
-    "date": "2026-11-01",
+    "date": "2026-11-16",
     "inventory": "docs/implementation-status.md",
-    "androidSource": "e2291a71fa8491497f342fe26fbdf36788e2b59a",
-    "controlPlaneSource": "c1fae966a2a0030a2d6e949b35716d767ea79e4c",
-    "scope": "Product requirements; cross-component contributions are linked by pinned inventory, not implied local code."
+    "androidSource": "69ca262301bf08490e816a782881bb10cda613a6",
+    "controlPlaneSource": "63067b67e5c13ed74109b0ea855b7e77bfb7530c",
+    "scope": "Accepted component source checkpoints, not full-product or physical acceptance; current native86 source remains pending Actions and live integration."
   }
 }

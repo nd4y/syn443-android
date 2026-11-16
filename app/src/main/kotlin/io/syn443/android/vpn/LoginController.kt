@@ -11,6 +11,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.json.JSONObject
 import java.io.File
 import java.net.URI
@@ -235,6 +237,34 @@ class LoginController private constructor(private val context:android.app.Applic
         require(stopped)
     }
     internal fun loginIntent()=journal.snapshot()
+    /** Read-only worker adapter. It borrows no VPN/device session credential and
+     * never starts, refreshes, cancels or retires ordinary device authentication. */
+    internal fun adminDiscoveryContext():AdminDeviceContext? {
+        check(android.os.Looper.myLooper()!=android.os.Looper.getMainLooper() &&
+            !Thread.currentThread().name.startsWith("Binder:"))
+        fun active(s:LoginIntent)=s.phase in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING) &&
+            s.maybeRegistered && s.deviceId.isNotEmpty() && cancelledGeneration!=s.generation
+        fun fence(s:LoginIntent)=Identity.hash(Canonical.encode(buildJsonObject {
+            put("domain","syn443.admin-device-context.v1");put("generation",s.generation);put("reauthRevision",s.reauthRevision)
+            put("authority",s.authority);put("device",s.deviceId);put("owner",s.ownerTag)
+            put("keyAlias",s.keyAlias);put("thumbprint",s.thumbprint)
+        }).toByteArray(Charsets.UTF_8))
+        return try {
+            val captured=synchronized(commands) {
+                val state=journal.snapshot();val owned=cached
+                if(!active(state) || owned==null ||
+                    fence(owned.first)!=fence(state))return@synchronized null
+                val bootstrap=owned.second.bootstrap.copy(roots=owned.second.bootstrap.roots.toMap())
+                if(Identity.bootstrapAuthority(bootstrap)!=state.authority)return@synchronized null
+                fence(state) to bootstrap
+            } ?: return null
+            val discovery=bootstrapTrust.adminDiscovery(captured.second) ?: return null
+            synchronized(commands) {
+                val current=journal.snapshot()
+                if(active(current) && fence(current)==captured.first)AdminDeviceContext(captured.first,discovery) else null
+            }
+        }catch(_:Exception){null}
+    }
     /** Memory/public-intent reads only. Never call StateStore, Keystore or network in this block. */
     internal fun <T> assignedRead(block:(LoginIntent)->T):T=synchronized(commands) {block(journal.snapshot())}
     internal fun ownsPolicy()=runCatching {journal.snapshot().phase!=LoginPhase.SIGNED_OUT}.getOrDefault(true)
