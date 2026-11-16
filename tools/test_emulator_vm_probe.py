@@ -103,6 +103,19 @@ class Fixture:
 
 
 class CapturedVmProbeTest(unittest.TestCase):
+    def test_failure_operation_codes_are_closed_labels_without_arguments_or_outputs(self):
+        cases = [(('root',), 'root'), (('unroot',), 'unroot'), (('wait-for-device',), 'wait_for_device'),
+            (('shell', 'am', 'broadcast', 'synthetic-foreign-value'), 'probe_broadcast'),
+            (('shell', 'pidof', probe.PACKAGE), 'probe_pid'), (('shell', 'pidof', 'system_server'), 'system_pid'),
+            (('install', 'synthetic-foreign-value'), 'install'), (('shell', 'getprop', 'synthetic-foreign-value'), 'property'),
+            (('shell', 'stop'), 'framework_stop'), (('shell', 'start'), 'framework_start'),
+            (('shell', 'settings', 'get', 'global', 'boot_count'), 'boot_counter'),
+            (('shell', 'pm', 'synthetic-foreign-value'), 'package_inventory'),
+            (('synthetic-foreign-value',), 'other')]
+        for args, expected in cases:
+            self.assertEqual(expected, probe.operation_code(args))
+            self.assertNotIn('synthetic-foreign-value', probe.operation_code(args))
+
     def failure(self, reason, action):
         with self.assertRaises(probe.ProbeError) as caught:
             action()

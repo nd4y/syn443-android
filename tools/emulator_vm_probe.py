@@ -276,6 +276,30 @@ def check_artifact():
     return document
 
 
+def operation_code(items):
+    """Only fixed labels may leave this runner; no raw arguments or output."""
+    args = tuple(items)
+    if args in (('root',), ('unroot',), ('reboot',), ('wait-for-device',), ('install',)):
+        return args[0].replace('-', '_')
+    if args[:1] == ('install',): return 'install'
+    if args[:3] == ('shell', 'am', 'broadcast'): return 'probe_broadcast'
+    if args == ('shell', 'pidof', PACKAGE): return 'probe_pid'
+    if args == ('shell', 'pidof', 'system_server'): return 'system_pid'
+    if args[:2] == ('shell', 'getprop'): return 'property'
+    if args[:2] == ('shell', 'id'): return 'shell_identity'
+    if args[:2] == ('shell', 'pm'): return 'package_inventory'
+    if args[:2] == ('shell', 'dumpsys'): return 'framework_dump'
+    if args[:2] == ('shell', 'settings'): return 'boot_counter'
+    if args[:2] == ('shell', 'service'): return 'framework_service'
+    if args[:2] == ('shell', 'cat'): return 'boot_id'
+    if args[:2] == ('shell', 'sha256sum'): return 'apk_digest'
+    if args[:2] == ('shell', 'stop'): return 'framework_stop'
+    if args[:2] == ('shell', 'start'): return 'framework_start'
+    if args[:2] == ('emu', 'avd'): return 'avd_identity'
+    if args == ('get-serialno',): return 'serial_identity'
+    return 'other'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -292,6 +316,7 @@ def main():
             return 1
     captures, reason, no_production_app = [], 'none', False
     last_failure = {'operation': 'none', 'kind': 'none'}
+    phase = 'preflight'
     try:
         need(re.fullmatch(r'[a-f0-9]{40}', args.source) is not None, 'artifact')
         need(os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('SYN443_CI_AVD') == 'syn443-ci', 'environment')
@@ -301,11 +326,7 @@ def main():
         need(re.fullmatch(r'emulator-[0-9]+', selected) is not None, 'identity')
 
         def adb(*items, timeout=5):
-            prefix = tuple(items[:3])
-            operation = 'probe_broadcast' if prefix == ('shell', 'am', 'broadcast') else (
-                'probe_pid' if tuple(items) == ('shell', 'pidof', PACKAGE) else (
-                'system_pid' if tuple(items) == ('shell', 'pidof', 'system_server') else (
-                'reboot' if tuple(items) == ('reboot',) else 'guard_or_framework')))
+            operation = operation_code(items)
             try:
                 reply = subprocess.run([binary, '-s', selected, *items], capture_output=True, timeout=timeout)
                 if reply.returncode:
@@ -321,21 +342,24 @@ def main():
         need(APK.is_file() and not APK.is_symlink() and 0 < APK.stat().st_size <= 16*1024*1024 and not OUTPUT.exists(), 'artifact')
         apk_digest = hashlib.sha256(APK.read_bytes()).hexdigest().encode('ascii')
         try:
+            phase = 'preparation'
             prepare(adb)  # Existing fresh/uninstalled guard stays unchanged.
         except AssertionError:
             raise ProbeError('framework') from None
+        phase = 'installation'
         need(guard(adb, probe=False) == context, 'identity')
         need(b'Success' in adb('install', '--no-incremental', str(APK), timeout=60), 'probe_package')
         checkpoint = package(adb)
         need(checkpoint[1] == apk_digest, 'probe_package')
         previous = None
         for stage in range(3):
+            phase = 'capture_'+str(stage)
             previous = stage_capture(adb, context, checkpoint, stage, captures, previous=previous)
     except ProbeError as error:
         reason = error.reason
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, UnicodeError):
         reason = 'adb'
-        print(json.dumps({'failedOperation': last_failure['operation'], 'failureKind': last_failure['kind'],
+        print(json.dumps({'phase': phase, 'failedOperation': last_failure['operation'], 'failureKind': last_failure['kind'],
                           'completedCaptures': len(captures)}))
     except Exception:
         reason = 'artifact'
