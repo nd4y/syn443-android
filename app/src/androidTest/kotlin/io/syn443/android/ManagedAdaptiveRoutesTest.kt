@@ -2,6 +2,7 @@ package io.syn443.android
 
 import io.syn443.android.vpn.ManagedAdaptiveRoutes
 import io.syn443.android.vpn.RouteSnapshot
+import io.syn443.decision.Decision
 import io.syn443.decision.NetworkMode
 import io.syn443.policy.Policy
 import io.syn443.recovery.RouteScope
@@ -325,6 +326,162 @@ class ManagedAdaptiveRoutesTest {
                 assertFalse(raw.contains("192.0.2.1")); assertFalse(raw.contains("192.0.2.7"))
                 assertFalse(raw.contains("catalogueB64")); assertFalse(raw.contains("graphB64"))
             }
+        }
+    }
+
+    @Test fun currentCheckFailureRequiresFreshBoundReplacementAndMonotonicTime() {
+        fun failed(h:Harness,probe:JSONObject,now:Long,code:String="dial_failed",selected:Boolean=true,completed:Any?=now) =
+            h.report(h.result(probe,"check_failed",selected=selected).put("checkCode",code).put("checkCompletedBootMs",completed),now)
+        fun samePath(a:JSONObject,b:JSONObject)=a.getJSONArray("hops").toString()==b.getJSONArray("hops").toString()
+        fun initial(h:Harness):JSONObject {h.ready();return checkNotNull(h.tick(1000)).also {h.selected(it,1000,100)}}
+
+        Harness(config()).use {h->
+            val a=initial(h)
+            val recheck=checkNotNull(h.tick(61000));assertTrue(samePath(a,recheck))
+            failed(h,recheck,61000)
+            val failedRow=h.view().getJSONArray("routes").getJSONObject(0)
+            assertEquals("failed",failedRow.getString("state"));assertEquals("check_failed",failedRow.getString("reason"))
+            val b=checkNotNull(h.tick(66000));assertFalse(samePath(a,b))
+            val before=h.commands.size
+            h.report(h.result(b,"verified",500).put("group","other-group"),66000)
+            h.report(h.result(b,"verified",500).put("hops",JSONArray().put("other-hop")),66000)
+            assertEquals(before,h.commands.size)
+            // A real failure followed by a fresh replacement does not require
+            // that the replacement also beats A's old healthy latency.
+            assertEquals("commit",h.measured(b,66000,500).getString("command"))
+            assertFalse(h.view().getBoolean("requiredReady"))
+            h.report(h.result(b,"selected",500,selected=true),66001)
+            val row=h.view().getJSONArray("routes").getJSONObject(0)
+            assertEquals("working",row.getString("state"))
+            assertEquals(b.getJSONArray("hops").toString(),row.getJSONArray("measuredPath").toString())
+            assertEquals(500,row.getInt("latencyMs"))
+        }
+        Harness(config()).use {h->
+            h.ready();val first=checkNotNull(h.tick(1000));failed(h,first,1000,selected=false)
+            val row=h.view().getJSONArray("routes").getJSONObject(0)
+            assertEquals("failed",row.getString("state"));assertEquals("check_failed",row.getString("reason"))
+        }
+        Harness(config()).use {h->
+            val a=initial(h)
+            // Repeated admitted failures without any successful replacement
+            // must not quarantine A or B, even when every target is down.
+            for(i in 0..1) {
+                val now=61000L+i*10000
+                val current=checkNotNull(h.tick(now,false,false));assertTrue(samePath(a,current));failed(h,current,now)
+                val reserve=checkNotNull(h.tick(now+5000,false,false));assertFalse(samePath(a,reserve))
+                failed(h,reserve,now+5000,selected=true)
+                assertEquals(1,h.commands.count {it.getString("command")=="commit"})
+            }
+            assertTrue(samePath(a,checkNotNull(h.tick(81000,false,false))))
+        }
+        for(checkCode in listOf("","dial_failed","constructor_budget")) {
+            Harness(config()).use {h->
+                val a=prepareHealthy(h)
+                // Admission/capacity/construction/budget uncertainty remains
+                // probe_unavailable, irrespective of an irrelevant extra code.
+                repeat(3) {i->
+                    val now=301000L+i*5000
+                    val current=checkNotNull(h.tick(now,false,false));assertTrue(samePath(a,current))
+                    h.report(h.result(current,"probe_unavailable",selected=true).put("checkCode",checkCode),now)
+                    assertEquals("incomplete",h.view().getJSONArray("routes").getJSONObject(0).getString("state"))
+                }
+                val reserve=checkNotNull(h.tick(316000));assertFalse(samePath(a,reserve))
+                assertEquals("discard",h.measured(reserve,316000,500).getString("command"))
+            }
+        }
+        Harness(config()).use {h->
+            val a=initial(h);val current=checkNotNull(h.tick(61000))
+            val before=h.commands.size
+            for(code in listOf("","unknown","tls failure at private.example.invalid"))failed(h,current,61000,code)
+            h.report(h.result(current,"unknown_failure",selected=true).put("checkCode","dial_failed"),61000)
+            assertEquals(before,h.commands.size);assertNull(h.tick(66000))
+            h.report(h.result(current,"probe_unavailable",selected=true),66000)
+            assertTrue(samePath(a,checkNotNull(h.tick(71000,false,false))))
+            assertFalse(h.view().toString().contains("private.example.invalid"))
+        }
+        Harness(config()).use {h->
+            val a=initial(h);failed(h,checkNotNull(h.tick(61000)),61000)
+            val b=checkNotNull(h.tick(66000));assertFalse(samePath(a,b))
+            // The B worker is still within its owner deadline, but A's failure
+            // is too old to attribute or bypass the latency hold.
+            assertEquals("discard",h.measured(b,92001,500).getString("command"))
+        }
+        Harness(config()).use {h->
+            val a=initial(h);val current=checkNotNull(h.tick(61000))
+            val before=h.commands.size
+            for(stamp in listOf(null,0L,-1L,60000L,61001L,61000.0,"61000"))failed(h,current,61000,completed=stamp)
+            assertEquals(before,h.commands.size);assertNull(h.tick(66000))
+            failed(h,current,89000,completed=61000L)
+            val b=checkNotNull(h.tick(94000));assertFalse(samePath(a,b))
+            // Arrival 28s late must not grant A another fresh 30s window.
+            assertEquals("discard",h.measured(b,94000,500).getString("command"))
+        }
+        Harness(config(groupCount=2)).use {h->
+            h.ready()
+            val a=checkNotNull(h.tick(1000));h.selected(a,1000)
+            h.selected(checkNotNull(h.tick(6000)),6000)
+            for(i in 1..4) {
+                val now=1000L+i*60000
+                h.selected(checkNotNull(h.tick(now)),now)
+                h.selected(checkNotNull(h.tick(now+5000)),now+5000)
+            }
+            val current=checkNotNull(h.tick(301000,false,false));assertEquals(a.getString("group"),current.getString("group"))
+            failed(h,current,301000)
+            val unrelated=checkNotNull(h.tick(306000));assertNotEquals(current.getString("group"),unrelated.getString("group"))
+            assertEquals("discard",h.measured(unrelated,306000,500).getString("command"))
+        }
+        Harness(config()).use {h->
+            val a=prepareHealthy(h)
+            failed(h,checkNotNull(h.tick(301000,false,false)),301000)
+            val b=checkNotNull(h.tick(306000,false,false));assertFalse(samePath(a,b));failed(h,b,306000)
+            val confirmed=checkNotNull(h.tick(311000,false,false));assertTrue(samePath(a,confirmed));h.selected(confirmed,311000)
+            val reserve=checkNotNull(h.tick(316000));assertFalse(samePath(a,reserve))
+            // Fresh A confirmation invalidates its still-young failure pairing.
+            assertEquals("discard",h.measured(reserve,316000,500).getString("command"))
+        }
+        Harness(config()).use {h->
+            val a=prepareHealthy(h);val b=checkNotNull(h.tick(301000))
+            assertFalse(samePath(a,b));failed(h,b,301000,"tls_failed")
+            val view=h.view();assertTrue(view.getBoolean("requiredReady"))
+            assertEquals(a.getJSONArray("hops").toString(),view.getJSONArray("routes").getJSONObject(0).getJSONArray("measuredPath").toString())
+        }
+        for(changeEpoch in listOf(false,true)) {
+            Harness(config()).use {h->
+                initial(h);failed(h,checkNotNull(h.tick(61000)),61000)
+                val b=checkNotNull(h.tick(66000));val before=h.commands.size
+                val report=h.result(b,"verified",500)
+                if(changeEpoch)report.put("nativeEpoch",h.epoch+1) else report.put("scope",Policy.hash("foreign-native-scope"))
+                h.report(report,66000)
+                assertEquals(before,h.commands.size);assertNull(h.tick(71000))
+            }
+        }
+        Harness(config()).use {h->
+            val a=initial(h);failed(h,checkNotNull(h.tick(61000)),61000)
+            val b=checkNotNull(h.tick(66000));val old=h.result(b,"verified",500)
+            h.rebind(h.scope,NetworkMode.CELLULAR)
+            h.report(old,67000)
+            assertEquals("configure",h.commands.last().getString("command"))
+            h.epoch=2;h.nativeScope=Policy.hash("fresh-mode-owner");h.ready(68000)
+            val fresh=checkNotNull(h.tick(71000,false,false));assertTrue(samePath(a,fresh));h.selected(fresh,71000)
+            assertTrue(h.view().getBoolean("requiredReady"))
+        }
+        for(bad in listOf(-1L,999L,Decision.MAX_TIME-599999,Long.MAX_VALUE)) {
+            Harness(config()).use {h->
+                initial(h);h.tick(bad)
+                assertTrue(h.controller.requiresRetirement());h.controller.force();assertNull(h.tick(10000))
+                assertEquals(1,h.starts().size)
+            }
+        }
+        Harness(config()).use {h->
+            initial(h);h.tick(5000);h.rebind(h.scope.copy(network=h.scope.network+1))
+            h.ready(4000)
+            assertTrue(h.controller.requiresRetirement());assertNull(h.tick(6000));assertEquals(1,h.starts().size)
+        }
+        Harness(config()).use {h->
+            val upper=Decision.MAX_TIME-600000
+            h.ready(upper);assertNotNull(h.tick(upper))
+            h.report(h.status(running=true),upper+1)
+            assertTrue(h.controller.requiresRetirement());assertEquals(1,h.starts().size)
         }
     }
 }

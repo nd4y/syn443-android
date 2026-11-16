@@ -154,20 +154,27 @@ func TestPrivateSelectionUncertainExitEvidenceKeepsCurrentAuthority(t *testing.T
 	selectionExitActivate(t, s, candidate, roots)
 	flow := selectionExitFlow(t, s, address)
 	for _, tc := range []struct {
-		name  string
-		raw   string
-		roots *x509.CertPool
-		late  bool
+		name      string
+		raw       string
+		roots     *x509.CertPool
+		late      bool
+		checkCode string
 	}{
-		{"untrusted TLS", `{"ip":"192.0.2.1","country":"DE"}`, nil, false},
-		{"invalid target evidence", `{"ip":"192.0.2.1","country":null}`, roots, false},
-		{"late mismatch", `{"ip":"192.0.2.1","country":"DE"}`, roots, true},
+		{"untrusted TLS", `{"ip":"192.0.2.1","country":"DE"}`, nil, false, "tls_failed"},
+		{"invalid target evidence", `{"ip":"192.0.2.1","country":null}`, roots, false, "exit_evidence_invalid"},
+		{"late mismatch", `{"ip":"192.0.2.1","country":"DE"}`, roots, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body.Store(tc.raw)
 			late.Store(tc.late)
-			if proof, err := s.probeWithRoots(context.Background(), candidate, tc.roots); proof != nil || err != errPrivatePath {
+			proof, err := s.probeWithRoots(context.Background(), candidate, tc.roots)
+			if proof != nil {
 				t.Fatal("uncertain target minted positive evidence")
+			}
+			if tc.checkCode != "" {
+				requirePrivateCheckedFailure(t, err, tc.checkCode)
+			} else if err != errPrivatePath {
+				t.Fatal("late target evidence acquired attributed failure")
 			}
 			p.mu.Lock()
 			valid := s.active == candidate.entry && s.flowEpoch == 1

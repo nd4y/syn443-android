@@ -69,6 +69,99 @@ func awaitPrivateAdaptiveOwner(t *testing.T, o *privateAdaptiveOwner) privateAda
 	return readPrivateAdaptiveOwner(t, o)
 }
 
+func TestPrivateAdaptiveOwnerReportsFreshCheckFailuresWithoutProofOrProxyVerdict(t *testing.T) {
+	for _, lateRelease := range []bool{false, true} {
+		t.Run(fmt.Sprintf("late-release-%t", lateRelease), func(t *testing.T) {
+			var fixture privateAdaptiveOwnerFixture
+			var releases atomic.Int32
+			fixture = newPrivateAdaptiveOwnerFixture(t, func(bool) (func(), bool) {
+				return func() {
+					if releases.Add(1) == 2 && lateRelease {
+						fixture.now.Add(30_000)
+					}
+				}, true
+			})
+			o := fixture.owner
+			epoch, scope, _ := o.context()
+			if !o.start("healthy", epoch, scope, "inside", fixture.path) {
+				t.Fatal("healthy request denied")
+			}
+			proof := awaitPrivateAdaptiveOwner(t, o)
+			if proof.Code != "verified" || !o.commit("healthy", proof.Receipt, epoch, scope, 1000) {
+				t.Fatal("healthy actual chain was not selected")
+			}
+			flow, e := fixture.managed.DialContext(context.Background(), "tcp", M.ParseSocksaddr(fixture.address))
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer flow.Close()
+			privateAdaptiveEcho(t, flow, "actual-selected-chain-before-negative-check")
+			_ = fixture.entry.listener.Close() // Existing accepted flow remains alive; a new probe is refused.
+			completed := fixture.now.Load()
+			if !o.start("observed-failure", epoch, scope, "inside", fixture.path) {
+				t.Fatal("fresh same-group check denied")
+			}
+			report := awaitPrivateAdaptiveOwner(t, o)
+			if report.Receipt != "" || !report.GroupSelected || o.commit("observed-failure", proof.Receipt, epoch, scope, 1000) {
+				t.Fatal("negative check withdrew selection or acquired receipt authority")
+			}
+			if lateRelease {
+				if report.Code != "probe_unavailable" || report.CheckCode != "" || report.CheckCompletedBootMS != 0 || strings.Contains(o.snapshot(), "checkCompletedBootMs") {
+					t.Fatal("owner-deadline-expired observation gained attribution")
+				}
+			} else if report.Code != "check_failed" || report.CheckCode != "dial_failed" || report.CheckCompletedBootMS != completed || completed <= 0 {
+				t.Fatal("actual refused adapter check lost its finite observation code")
+			}
+			privateAdaptiveEcho(t, flow, "target-failure-alone-never-withdraws-active-flow")
+			if raw := o.snapshot(); strings.Contains(raw, fixture.address) || strings.Contains(raw, "127.0.0.1:") {
+				t.Fatal("observed check report exposed a target")
+			}
+			if !lateRelease {
+				if debug := fmt.Sprintf("%v %#v", report, report); strings.Contains(debug, fmt.Sprint(completed)) || strings.Contains(debug, scope) {
+					t.Fatal("ordinary diagnostic formatting exposed private observation metadata")
+				}
+				fixture.now.Add(30_000)
+				boundary := readPrivateAdaptiveOwner(t, o)
+				if boundary.Code != "check_failed" || boundary.CheckCompletedBootMS != completed {
+					t.Fatal("an exact 30-second completion bound was not preserved")
+				}
+				fixture.now.Add(1)
+				late := readPrivateAdaptiveOwner(t, o)
+				if late.Code != "probe_unavailable" || late.CheckCode != "" || late.CheckCompletedBootMS != 0 || strings.Contains(o.snapshot(), "checkCompletedBootMs") {
+					t.Fatal("a delayed status read restarted the failure freshness window")
+				}
+				privateAdaptiveEcho(t, flow, "expired-observation-does-not-withdraw-owned-flow")
+			}
+		})
+	}
+	t.Run("expired work budget starts no target check", func(t *testing.T) {
+		var f privateAdaptiveOwnerFixture
+		f = newPrivateAdaptiveOwnerFixture(t, func(bool) (func(), bool) { f.now.Add(30_000); return func() {}, true })
+		epoch, scope, _ := f.owner.context()
+		if !f.owner.start("expired-before-dispatch", epoch, scope, "inside", f.path) {
+			t.Fatal("bounded request denied")
+		}
+		report := awaitPrivateAdaptiveOwner(t, f.owner)
+		if report.Code != "probe_unavailable" || report.CheckCode != "" || report.CheckCompletedBootMS != 0 || strings.Contains(f.owner.snapshot(), "checkCompletedBootMs") || report.Receipt != "" || f.entry.calls.Load() != 0 || f.exit.calls.Load() != 0 {
+			t.Fatal("expired aggregate work budget became a target failure")
+		}
+	})
+	t.Run("constructor callback cannot forge a checked failure", func(t *testing.T) {
+		f := newPrivateAdaptiveOwnerFixture(t, nil)
+		f.owner.hub.create = func(context.Context, string, string, string) (adapter.Outbound, error) {
+			return nil, &privateCheckedFailure{code: "dial_failed", completedBootMS: f.now.Load()}
+		}
+		epoch, scope, _ := f.owner.context()
+		if !f.owner.start("forged-constructor", epoch, scope, "inside", f.path) {
+			t.Fatal("bounded request denied")
+		}
+		report := awaitPrivateAdaptiveOwner(t, f.owner)
+		if report.Code != "probe_unavailable" || report.CheckCode != "" || report.CheckCompletedBootMS != 0 || strings.Contains(f.owner.snapshot(), "checkCompletedBootMs") || report.Receipt != "" || f.entry.calls.Load() != 0 {
+			t.Fatal("constructor error forged actual check attribution")
+		}
+	})
+}
+
 func TestPrivateAdaptiveOwnerRealTwoHopReceiptAndLocalContextBindings(t *testing.T) {
 	var admitted, released atomic.Int32
 	var recovery sync.Map

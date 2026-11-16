@@ -2,10 +2,14 @@ package bridge
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -298,10 +302,20 @@ func TestPrivateSelectionBlockedProbeCannotBeReplacedOrPublishLate(t *testing.T)
 			t.Fatal(e)
 		}
 		defer s.Close()
-		if proof, e := s.probe(context.Background(), c); proof != nil || e != errPrivatePath {
+		proof, e := s.probe(context.Background(), c)
+		if proof != nil {
 			t.Fatal("lazy unconnected socket minted positive proof")
 		}
+		requirePrivateCheckedFailure(t, e, "dial_failed")
 	})
+}
+
+func requirePrivateCheckedFailure(t *testing.T, err error, code string) {
+	t.Helper()
+	var checked *privateCheckedFailure
+	if !errors.As(err, &checked) || checked == nil || checked.code != code || checked.completedBootMS <= 0 {
+		t.Fatal("expected exact admitted-check observation was not preserved")
+	}
 }
 
 type privateFailedHandshake struct{ net.Conn }
@@ -310,3 +324,137 @@ func (*privateFailedHandshake) NeedHandshake() bool         { return true }
 func (*privateFailedHandshake) Write([]byte) (int, error)   { return 0, errPrivatePath }
 func (*privateFailedHandshake) Close() error                { return nil }
 func (*privateFailedHandshake) SetDeadline(time.Time) error { return nil }
+
+func TestPrivateCheckedFailureRequiresAdmittedDispatchWithoutRevokingActiveFlows(t *testing.T) {
+	t.Run("actual refused TCP target", func(t *testing.T) {
+		listener, e := net.Listen("tcp", "127.0.0.1:0")
+		if e != nil {
+			t.Fatal(e)
+		}
+		address := listener.Addr().String()
+		_ = listener.Close()
+		var calls atomic.Int32
+		var now atomic.Int64
+		now.Store(bootMillis())
+		var observed *privateProbeDialObservation
+		node := &privateTrafficTestNode{dial: func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
+			calls.Add(1)
+			observed, _ = ctx.Value(privateProbeDialKey{}).(*privateProbeDialObservation)
+			conn, err := routeTestDial(ctx, network, dst)
+			now.Add(7)
+			return conn, err
+		}}
+		p, c, scope := privateTrafficCandidate(t, node)
+		p.lease.clock = now.Load
+		if e := p.lease.set(now.Load() + 1_000_000); e != nil {
+			t.Fatal(e)
+		}
+		s, e := newPrivatePathSelector(p, scope, "one", []routeCheck{{Method: "tcp", Target: address}})
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer s.Close()
+		proof, e := s.probe(context.Background(), c)
+		if proof != nil || calls.Load() != 1 {
+			t.Fatal("refused target acquired proof or skipped its actual adapter dispatch")
+		}
+		requirePrivateCheckedFailure(t, e, "dial_failed")
+		var checked *privateCheckedFailure
+		if !errors.As(e, &checked) || checked.completedBootMS != now.Load() {
+			t.Fatal("failure did not preserve the actual guarded BOOTTIME completion")
+		}
+		if observed == nil || !observed.dispatched.Load() || !observed.completed.Load() || !observed.returnedError.Load() || observed.validConn.Load() {
+			t.Fatal("refused TCP outcome was not recorded structurally")
+		}
+		if text := fmt.Sprintf("%v %#v", e, e); strings.Contains(text, address) || strings.Contains(text, "127.0.0.1") || strings.Contains(text, fmt.Sprint(checked.completedBootMS)) {
+			t.Fatal("check error exposed a target")
+		}
+	})
+	for _, method := range []string{"ssh_banner", "tls"} {
+		t.Run(method, func(t *testing.T) {
+			echo := listenWire(t, func(c net.Conn) { _, _ = io.Copy(c, c) })
+			address := echo.listener.Addr().String()
+			node := &privateTrafficTestNode{dial: routeTestDial}
+			p, c, scope := privateTrafficCandidate(t, node)
+			var roots *x509.CertPool
+			var target string
+			var bad atomic.Bool
+			want := "ssh_banner_mismatch"
+			if method == "ssh_banner" {
+				banner := listenWire(t, func(conn net.Conn) {
+					if bad.Load() {
+						_, _ = io.WriteString(conn, "WRONG-1.0-fixture\r\n")
+					} else {
+						_, _ = io.WriteString(conn, "SSH-2.0-fixture\r\n")
+					}
+				})
+				target = banner.listener.Addr().String()
+			} else {
+				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
+				defer server.Close()
+				target = server.URL
+				roots = x509.NewCertPool()
+				roots.AddCert(server.Certificate())
+				want = "tls_failed"
+			}
+			s, e := newPrivatePathSelector(p, scope, "one", []routeCheck{{Method: method, Target: target}})
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer s.Close()
+			proof, e := s.probeWithRoots(context.Background(), c, roots)
+			if e != nil || !s.selectVerified(proof, 1000) {
+				t.Fatal("healthy actual check did not authorize initial selection", e)
+			}
+			flow, e := s.dialTCP(context.Background(), "tcp", M.ParseSocksaddr(address))
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer flow.Close()
+			selectionExitEcho(t, flow, "before-observed-target-failure")
+			bad.Store(true)
+			proof, e = s.probeWithRoots(context.Background(), c, nil)
+			if proof != nil {
+				t.Fatal("negative target observation minted a selection proof")
+			}
+			requirePrivateCheckedFailure(t, e, want)
+			p.mu.Lock()
+			stillSelected := s.active == c.entry && s.flowEpoch == 1
+			p.mu.Unlock()
+			if !stillSelected {
+				t.Fatal("target failure was treated as immediate path withdrawal")
+			}
+			selectionExitEcho(t, flow, "target-failure-alone-preserves-owned-flow")
+		})
+	}
+	for _, code := range []string{"ok", "unsupported", "cancelled", "outbound_unavailable", "exit_ip_mismatch", "exit_country_mismatch", "unknown-private-target"} {
+		if privateCheckedProbeCode(code) {
+			t.Fatal("non-attributable result entered the fixed failed-check enum")
+		}
+	}
+	t.Run("late aggregate wrong banner remains unknown", func(t *testing.T) {
+		var now atomic.Int64
+		now.Store(bootMillis())
+		var calls atomic.Int32
+		target := listenWire(t, func(conn net.Conn) { now.Add(1000); _, _ = io.WriteString(conn, "WRONG-1.0-fixture\r\n") })
+		node := &privateTrafficTestNode{dial: func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
+			calls.Add(1)
+			return routeTestDial(ctx, network, dst)
+		}}
+		p, c, scope := privateTrafficCandidate(t, node)
+		p.lease.clock = now.Load
+		if e := p.lease.set(now.Load() + 1_000_000); e != nil {
+			t.Fatal(e)
+		}
+		s, e := newPrivatePathSelector(p, scope, "one", []routeCheck{{Method: "ssh_banner", Target: target.listener.Addr().String()}})
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer s.Close()
+		before := now.Load()
+		work := context.WithValue(context.Background(), privateAdaptiveWorkDeadlineKey{}, before+500)
+		if proof, e := s.probe(work, c); proof != nil || e != errPrivatePath || calls.Load() != 1 || now.Load() != before+1000 {
+			t.Fatal("aggregate-expired actual target failure gained attribution or skipped its check")
+		}
+	})
+}

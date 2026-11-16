@@ -35,6 +35,16 @@ flows. An uncertain target/reserve result cannot overwrite another healthy path.
 Context-specific negative memory never classifies an unattributed timeout as a
 confirmed bad proxy.
 
+A failed check is a separate observation with a compiled finite reason and an
+actual native BOOTTIME completion timestamp. Local admission/operation limits,
+constructor failures, cancellation, expired budgets and panic remain uncertain.
+Only a fresh independently checked replacement for the same group and native
+context may trigger immediate recovery. The old path enters context-specific
+negative memory after the native selection acknowledgement, and only within30s
+of the actual failed check completion; delayed delivery cannot refresh it. A
+failed reserve never degrades an independently healthy active path. Backward or
+out-of-range coordinator clocks require actual host retirement.
+
 Initial recovery takes priority over maintenance. The coordinator bounds attempts
 to8/minute and128/hour across its groups and context rebinds. Healthy metered
 maintenance confirms the current route. Optional unmetered exploration requires
@@ -48,9 +58,9 @@ identity and restricted-cellular detection remain separate work. Availability of
 this TCP primitive does not claim all four application modes or physical LTE
 acceptance. No LTE device test is authorized in this stage.
 
-Actions must exercise42 required native roots in ordinary/race suites, the public
+Actions must exercise45 required native roots in ordinary/race suites, the public
 candidate graph case, eight new codec JVM cases, three new signed policy cases
-and15 new Android config/controller cases. Android matrices require258 actual
+and16 new Android config/controller cases. Android matrices require259 actual
 outcomes each on API29/35/37; all prior lifecycle/privacy/coverage gates remain.
 Exact-source CI, signed-policy deployment and real Xperia TUN/chain/recovery
 acceptance remain distinct release gates. All fixtures are synthetic.

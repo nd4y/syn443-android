@@ -41,21 +41,26 @@ type privateAdaptiveOwner struct {
 }
 
 type privateAdaptiveOwnerReport struct {
-	Request       string   `json:"request"`
-	Running       bool     `json:"running"`
-	NativeEpoch   uint64   `json:"nativeEpoch"`
-	Scope         string   `json:"scope"`
-	PolicyScope   string   `json:"policyScope"`
-	Ready         bool     `json:"ready"`
-	Group         string   `json:"group"`
-	Hops          []string `json:"hops"`
-	Code          string   `json:"code"`
-	ElapsedMS     int64    `json:"elapsedMs"`
-	ProbeMS       int64    `json:"probeMs"`
-	Receipt       string   `json:"receipt"`
-	GroupSelected bool     `json:"groupSelected"`
-	WorkAgeMS     int64    `json:"workAgeMs"`
+	Request              string   `json:"request"`
+	Running              bool     `json:"running"`
+	NativeEpoch          uint64   `json:"nativeEpoch"`
+	Scope                string   `json:"scope"`
+	PolicyScope          string   `json:"policyScope"`
+	Ready                bool     `json:"ready"`
+	Group                string   `json:"group"`
+	Hops                 []string `json:"hops"`
+	Code                 string   `json:"code"`
+	CheckCode            string   `json:"checkCode"`
+	CheckCompletedBootMS int64    `json:"checkCompletedBootMs,omitempty"`
+	ElapsedMS            int64    `json:"elapsedMs"`
+	ProbeMS              int64    `json:"probeMs"`
+	Receipt              string   `json:"receipt"`
+	GroupSelected        bool     `json:"groupSelected"`
+	WorkAgeMS            int64    `json:"workAgeMs"`
 }
+
+func (privateAdaptiveOwnerReport) String() string     { return "PrivateAdaptiveOwnerReport([redacted])" }
+func (r privateAdaptiveOwnerReport) GoString() string { return r.String() }
 
 func newPrivateAdaptiveOwner(r *privateAdaptiveReference, policyScope, mode, wireHash string, admit privateAdaptiveAdmission) (*privateAdaptiveOwner, error) {
 	if r == nil || !privateScopeID.MatchString(policyScope) || !privateScopeID.MatchString(wireHash) || !privateAdaptiveMode(mode) {
@@ -303,14 +308,20 @@ func (o *privateAdaptiveOwner) run(ctx context.Context, cancel context.CancelFun
 			}
 			return
 		}
-		o.report.Code, o.report.ElapsedMS = "probe_unavailable", 0
-		if errors.Is(err, errPrivateExitMismatch) && !panicked && ctx.Err() == nil {
+		o.report.Code, o.report.CheckCode, o.report.CheckCompletedBootMS, o.report.ElapsedMS = "probe_unavailable", "", 0, 0
+		fresh := !panicked && released && ctx.Err() == nil && started >= 0 && now >= started && now-started < 30_000 && privateAdaptiveWorkCurrent(ctx, o.hub.pool.lease.clock)
+		if errors.Is(err, errPrivateExitMismatch) && fresh {
 			o.report.Code = "exit_mismatch"
+		}
+		var failure *privateCheckedFailure
+		if fresh && errors.As(err, &failure) && failure != nil && privateCheckedProbeCode(failure.code) &&
+			failure.completedBootMS > 0 && failure.completedBootMS >= started && failure.completedBootMS <= now && now-failure.completedBootMS <= 30_000 {
+			o.report.Code, o.report.CheckCode, o.report.CheckCompletedBootMS = "check_failed", failure.code, failure.completedBootMS
 		}
 		if now >= started && now-started <= 30_000 {
 			o.report.ElapsedMS = now - started
 		}
-		if !panicked && released && err == nil && receipt != nil && ctx.Err() == nil && started >= 0 && now >= started && now-started < 30_000 {
+		if fresh && err == nil && receipt != nil {
 			o.receipt, o.report.Receipt, o.report.Code = receipt, token, "verified"
 			o.report.ProbeMS = receipt.proof.completed - receipt.proof.started
 		} else if receipt != nil {
@@ -335,6 +346,15 @@ func (o *privateAdaptiveOwner) snapshot() string {
 	report := o.report
 	report.NativeEpoch, report.Scope, report.Running, report.Ready = o.epoch, o.scope, o.busy, o.currentLocked()
 	report.PolicyScope = o.policyScope
+	if report.Code == "check_failed" {
+		now := o.hub.pool.lease.clock()
+		if !report.Ready || report.CheckCompletedBootMS <= 0 || now < report.CheckCompletedBootMS || now-report.CheckCompletedBootMS > 30_000 {
+			// A delayed read cannot restart the freshness window. Retire the
+			// observation metadata permanently, while retaining actual flows.
+			o.report.Code, o.report.CheckCode, o.report.CheckCompletedBootMS = "probe_unavailable", "", 0
+			report.Code, report.CheckCode, report.CheckCompletedBootMS = "probe_unavailable", "", 0
+		}
+	}
 	if o.busy {
 		now := o.hub.pool.lease.clock()
 		if now < o.workStarted || now-o.workStarted > 60_000 {

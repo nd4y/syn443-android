@@ -20,6 +20,37 @@ import (
 
 var errPrivateExitMismatch = errors.New("verified exit predicate mismatch")
 
+// An observed failed check, never a proxy verdict or a selection proof. The
+// only payload is a compiled finite code and its actual BOOTTIME completion;
+// source errors/targets are not kept.
+type privateCheckedFailure struct {
+	code            string
+	completedBootMS int64
+}
+
+type privateProbeDialKey struct{}
+
+// Ephemeral evidence of admitted final-adapter dispatch, not proof that bytes
+// reached a physical network. No endpoint, raw error or credentials are kept.
+type privateProbeDialObservation struct {
+	dispatched, completed, returnedError, validConn, localRefusal atomic.Bool
+}
+
+func (o *privateProbeDialObservation) observedFailure() bool {
+	return o != nil && !o.localRefusal.Load() && o.dispatched.Load() && o.completed.Load() && (o.validConn.Load() || o.returnedError.Load())
+}
+
+func privateCheckedProbeCode(code string) bool {
+	switch code {
+	case "dial_failed", "check_timeout", "tls_failed", "ssh_banner_mismatch", "request_failed", "response_failed", "exit_evidence_invalid", "http_response_mismatch":
+		return true
+	}
+	return false
+}
+func (*privateCheckedFailure) Error() string      { return "private route check failed" }
+func (*privateCheckedFailure) String() string     { return "PrivateCheckedFailure([redacted])" }
+func (e *privateCheckedFailure) GoString() string { return e.String() }
+
 var privateGroupID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
 // Internal primitive only. The authorized catalogue, shared priority scheduler
@@ -141,7 +172,9 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 		if !privateAdaptiveWorkCurrent(ctx, p.lease.clock) || now < started || now-started >= 12_000 {
 			return nil, errPrivatePath
 		}
-		code, complete := probeRouteWithClock(ctx, func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
+		observation := &privateProbeDialObservation{}
+		checkContext := context.WithValue(ctx, privateProbeDialKey{}, observation)
+		code, complete := probeRouteWithClock(checkContext, func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
 			return candidate.dialTCP(s.scope, ctx, network, dst)
 		}, check, roots, p.lease.clock)
 		if !complete || code != "ok" || ctx.Err() != nil {
@@ -155,6 +188,14 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 				p.mu.Unlock()
 				if fresh {
 					return nil, errPrivateExitMismatch
+				}
+			}
+			if complete && ctx.Err() == nil && observation.observedFailure() && privateCheckedProbeCode(code) {
+				p.mu.Lock()
+				completed, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started)
+				p.mu.Unlock()
+				if fresh {
+					return nil, &privateCheckedFailure{code: code, completedBootMS: completed}
 				}
 			}
 			return nil, errPrivatePath

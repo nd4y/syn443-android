@@ -25,6 +25,7 @@ type privateFlowOwner struct {
 	operations     int
 	closeConfirmed bool
 	released       bool
+	probe          *privateProbeDialObservation
 }
 
 func (f *privateFlowOwner) valid() bool {
@@ -43,6 +44,9 @@ func (f *privateFlowOwner) begin() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !f.validLocked(p, e) || p.operations >= 256 || f.operations >= 4 {
+		if f.probe != nil {
+			f.probe.localRefusal.Store(true)
+		}
 		return false
 	}
 	p.operations++
@@ -215,8 +219,8 @@ func (h *privatePathHold) dialContext(parent context.Context) (context.Context, 
 	return ctx, cancel, stop
 }
 
-func (h *privatePathHold) attach(closeSocket func() error, cancel context.CancelFunc, stop func() bool) *privateFlowOwner {
-	f := &privateFlowOwner{hold: h, closeSocket: closeSocket, cancel: cancel, stop: stop}
+func (h *privatePathHold) attach(closeSocket func() error, cancel context.CancelFunc, stop func() bool, probe *privateProbeDialObservation) *privateFlowOwner {
+	f := &privateFlowOwner{hold: h, closeSocket: closeSocket, cancel: cancel, stop: stop, probe: probe}
 	p, e := h.pool, h.entry
 	p.mu.Lock()
 	e.flows[f] = struct{}{}
@@ -262,7 +266,8 @@ func (h *privatePathHold) dialTCP(scope string, parent context.Context, network 
 		_ = h.Close()
 		return nil, errPrivatePath
 	}
-	f := h.attach(conn.Close, cancel, stop)
+	probe, _ := parent.Value(privateProbeDialKey{}).(*privateProbeDialObservation)
+	f := h.attach(conn.Close, cancel, stop, probe)
 	if dialErr != nil || ctx.Err() != nil || !f.valid() {
 		_ = f.Close()
 		return nil, errPrivatePath
@@ -297,7 +302,7 @@ func (c *privatePathCandidate) listenUDP(scope string, parent context.Context, d
 		_ = h.Close()
 		return nil, errPrivatePath
 	}
-	f := h.attach(conn.Close, cancel, stop)
+	f := h.attach(conn.Close, cancel, stop, nil)
 	if dialErr != nil || ctx.Err() != nil || !f.valid() {
 		_ = f.Close()
 		return nil, errPrivatePath
@@ -314,14 +319,34 @@ func (h *privatePathHold) retain() {
 }
 
 func privateSafeTCPDial(node adapter.Outbound, ctx context.Context, network string, dst M.Socksaddr) (conn net.Conn, err error, panicked bool) {
+	var observation *privateProbeDialObservation
 	defer func() {
 		if recover() != nil {
+			if observation != nil {
+				observation.completed.Store(false)
+				observation.validConn.Store(false)
+				observation.returnedError.Store(false)
+			}
 			conn = nil
 			err = errPrivatePath
 			panicked = true
 		}
 	}()
+	if ctx != nil {
+		observation, _ = ctx.Value(privateProbeDialKey{}).(*privateProbeDialObservation)
+	}
+	if observation != nil {
+		observation.completed.Store(false)
+		observation.validConn.Store(false)
+		observation.returnedError.Store(false)
+		observation.dispatched.Store(true)
+	}
 	conn, err = node.DialContext(ctx, network, dst)
+	if observation != nil {
+		observation.validConn.Store(conn != nil)
+		observation.returnedError.Store(err != nil)
+		observation.completed.Store(true)
+	}
 	return
 }
 func privateSafeUDPListen(node adapter.Outbound, ctx context.Context, dst M.Socksaddr) (conn net.PacketConn, err error, panicked bool) {

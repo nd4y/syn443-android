@@ -11,6 +11,9 @@ REQUIRED = {
     'TestDiagnosticCancellationBeforeRosterReturnsCannotStartLateProbes',
 }
 PATH_REQUIRED = {
+    'TestPrivateCheckedFailureRequiresAdmittedDispatchWithoutRevokingActiveFlows',
+    'TestPrivateProbeDialObservationRejectsLocalQuotaPanicAndNilResults',
+    'TestPrivateAdaptiveOwnerReportsFreshCheckFailuresWithoutProofOrProxyVerdict',
     'TestPrivateAdaptiveWireStrictClosedShapeAndCanonicalOwnership',
     'TestPrivateAdaptiveWireRejectsUnboundGroupsAndUnsafeCatalogue',
     'TestPrivateAdaptiveWireParserAndByteBounds',
