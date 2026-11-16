@@ -1,5 +1,11 @@
 package io.syn443.android
 
+import android.widget.TextView
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -27,6 +33,33 @@ class ChatUiTest {
     @get:Rule val compose=createAndroidComposeRule<SupportActivity>()
     @Test fun supportChatHasVisibleTitleAndConnectionStatus() {
         assertReady()
+    }
+    @Test fun chatReadinessRejectsMissingRootTitleAndStatus() {
+        assertReady()
+        val scenario=compose.activityRule.scenario
+        val instrumentation=InstrumentationRegistry.getInstrumentation()
+        try {
+            scenario.onActivity {activity->
+                activity.setContentView(TextView(activity).apply {text="Readiness fixture without Compose"})
+            }
+            instrumentation.waitForIdleSync()
+            val missingRoot=runCatching {assertReady()}.exceptionOrNull()
+            assertEquals("Missing Compose must exhaust the bounded readiness wait",
+                ComposeTimeoutException::class.java,missingRoot?.javaClass)
+            scenario.recreate()
+            assertReady()
+            scenario.onActivity {activity->
+                activity.setContentView(ComposeView(activity).apply {
+                    setContent {BasicText("Readiness fixture title",Modifier.testTag("chat-title"))}
+                })
+            }
+            instrumentation.waitForIdleSync()
+            val missingStatus=runCatching {assertReady()}.exceptionOrNull()
+            assertTrue("A title without connection status must not become ready",missingStatus is AssertionError)
+        } finally {
+            scenario.recreate()
+            assertReady()
+        }
     }
     @Test fun supportChatKeepsItsRootAcrossRepeatedRecreation() {
         assertReady()
@@ -121,7 +154,7 @@ class ChatUiTest {
             val root=activity.findViewById<android.view.ViewGroup>(android.R.id.content)
             assertTrue("SupportActivity must install its content root during startup",root.childCount>0)
         }
-        compose.waitUntil(5000) {compose.onAllNodesWithTag("chat-title").fetchSemanticsNodes().isNotEmpty()}
+        compose.waitUntil(5000) {compose.onAllNodesWithTag("chat-title").fetchSemanticsNodes(atLeastOneRootRequired=false).isNotEmpty()}
         compose.onNodeWithTag("chat-title").assertIsDisplayed()
         compose.onNodeWithTag("chat-status").assertIsDisplayed()
     }

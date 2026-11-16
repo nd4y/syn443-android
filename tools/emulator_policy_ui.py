@@ -133,6 +133,24 @@ def focused_settings_anr(windows):
     ) is not None
 
 
+def classified_focus_snapshot(windows):
+    """Diagnostic categories only; never return window titles or process data."""
+    if not isinstance(windows,bytes) or len(windows)>1_048_576:
+        return {'focusCount':None,'category':'unrecognized'}
+    focus=re.findall(rb'(?m)^\s*mCurrentFocus=([^\r\n]+)',windows)
+    count=len(focus)
+    if count>1:category='ambiguous'
+    elif count==0:category='unrecognized'
+    elif focus[0].strip()==b'null':category='null'
+    elif focused_settings_anr(windows):category='settings_anr'
+    elif re.fullmatch(rb'Window\{[^}\r\n]* Application Not Responding: io\.syn443\.android(?::(?:controller|engine))?\}',focus[0].strip()):
+        category='app_anr'
+    elif re.fullmatch(rb'Window\{[^}\r\n]* Application Not Responding: [^}\r\n]+\}',focus[0].strip()):
+        category='foreign_anr'
+    else:category='unrecognized'
+    return {'focusCount':count,'category':category}
+
+
 def open_policy():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
     # Reboots can leave a nonsecure keyguard or a previously restored Settings
@@ -156,6 +174,7 @@ def open_policy():
     root=None
     relaunched=False
     last_settings_anr=None
+    last_focus_snapshot={'focusCount':None,'category':'unrecognized'}
     while time.monotonic()<end:
         root=tree()
         if pin_keys(root):raise AssertionError('Protected emulator keyguard unexpectedly active')
@@ -167,7 +186,9 @@ def open_policy():
                                    for n in root.iter('node')):
             # DisplayContent owns current focus on modern Android. The windows
             # subcommand lists windows but does not include that owner field.
-            last_settings_anr=focused_settings_anr(adb('shell','dumpsys','window','displays',timeout=5))
+            windows=adb('shell','dumpsys','window','displays',timeout=5)
+            last_settings_anr=focused_settings_anr(windows)
+            last_focus_snapshot=classified_focus_snapshot(windows)
             if last_settings_anr:
                 relaunched=True
                 print('Owned Settings ANR: restarting the VPN settings activity once',flush=True)
@@ -181,7 +202,7 @@ def open_policy():
     resources=sorted({n.get('resource-id','') for n in nodes if n.get('package') in ('android','com.android.settings','com.android.systemui')})[:32]
     owned=[{'id':n.get('resource-id',''),'bounds':n.get('bounds','')} for n in nodes if n.get('package')=='com.android.settings' and n.get('text')=='SYN443']
     gears=[{'bounds':n.get('bounds',''),'description':('expected' if n.get('content-desc')=='Settings for SYN443' else 'present' if n.get('content-desc') else 'empty')} for n in nodes if n.get('package')=='com.android.settings' and n.get('resource-id','').endswith('/settings_button')]
-    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears,'focusedSettingsANR':last_settings_anr}),flush=True)
+    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears,'focusedSettingsANR':last_settings_anr,'focusSnapshot':last_focus_snapshot}),flush=True)
     raise AssertionError('Owned VPN settings entry unavailable')
 
 
