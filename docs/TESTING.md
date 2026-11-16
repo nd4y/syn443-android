@@ -2,7 +2,7 @@
 
 The [exit-country primitive](exit-country-probe.md) adds strict native TLS/JSON
 cases, an independent signed capability verifier case and a mandatory Android
-configuration/status case. The floor is242 actual outcomes on each API29/35/37,
+configuration/status case. The floor is243 actual outcomes on each API29/35/37,
 with no failures or skips; the policy JVM floor is17. Native private hub and
 work-budget ownership regressions must pass both ordinary and race executions.
 These counts establish component behavior, not physical adaptive route acceptance.
