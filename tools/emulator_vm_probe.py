@@ -211,12 +211,14 @@ def stage_capture(adb, context, checkpoint, stage, captures, *, previous=None,
     seed_loaded = marker == b'v1'
     raw = call('shell', 'am', 'broadcast', '--user', '0', '-a', ACTION, '-n', COMPONENT, '-f', '0x10000020')
     measured = broadcast_result(raw)
-    need(process(call, PACKAGE) == measured['pid'], 'reply')
     record = {'stage': stage, 'snapshot': measured, 'heapAdequate': measured['maxBytes'] >= MIN_HEAP,
               'bootIdChanged': stage > 0, 'bootCountAdvanced': stage > 0, 'sameApkAndUid': True,
               'systemServerPid': server, 'frameworkContinuous': False, 'healthWindowMs': 0,
               'seedSentinelLoaded': seed_loaded}
     captures.append(record)
+    # A receiver can return actual capacity and die immediately afterwards.
+    # Preserve that bounded observation; a missing live PID still fails the run.
+    need(process(call, PACKAGE) == measured['pid'], 'reply')
     started = clock()
     while True:
         need(engines('syn443-ci') == [context[1]] and boot_id(call) == current_boot, 'identity')
@@ -289,6 +291,7 @@ def main():
             print(json.dumps({'schemaValid': False}))
             return 1
     captures, reason, no_production_app = [], 'none', False
+    last_failure = {'operation': 'none', 'kind': 'none'}
     try:
         need(re.fullmatch(r'[a-f0-9]{40}', args.source) is not None, 'artifact')
         need(os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('SYN443_CI_AVD') == 'syn443-ci', 'environment')
@@ -298,10 +301,20 @@ def main():
         need(re.fullmatch(r'emulator-[0-9]+', selected) is not None, 'identity')
 
         def adb(*items, timeout=5):
-            reply = subprocess.run([binary, '-s', selected, *items], capture_output=True, timeout=timeout)
-            if reply.returncode:
-                raise subprocess.CalledProcessError(reply.returncode, 'owned-adb')
-            return reply.stdout
+            prefix = tuple(items[:3])
+            operation = 'probe_broadcast' if prefix == ('shell', 'am', 'broadcast') else (
+                'probe_pid' if tuple(items) == ('shell', 'pidof', PACKAGE) else (
+                'system_pid' if tuple(items) == ('shell', 'pidof', 'system_server') else (
+                'reboot' if tuple(items) == ('reboot',) else 'guard_or_framework')))
+            try:
+                reply = subprocess.run([binary, '-s', selected, *items], capture_output=True, timeout=timeout)
+                if reply.returncode:
+                    last_failure.update(operation=operation, kind='nonzero_exit')
+                    raise subprocess.CalledProcessError(reply.returncode, 'owned-adb')
+                return reply.stdout
+            except subprocess.TimeoutExpired:
+                last_failure.update(operation=operation, kind='timeout')
+                raise
 
         context = guard(adb, probe=False)
         no_production_app = True
@@ -322,6 +335,8 @@ def main():
         reason = error.reason
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, UnicodeError):
         reason = 'adb'
+        print(json.dumps({'failedOperation': last_failure['operation'], 'failureKind': last_failure['kind'],
+                          'completedCaptures': len(captures)}))
     except Exception:
         reason = 'artifact'
     result = public_result(args.source, captures, reason, no_production_app=no_production_app and reason != 'production_app')

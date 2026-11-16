@@ -210,6 +210,22 @@ class CapturedVmProbeTest(unittest.TestCase):
             self.failure('reply', lambda: probe.stage_capture(adb, wrong.context, wrong.checkpoint, 0, [],
                 clock=wrong.clock, sleep=wrong.sleep, engines=wrong.engines))
 
+    def test_actual_capacity_survives_probe_exit_after_reply_without_becoming_a_success(self):
+        f = Fixture(); f.maximum = 16*1024*1024; captures = []
+        original = f.adb
+        def adb(*args, **options):
+            if args == ('shell', 'pidof', probe.PACKAGE) and f.measured:
+                raise subprocess.CalledProcessError(1, 'fixture-exited-after-reply')
+            return original(*args, **options)
+        with patch.dict('os.environ', ENV), self.assertRaises(subprocess.CalledProcessError):
+            probe.stage_capture(adb, f.context, f.checkpoint, 0, captures,
+                clock=f.clock, sleep=f.sleep, engines=f.engines)
+        self.assertEqual(1, len(captures))
+        self.assertEqual(16*1024*1024, captures[0]['snapshot']['maxBytes'])
+        self.assertFalse(captures[0]['heapAdequate'])
+        self.assertFalse(captures[0]['frameworkContinuous'])
+        self.assertEqual('FAIL', probe.public_result('a'*40, captures, 'adb', no_production_app=True)['verdict'])
+
     def test_public_artifact_is_closed_numeric_metadata_and_cannot_relabel_partial_failure(self):
         f = Fixture();captures = [];previous = None
         with patch.dict('os.environ', ENV):
