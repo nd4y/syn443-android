@@ -15,7 +15,7 @@ APKS = (
 AAR = Path("native/build/engine.aar")
 INPUTS = (
     Path("native/engine-lock.json"), Path("native/bridge/go.mod"),
-    Path("native/bridge/go.sum"), Path("gradle/wrapper/gradle-wrapper.properties"),
+    Path("native/bridge/go.sum"), Path("native/routegraph/go.mod"), Path("gradle/wrapper/gradle-wrapper.properties"),
     Path("contracts/lock.json"),
 )
 ABIS = ("arm64-v8a", "x86_64")

@@ -1,5 +1,12 @@
 # Testing and release gates
 
+The [exit-country primitive](exit-country-probe.md) adds strict native TLS/JSON
+cases, an independent signed capability verifier case and a mandatory Android
+configuration/status case. The floor is242 actual outcomes on each API29/35/37,
+with no failures or skips; the policy JVM floor is17. Native private hub and
+work-budget ownership regressions must pass both ordinary and race executions.
+These counts establish component behavior, not physical adaptive route acceptance.
+
 [Real chat background transitions](chat-background-fixture.md) retain all five
 observed stop/resume cycles in the same Activity and five recreations, plus the
 original root/title/status and VPN intent assertions. An owned foreground cover

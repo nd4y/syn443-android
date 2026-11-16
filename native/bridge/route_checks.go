@@ -24,9 +24,10 @@ import (
 )
 
 type routeCheck struct {
-	Method     string `json:"method"`
-	Target     string `json:"target"`
-	ExpectedIP string `json:"expected_ip,omitempty"`
+	Method            string `json:"method"`
+	Target            string `json:"target"`
+	ExpectedIP        string `json:"expected_ip,omitempty"`
+	ExpectedExitClass string `json:"expected_exit_class,omitempty"`
 }
 type routePlan struct {
 	ID       string       `json:"id"`
@@ -272,6 +273,12 @@ func validRouteCheck(c routeCheck) bool {
 	} else if c.ExpectedIP != "" {
 		return false
 	}
+	if c.Method == "https_exit_country" {
+		return validExitCountryTarget(c)
+	}
+	if c.ExpectedExitClass != "" {
+		return false
+	}
 	switch c.Method {
 	case "tcp", "ssh_banner":
 		host, port, err := net.SplitHostPort(c.Target)
@@ -502,7 +509,7 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 	defer cancel()
 	target := c.Target
 	var u *url.URL
-	if c.Method == "tls" || c.Method == "https_204" || c.Method == "https_exit_ip" {
+	if c.Method == "tls" || c.Method == "https_204" || c.Method == "https_exit_ip" || c.Method == "https_exit_country" {
 		u, _ = url.Parse(target)
 		port := u.Port()
 		if port == "" {
@@ -579,12 +586,15 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 		return "unsupported", false
 	}
 	req.Header.Set("Connection", "close")
-	if c.Method == "https_exit_ip" {
+	if c.Method == "https_exit_ip" || c.Method == "https_exit_country" {
 		req.Header.Set("Cache-Control", "no-cache, no-store")
 		req.Header.Set("Accept-Encoding", "identity")
 	}
 	if req.Write(secure) != nil {
 		return "request_failed", true
+	}
+	if c.Method == "https_exit_country" {
+		return probeExitCountryResponse(parent, ctx, secure, req, c.ExpectedExitClass)
 	}
 	response, err := http.ReadResponse(bufio.NewReaderSize(io.LimitReader(secure, 8193), 4096), req)
 	if err != nil {

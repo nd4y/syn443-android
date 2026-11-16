@@ -1407,7 +1407,8 @@
       "status": "partial",
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/route-frontier.md"
+        "docs/route-frontier.md",
+        "docs/exit-country-probe.md"
       ],
       "implementationScope": "Per-outbound TCP/SSH/TLS/HTTPS all-of profiles, bounded scoped status/check/cancel and a separate exact IP check from a configured HTTPS endpoint.",
       "remainingScope": "Full traffic-rule plans, any/quorum/stages, managed exit authorization, provider attribution and profile editor."
@@ -1417,7 +1418,8 @@
       "text": "Profile задаёт checkId/revision, method, target, DNS strategy, physical network/path binding, timeout, intervals, sample count, retries, payload/body limits, expected result, criticality и влияние на quality. Секреты headers/auth представлены secretRef. Параметры проверяются против hard limits, прав администратора и capabilities.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/exit-country-probe.md"
       ],
       "implementationScope": "Per-outbound TCP/SSH/TLS/HTTPS all-of profiles and bounded scoped status/check/cancel.",
       "remainingScope": "Full traffic-rule plans, any/quorum/stages, exit attribution and profile editor."
@@ -1427,7 +1429,8 @@
       "text": "Методы: ICMP при наличии IP/ICMP-capability полного пути; TCP connect; TLS handshake с обычной проверкой имени/сертификата; DNS с ожидаемым rcode/условием ответа; HTTP(S) с заданными method/status/body/header predicates; прикладной SSH banner; UDP echo/согласованный datagram probe только к назначенному поддержанному responder. Базовые HTTP методы GET/HEAD; POST с ограниченным телом допускается лишь явной политикой для предназначенного сервису endpoint и не считается безопасной универсальной пробой.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/exit-country-probe.md"
       ],
       "implementationScope": "Per-outbound TCP/SSH/TLS/HTTPS all-of profiles and bounded scoped status/check/cancel.",
       "remainingScope": "Full traffic-rule plans, any/quorum/stages, exit attribution and profile editor."
@@ -1437,7 +1440,8 @@
       "text": "Комбинации задаются явным деревом условий all/any/quorum(k,n), последовательными или параллельными этапами, conditional/fallback branches, общим deadline и пределом стоимости. Правила короткого замыкания и критичность описаны, чтобы успешная необязательная проба не скрывала провал обязательной. Несовместимые или всегда недостижимые условия отклоняются компилятором.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/exit-country-probe.md"
       ],
       "implementationScope": "Per-outbound TCP/SSH/TLS/HTTPS all-of profiles and bounded scoped status/check/cancel.",
       "remainingScope": "Full traffic-rule plans, any/quorum/stages, exit attribution and profile editor."
@@ -1447,7 +1451,8 @@
       "text": "Для разных задач можно назначить разные профили одному маршруту: быстрая проверка liveness, подтверждение доступа к домашнему сервису, качество latency, exit verification и глубокая диагностика. Не требуется один универсальный URL для всех путей. На default profile можно ссылаться из нескольких правил без копирования.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/exit-country-probe.md"
       ],
       "implementationScope": "Per-outbound TCP/SSH/TLS/HTTPS all-of profiles and bounded scoped status/check/cancel.",
       "remainingScope": "Full traffic-rule plans, any/quorum/stages, exit attribution and profile editor."

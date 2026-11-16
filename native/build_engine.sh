@@ -35,6 +35,7 @@ PY
 mkdir -p "$work/bridge"
 gofmt -w "$root"/native/bridge/*.go "$root"/native/engine-netbird/*.go
 cp -R "$root/native/engine-netbird" "$work/"
+cp -R "$root/native/routegraph" "$work/"
 cp "$root"/native/bridge/*.go "$root"/native/bridge/go.mod "$root"/native/bridge/go.sum "$work/bridge/"
 cd "$work/bridge"
 export GOMAXPROCS="${GOMAXPROCS:-2}" GOFLAGS="-p=1" GOTOOLCHAIN=local

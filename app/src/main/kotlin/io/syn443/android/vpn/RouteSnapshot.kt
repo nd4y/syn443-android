@@ -42,12 +42,12 @@ object RouteSnapshot {
     private var completedReceipt=""
     private var confirmingFailure=false
     private var skippedMeteredReserves=false
-    private val methods=setOf("tcp","tls","https_204","ssh_banner","https_exit_ip")
-    private val tlsMethods=setOf("tls","https_204","https_exit_ip")
+    private val methods=setOf("tcp","tls","https_204","ssh_banner","https_exit_ip","https_exit_country")
+    private val tlsMethods=setOf("tls","https_204","https_exit_ip","https_exit_country")
     private val ipv4Literal=Regex("(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}")
     private val ipv6Literal=Regex("[0-9a-fA-F:.]{2,45}")
     private var measuredPaths=emptyMap<String,JSONArray>()
-    private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","exit_evidence_invalid","exit_ip_mismatch","path_changed","check_timeout","probe_unavailable")
+    private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","exit_evidence_invalid","exit_ip_mismatch","exit_country_mismatch","path_changed","check_timeout","probe_unavailable")
     private val completedProbeFailures=setOf("dial_failed","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","check_timeout")
 
     private fun validExitIP(value: Any?): Boolean {
@@ -74,13 +74,20 @@ object RouteSnapshot {
             for(j in 0 until checks.length()) {
                 val check=checks.getJSONObject(j)
                 val method=check.getString("method");val target=check.getString("target")
-                val fields=if(method=="https_exit_ip") setOf("method","target","expected_ip") else setOf("method","target")
+                val fields=when(method) {
+                    "https_exit_ip" -> setOf("method","target","expected_ip")
+                    "https_exit_country" -> setOf("method","target","expected_exit_class")
+                    else -> setOf("method","target")
+                }
                 require(check.keys().asSequence().toSet()==fields)
                 if(method=="https_exit_ip")require(validExitIP(check.get("expected_ip")))
+                if(method=="https_exit_country")require(check.get("expected_exit_class") in setOf("RU","NON_RU"))
                 require(method in methods && target.length in 1..2048)
                 val uri=if(method in tlsMethods) URI(target) else URI("tcp://$target")
                 require(uri.host!=null && uri.userInfo==null && uri.fragment==null)
                 require(if(method in tlsMethods) uri.scheme=="https" && (uri.port==-1 || uri.port in 1..65535) else uri.port in 1..65535 && uri.rawPath.isNullOrEmpty() && uri.query==null)
+                if(method=="https_exit_country")require((uri.rawPath.isNullOrEmpty() || uri.rawPath=="/") && uri.rawQuery==null &&
+                    target.all {it.code in 33..126} && '\\' !in target && '#' !in target && !uri.rawAuthority.endsWith(":"))
             }
         }
     }

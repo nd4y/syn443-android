@@ -202,6 +202,28 @@ class PolicyTest {
         invalid { verify(sign(qualified.copy(engineConfigB64 = baseline.engineConfigB64, contentHash = baseline.contentHash))) }
     }
 
+    @Test fun countryCheckRequiresItsOwnBoundCapabilityAndCannotReuseIpAuthority() {
+        val baseline = payload()
+        val engine = """{"outbounds":[{"type":"direct","tag":"direct"}],"route_checks":[{"outbound":"direct","checks":[{"method":"https_exit_country","target":"https://health.example.invalid/","expected_exit_class":"RU"}]}]}"""
+        val qualified = baseline.copy(schemaVersion = 2, keyThumbprint = enc(ByteArray(32) { 9 }),
+            requiredCapabilities = baseline.requiredCapabilities + listOf("policy.keybound.v2", "route.health.v1", Policy.ROUTE_EXIT_COUNTRY),
+            engineConfigB64 = enc(engine.toByteArray()), contentHash = Policy.hash(engine))
+        assertEquals(engine, verify(sign(qualified)).engineConfig)
+        for (changed in listOf(qualified.copy(operation = "release"),
+            qualified.copy(requiredCapabilities = qualified.requiredCapabilities - Policy.ROUTE_EXIT_COUNTRY),
+            qualified.copy(requiredCapabilities = qualified.requiredCapabilities - "route.health.v1"),
+            qualified.copy(requiredCapabilities = qualified.requiredCapabilities - Policy.ROUTE_EXIT_COUNTRY + Policy.ROUTE_EXIT_IP),
+            qualified.copy(engineConfigB64 = baseline.engineConfigB64, contentHash = baseline.contentHash))) {
+            invalid { verify(sign(changed)) }
+        }
+        val both = engine.replace("\"checks\":[{", "\"checks\":[{\"method\":\"https_exit_ip\",\"target\":\"https://health.example.invalid/ip\",\"expected_ip\":\"192.0.2.9\"},{")
+        val combined = qualified.copy(requiredCapabilities = qualified.requiredCapabilities + Policy.ROUTE_EXIT_IP,
+            engineConfigB64 = enc(both.toByteArray()), contentHash = Policy.hash(both))
+        assertEquals(both, verify(sign(combined)).engineConfig)
+        invalid { verify(sign(combined.copy(requiredCapabilities = combined.requiredCapabilities - Policy.ROUTE_EXIT_COUNTRY))) }
+        invalid { verify(sign(combined.copy(requiredCapabilities = combined.requiredCapabilities - Policy.ROUTE_EXIT_IP))) }
+    }
+
     @Test fun replayAndFloorsSurviveSerialization() {
         val p = verify(sign()); val j = Policy.stage(Journal(), p)
         val disk = Policy.json.decodeFromString<Journal>(Policy.json.encodeToString(j))

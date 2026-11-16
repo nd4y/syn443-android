@@ -14,6 +14,9 @@ import (
 
 var privateScopeID = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+const privateCandidateLimit = 32 // sixteen active groups plus bounded draining/probing owners
+const privateGroupLimit = 16
+
 // Construction/retirement ownership only. This does not grant probe admission,
 // selection authority or a public outbound. One instance belongs to one native
 // runtime, and its configured adapter count is reserved for that lifetime.
@@ -90,7 +93,7 @@ func newPrivatePathPool(parent context.Context, scope string, capacity int, leas
 	}
 	ctx, cancel := context.WithCancel(parent)
 	p := &privatePathPool{ctx: ctx, cancel: cancel, lease: lease, scope: scope, configured: configured, capacity: capacity,
-		entries: map[uint64]*privatePoolEntry{}, selectors: map[string]*privatePathSelector{}, retire: make(chan *privatePoolEntry, 8), workerExited: make(chan struct{})}
+		entries: map[uint64]*privatePoolEntry{}, selectors: map[string]*privatePathSelector{}, retire: make(chan *privatePoolEntry, privateCandidateLimit), workerExited: make(chan struct{})}
 	go p.retirementWorker()
 	stop := context.AfterFunc(parent, p.Close)
 	p.mu.Lock()
@@ -119,15 +122,31 @@ func (p *privatePathPool) snapshot() privatePoolSnapshot {
 // context change. Adapter reservations include in-flight and failed cleanup.
 // The caller runs construction on its owned bounded worker, never a heartbeat.
 func (p *privatePathPool) prepare(scope string, hops []string, create func(context.Context, string, string, string) (adapter.Outbound, error)) (*privatePathCandidate, error) {
-	if len(hops) < 1 || len(hops) > 4 || create == nil {
+	return p.prepareWithContext(context.Background(), scope, hops, create)
+}
+
+func (p *privatePathPool) prepareWithContext(work context.Context, scope string, hops []string, create func(context.Context, string, string, string) (adapter.Outbound, error)) (*privatePathCandidate, error) {
+	if work == nil || work.Err() != nil || len(hops) < 1 || len(hops) > 4 || create == nil {
 		return nil, errPrivatePath
 	}
 	ownedHops := append([]string(nil), hops...)
 	p.mu.Lock()
-	if p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || scope != p.scope || p.building || len(p.entries) >= 8 || p.configured+p.used+len(ownedHops) > p.capacity || p.next == ^uint64(0) {
+	if p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || scope != p.scope || p.building || len(p.entries) >= privateCandidateLimit || p.configured+p.used+len(ownedHops) > p.capacity || p.next == ^uint64(0) {
 		p.mu.Unlock()
 		return nil, errPrivatePath
 	}
+	duration := 30 * time.Second
+	if deadline, ok := work.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < duration {
+			duration = remaining
+		}
+	}
+	started := p.lease.clock()
+	if duration < time.Millisecond || started < 0 || started > math.MaxInt64-30_000 {
+		p.mu.Unlock()
+		return nil, errPrivatePath
+	}
+	deadlineBoot := started + duration.Milliseconds()
 	p.next++
 	child, cancel := context.WithCancel(p.ctx)
 	e := &privatePoolEntry{id: p.next, scope: scope, cost: len(ownedHops), cancel: cancel, flows: map[*privateFlowOwner]struct{}{}}
@@ -135,7 +154,42 @@ func (p *privatePathPool) prepare(scope string, hops []string, create func(conte
 	p.used += e.cost
 	p.building = true
 	p.mu.Unlock()
-	path, retained, err := buildPrivatePath(child, ownedHops, create)
+	remaining := deadlineBoot - p.lease.clock()
+	if remaining < 0 {
+		remaining = 0
+	}
+	budget, cancelBudget := context.WithTimeout(work, time.Duration(remaining)*time.Millisecond)
+	stopBudget := context.AfterFunc(budget, cancel)
+	published := false
+	defer func() {
+		stopBudget()
+		cancelBudget()
+		if !published {
+			cancel()
+		}
+	}()
+	withinBudget := func() bool {
+		now := p.lease.clock()
+		return budget.Err() == nil && work.Err() == nil && child.Err() == nil && now >= started && now < deadlineBoot && privateManagedLease(p.lease)
+	}
+	if !withinBudget() {
+		cancel()
+	}
+	path, retained, err := buildPrivatePathBudgeted(child, ownedHops, func(ctx context.Context, id, tag, previous string) (adapter.Outbound, error) {
+		if !withinBudget() {
+			cancel()
+			return nil, errPrivatePath
+		}
+		node, err := create(ctx, id, tag, previous)
+		if !withinBudget() {
+			cancel()
+			return node, errPrivatePath
+		}
+		return node, err
+	}, withinBudget)
+	unlinked := stopBudget()
+	expired := budget.Err() != nil
+	cancelBudget()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.building = false
@@ -148,9 +202,11 @@ func (p *privatePathPool) prepare(scope string, hops []string, create func(conte
 		p.used -= e.cost
 	} else {
 		e.path = path
-		if p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || e.scope != p.scope || e.draining {
+		finished := p.lease.clock()
+		if !unlinked || expired || work.Err() != nil || finished < started || finished >= deadlineBoot || p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || e.scope != p.scope || e.draining {
 			p.enqueueLocked(e)
 		} else {
+			published = true
 			return &privatePathCandidate{pool: p, entry: e}, nil
 		}
 	}
@@ -177,7 +233,7 @@ func (p *privatePathPool) enqueueLocked(e *privatePoolEntry) {
 	if e.path != nil && !e.queued && !e.retained {
 		e.queued = true
 		e.cancel()
-		// At most eight entries, one queue record each. A blocked closer cannot
+		// At most thirty-two entries, one queue record each. A blocked closer cannot
 		// consume a replacement worker or free its adapter reservation.
 		p.retire <- e
 	}
