@@ -62,6 +62,8 @@ class AdminLayerComparisonTest {
         val changes=own.getValue("changes").jsonArray.associate {it.jsonObject.getValue("path").jsonPrimitive.content to it.jsonObject.getValue("value")}
         assertEquals(JsonPrimitive(3),changes["/settings/a"]);assertEquals(JsonPrimitive(2),changes["/settings/b"])
         val diff=checkNotNull(result.diff);assertTrue(diff.localProjection)
+        assertEquals(current.document.root.jsonObject.getValue("effective").jsonObject.getValue("document"),
+            Json.parseToJsonElement(diff.beforeJson()))
         assertEquals("3",diff.entries.single {it.path=="/settings/a"}.afterJson())
         assertEquals("1",diff.entries.single {it.path=="/settings/a"}.beforeJson())
         assertTrue(checkNotNull(diff.entries.single {it.path=="/settings/a"}.beforeOriginJson()).contains("\"revision\":2"))
