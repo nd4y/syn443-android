@@ -3,6 +3,8 @@
     <application
         android:label="SYN443 CI VM Probe"
         android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:supportsRtl="false"
         android:usesCleartextTraffic="false"
         android:defaultToDeviceProtectedStorage="true"
