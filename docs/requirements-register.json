@@ -1043,8 +1043,11 @@
     {
       "id": "ALG-06",
       "text": "Энергетическая цена включает число и объём проб, новые DNS/TCP/TLS handshakes, radio wakeups по доступным оценкам, keepalive и число активных резервов. Она сравнивается при сопоставимой стабильности. Допускаются оценки/классы стоимости; измерение джоулей для каждого маршрута не предполагается.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms"
+      ],
+      "remainingScope": "Local adaptive TCP admission and passive recheck source only. Exact Actions/native race/Android/device acceptance, common SDK/diagnostic/telemetry governor, broader modes and failure correlation remain separate requirements."
     },
     {
       "id": "ALG-07",
@@ -1061,8 +1064,11 @@
     {
       "id": "ALG-09",
       "text": "Цикл: определить networkEpoch/режим и активную policy; классифицировать требуемые назначения; взять разрешённые свежие last-known-good; проверить жёсткие ограничения и cache; сформировать shortlist; выполнить минимальный необходимый probe plan; сравнить кандидатов; закрепить основной/резерв; наблюдать и при деградации расширять поиск.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms"
+      ],
+      "remainingScope": "Local adaptive TCP admission and passive recheck source only. Exact Actions/native race/Android/device acceptance, common SDK/diagnostic/telemetry governor, broader modes and failure correlation remain separate requirements."
     },
     {
       "id": "ALG-10",
@@ -1128,8 +1134,11 @@
     {
       "id": "ALG-17",
       "text": "Пассивные симптомы реальных соединений и активные пробы сопоставляются по path/intent/network/config, без истории сайтов и содержимого пользовательского трафика. Системная ошибка, отказ target и proxy failure имеют разные evidence. Серверный мониторинг дополняет, но не заменяет локальные проверки с телефона.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms"
+      ],
+      "remainingScope": "Local adaptive TCP admission and passive recheck source only. Exact Actions/native race/Android/device acceptance, common SDK/diagnostic/telemetry governor, broader modes and failure correlation remain separate requirements."
     },
     {
       "id": "ALG-18",
@@ -1162,10 +1171,11 @@
       "evidence": [
         "docs/route-lifecycle.md#reserve-probe-cooldown",
         "docs/route-frontier.md",
-        "docs/managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity"
+        "docs/managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity",
+        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms"
       ],
       "implementationScope": "Signed internal Wi-Fi failover defers optional reserve probes during attributed cooldown and during metered maintenance. Required checks continue and a fresh selector failure triggers a full comparison.",
-      "remainingScope": "Bounded TCP source primitive and continuity only; exact Actions and activated managed-chain evidence remain separate. Full mode classification, shared admission/energy, recovery reserve, persistent hints and rollout still required."
+      "remainingScope": "Local adaptive TCP admission and passive recheck source only. Exact Actions/native race/Android/device acceptance, common SDK/diagnostic/telemetry governor, broader modes and failure correlation remain separate requirements."
     },
     {
       "id": "ALG-23",

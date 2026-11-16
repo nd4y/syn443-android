@@ -204,6 +204,8 @@ class ManagedAdaptiveRoutesFairnessTest {
             assertNotNull(retry)
             assertEquals("group-00", checkNotNull(retry).getString("group"))
             h.failed(checkNotNull(retry), retryAt, "exit_mismatch") // third failure: at least48s cooldown.
+            h.controller.force() // explicit routine refresh retains the new75s cadence and all admission debt.
+            assertNull(h.tick(65000)) // critical but cooling group yields its CPU quantum.
             val confirmation = checkNotNull(h.tick(66000)); assertEquals("group-01", confirmation.getString("group")); h.selected(confirmation, 66000)
             assertNull(h.tick(71000)) // blocked group consumes a CPU quantum, not I/O.
             h.controller.force()

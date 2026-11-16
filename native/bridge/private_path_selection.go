@@ -66,6 +66,7 @@ type privatePathSelector struct {
 	flowContext              context.Context
 	cancelFlows              context.CancelFunc
 	closed                   bool
+	hint                     privatePathHintSlot
 }
 
 // A pointer minted only by successful real probes, consumed exactly once. A
@@ -76,6 +77,7 @@ type privateSelectionProof struct {
 	scope, group, checksHash string
 	started, completed       int64
 	flowEpoch                uint64
+	selectionToken           uint64 // captured only by the exact successful commit
 }
 
 func newPrivatePathSelector(p *privatePathPool, scope, group string, checks []routeCheck) (*privatePathSelector, error) {
@@ -226,6 +228,7 @@ func (s *privatePathSelector) freshProbeLocked(ctx context.Context, e, previous 
 func (s *privatePathSelector) withdrawLocked() {
 	p := s.pool
 	s.proof = nil
+	s.hint.clearLocked()
 	s.cancelFlows()
 	if s.flowEpoch == math.MaxUint64 {
 		s.closed = true
@@ -262,6 +265,7 @@ func (s *privatePathSelector) selectVerified(proof *privateSelectionProof, grace
 		return false
 	}
 	old := s.active
+	proof.selectionToken = s.hint.selectedLocked(now)
 	if old == e {
 		return true
 	}
@@ -289,7 +293,7 @@ func (s *privatePathSelector) dialTCP(parent context.Context, network string, de
 	}
 	c := &privatePathCandidate{pool: p, entry: s.active}
 	h, err := c.holdLocked(s.scope)
-	epoch, groupContext := s.flowEpoch, s.flowContext
+	epoch, groupContext, selectionToken := s.flowEpoch, s.flowContext, s.hint.token
 	p.mu.Unlock()
 	if err != nil {
 		return nil, errPrivatePath
@@ -312,6 +316,10 @@ func (s *privatePathSelector) dialTCP(parent context.Context, network string, de
 		return nil, errPrivatePath
 	}
 	f := &privateSelectedTCPFlow{Conn: conn, selector: s, epoch: epoch, groupContext: groupContext, cancel: cancel}
+	if base, ok := conn.(*privateTCPFlow); ok && base != nil && base.owner != nil && base.owner.hold.entry == c.entry &&
+		s.active == c.entry && selectionToken != 0 && s.hint.token == selectionToken && s.hint.clockLocked(p.lease.clock()) {
+		base.owner.hint = privatePathHintFlow{selector: s, entry: c.entry, token: selectionToken, lifetime: ctx}
+	}
 	// Assign both hooks while holding the same mutex Close uses to read them.
 	// A cancelled context can run its callback immediately on another goroutine.
 	f.stopGroup = context.AfterFunc(groupContext, func() { _ = f.Close() })
@@ -328,6 +336,7 @@ func (s *privatePathSelector) Close() {
 		return
 	}
 	s.closed, s.proof = true, nil
+	s.hint.clearLocked()
 	s.cancelFlows()
 	delete(p.selectors, s.group)
 	if old := s.active; old != nil {

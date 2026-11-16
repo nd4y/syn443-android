@@ -1,6 +1,7 @@
 package io.syn443.android.vpn
 
 import io.syn443.decision.AdaptiveRuntime
+import io.syn443.decision.AdaptiveProbeBudget
 import io.syn443.decision.Context
 import io.syn443.decision.Decision
 import io.syn443.decision.NetworkMode
@@ -24,7 +25,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private data class Group(var frontier:RouteFrontier?=null,var current:PlannedPath?=null,
         var measuredAt:Long=0,var latency:Long=0,var nextAt:Long=0,var exploreAt:Long=0,
         var improvement:String="",var improvementPath:PlannedPath?=null,var improvementCount:Int=0,var recheckFailed:Boolean=false,
-        var failure:CurrentFailure?=null)
+        var failure:CurrentFailure?=null,var selectionToken:Long=0,var hintSequence:Long=0,var urgentRecheck:Boolean=false,var forceCheck:Boolean=false)
     private data class Pending(val request:String,val group:String,val path:PlannedPath,val attempt:Long,val startedAt:Long,
         val nativeEpoch:Long,val nativeScope:String,var action:String="probe",var latency:Long=0,var receipt:String="",var retries:Int=0,
         var recovery:CurrentFailure?=null)
@@ -42,13 +43,15 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private var pending:Pending?=null
     private var attempt=0L
     private var groupCursor=0
+    private val cpuYields=HashSet<String>()
     private var policyRevision=0L
     private var boundPolicy:AdaptivePolicyBinding?=null
     private var previousPolicyScope=""
     private var retireOwner=false
     private var lastCommandAt=Long.MIN_VALUE/2
     private var lastNow=0L
-    private val admissions=java.util.ArrayDeque<Long>()
+    private val budget=AdaptiveProbeBudget()
+    private val maintenanceCadence=budget.routineCadence(groups.size)
 
     fun bind(scope:RouteScope,networkMode:NetworkMode,revision:Long) {
         require(revision>0)
@@ -85,8 +88,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         if(!sameEngine) {nativeEpoch=0;retireOwner=false}
         context=next;routeScope=scope;mode=networkMode;policyRevision=revision;policyScope=next.dependencyHash
         memory=RouteHealthMemory(next);pending=null;nativeReady=false;nativeScope=""
-        groupCursor=0
-        groups.values.forEach {it.frontier=null;it.current=null;it.measuredAt=0;it.nextAt=0;it.improvement="";it.improvementPath=null;it.improvementCount=0;it.recheckFailed=false;it.failure=null}
+        groupCursor=0;cpuYields.clear()
+        groups.values.forEach {it.frontier=null;it.current=null;it.measuredAt=0;it.nextAt=0;it.improvement="";it.improvementPath=null;it.improvementCount=0;it.recheckFailed=false;it.failure=null;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false}
     }
     fun controlFrame():String {check(policyScope.isNotEmpty());return JSONObject().put("schemaVersion",1).put("scope",policyScope).put("mode",mode.name).toString()}
     private fun send(command:JSONObject,now:Long,dispatch:(String)->Unit) {
@@ -104,6 +107,38 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             now-it.completedAt in 0..30_000 && nativeEpoch==it.nativeEpoch && nativeScope==it.nativeScope &&
             work.nativeEpoch==it.nativeEpoch && work.nativeScope==it.nativeScope
     }
+    private fun safeInteger(raw:JSONObject,name:String):Long? {
+        val value=raw.opt(name)
+        if(value !is Int && value !is Long)return null
+        return (value as Number).toLong().takeIf {it in 1..9_007_199_254_740_991L}
+    }
+    /** A passive symptom requests a fresh check, never a route verdict. The
+     * outer report already binds the current native and policy scopes. */
+    private fun recheckHints(raw:JSONObject,now:Long) {
+        if(!raw.has("recheckHints"))return
+        val values=raw.optJSONArray("recheckHints") ?: return
+        if(values.length()>16)return
+        data class Hint(val group:String,val token:Long,val sequence:Long,val completed:Long)
+        val hints=ArrayList<Hint>(values.length())
+        val seen=HashSet<String>()
+        for(index in 0 until values.length()) {
+            val value=values.optJSONObject(index) ?: return
+            if(value.keys().asSequence().toSet()!=setOf("group","selectionToken","sequence","completedBootMs","code"))return
+            val group=value.opt("group") as? String ?: return
+            if(group !in groups || !seen.add(group) || value.opt("code")!="traffic_network_failure")return
+            hints+=Hint(group,safeInteger(value,"selectionToken") ?: return,safeInteger(value,"sequence") ?: return,
+                safeInteger(value,"completedBootMs") ?: return)
+        }
+        for(hint in hints) {
+            val group=groups.getValue(hint.group)
+            if(group.current==null || group.selectionToken!=hint.token || hint.sequence<=group.hintSequence ||
+                hint.completed>now || now-hint.completed>30_000)continue
+            group.hintSequence=hint.sequence
+            group.urgentRecheck=true
+            group.nextAt=minOf(group.nextAt,now)
+            group.improvement="";group.improvementPath=null;group.improvementCount=0
+        }
+    }
     fun report(raw:JSONObject,now:Long,dispatch:(String)->Unit) {
         if(retireOwner || context==null)return
         if(!advanceClock(now) || raw.toString().length>32768)return
@@ -112,7 +147,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val reportedPolicy=raw.optString("policyScope")
         if(reportedPolicy!=policyScope && reportedPolicy!=previousPolicyScope)return
         if(epoch!=nativeEpoch || nativeScope.isNotEmpty() && scope!=nativeScope)
-            groups.values.forEach {it.frontier=null;it.failure=null;it.recheckFailed=false}
+            groups.values.forEach {it.frontier=null;it.failure=null;it.recheckFailed=false;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false}
         nativeEpoch=epoch;nativeRunning=raw.optBoolean("running")
         if(nativeRunning && raw.optLong("workAgeMs",0)>35_000) {retireOwner=true;return}
         if(raw.optString("policyScope")!=policyScope || !raw.optBoolean("ready")) {
@@ -122,6 +157,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             return
         }
         nativeReady=true;nativeScope=scope
+        recheckHints(raw,now)
         val work=pending ?: return
         if(now-work.startedAt>35_000) {retireOwner=true;return}
         if(epoch!=work.nativeEpoch || scope!=work.nativeScope)return
@@ -167,14 +203,15 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             return
         }
         if(work.action=="commit" && code=="selected") {
-            if(!raw.optBoolean("groupSelected"))return
+            if(!raw.optBoolean("groupSelected") || raw.optString("receipt")!=work.receipt)return
             // Only an independently verified replacement with a successful
             // previous-selection-bound native commit attributes the old failure.
             work.recovery?.takeIf {it==recoveryFailure(group,work,now)}?.let {
                 memory?.record(checkNotNull(context),key(work.group,it.path),it.attempt,now,ProbeVerdict.CONFIRMED_PATH_FAILURE)
             }
             val changed=group.current?.id!=work.path.id
-            group.current=work.path;group.measuredAt=now;group.latency=work.latency;group.nextAt=now+60_000
+            group.current=work.path;group.measuredAt=now;group.latency=work.latency;group.nextAt=now+maintenanceCadence
+            group.selectionToken=safeInteger(raw,"selectionToken") ?: 0;group.hintSequence=0;group.urgentRecheck=false;group.forceCheck=false
             if(changed || group.exploreAt==0L)group.exploreAt=now+300_000
             group.improvement="";group.improvementPath=null;group.improvementCount=0;group.recheckFailed=false;group.failure=null
             memory?.record(checkNotNull(context),key(work.group,work.path),work.attempt,now,ProbeVerdict.VERIFIED)
@@ -193,6 +230,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             if(code=="exit_mismatch")memory?.record(checkNotNull(context),key(work.group,work.path),work.attempt,now,ProbeVerdict.CONFIRMED_PATH_FAILURE)
             if(group.current?.id==work.path.id && !raw.optBoolean("groupSelected"))group.current=null
             if(group.current?.id==work.path.id) {
+                group.urgentRecheck=false
                 group.recheckFailed=code!="probe_unavailable"
                 group.failure=if(code=="check_failed")CurrentFailure(work.path,work.attempt,checkedAt,nativeEpoch,nativeScope) else null
                 if(code=="check_failed") {group.improvement="";group.improvementPath=null;group.improvementCount=0}
@@ -202,7 +240,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),false,code,null,emptyList())
         } else if(work.action=="discard" && code=="discarded") {
             // A second independent fresh measurement is needed before a latency switch.
-            group.nextAt=if(group.improvement==work.path.id)now+5000 else minOf(now+60_000,group.measuredAt+60_000)
+            group.nextAt=if(group.improvement==work.path.id)now+5000 else minOf(now+maintenanceCadence,group.measuredAt+maintenanceCadence)
         } else if(code !in setOf("commit_rejected","discarded"))return
         pending=null
     }
@@ -210,18 +248,29 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     fun tick(now:Long,unmetered:Boolean,allowExplore:Boolean,dispatch:(String)->Unit) {
         val current= context ?: return
         if(retireOwner || !advanceClock(now) || !nativeReady || nativeScope.isEmpty() || nativeRunning || pending!=null || now-lastCommandAt<1000)return
-        while(admissions.isNotEmpty() && now-admissions.first>=3_600_000)admissions.removeFirst()
-        if(admissions.size>=128 || admissions.count {now-it<60_000}>=8 || admissions.lastOrNull()?.let {now-it<5000}==true)return
+        if(!budget.canStart(now,routine=false)) {if(budget.invalidated())retireOwner=true;return}
         val rotated=order.drop(groupCursor)+order.take(groupCursor)
-        val groupID=rotated.firstOrNull {id->val g=groups.getValue(id);now>=g.nextAt &&
-            (g.current==null || g.recheckFailed || now-g.measuredAt>=60_000 || unmetered && allowExplore && now>=g.exploreAt || g.improvement.isNotEmpty())} ?: return
+        val due=rotated.filter {id->val g=groups.getValue(id)
+            val recovery=g.current==null || g.recheckFailed || g.urgentRecheck
+            now>=g.nextAt && (recovery || budget.canStart(now,routine=true)) &&
+            (recovery || g.forceCheck || now-g.measuredAt>=maintenanceCadence || unmetered && allowExplore && now>=g.exploreAt || g.improvement.isNotEmpty())}
+        if(due.isEmpty())return
+        // Recovery I/O precedes routine I/O, but a group that consumed only a
+        // CPU quantum must let every other due group try before competing
+        // again. Force cannot erase this bounded fair-round debt.
+        val unserved=due.filter {it !in cpuYields}
+        val round=if(unserved.isNotEmpty())unserved else due.also {cpuYields.clear()}
+        val groupID=round.firstOrNull {id->val g=groups.getValue(id);g.current==null || g.recheckFailed || g.urgentRecheck}
+            ?: round.first()
         val group=groups.getValue(groupID)
         // A bounded CPU quantum must yield even when it cannot emit/dispatch
         // a candidate. Only rotating on I/O can starve other due groups.
         groupCursor=(order.indexOf(groupID)+1)%order.size
-        val explore=unmetered && allowExplore && group.current!=null && now>=group.exploreAt
-        val recheck=group.current?.takeIf {!explore && !group.recheckFailed && now-group.measuredAt>=60_000}
-        val retryImprovement=group.improvementPath
+        cpuYields.add(groupID)
+        val routine=group.current!=null && !group.recheckFailed && !group.urgentRecheck
+        val explore=routine && !group.forceCheck && unmetered && allowExplore && now>=group.exploreAt
+        val recheck=group.current?.takeIf {!explore && !group.recheckFailed && (group.forceCheck || group.urgentRecheck || now-group.measuredAt>=maintenanceCadence)}
+        val retryImprovement=group.improvementPath?.takeIf {!group.urgentRecheck && !group.forceCheck}
         var candidate=retryImprovement?.takeIf {now-group.measuredAt<=120_000} ?: recheck
         if(candidate==null) {
             if(group.frontier==null)group.frontier=wire.graph.frontier(groupID,current,mode,emptyList(),now,600_000)
@@ -252,11 +301,14 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         attempt++
         if(health.readiness==PathReadiness.REVALIDATE && health.retryAtMs!=null && !checkNotNull(memory).beginRetry(current,key(groupID,candidate),attempt,now))return
         val request=UUID.randomUUID().toString()
-        pending=Pending(request,groupID,candidate,attempt,now,nativeEpoch,nativeScope);admissions.addLast(now)
+        if(!budget.start(now,routine))return
+        cpuYields.remove(groupID)
+        group.forceCheck=false
+        pending=Pending(request,groupID,candidate,attempt,now,nativeEpoch,nativeScope)
         if(explore)group.exploreAt=now+300_000
         send(frame("start").put("request",request).put("group",groupID).put("hops",JSONArray(candidate.hops)),now,dispatch)
     }
-    fun force() {groups.values.forEach {it.nextAt=0;it.measuredAt=0}}
+    fun force() {groups.values.forEach {it.nextAt=0;it.forceCheck=it.current!=null}}
     fun requiresRetirement()=retireOwner
     override fun toString()="ManagedAdaptiveRoutes([redacted])"
     companion object {

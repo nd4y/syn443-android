@@ -1,5 +1,13 @@
 # Testing and release gates
 
+[Recovery admission and passive symptoms](managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms)
+add eight ordinary/race native roots (53 total), six budget JVM roots and seven
+Android roots, increasing the actual API29/35/37 floor to279 unique zero-skipped
+outcomes. Actual native tests include two-hop sockets and completed errors while
+owner/hub locks are held. Controller simulations separately test routine cutoff,
+reserved recovery, stale A->B->A tokens, malformed hints, matched receipts and
+unchanged pending ownership. They do not replace real managed-chain acceptance.
+
 [Lease/search continuity](managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity)
 requires six named cursor JVM outcomes, five signed lease-semantics outcomes and
 13 Android continuity/fairness outcomes. Each API29/35/37 matrix requires272
