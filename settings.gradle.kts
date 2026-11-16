@@ -7,4 +7,5 @@ dependencyResolutionManagement {
 }
 rootProject.name = "SYN443"
 include(":core:decision", ":core:host-lifecycle", ":core:recovery", ":core:policy", ":core:observability", ":core:health", ":core:identity", ":app")
+include(":ci-vm-probe")
 

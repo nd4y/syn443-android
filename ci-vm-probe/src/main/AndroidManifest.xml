@@ -1,0 +1,19 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- No uses-permission, activity, service, network or storage capability. -->
+    <application
+        android:label="SYN443 CI VM Probe"
+        android:allowBackup="false"
+        android:supportsRtl="false"
+        android:usesCleartextTraffic="false"
+        android:defaultToDeviceProtectedStorage="true"
+        android:directBootAware="true">
+        <!-- DUMP excludes ordinary app senders. API29 public APIs cannot prove
+             the original shell UID; privileged platform/root also has authority.
+             The host separately requires its actual shell UID2000 and owned AVD. -->
+        <receiver
+            android:name=".VmProbeReceiver"
+            android:exported="true"
+            android:directBootAware="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>
