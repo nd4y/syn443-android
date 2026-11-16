@@ -99,6 +99,9 @@ object AdminLayerControl {
     private fun base(revision:Long,hashValue:String) {require(revision in 0..MAX && if(revision==0L)hashValue.isEmpty() else hash.matches(hashValue))}
     private fun target(kind:String,value:String) {require(kind in setOf("template","group","user","device"));identifier(value)}
     private fun validPath(value:String)=value.also {require(it.length in 2..512 && path.matches(it))}
+    // A computed leaf can contain sixteen 64-byte keys even though a mutation
+    // or permission path is independently capped at512 bytes by the server.
+    internal fun effectiveFieldPath(value:String)=value.also {require(it.length in 2..1040 && path.matches(it))}
     private fun observed(value:Long,time:TimeWindow) {require(value in 1..MAX && value<=Math.addExact(time.upperMs,30_000))}
     private fun request(action:AdminLayerAction,requestId:String,payload:String,expect:AdminLayerExpected):AdminLayerRequest {
         require(requestPattern.matches(requestId))
@@ -271,7 +274,7 @@ object AdminLayerControl {
             else->error("admin_layer_permission")
         }
     }
-    private fun layers(values:JsonArray,device:String):Map<String,Long> {
+    internal fun layers(values:JsonArray,device:String):Map<String,Long> {
         require(values.size in 1..20)
         val seen=linkedMapOf<String,Long>();val counts=mutableMapOf<String,Int>();var changesCount=0;var permissionsCount=0
         for(value in values) {
@@ -332,7 +335,7 @@ object AdminLayerControl {
             val effective=value.getValue("effective").jsonObject;shape(effective,setOf("document","fields","restrictions"))
             require(effective.getValue("document") is JsonObject && doc.raw(effective.getValue("document")).toByteArray(Charsets.UTF_8).size<=REQUEST_LIMIT)
             val fields=effective.getValue("fields").jsonObject;require(fields.size<=4096)
-            fields.forEach {(path,value)->validPath(path);origin(value,origins)}
+            fields.forEach {(path,value)->effectiveFieldPath(path);origin(value,origins)}
             val restrictions=effective.getValue("restrictions").jsonArray;require(restrictions.size<=256)
             restrictions.forEach {val r=it.jsonObject;shape(r,setOf("permission","origin"));permission(r.getValue("permission"));origin(r.getValue("origin"),origins)}
         }
@@ -449,7 +452,7 @@ object AdminLayerControl {
     private fun layerIdentity(layer:JsonElement):String=layer.jsonObject.let {text(it.getValue("kind"))+"/"+text(it.getValue("id"))}
     /** Exact JSON semantics for protected portable values. In particular, do
      * not compare via Double: distinct high-precision decimals may round alike. */
-    private fun sameLayerValue(a:JsonElement,b:JsonElement):Boolean=when {
+    internal fun sameLayerValue(a:JsonElement,b:JsonElement):Boolean=when {
         a is JsonObject && b is JsonObject->a.keys==b.keys && a.all {(key,value)->sameLayerValue(value,b.getValue(key))}
         a is JsonArray && b is JsonArray->a.size==b.size && a.indices.all {sameLayerValue(a[it],b[it])}
         a==JsonNull || b==JsonNull->a==b

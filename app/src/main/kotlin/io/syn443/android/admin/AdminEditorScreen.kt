@@ -106,6 +106,10 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
         } else if(!model.unassigned)item {Text("Предложение ещё не загружено.",Modifier.testTag("editor-no-document"))}
         if(model.phase==AdminEditorPhase.REVIEW && !model.unassigned) {
             item {Text("Проверьте получателей и изменения перед публикацией.",Modifier.testTag("editor-review"))}
+            if(model.comparisonBinding.isNotEmpty())item {
+                OutlinedButton(onClick={if(!dirty && !editorBusy(latestModel))latestActions.viewComparison()},enabled=!activeBusy && !dirty,
+                    modifier=Modifier.fillMaxWidth().testTag("editor-full-comparison")) {Text("Показать полное сравнение изменений")}
+            }
             if(expired)item {Text(adminEditorErrorText("REVIEW_EXPIRED"),Modifier.testTag("editor-review-expired"))}
             item {Button(onClick={val current=latestModel;val now=latestElapsed()
                 if(reviewAllowed(current,now))confirmation=EditorConfirmation(current.reviewBinding,current.reviewDeadlineElapsed,now)

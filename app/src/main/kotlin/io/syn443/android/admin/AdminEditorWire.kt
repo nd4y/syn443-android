@@ -20,7 +20,7 @@ internal object AdminEditorWire {
     private val kinds=setOf("template","group","user","device","local")
     private val fields=setOf("schemaVersion","device","privateDraftRevision","desiredHeadRevision","localRevision",
         "phase","busy","readOnly","unassigned","documentBinding","pages64","parents","reviewBinding",
-        "reviewDeadlineElapsed","recipients","diffSummaries64","error")
+        "reviewDeadlineElapsed","recipients","diffSummaries64","error","comparisonBinding")
 
     private fun utf8Size(value:String):Int {
         val raw=value.toByteArray(Charsets.UTF_8)
@@ -53,6 +53,7 @@ internal object AdminEditorWire {
             .all {it in 0..MAX_INTEGER})
         require(value.documentBinding.isEmpty() || binding.matches(value.documentBinding))
         require(value.reviewBinding.isEmpty() || binding.matches(value.reviewBinding))
+        require(value.comparisonBinding.isEmpty() || editorDigest(value.comparisonBinding))
         require(value.pages.size<=64 && value.pages.all {it.length<=8192 && editorUnicode(it)})
         require(value.pages.sumOf(::utf8Size)<=MAX_PAGE_BYTES)
         require(value.pages.isEmpty() || value.documentBinding.isNotEmpty())
@@ -111,6 +112,7 @@ internal object AdminEditorWire {
             field("recipients") {out.array(value.recipients)}
             field("diffSummaries64") {out.encodedArray(value.diffSummaries)}
             field("error") {out.text(value.error)}
+            field("comparisonBinding") {out.text(value.comparisonBinding)}
             out.raw("}");out.body()
         }
     }
@@ -209,7 +211,7 @@ internal object AdminEditorWire {
             var device="";var privateRevision=0L;var desiredRevision=0L;var localRevision=0L
             var phase=AdminEditorPhase.INVENTORY;var busy=false;var readOnly=false;var unassigned=false
             var document="";var pages:List<String> = emptyList();var parents:List<AdminEditorParent> = emptyList()
-            var review="";var deadline=0L;var recipients:List<String> = emptyList();var differences:List<String> = emptyList();var error=""
+            var review="";var deadline=0L;var recipients:List<String> = emptyList();var differences:List<String> = emptyList();var error="";var comparison=""
             do {
                 val name=text(32);require(name in fields && seen.add(name));expect(':')
                 when(name) {
@@ -230,12 +232,13 @@ internal object AdminEditorWire {
                     "recipients"->recipients=strings(64,64)
                     "diffSummaries64"->differences=encodedStrings(512,MAX_DIFF_BYTES)
                     "error"->error=text(64)
+                    "comparisonBinding"->comparison=text(43)
                 }
             }while(take(','))
             expect('}');space();require(at==source.length && seen==fields)
             return AdminEditorModel(device=device,privateDraftRevision=privateRevision,desiredHeadRevision=desiredRevision,
                 localRevision=localRevision,phase=phase,busy=busy,readOnly=readOnly,unassigned=unassigned,documentBinding=document,
-                pages=pages,parents=parents,reviewBinding=review,reviewDeadlineElapsed=deadline,recipients=recipients,diffSummaries=differences,error=error)
+                pages=pages,parents=parents,reviewBinding=review,reviewDeadlineElapsed=deadline,recipients=recipients,diffSummaries=differences,error=error,comparisonBinding=comparison)
         }
     }
 }

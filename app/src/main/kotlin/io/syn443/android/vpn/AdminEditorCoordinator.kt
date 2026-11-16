@@ -14,9 +14,15 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
     private val boot:()->Int,private val elapsed:()->Long) {
     enum class Kind { OPEN, SAVE_LOCAL, SAVE_DRAFT, PREVIEW, PUBLISH, POLL, RETRY_EXACT, COMPARE, REBASE, CLOSE }
     class Command(val kind:Kind,val device:String="",val binding:String="",val localRevision:Long=0,
-        pages:List<String> = emptyList(),val reviewBinding:String="",val reviewDeadline:Long=0) {
+        pages:List<String> = emptyList(),val reviewBinding:String="",val reviewDeadline:Long=0,val comparisonBinding:String="") {
         val pages:List<String> = Collections.unmodifiableList(ArrayList(pages))
         override fun toString()="AdminEditorCommand([redacted])"
+    }
+    enum class ComparisonKind { LOAD, PAGE, DETAIL, RESOLVE }
+    class ComparisonCommand(val kind:ComparisonKind,val device:String,val documentBinding:String,val localRevision:Long,
+        val comparisonBinding:String="",val section:AdminComparisonSection=AdminComparisonSection.CONFLICTS,val offset:Int=0,
+        val rowId:String="",val side:AdminComparisonSide=AdminComparisonSide.BASE,val page:Int=0,val choice:String="") {
+        override fun toString()="AdminComparisonCommand([redacted])"
     }
     interface Access {
         fun ownership():AdminLayerOwnership
@@ -48,13 +54,20 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
     private var reviewDocument=""
     private var recipients=emptyList<String>()
     private var diffs=emptyList<String>()
+    private class ComparisonCache(val comparison:AdminLayerComparison?,val diff:AdminLayerDiff?,val current:AdminLayerInventory,val currentFacts:String,val baseRevision:Long,
+        val saved:Long,val localRevision:Long,val document:String,val proposalHash:String,val service:String,val actor:String,val origin:String,
+        val boot:Int,val sessionUntil:Long,val binding:String,val readOnly:Boolean,val review:String="",val reviewDeadline:Long=0)
+    private class PreparedDiff(val diff:AdminLayerDiff,val proposalHash:String,val current:AdminLayerInventory,val saved:Long)
+    private var comparisonCache:ComparisonCache?=null
+    private var preparedDiff:PreparedDiff?=null
     private fun worker() {
         if(Looper.myLooper()==Looper.getMainLooper() || Thread.currentThread().name.startsWith("Binder:"))
             throw AdminEditorStorageException(AdminEditorStorageFailure.WRONG_THREAD)
     }
     private fun fail(code:String):Nothing=throw Failure(code)
     private fun clearReview() {preview=null;reviewBinding="";reviewDeadline=0;reviewBoot=-1;reviewDocument="";recipients=emptyList();diffs=emptyList()}
-    private fun clearRam() {record=null;base=null;head=null;savedRevision=null;dirty=true;publishedRevision=0;activeOperation=null;clearReview();ownedService="";ownedActor="";ownedOrigin="";ownedBoot=-1;ownedSessionUntil=-1;lastElapsed=-1}
+    private fun clearComparison() {comparisonCache=null;preparedDiff=null}
+    private fun clearRam() {record=null;base=null;head=null;savedRevision=null;dirty=true;publishedRevision=0;activeOperation=null;clearReview();clearComparison();ownedService="";ownedActor="";ownedOrigin="";ownedBoot=-1;ownedSessionUntil=-1;lastElapsed=-1}
     private fun admitted(access:Access):AdminLayerOwnership {
         access.check();val owned=access.ownership();access.check()
         val now=elapsed()
@@ -63,7 +76,7 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
         if(ownedService.isNotEmpty() && (owned.serviceHash!=ownedService || owned.actor!=ownedActor || owned.apiOrigin!=ownedOrigin || owned.bootCount!=ownedBoot)) {
             clearRam();fail("REAUTHENTICATE")
         }
-        if(ownedSessionUntil>=0 && ownedSessionUntil!=owned.sessionUntilElapsedMs){clearReview();activeOperation=null}
+        if(ownedSessionUntil>=0 && ownedSessionUntil!=owned.sessionUntilElapsedMs){clearReview();clearComparison();activeOperation=null}
         ownedSessionUntil=owned.sessionUntilElapsedMs
         ownedService=owned.serviceHash;ownedActor=owned.actor;ownedOrigin=owned.apiOrigin;ownedBoot=owned.bootCount;lastElapsed=now
         return owned
@@ -118,7 +131,7 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
     }
     private fun open(command:Command,access:Access) {
         require(command.device.matches(Regex("[A-Za-z0-9_-]{1,64}")))
-        clearReview();activeOperation=null;publishedRevision=0
+        clearReview();clearComparison();activeOperation=null;publishedRevision=0
         val owned=admitted(access)
         record=null;base=null;head=null;savedRevision=null;dirty=true
         val recovered=try {store.recoverOwned(owned.serviceHash,owned.actor)}catch(e:AdminEditorStorageException) {
@@ -172,6 +185,8 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
         return result
     }
     private fun pending(request:AdminLayerRequest,access:Access) {
+        comparisonCache=null
+        if(request.action!=AdminLayerAction.PREVIEW)preparedDiff=null
         val r=checkNotNull(record);val body=request.bodyBytes();val replay=AdminLayerControl.replayContext(request,ownedActor,ownedOrigin)
         val action=when(request.action) {
             AdminLayerAction.DRAFT_PUT->"layers.draft.put";AdminLayerAction.DRAFT_DISCARD->"layers.draft.discard"
@@ -205,7 +220,7 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
                 "ready"->{
                     val checked=reply.preview ?:fail("INVALID_REPLY")
                     resolve(text(),access)
-                    if(checked.replayOnly){clearReview();phase=AdminEditorPhase.LOCAL_DIRTY;error="REVIEW_REQUIRED"}
+                    if(checked.replayOnly){clearReview();clearComparison();phase=AdminEditorPhase.LOCAL_DIRTY;error="REVIEW_REQUIRED"}
                     else {
                         val deadline=access.reviewDeadline(checked);val owned=admitted(access)
                         if(deadline<=elapsed() || deadline>owned.sessionUntilElapsedMs)fail("REVIEW_EXPIRED")
@@ -214,14 +229,19 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
                         val recipientsJson=JSONObject(checked.wireJson()).getJSONObject("preview").getJSONArray("recipients")
                         recipients=(0 until recipientsJson.length()).map {recipientsJson.getJSONObject(it).getString("device")}
                         diffs=overrideSummary();phase=AdminEditorPhase.REVIEW
+                        val prepared=preparedDiff
+                        if(prepared!=null && prepared.proposalHash==proposalHash())
+                            comparisonCache=cache(null,prepared.diff,prepared.current,prepared.saved,owned,true,reviewBinding,deadline)
+                        else comparisonCache=null
+                        preparedDiff=null
                     }
                 }
                 "published"->{
                     val revision=reply.heads.singleOrNull {it.device==record?.owner?.deviceId}?.revision ?:fail("INVALID_REPLY")
-                    resolve(text(),access);publishedRevision=revision;clearReview();phase=AdminEditorPhase.PUBLISHED;error=""
+                    resolve(text(),access);publishedRevision=revision;clearReview();clearComparison();phase=AdminEditorPhase.PUBLISHED;error=""
                 }
                 "rejected","expired","cancelled"->{
-                    resolve(text(),access);clearReview()
+                    resolve(text(),access);clearReview();clearComparison()
                     phase=if(reply.error=="configuration_conflict")AdminEditorPhase.CONFLICT else AdminEditorPhase.LOCAL_DIRTY
                     error=when(reply.error){"configuration_conflict"->"CONFIGURATION_CONFLICT";"configuration_denied"->"ACCESS_DENIED";""->"REVIEW_REQUIRED";else->"INVALID_REPLY"}
                 }
@@ -240,6 +260,155 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
         }
         return if(all.size<=64)all else all.take(63)+"Ещё ${all.size-63} переопределений; сверяйте полное предложение."
     }
+    private fun proposalHash()=Identity.hash(text().toByteArray(Charsets.UTF_8))
+    private fun cache(value:AdminLayerComparison?,diff:AdminLayerDiff?,current:AdminLayerInventory,saved:Long,owned:AdminLayerOwnership,
+        readOnly:Boolean,review:String="",deadline:Long=0):ComparisonCache {
+        val r=checkNotNull(record);require(r.pending==null)
+        val document=documentBinding();val hash=proposalHash()
+        val resolutions=value?.conflicts?.sortedBy {it.id}?.joinToString("\u0000"){it.id+"="+(it.resolution?.choice?:"")}?:""
+        val bodyHash=value?.proposal?.let {Identity.hash(it.wireJson().toByteArray(Charsets.UTF_8))}?:hash
+        val facts=if(readOnly)Identity.hash(current.wireJson().toByteArray(Charsets.UTF_8)) else AdminLayerComparison.configurationBinding(current)
+        val source=value?.binding?:Identity.hash(("prepared-diff\u0000"+hash+"\u0000"+facts+"\u0000"+checkNotNull(diff).beforeJson()+"\u0000"+diff.afterJson()).toByteArray(Charsets.UTF_8))
+        val binding=Identity.hash(("syn443.admin-editor.comparison.v1\u0000"+source+"\u0000"+resolutions+"\u0000"+bodyHash+"\u0000"+
+            document+"\u0000"+r.revision+"\u0000"+owned.serviceHash+"\u0000"+owned.actor+"\u0000"+owned.apiOrigin+"\u0000"+owned.bootCount+"\u0000"+
+            owned.sessionUntilElapsedMs+"\u0000"+readOnly+"\u0000"+review+"\u0000"+deadline).toByteArray(Charsets.UTF_8))
+        return ComparisonCache(value,diff,current,facts,base?.revision?:current.revision,saved,r.revision,document,hash,owned.serviceHash,owned.actor,owned.apiOrigin,
+            owned.bootCount,owned.sessionUntilElapsedMs,binding,readOnly,review,deadline)
+    }
+    private fun sameStoredRecord(expected:AdminEditorRecord,access:Access) {
+        val actual=store.load(expected.owner);admitted(access)
+        if(actual!=expected){clearComparison();fail("COMPARISON_STALE")}
+    }
+    private fun currentComparison(access:Access):ComparisonCache {
+        val owned=admitted(access);val c=comparisonCache ?:fail("COMPARISON_STALE")
+        val r=record ?:fail("COMPARISON_STALE")
+        if(r.pending!=null || r.revision!=c.localRevision || documentBinding()!=c.document || proposalHash()!=c.proposalHash ||
+            owned.serviceHash!=c.service || owned.actor!=c.actor || owned.apiOrigin!=c.origin || owned.bootCount!=c.boot || owned.sessionUntilElapsedMs!=c.sessionUntil) {
+            clearComparison();fail("COMPARISON_STALE")
+        }
+        sameStoredRecord(r,access)
+        if(comparisonCache!==c)fail("COMPARISON_STALE")
+        return c
+    }
+    private fun comparisonSelected(command:ComparisonCommand):AdminEditorRecord=selected(Command(Kind.COMPARE,command.device,command.documentBinding,command.localRevision))
+    private fun freshComparison(command:ComparisonCommand,access:Access):ComparisonCache {
+        val r=comparisonSelected(command);if(r.pending!=null)fail("PENDING")
+        sameStoredRecord(r,access);clearReview();clearComparison()
+        val candidate=proposal();val bundle=scope(candidate,r)
+        val current=currentInventory(r.owner.deviceId,access)
+        val revision=bundle.getLong("baseRevision");val hash=bundle.getString("baseHash")
+        val captured=if(current.revision==revision && current.hash==hash)current else
+            remote(AdminLayerControl.history(r.owner.deviceId,revision,hash,Identity.random()),access) as? AdminLayerInventory ?:fail("INVALID_REPLY")
+        loadSavedRevision(access);val saved=checkNotNull(savedRevision)
+        val value=AdminLayerComparison.compareDeviceDraft(captured,current,candidate,r.owner.draftId,saved)
+        sameStoredRecord(r,access)
+        val owned=admitted(access);base=captured;head=current
+        return cache(value,value.diff,current,saved,owned,false).also {comparisonCache=it}
+    }
+    private fun row(c:ComparisonCache,section:AdminComparisonSection,index:Int):AdminComparisonRow {
+        val sides=ArrayList<AdminComparisonSide>()
+        return if(section==AdminComparisonSection.CONFLICTS) {
+            val item=checkNotNull(c.comparison).conflicts[index]
+            if(item.baseJson()!=null)sides+=AdminComparisonSide.BASE
+            if(item.localJson()!=null)sides+=AdminComparisonSide.LOCAL_VALUE
+            if(item.currentJson()!=null)sides+=AdminComparisonSide.CURRENT
+            AdminComparisonRow(item.id,item.kind,item.path,item.code,item.resolvable,item.resolution?.choice?:"",sides)
+        } else {
+            val item=checkNotNull(c.diff).entries[index]
+            if(item.beforeJson()!=null)sides+=AdminComparisonSide.BEFORE
+            if(item.afterJson()!=null)sides+=AdminComparisonSide.AFTER
+            if(item.beforeOriginJson()!=null)sides+=AdminComparisonSide.BEFORE_ORIGIN
+            if(item.afterOriginJson()!=null)sides+=AdminComparisonSide.AFTER_ORIGIN
+            val id=Identity.hash((c.binding+"\u0000DIFF\u0000"+index+"\u0000"+item.path+"\u0000"+item.kind).toByteArray(Charsets.UTF_8))
+            val code=when {item.beforeJson()==null->"ADDED";item.afterJson()==null->"REMOVED";item.beforeJson()!=item.afterJson()->"VALUE_CHANGED";else->"ORIGIN_CHANGED"}
+            AdminComparisonRow(id,item.kind,item.path,code,availableSides=sides)
+        }
+    }
+    private fun comparisonModel(c:ComparisonCache,section:AdminComparisonSection,offset:Int,detail:AdminComparisonDetail?=null):AdminComparisonModel {
+        val total=if(section==AdminComparisonSection.CONFLICTS)c.comparison?.conflicts?.size?:0 else c.diff?.entries?.size?:0
+        require(offset in 0..total)
+        val rows=(offset until minOf(offset+20,total)).map {row(c,section,it)}
+        return AdminComparisonModel(device=checkNotNull(record).owner.deviceId,binding=c.binding,localRevision=c.localRevision,section=section,
+            total=total,offset=offset,rows=rows,ready=!c.readOnly && c.comparison?.ready==true,detail=detail,readOnly=c.readOnly,
+            baseRevision=c.baseRevision,currentRevision=c.current.revision)
+    }
+    private fun detailText(c:ComparisonCache,section:AdminComparisonSection,index:Int,side:AdminComparisonSide):String? {
+        return if(section==AdminComparisonSection.CONFLICTS) {
+            val item=checkNotNull(c.comparison).conflicts[index]
+            when(side){AdminComparisonSide.BASE->item.baseJson();AdminComparisonSide.LOCAL_VALUE->item.localJson();AdminComparisonSide.CURRENT->item.currentJson();else->null}
+        } else {
+            val item=checkNotNull(c.diff).entries[index]
+            when(side){AdminComparisonSide.BEFORE->item.beforeJson();AdminComparisonSide.AFTER->item.afterJson();AdminComparisonSide.BEFORE_ORIGIN->item.beforeOriginJson();AdminComparisonSide.AFTER_ORIGIN->item.afterOriginJson();else->null}
+        }
+    }
+    fun comparison(command:ComparisonCommand,access:Access):AdminComparisonModel {
+        worker()
+        try {
+            admitted(access)
+            require(command.offset>=0 && command.page in 0..255)
+            val c=if(command.kind==ComparisonKind.LOAD)freshComparison(command,access) else {
+                comparisonSelected(command)
+                currentComparison(access).also {if(command.comparisonBinding!=it.binding)fail("COMPARISON_STALE")}
+            }
+            val result=when(command.kind) {
+                ComparisonKind.LOAD,ComparisonKind.PAGE->comparisonModel(c,command.section,command.offset)
+                ComparisonKind.DETAIL->{
+                    require(command.page in 0..255)
+                    val model=comparisonModel(c,command.section,command.offset)
+                    val position=model.rows.indexOfFirst {it.id==command.rowId}
+                    if(position<0 || command.side !in model.rows[position].availableSides)fail("COMPARISON_STALE")
+                    val value=detailText(c,command.section,command.offset+position,command.side) ?:fail("COMPARISON_STALE")
+                    val chunks=pages(value);require(command.page<chunks.size)
+                    val detail=AdminComparisonDetail(command.rowId,command.side,command.page,chunks.size,chunks[command.page])
+                    comparisonModel(c,command.section,command.offset,detail)
+                }
+                ComparisonKind.RESOLVE->{
+                    if(c.readOnly)fail("COMPARISON_READ_ONLY")
+                    val before=comparisonModel(c,command.section,command.offset)
+                    if(before.rows.none {it.id==command.rowId})fail("COMPARISON_STALE")
+                    val value=checkNotNull(c.comparison)
+                    val choice=when(command.choice){"LOCAL"->AdminLayerResolution.KEEP_LOCAL;"CURRENT"->AdminLayerResolution.CURRENT;else->fail("INVALID_COMPARISON")}
+                    val next=AdminLayerComparison.resolveDeviceDraft(value,mapOf(command.rowId to choice))
+                    val owned=admitted(access);sameStoredRecord(checkNotNull(record),access)
+                    if(comparisonCache!==c)fail("COMPARISON_STALE")
+                    val updated=cache(next,next.diff,c.current,c.saved,owned,false).also {comparisonCache=it}
+                    val total=if(command.section==AdminComparisonSection.CONFLICTS)next.conflicts.size else next.diff?.entries?.size?:0
+                    comparisonModel(updated,command.section,minOf(command.offset,total))
+                }
+            }
+            currentComparison(access)
+            return result
+        }catch(e:Exception) {
+            val code=when(e){is Failure->e.code;is AdminException->e.reason.name;is AdminEditorStorageException->"STORAGE_"+e.reason.name;else->"INVALID_COMPARISON"}
+            if(code in setOf("REAUTHENTICATE","SESSION_EXPIRED","CANCELLED"))clearComparison()
+            return AdminComparisonModel(error=code)
+        }
+    }
+    fun comparisonSnapshot(access:Access):AdminComparisonModel? {
+        worker();admitted(access)
+        if(comparisonCache==null)return null
+        val c=currentComparison(access)
+        return comparisonModel(c,if(c.readOnly)AdminComparisonSection.DIFF else AdminComparisonSection.CONFLICTS,0)
+    }
+    private fun rebase(command:Command,access:Access) {
+        val c=currentComparison(access)
+        if(command.comparisonBinding!=c.binding)fail("COMPARISON_STALE")
+        if(c.readOnly)fail("COMPARISON_READ_ONLY")
+        val candidate=c.comparison?.takeIf {it.ready}?.proposal ?:fail("COMPARISON_REQUIRED")
+        val r=checkNotNull(record)
+        val current=currentInventory(r.owner.deviceId,access)
+        if(AdminLayerComparison.configurationBinding(current)!=c.currentFacts) {
+            head=current;clearComparison();fail("COMPARISON_STALE")
+        }
+        loadSavedRevision(access)
+        if(savedRevision!=c.saved){clearComparison();fail("COMPARISON_STALE")}
+        currentComparison(access)
+        if(comparisonCache!==c)fail("COMPARISON_STALE")
+        // Only the exact explicitly confirmed candidate is written. No remote
+        // mutation, new preview or automatic choice follows this local CAS.
+        clearReview();clearComparison();persistPrepared(candidate,access)
+        base=current;head=current;savedRevision=c.saved;dirty=true;phase=AdminEditorPhase.LOCAL_DIRTY
+    }
     fun execute(command:Command,access:Access):AdminEditorModel {
         worker();error=""
         try {
@@ -252,11 +421,16 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
                     Kind.SAVE_LOCAL->{
                         require(command.pages.size<=64 && command.pages.all {it.length<=8192 && editorUnicode(it)})
                         val raw=command.pages.joinToString("");val bytes=raw.toByteArray(Charsets.UTF_8)
-                        try {require(bytes.size<=AdminEditorStore.MAX_TEXT);clearReview();record=store.edit(r,bytes);admitted(access)}finally {bytes.fill(0)}
+                        try {require(bytes.size<=AdminEditorStore.MAX_TEXT);clearReview();clearComparison();record=store.edit(r,bytes);admitted(access)}finally {bytes.fill(0)}
                         dirty=true;phase=AdminEditorPhase.LOCAL_DIRTY
                     }
-                    Kind.SAVE_DRAFT->{clearReview();val candidate=prepared(access,true);val request=AdminLayerControl.saveDraft(checkNotNull(savedRevision),candidate,Identity.random());pending(request,access);result(remote(request,access),access)}
-                    Kind.PREVIEW->{clearReview();val candidate=prepared(access,false);val request=AdminLayerControl.preview(candidate,ownedActor,ownedOrigin,Identity.random());pending(request,access);result(remote(request,access),access)}
+                    Kind.SAVE_DRAFT->{clearReview();clearComparison();val candidate=prepared(access,true);val request=AdminLayerControl.saveDraft(checkNotNull(savedRevision),candidate,Identity.random());pending(request,access);result(remote(request,access),access)}
+                    Kind.PREVIEW->{
+                        clearReview();clearComparison();val candidate=prepared(access,false)
+                        val captured=capturedBase(candidate,access)
+                        preparedDiff=PreparedDiff(AdminLayerComparison.diffPreparedDeviceDraft(captured,candidate),proposalHash(),captured,checkNotNull(savedRevision))
+                        val request=AdminLayerControl.preview(candidate,ownedActor,ownedOrigin,Identity.random());pending(request,access);result(remote(request,access),access)
+                    }
                     Kind.PUBLISH->{
                         val checked=preview ?:fail("REVIEW_EXPIRED");val owned=admitted(access)
                         if(phase!=AdminEditorPhase.REVIEW || command.reviewBinding!=reviewBinding || command.reviewDeadline!=reviewDeadline || reviewDocument!=documentBinding() ||
@@ -266,10 +440,8 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
                     }
                     Kind.POLL->{val operation=restore(access);if(operation.action !in setOf(AdminLayerAction.PREVIEW,AdminLayerAction.PUBLISH))fail("NO_JOB");result(remote(AdminLayerControl.poll(operation,Identity.random()),access),access)}
                     Kind.RETRY_EXACT->{val operation=restore(access);clearReview();result(remote(operation,access),access)}
-                    Kind.COMPARE->{clearReview();val candidate=proposal();val captured=capturedBase(candidate,access);head=currentInventory(r.owner.deviceId,access);phase=if(head?.revision==captured.revision && head?.hash==captured.hash)AdminEditorPhase.EDITING else AdminEditorPhase.CONFLICT;error=if(phase==AdminEditorPhase.CONFLICT)"CONFIGURATION_CONFLICT" else ""}
-                    Kind.REBASE->{clearReview();val candidate=proposal();val captured=capturedBase(candidate,access);head=currentInventory(r.owner.deviceId,access)
-                        if(head?.revision!=captured.revision || head?.hash!=captured.hash){phase=AdminEditorPhase.LIMITED;error="REBASE_REQUIRED"}
-                        else {if(savedRevision==null)loadSavedRevision(access);persistPrepared(AdminLayerControl.prepareDeviceDraft(captured,candidate,r.owner.draftId,checkNotNull(savedRevision)),access);dirty=true;phase=AdminEditorPhase.LOCAL_DIRTY}}
+                    Kind.COMPARE->fail("COMPARISON_REQUIRED")
+                    Kind.REBASE->rebase(command,access)
                     Kind.CLOSE->{clearReview();record=store.close(r);admitted(access);clearRam();phase=AdminEditorPhase.INVENTORY}
                 }
             }
@@ -283,14 +455,14 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
                 else->"INVALID_PROPOSAL"
             }
             error=code
-            if(code in setOf("REAUTHENTICATE","SESSION_EXPIRED","CANCELLED"))activeOperation=null
+            if(code in setOf("REAUTHENTICATE","SESSION_EXPIRED","CANCELLED")){activeOperation=null;clearComparison()}
             if(e is AdminEditorStorageException && e.reason==AdminEditorStorageFailure.OWNER_MISMATCH)clearRam()
             phase=when {
                 code in setOf("REAUTHENTICATE","SESSION_EXPIRED","CANCELLED")->AdminEditorPhase.NEEDS_REAUTH
                 record?.pending!=null->AdminEditorPhase.UNCERTAIN
-                code in setOf("CONFLICT","CONFIGURATION_CONFLICT")->AdminEditorPhase.CONFLICT
+                code in setOf("CONFLICT","CONFIGURATION_CONFLICT","COMPARISON_STALE")->AdminEditorPhase.CONFLICT
                 code in setOf("INVALID_PROPOSAL","INVALID_CONFIGURATION","REVIEW_EXPIRED","REVIEW_REQUIRED")->AdminEditorPhase.LOCAL_DIRTY
-                code in setOf("LIMITED","NO_JOB","REBASE_REQUIRED")->AdminEditorPhase.LIMITED
+                code in setOf("LIMITED","NO_JOB","REBASE_REQUIRED","COMPARISON_REQUIRED","COMPARISON_READ_ONLY")->AdminEditorPhase.LIMITED
                 else->AdminEditorPhase.UNAVAILABLE
             }
             return model(phase!=AdminEditorPhase.NEEDS_REAUTH)
@@ -317,6 +489,7 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
             desiredHeadRevision=maxOf(publishedRevision,head?.revision ?:base?.currentRevision ?:0),localRevision=current?.revision ?:0,phase=phase,
             readOnly=phase in setOf(AdminEditorPhase.PUBLISHED,AdminEditorPhase.LIMITED,AdminEditorPhase.UNAVAILABLE),
             unassigned=head?.revision==0L,documentBinding=documentBinding(),pages=if(current!=null && showBody)pages(body) else emptyList(),parents=parents,
-            reviewBinding=reviewBinding,reviewDeadlineElapsed=reviewDeadline,recipients=recipients,diffSummaries=diffs,error=error)
+            reviewBinding=reviewBinding,reviewDeadlineElapsed=reviewDeadline,recipients=recipients,diffSummaries=diffs,error=error,
+            comparisonBinding=if(showBody)comparisonCache?.binding?:"" else "")
     }
 }

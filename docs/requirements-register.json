@@ -544,10 +544,11 @@
       "text": "Слои: базовый шаблон сервиса, назначения групп, пользовательская политика, политика устройства, разрешённые локальные значения. Для групп задаётся явный приоритет. Коллизия одинакового приоритета или конфликт взаимоисключающих маршрутов блокирует публикацию. Наследование прав может сужать, но не обходить запрет вышестоящей политики. Для каждого итогового поля панель объясняет источник.",
       "status": "planned",
       "evidence": [
-        "docs/mobile-layered-editor-contract.md"
+        "docs/mobile-layered-editor-contract.md",
+        "docs/native-layered-editor.md"
       ],
-      "implementationScope": "v88 source-pending native layer codecs retain exact authoritative parent spans and field provenance, preserve SET/DELETE/INHERIT, and keep global-layer, private-draft, local-editor and desired-head revision domains separate. The actual Go wire fixture producer is accepted; new Android conformance outcomes await Actions.",
-      "remainingScope": "Full native layer/priority/permission administration, live publication and complete effective-policy explanation remain required; this source contribution changes no requirement status."
+      "implementationScope": "v89 source-pending adds bounded three-way comparison, field/value/origin details and explicit local-only rebase while retaining protected raw parents, permissions, SET/DELETE/INHERIT and separate revision domains. Accepted CP57 source/artifact supplies41 actual Go projections,11 chosen rebase projection examples and2 leaf-bound summaries; Android conformance and coverage await Actions.",
+      "remainingScope": "Full native layer/priority/permission administration, typed settings validation, live publication and physical effective-policy explanation remain required. Local projection grants no authorization and this source contribution changes no requirement status."
     },
     {
       "id": "CFG-04",
@@ -1897,10 +1898,11 @@
         "docs/mobile-admin-native-ui.md",
         "docs/mobile-admin-controller.md",
         "docs/mobile-admin-control-api.md",
-        "docs/mobile-layered-editor-contract.md"
+        "docs/mobile-layered-editor-contract.md",
+        "docs/native-layered-editor.md"
       ],
-      "implementationScope": "v88 source-pending native workflow edits one already assigned device through explicit local save, server private-draft save, preview, recipient review and publication. Existing read-only device/configuration/runtime views remain. The candidate adds42 named identity and44 Android outcomes (floors185/377); no new execution or live editor acceptance is claimed.",
-      "remainingScope": "Initial assignment, changed-head rebase, user search and complete policy/profile administration, rollback/diagnosis actions, physical mobile UX and live server authorization remain open; unsupported workflows use the full web panel."
+      "implementationScope": "v89 source-pending extends the assigned-device workflow with paged conflict/diff and explicit detail, bound choices and confirmed local-only rebase after fresh head, saved-draft CAS and actual encrypted-record checks. A cached read-only preview diff retains the original proposal/CAS/deadline. The new14 identity and21 Android outcomes raise required floors to200/398; no execution or live acceptance is claimed.",
+      "remainingScope": "Initial assignment, user search and complete policy/profile administration, rollback/diagnosis actions, physical mobile UX, native OIDC/MFA and live server authorization remain open. Unknown HTTP mutation outcomes retain pending ownership until exact reconciliation; unsupported workflows use the full web panel."
     },
     {
       "id": "MOB-03",
@@ -1942,10 +1944,11 @@
         "docs/mobile-admin-native-ui.md",
         "docs/mobile-admin-controller.md",
         "docs/mobile-admin-control-api.md",
-        "docs/mobile-layered-editor-contract.md"
+        "docs/mobile-layered-editor-contract.md",
+        "docs/native-layered-editor.md"
       ],
-      "implementationScope": "v88 source-pending native editor names one assigned recipient, retains exact raw parents and uses separate local/private/global/head revisions. Explicit review is invalidated by edits; a pending mutation survives lost replies without replay or replacement, and administration does not mutate the phone VPN identity/desired state.",
-      "remainingScope": "Live assigned-device mutation, physical editor acceptance, complete source/effective-policy/history/diagnosis views and broad pilot rollout remain open. Initial assignment and changed-head rebase use the web panel."
+      "implementationScope": "v89 source-pending names one assigned recipient and shows base/compared revisions, bounded differences and explicitly requested value/provenance fragments. Confirmed resolution updates only the exact local proposal/CAS; server draft, preview and publication stay separate. Preview diff does not renew review, dirty text cannot open an old diff, and administration does not mutate the phone VPN identity/desired state.",
+      "remainingScope": "Live assigned-device mutation, physical comparison/editor acceptance, complete source/effective-policy/history/diagnosis views and broad pilot rollout remain open. Initial assignment uses the web panel; typed compilation, server authorization and definitive unknown-outcome reconciliation remain separate gates."
     },
     {
       "id": "MOB-06",
@@ -3338,10 +3341,10 @@
     "verified": "All clauses and required acceptance proved for the declared scope."
   },
   "evidenceSnapshot": {
-    "date": "2026-11-16",
+    "date": "2026-11-17",
     "inventory": "docs/implementation-status.md",
     "androidSource": "69ca262301bf08490e816a782881bb10cda613a6",
     "controlPlaneSource": "63067b67e5c13ed74109b0ea855b7e77bfb7530c",
-    "scope": "Accepted component source checkpoints remain distinct from full-product and physical acceptance. Current v88 layered-editor source and required new185 identity/377 per-API emulator floors are pending Actions and live integration; prior accepted source hashes are retained here."
+    "scope": "Accepted component source checkpoints remain distinct from full-product and physical acceptance. Current v89 comparison/local-rebase source requires200 identity and398 per-API emulator outcomes; new Actions and live integration remain pending. Accepted CP57 richer projection artifact provenance is recorded in docs/native-layered-editor.md; prior accepted source hashes are retained here."
   }
 }

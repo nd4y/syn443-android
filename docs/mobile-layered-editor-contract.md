@@ -1,6 +1,6 @@
 # Native layered editor value contract
 
-The v88 source candidate connects bounded layer codecs, guarded administrative
+The v89 source candidate connects bounded layer codecs, guarded administrative
 HTTP, an encrypted local editor, the controller coordinator and an explicit
 native editing route to the existing Control API. Codec values and local files
 never establish permissions, satisfy fresh MFA or authorize publication. The
@@ -10,9 +10,12 @@ publication and physical editor UX have not been accepted. All builds and
 executable checks belong in GitHub Actions.
 
 The source scope is editing one already assigned device, explicit private-draft
-save, preview, review, publication and reconciliation. Initial assignment,
-changed-head rebase, broad user/server administration and the remaining full
-workflows use the web panel. This is not completion of the full specification.
+save, preview, review, publication and reconciliation. The
+[native comparison slice](native-layered-editor.md) adds explicit bounded
+three-way comparison, value/provenance detail and local-only changed-head rebase
+after fresh head, saved-draft CAS and actual encrypted-record checks. Initial
+assignment, broad user/server administration and the remaining full workflows
+use the web panel. This is not completion of the full specification.
 
 ## Existing operations
 
@@ -232,10 +235,17 @@ MFA, jobs and signed-policy activation remain independent gates.
 
 ## Required source evidence
 
-The candidate adds 43 named identity outcomes and 44 Android outcomes, raising
-the mandatory floors to 186 and 377 on each API29/35/37 emulator. All 19 new
-handwritten layer classes require 90% line coverage in both existing verifiers.
+The layered editor and comparison candidates add57 named identity outcomes and65
+Android outcomes over the preceding source checkpoint, raising the mandatory
+floors to200 identity outcomes and398 on each API29/35/37 emulator. All30 stable
+handwritten layer and comparison classes require90% line coverage in both
+existing verifiers.
 The source tests include the actual Go fixture, exact parent spans, immutable
 DPoP-bound requests, refreshed ownership, encrypted lost-acknowledgement recovery,
-five revision domains, changed-head refusal and UI review lifetime. These names
-and counts are mandatory source gates, not a claim that they have run or passed.
+five revision domains, explicit changed-head local rebase and original UI review
+lifetime. The richer accepted CP57 Go fixture adds41 actual projections,11
+chosen rebase projections and2 leaf-bound summaries; its exact source/artifact
+receipt is recorded in the comparison document. These names and counts are
+mandatory source gates, not a claim that they have run or passed. Live native
+OIDC/ACL/MFA, initial assignment and a definitive negative operation receipt for
+unknown HTTP outcomes remain separate gates.

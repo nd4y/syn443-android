@@ -2,6 +2,7 @@ package io.syn443.android.admin
 
 import androidx.compose.runtime.Immutable
 import java.util.Collections
+import java.util.Base64
 
 internal enum class AdminEditorPhase {
     INVENTORY, EDITING, LOCAL_DIRTY, SAVING, PREVIEWING, REVIEW, PUBLISHING,
@@ -18,7 +19,7 @@ internal class AdminEditorModel(
     pages:List<String> = emptyList(),parents:List<AdminEditorParent> = emptyList(),
     val reviewBinding:String="",val reviewDeadlineElapsed:Long=0,
     recipients:List<String> = emptyList(),diffSummaries:List<String> = emptyList(),
-    val error:String=""
+    val error:String="",val comparisonBinding:String=""
 ) {
     val pages:List<String> = Collections.unmodifiableList(ArrayList(pages))
     val parents:List<AdminEditorParent> = Collections.unmodifiableList(ArrayList(parents))
@@ -32,6 +33,7 @@ internal class AdminEditorModel(
         require(pages.isEmpty() || documentBinding.isNotEmpty())
         require(parents.size<=20)
         require(reviewBinding.isEmpty() || editorBinding.matches(reviewBinding))
+        require(comparisonBinding.isEmpty() || editorDigest(comparisonBinding))
         require(reviewDeadlineElapsed>=0 && recipients.size<=64 && recipients.all {editorId.matches(it)} && recipients.toSet().size==recipients.size)
         require(diffSummaries.size<=64 && diffSummaries.all {it.length<=512 && editorUnicode(it)})
     }
@@ -51,11 +53,11 @@ internal class AdminEditorActions(
     val edited:()->Unit={},val saveLocal:(List<String>)->Unit={},val saveDraft:()->Unit={},
     val preview:()->Unit={},val publish:(String,Long)->Unit={_,_->},
     val poll:()->Unit={},val retryExact:()->Unit={},val login:()->Unit={},
-    val comparison:()->Unit={},val rebase:()->Unit={},val web:()->Unit={},val back:()->Unit={},val close:()->Unit={}
+    val comparison:()->Unit={},val rebase:()->Unit={},val web:()->Unit={},val back:()->Unit={},val close:()->Unit={},val viewComparison:()->Unit={}
 )
 
 internal fun AdminEditorModel.withBusy(value:Boolean)=AdminEditorModel(device,privateDraftRevision,desiredHeadRevision,localRevision,
-    phase,value,readOnly,unassigned,documentBinding,pages,parents,reviewBinding,reviewDeadlineElapsed,recipients,diffSummaries,error)
+    phase,value,readOnly,unassigned,documentBinding,pages,parents,reviewBinding,reviewDeadlineElapsed,recipients,diffSummaries,error,comparisonBinding)
 internal fun AdminEditorModel.withFailure(code:String)=AdminEditorModel(device,privateDraftRevision,desiredHeadRevision,localRevision,
     AdminEditorPhase.UNAVAILABLE,false,true,unassigned,documentBinding,pages,parents,error=code)
 
@@ -72,6 +74,11 @@ internal fun adminEditorErrorText(code:String):String=when(if(code.length in 1..
 private const val EDITOR_MAX_INTEGER=9_007_199_254_740_991L
 private val editorId=Regex("[A-Za-z0-9_-]{1,64}")
 private val editorBinding=Regex("[A-Za-z0-9_-]{1,128}")
+internal fun editorDigest(value:String):Boolean {
+    if(!value.matches(Regex("[A-Za-z0-9_-]{43}")))return false
+    val raw=try {Base64.getUrlDecoder().decode(value)}catch(_:IllegalArgumentException){return false}
+    return try {raw.size==32 && Base64.getUrlEncoder().withoutPadding().encodeToString(raw)==value}finally {raw.fill(0)}
+}
 internal fun editorUnicode(value:String):Boolean {
     var at=0
     while(at<value.length) {

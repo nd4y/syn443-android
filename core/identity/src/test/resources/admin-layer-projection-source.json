@@ -1,0 +1,8 @@
+{
+  "producerRepository": "nd4y/syn443-control-plane",
+  "sourceCommit": "d4d9a4d774a6b1bc404563af648d547b92399af4",
+  "run": 43956602201,
+  "fixtureSha256": "7187eb00ad98742b1043c867b2c3d909e34cd9764d8149d69f6565df89c6a135",
+  "artifactId": 14272259074,
+  "artifactDigest": "sha256:89325b5b220c0659a086fd32c6fdef97fe45e4759a46d6a808c2c8f003bf6c19"
+}

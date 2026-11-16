@@ -88,7 +88,7 @@ class ControlProvider : ContentProvider() {
                     require(caller==Process.myUid())
                     val id=requireNotNull(arg).also {require(it.matches(Regex("[a-f0-9]{32}")))}
                     val input=requireNotNull(extras)
-                    require(input.keySet()==setOf("generation","kind","device","binding","localRevision","pages","reviewBinding","reviewDeadline"))
+                    require(input.keySet()==setOf("generation","kind","device","binding","localRevision","pages","reviewBinding","reviewDeadline","comparisonBinding"))
                     val generation=input.getLong("generation",-1).also {require(it>=0)}
                     val kind=AdminEditorCoordinator.Kind.valueOf(requireNotNull(input.getString("kind")))
                     val device=requireNotNull(input.getString("device")).also {require(it.length<=64)}
@@ -99,8 +99,30 @@ class ControlProvider : ContentProvider() {
                     }
                     val review=requireNotNull(input.getString("reviewBinding")).also {require(it.length<=128)}
                     val deadline=input.getLong("reviewDeadline",-1).also {require(it>=0)}
-                    val command=AdminEditorCoordinator.Command(kind,device,binding,local,pages,review,deadline)
+                    val comparison=requireNotNull(input.getString("comparisonBinding")).also {require(it.length<=43)}
+                    val command=AdminEditorCoordinator.Command(kind,device,binding,local,pages,review,deadline,comparison)
                     return Bundle().apply {putBoolean("ok",true);putBoolean("admitted",AdminController.get(context).editorStart(id,generation,command))}
+                }
+                "admin-comparison-start" -> {
+                    require(caller==Process.myUid())
+                    val id=requireNotNull(arg).also {require(it.matches(Regex("[a-f0-9]{32}")))}
+                    val input=requireNotNull(extras)
+                    require(input.keySet()==setOf("generation","kind","device","documentBinding","localRevision","comparisonBinding",
+                        "section","offset","rowId","side","page","choice"))
+                    val generation=input.getLong("generation",-1).also {require(it>=0)}
+                    val kind=AdminEditorCoordinator.ComparisonKind.valueOf(requireNotNull(input.getString("kind")))
+                    val device=requireNotNull(input.getString("device")).also {require(it.length<=64)}
+                    val document=requireNotNull(input.getString("documentBinding")).also {require(it.length<=128)}
+                    val revision=input.getLong("localRevision",-1).also {require(it>=0)}
+                    val binding=requireNotNull(input.getString("comparisonBinding")).also {require(it.length<=43)}
+                    val section=io.syn443.android.admin.AdminComparisonSection.valueOf(requireNotNull(input.getString("section")))
+                    val offset=input.getInt("offset",-1).also {require(it in 0..8194)}
+                    val row=requireNotNull(input.getString("rowId")).also {require(it.length<=43)}
+                    val side=io.syn443.android.admin.AdminComparisonSide.valueOf(requireNotNull(input.getString("side")))
+                    val page=input.getInt("page",-1).also {require(it in 0..255)}
+                    val choice=requireNotNull(input.getString("choice")).also {require(it in setOf("","LOCAL","CURRENT"))}
+                    val command=AdminEditorCoordinator.ComparisonCommand(kind,device,document,revision,binding,section,offset,row,side,page,choice)
+                    return Bundle().apply {putBoolean("ok",true);putBoolean("admitted",AdminController.get(context).comparisonStart(id,generation,command))}
                 }
                 "admin-read-start", "admin-read-result", "admin-read-cancel" -> {
                     require(caller==Process.myUid())
