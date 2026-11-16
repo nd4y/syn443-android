@@ -97,4 +97,38 @@ class RouteFrontierTest {
                 listOf(RouteTemplate("too-wide", List(4) { ids })), emptyList(), 100, 100)
         }
     }
+
+    @Test fun publicCandidateCanBeExploredForBothPublicIntentsButNeverInternal() {
+        val public = RouteHop("public", NetworkMode.entries.toSet(), null, tcp, publicCandidate = true)
+        val nodes = listOf(public, public.copy(id = "no-tcp", features = setOf(PathFeature.UDP, PathFeature.IPV4)),
+            public.copy(id = "transit", publicCandidate = false))
+        val template = listOf(RouteTemplate("one", listOf(nodes.map { it.id }.toSet())))
+        val identities = mutableSetOf<String>()
+        for (mode in NetworkMode.entries) for (intent in ExitClass.entries) {
+            val frontier = RouteFrontier(context, mode, intent, tcp, nodes, emptyList(), template,
+                listOf(listOf("no-tcp"), listOf("transit")), 100, 1000)
+            val (paths, coverage) = enumerate(frontier)
+            assertEquals(3, coverage.upperBound)
+            assertEquals(3, coverage.examined)
+            if (intent == ExitClass.privateRoute) assertTrue(paths.isEmpty())
+            else {
+                assertEquals(listOf(listOf("public")), paths.map { it.hops })
+                identities += paths.single().id
+            }
+        }
+        assertEquals(1, identities.size)
+        assertEquals(3, ExitClass.entries.size)
+    }
+
+    @Test fun publicCandidateCannotAlsoCarryAnExplicitExitClass() {
+        for (exit in ExitClass.entries) {
+            assertThrows(IllegalArgumentException::class.java) {
+                RouteHop("ambiguous", restricted, exit, tcp, publicCandidate = true)
+            }
+        }
+        val transit = RouteHop("transit", restricted, null, tcp)
+        assertFalse(ExitClass.entries.any(transit::declaresExit))
+        assertTrue(transit.copy(publicCandidate = true).declaresExit(ExitClass.RU))
+        assertFalse(transit.copy(publicCandidate = true).declaresExit(ExitClass.privateRoute))
+    }
 }

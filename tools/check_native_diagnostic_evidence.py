@@ -11,6 +11,16 @@ REQUIRED = {
     'TestDiagnosticCancellationBeforeRosterReturnsCannotStartLateProbes',
 }
 PATH_REQUIRED = {
+    'TestPrivateAdaptiveWireStrictClosedShapeAndCanonicalOwnership',
+    'TestPrivateAdaptiveWireRejectsUnboundGroupsAndUnsafeCatalogue',
+    'TestPrivateAdaptiveWireParserAndByteBounds',
+    'TestPrivateAdaptiveWireFullFiveHundredCatalogueFitsWithoutTruncation',
+    'TestPrivateAdaptiveOwnerRealTwoHopReceiptAndLocalContextBindings',
+    'TestPrivateAdaptiveOwnerCancellationRetainsWorkerAndPermitUntilActualExit',
+    'TestPrivateAdaptiveOwnerLeaseUnknownConstructorAndAdmissionFailClosed',
+    'TestAdaptiveRuntimePreflightRetainsClosedWireAndWholeRenderedBounds',
+    'TestAdaptiveRuntimeExportedCommandsRequireActualTwoHopReceiptAndNativeEpoch',
+    'TestAdaptiveRuntimeSharedBootDeadlinePreventsAnotherProbe',
     'TestPrivateCandidateRegistryClonesParentAndNeverBorrowsDefault',
     'TestPrivateCandidateFailureOwnsPartialObjectsAndClosesInReverse',
     'TestPrivateCandidateRejectsInvalidPathsAndClosePanicCannotOrphanEarlierNodes',
@@ -69,9 +79,9 @@ def verify(lines, required=REQUIRED, expected_package='io.syn443/engine-netbird'
 
 
 if __name__ == '__main__':
-    assert sys.argv[2:] in ([], ['--path-candidates']), 'Unsupported evidence mode'
+    assert sys.argv[2:] in ([], ['--path-candidates'], ['--route-graph']), 'Unsupported evidence mode'
     path = Path(sys.argv[1])
     assert path.is_file() and 0 < path.stat().st_size <= 64 * 1024 * 1024, 'Missing or unbounded native test evidence'
     with path.open(encoding='utf-8') as source:
-        count = verify(source, PATH_REQUIRED, 'io.syn443/bridge') if sys.argv[2:] else verify(source)
+        count = verify(source, {'TestPublicCandidateSeparatesDeclaredExitFromGroupIntent'}, 'io.syn443/routegraph') if sys.argv[2:]==['--route-graph'] else verify(source, PATH_REQUIRED, 'io.syn443/bridge') if sys.argv[2:] else verify(source)
     print(f'Native regressions: {count} actual passes, zero failed/skipped/missing cases')

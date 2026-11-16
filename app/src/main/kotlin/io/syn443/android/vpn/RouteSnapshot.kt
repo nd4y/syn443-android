@@ -131,6 +131,16 @@ object RouteSnapshot {
         return rows.any {it.checks.length()>0} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
     }
     @Synchronized fun owner(scope:RouteScope?){if(live!=scope){invalidate();live=scope}}
+    /** Called only after the bound native adaptive owner reports a real result. */
+    @Synchronized internal fun adaptive(scope:RouteScope,tag:String,ok:Boolean,code:String,latency:Long?,hops:List<String>) {
+        if(scope!=live || code !in setOf("ok","probe_unavailable","exit_mismatch"))return
+        val row=rows.singleOrNull {it.tag==tag && it.type=="syn443-adaptive"} ?: return
+        val now=SystemClock.elapsedRealtime()
+        observations=observations+(row.id to RouteObservation(scope,now,ok || code=="exit_mismatch",ok))
+        codes=codes+(row.id to code)
+        if(latency!=null && latency in 0..30_000)timings=timings+(row.id to latency)
+        measuredPaths=measuredPaths+(row.id to JSONArray(hops.take(4)))
+    }
     @Synchronized fun prepareActivation(scope:RouteScope,startedElapsed:Long):Boolean {
         require(startedElapsed>=0)
         val attempt=scope to startedElapsed

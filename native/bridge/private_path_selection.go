@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math"
 	"net"
 	"regexp"
@@ -16,6 +17,8 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
+
+var errPrivateExitMismatch = errors.New("verified exit predicate mismatch")
 
 var privateGroupID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
@@ -135,10 +138,14 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 			if complete && ctx.Err() == nil && (check.Method == "https_exit_country" && code == "exit_country_mismatch" ||
 				check.Method == "https_exit_ip" && code == "exit_ip_mismatch") {
 				p.mu.Lock()
-				if _, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started); previous == candidate.entry && fresh {
+				_, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started)
+				if previous == candidate.entry && fresh {
 					s.withdrawLocked()
 				}
 				p.mu.Unlock()
+				if fresh {
+					return nil, errPrivateExitMismatch
+				}
 			}
 			return nil, errPrivatePath
 		}

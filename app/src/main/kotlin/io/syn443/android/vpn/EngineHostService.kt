@@ -29,9 +29,30 @@ class EngineHostService : Service() {
     private var lock: FileLock? = null
     private data class NetworkUpdate(val session: String, val name: String, val index: Int)
     @Volatile private var latestNetwork: NetworkUpdate? = null
+    @Volatile private var adaptiveInvalidated=false
     private val proofRunning=java.util.concurrent.atomic.AtomicBoolean()
     private var managedProofEnabled=false
     private var routePoll:Runnable?=null // native worker only
+    private var adaptivePoll:Runnable?=null
+    private var adaptivePollUntil=0L
+    private fun publishAdaptive(session:String,runtime:Runtime) {
+        if(token!=session || engine!==runtime)return
+        val raw=runCatching {runtime.adaptiveStatus()}.getOrNull() ?: return
+        if(raw=="{}" || raw.length>32768)return
+        val state=runCatching {org.json.JSONObject(raw)}.getOrNull() ?: return
+        runCatching {callback?.routeState(session,org.json.JSONObject().put("adaptive",state).toString())}
+        if(state.optBoolean("running") && adaptivePoll==null && SystemClock.elapsedRealtime()<adaptivePollUntil) {
+            val task=object:Runnable {
+                override fun run() {
+                    if(adaptivePoll!==this)return
+                    adaptivePoll=null
+                    if(SystemClock.elapsedRealtime()<adaptivePollUntil)publishAdaptive(session,runtime)
+                }
+            }
+            adaptivePoll=task
+            worker.postDelayed(task,250)
+        }
+    }
     private fun stopRoutePoll() {
         routePoll?.let(worker::removeCallbacks)
         routePoll=null
@@ -74,6 +95,11 @@ class EngineHostService : Service() {
     override fun onCreate() { super.onCreate(); workerThread.start(); worker = Handler(workerThread.looper) }
     private val binder = object : IEngineHost.Stub() {
         override fun pid() = Process.myPid()
+        override fun invalidateAdaptiveContext(session:String):Boolean = synchronized(controlLock) {
+            if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid())return@synchronized false
+            adaptiveInvalidated=true
+            runCatching {engine?.invalidateAdaptiveContext()}.isSuccess
+        }
         override fun start(fd: ParcelFileDescriptor, config: String, routeSelection: String, session: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
             synchronized(controlLock) {
                 if (token != null) { fd.close(); platform.event(session, FAILED); return }
@@ -101,9 +127,11 @@ class EngineHostService : Service() {
                         engine = created
                         // Revocation received during construction must precede the first packet.
                         created.setLeaseDeadline(desiredLease)
+                        if(adaptiveInvalidated || latestNetwork?.session==session)created.invalidateAdaptiveContext()
                     }
                     created.start()
                     platform.event(session, READY)
+                    publishAdaptive(session,created)
                 } catch (_: Exception) { platform.event(session, if (engine == null) INVALID else FAILED) }
             }
         }
@@ -120,7 +148,7 @@ class EngineHostService : Service() {
         override fun stop(session: String) {
             if (session != token) return
             leaseDeadline(session, 1L)
-            worker.post { stopRoutePoll();runCatching { engine?.cancel(); engine?.close() }; finishHost() }
+            worker.post { stopRoutePoll();adaptivePoll?.let(worker::removeCallbacks);adaptivePoll=null;runCatching { engine?.cancel(); engine?.close() }; finishHost() }
         }
         override fun pulse(session: String) {
             if (session != token) return
@@ -129,11 +157,14 @@ class EngineHostService : Service() {
                 engine?.netBirdStatus()?.let { callback?.overlayState(session, it) }
                 if(routePoll==null)engine?.routeCheckStatus()?.let { callback?.routeState(session, it) }
                 sampleIdentity(session)
+                engine?.let {publishAdaptive(session,it)}
             } }
         }
         override fun networkChanged(session: String, name: String, index: Int) {
             if (session != token) return
             latestNetwork = NetworkUpdate(session, name, index)
+            // Revoke path authority before a possibly blocked SDK worker runs.
+            synchronized(controlLock) {runCatching {engine?.invalidateAdaptiveContext()}}
             worker.removeCallbacks(applyNetwork)
             worker.post(applyNetwork)
         }
@@ -154,6 +185,18 @@ class EngineHostService : Service() {
         override fun checkRoutes(session:String,request:String) {
             if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid() || request.length>32768)return
             worker.post {if(session==token) {
+                val frame=runCatching {org.json.JSONObject(request)}.getOrNull()
+                if(frame?.optString("kind")=="adaptive") {
+                    val runtime=engine ?: return@post
+                    val command=frame.optString("commandJson")
+                    if(command.length in 1..4096) {
+                        val accepted=runCatching {runtime.adaptiveCommand(command)}.getOrDefault(false)
+                        if(accepted && runCatching {org.json.JSONObject(command).optString("command")=="start"}.getOrDefault(false))
+                            adaptivePollUntil=SystemClock.elapsedRealtime()+31_000
+                    }
+                    publishAdaptive(session,runtime)
+                    return@post
+                }
                 val key=runCatching {org.json.JSONObject(request).getString("request")}.getOrNull()
                 val runtime=engine
                 if(key!=null && key.length in 1..80) {
@@ -179,6 +222,7 @@ class EngineHostService : Service() {
     @Volatile private var callback: IPlatform? = null
     override fun onBind(intent: Intent): IBinder = object : IEngineHost.Stub() {
         override fun pid() = binder.pid()
+        override fun invalidateAdaptiveContext(token:String)=binder.invalidateAdaptiveContext(token)
         override fun start(fd: ParcelFileDescriptor, config: String, routeSelection: String, token: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
             binder.start(fd, config, routeSelection, token, name, index, leaseDeadline, platform)
         }

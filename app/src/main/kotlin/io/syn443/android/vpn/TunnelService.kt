@@ -36,6 +36,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import javax.net.ssl.HttpsURLConnection
 import io.syn443.decision.FailoverAlgorithm
+import io.syn443.decision.NetworkMode
 import io.syn443.policy.Payload
 import io.syn443.policy.Policy
 import io.syn443.recovery.RouteScope
@@ -84,6 +85,35 @@ class TunnelService : VpnService() {
     private var networkWaitReason = "network_unavailable"
     private data class PendingFailover(val scope: RouteScope, val receipt: String, val decision: RouteDecisionStamp)
     private var pendingFailover: PendingFailover? = null
+    private var adaptiveRoutes:ManagedAdaptiveRoutes?=null
+    private fun adaptivePolicy():Payload? {
+        val state=policies.read()
+        if(!state.enrolled)return null
+        val envelope=if(state.journal.phase=="applying")state.journal.candidate else state.journal.active
+        return policies.allowed(envelope,state)?.payload?.takeIf {
+            it.contentHash==runningConfigHash && it.algorithmRevision==Policy.ADAPTIVE_ALGORITHM &&
+                Policy.ROUTE_ADAPTIVE_TCP in it.requiredCapabilities
+        }
+    }
+    private fun adaptiveMode():NetworkMode?=when(probeContext?.network?.transport) {
+        PhysicalTransport.WIFI->NetworkMode.WIFI
+        PhysicalTransport.CELLULAR->NetworkMode.CELLULAR
+        else->null
+    }
+    private fun adaptiveTick(force:Boolean=false) {
+        val routes=adaptiveRoutes ?: return
+        val scope=routeScope() ?: return
+        val policy=adaptivePolicy() ?: return
+        val mode=adaptiveMode() ?: return
+        routes.bind(scope,mode,policy.revision)
+        if(force)routes.force()
+        val power=getSystemService(android.os.PowerManager::class.java)
+        val battery=getSystemService(android.os.BatteryManager::class.java).getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        routes.tick(SystemClock.elapsedRealtime(),probeContext?.network?.metered==false,!power.isPowerSaveMode && battery in 25..100) {command->
+            token?.let {session->runCatching {host?.checkRoutes(session,command)}}
+        }
+        if(routes.requiresRetirement())retire(true)
+    }
     private fun routeScope() = token?.let {RouteScope(boundGeneration,epoch,policies.read().journal.activationGeneration,it,runningConfigHash)}
     private fun failoverWifi(): Boolean = probeContext?.network?.let {
         it.transport == PhysicalTransport.WIFI && it.validated
@@ -100,6 +130,7 @@ class TunnelService : VpnService() {
         if(!ready || network==null || retiring || !Recovery.current(store.checkpoint(),boundGeneration))return
         val scope=routeScope() ?: return
         RouteSnapshot.owner(scope)
+        if(adaptiveRoutes!=null) {adaptiveTick(force);return}
         val confirmation=RouteSnapshot.confirmingFailover(scope) && failoverWifi()
         val awaitingValidated=only==null && !activation && RouteSnapshot.awaitingValidatedBatch(scope)
         val validatedPolicy=if(awaitingValidated)managedFailoverPolicy() else null
@@ -274,6 +305,13 @@ class TunnelService : VpnService() {
             return
         }
         val pathChanged = PhysicalProbeContext.pathChanged(probeContext, context)
+        // Includes NoNetwork/captive/validation-only changes. A synchronous
+        // bounded control call revokes old native receipts before Java exposes
+        // the new epoch; the SDK worker is never entered by this call.
+        if(adaptiveRoutes!=null && host!=null) {
+            val revoked=token?.let {session->runCatching {host?.invalidateAdaptiveContext(session)==true}.getOrDefault(false)}==true
+            if(!revoked)retire(true)
+        }
         LoginController.get(this).cancelOptionalNetworkWork()
         // Use the same outer lock as the final enrolled activation commit. A queued
         // encrypted write cannot confirm proof after a newer network epoch publishes.
@@ -400,7 +438,12 @@ class TunnelService : VpnService() {
             stableSince = 0; successes = 0; lastProbe = 0
             boundGeneration = cp.generation
             LoginController.get(this).overlayStarting(checkNotNull(token),runningConfigHash)
-            val routeSelection = if (pendingLeaseDeadline > 0) RouteSnapshot.nativeSelectionPlan(runningConfigHash) else ""
+            adaptiveRoutes=ManagedAdaptiveRoutes.read(raw)
+            val routeSelection = adaptiveRoutes?.let {routes->
+                val policy=checkNotNull(adaptivePolicy())
+                routes.bind(checkNotNull(routeScope()),checkNotNull(adaptiveMode()),policy.revision)
+                routes.controlFrame()
+            } ?: if (pendingLeaseDeadline > 0) RouteSnapshot.nativeSelectionPlan(runningConfigHash) else ""
             pendingConfig = PendingConfig(rendered, routeSelection)
             startAt = SystemClock.uptimeMillis(); lastPulse = startAt
             val reservation = fence.reserveStart(startAt)
@@ -450,6 +493,18 @@ class TunnelService : VpnService() {
         override fun routeState(session:String,raw:String) {handler.post {
             if(session!=token || retiring || !ready || !Recovery.current(store.checkpoint(),boundGeneration))return@post
             val scope=routeScope() ?: return@post
+            val adaptive=runCatching {org.json.JSONObject(raw).optJSONObject("adaptive")}.getOrNull()
+            if(adaptive!=null) {
+                val policy=adaptivePolicy() ?: return@post
+                val mode=adaptiveMode() ?: return@post
+                RouteSnapshot.owner(scope)
+                adaptiveRoutes?.let {routes->
+                    routes.bind(scope,mode,policy.revision)
+                    routes.report(adaptive,SystemClock.elapsedRealtime()) {command->runCatching {host?.checkRoutes(session,command)}}
+                    adaptiveTick()
+                }
+                return@post
+            }
             if(!runCatching {RouteSnapshot.update(scope,raw)}.getOrDefault(false))return@post
             if(internetHealthy)phase("Online","required_https_ok",boundGeneration)
             if(!RouteSnapshot.hasManagedFailover(scope))return@post
