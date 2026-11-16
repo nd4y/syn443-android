@@ -1,6 +1,7 @@
 package io.syn443.android.vpn
 
 import android.content.Context
+import android.provider.Browser
 import androidx.browser.customtabs.CustomTabColorSchemeParams
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.net.toUri
@@ -41,7 +42,12 @@ internal object AdminPanelBrowser {
         val colors=CustomTabColorSchemeParams.Builder().setToolbarColor(toolbarColor)
             .setNavigationBarColor(navigationColor).build()
         return CustomTabsIntent.Builder().setColorScheme(CustomTabsIntent.COLOR_SCHEME_DARK)
-            .setDefaultColorSchemeParams(colors).setShowTitle(true).build().also {it.intent.data=target.toUri()}
+            .setDefaultColorSchemeParams(colors).setShowTitle(true).build().also {
+                // AndroidX adds an app-locale Accept-Language override. Keep
+                // all HTTP headers in the normal browser-owned context.
+                it.intent.removeExtra(Browser.EXTRA_HEADERS)
+                it.intent.data=target.toUri()
+            }
     }
 
     /** A missing browser propagates the ordinary finite UI launch error. There
