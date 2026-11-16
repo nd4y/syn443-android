@@ -257,7 +257,13 @@ class AssignedPolicyRuntimeContinuityTest {
             h.bind(f.binding(), 2000); assertNotEquals(old, h.policyScope)
             val before=h.commands.size
             h.acknowledge(staleProof, 2000)
-            assertEquals(before, h.commands.size) // old pending proof cannot emit a commit.
+            val reconfigure=h.commands.drop(before).single()
+            assertEquals(setOf("command","schemaVersion","nativeEpoch","scope","mode"),reconfigure.keys().asSequence().toSet())
+            assertEquals("configure",reconfigure.getString("command"))
+            assertEquals(1,reconfigure.getInt("schemaVersion"));assertEquals(h.epoch,reconfigure.getLong("nativeEpoch"))
+            assertEquals(h.policyScope,reconfigure.getString("scope"));assertEquals("WIFI",reconfigure.getString("mode"))
+            // The old proof may request configuration of the new scope, but
+            // cannot dispatch a start, commit or discard of stale authority.
             val signerScope=h.policyScope
             f.anchor=Policy.hash("synthetic-new-anchor"); f.publish(); h.bind(f.binding(), 2000)
             assertNotEquals(signerScope, h.policyScope)
@@ -276,7 +282,17 @@ class AssignedPolicyRuntimeContinuityTest {
             ManagedAdaptiveRoutesFairnessTest.Harness(f.raw, initial).use { h ->
                 h.ready(1000); val first=checkNotNull(h.tick(1000)); h.failed(first, 1000)
                 h.bind(newer, 2000); val stable=h.policyScope
-                h.bind(initial, 3000); assertNotEquals(stable, h.policyScope)
+                h.bind(initial, 3000); assertTrue(h.controller.requiresRetirement())
+                assertEquals(stable,h.policyScope)
+                val before=h.commands.size
+                h.bind(replacement(newer, revision=3),4000)
+                assertTrue(h.controller.requiresRetirement());h.ready(4000);assertNull(h.tick(5000))
+                assertEquals(before,h.commands.size)
+            }
+            // Retirement is sticky for the old owner; use an independent
+            // virtual owner to exercise mode, network and BOOT boundaries.
+            ManagedAdaptiveRoutesFairnessTest.Harness(f.raw,newer).use { h ->
+                h.ready(1000)
                 h.bind(replacement(newer, revision=3), 4000); val revisionScope=h.policyScope
                 h.controller.bind(h.scope, NetworkMode.CELLULAR, replacement(newer, revision=4), 5000)
                 assertNotEquals(revisionScope, h.policyScope)
