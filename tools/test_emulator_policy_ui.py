@@ -91,6 +91,59 @@ class OwnedVpnSettingsTest(unittest.TestCase):
                     b'mCurrentFocus=null\n',owned+owned,owned+b'mCurrentFocus=null\n',owned+b'x'*1_048_576):
             self.assertFalse(ui.focused_settings_anr(raw))
 
+    def test_focus_snapshot_classifies_only_fixed_categories_without_window_data(self):
+        owned=b'  mCurrentFocus=Window{123a u0 Application Not Responding: com.android.settings}\n'
+        for raw,count,category in (
+            (owned,1,'settings_anr'),
+            (owned.replace(b'com.android.settings',b'io.syn443.android'),1,'app_anr'),
+            (owned.replace(b'com.android.settings',b'io.syn443.android:controller'),1,'app_anr'),
+            (owned.replace(b'com.android.settings',b'io.syn443.android:engine'),1,'app_anr'),
+            (owned.replace(b'com.android.settings',b'com.android.settings.other'),1,'foreign_anr'),
+            (owned.replace(b'com.android.settings',b'io.syn443.android.other'),1,'foreign_anr'),
+            (owned.replace(b'com.android.settings',b'private-label-fixture'),1,'foreign_anr'),
+            (b'mCurrentFocus=null\n',1,'null'),
+            (owned+b'mCurrentFocus=null\n',2,'ambiguous'),
+            (owned+owned,2,'ambiguous'),
+            (owned.replace(b'mCurrentFocus',b'mPreviousFocus'),0,'unrecognized'),
+            (b'mCurrentFocus=Window{123a u0 private-label-fixture}\n',1,'unrecognized'),
+            (b'',0,'unrecognized'),
+        ):
+            snapshot=ui.classified_focus_snapshot(raw)
+            self.assertEqual(snapshot,{'focusCount':count,'category':category})
+            self.assertNotIn('private-label-fixture',repr(snapshot))
+            self.assertNotIn('123a',repr(snapshot))
+            self.assertNotIn('com.android.settings',repr(snapshot))
+            self.assertNotIn('io.syn443.android',repr(snapshot))
+            self.assertEqual(ui.focused_settings_anr(raw),category=='settings_anr')
+
+    def test_focus_snapshot_refuses_oversized_or_unobserved_input_without_parsing(self):
+        for raw in (b'x'*1_048_577,None,'private-label-fixture'):
+            with patch.object(ui.re,'findall')as scan:
+                self.assertEqual(ui.classified_focus_snapshot(raw),{'focusCount':None,'category':'unrecognized'})
+                scan.assert_not_called()
+
+    def test_unknown_anr_failure_prints_only_classified_focus_and_preserves_guards(self):
+        blocked=ET.Element('hierarchy');node(blocked,package='android',resource_id='android:id/aerr_close')
+        launches=[]
+        def adb(*args,**kwargs):
+            if args[-1]=='ro.hardware':return b'ranchu'
+            if args[-1]=='size':return b'1080x1920'
+            if 'resolve-activity' in args:return b'com.android.settings/.Settings$VpnSettingsActivity'
+            if args[1:3]==('dumpsys','window'):
+                return b'mCurrentFocus=Window{123a u0 Application Not Responding: private-label-fixture}\n'
+            if args[1:3]==('am','start'):launches.append(args)
+            return b''
+        with patch.object(ui,'adb',side_effect=adb),patch.object(ui,'tree',return_value=blocked),patch.object(ui,'tap')as tap,patch.object(ui.time,'sleep'),patch.object(ui.time,'monotonic',side_effect=itertools.count()),patch('builtins.print')as output:
+            with self.assertRaisesRegex(AssertionError,'Owned VPN settings entry unavailable'):ui.open_policy()
+            tap.assert_not_called()
+            output.assert_called_once()
+        self.assertEqual(len(launches),1)
+        message=output.call_args.args[0]
+        self.assertIn("'focusedSettingsANR': False",message)
+        self.assertIn("'focusSnapshot': {'focusCount': 1, 'category': 'foreign_anr'}",message)
+        self.assertNotIn('private-label-fixture',message)
+        self.assertNotIn('123a',message)
+
     def test_owned_settings_anr_reopens_activity_without_tapping_dialog(self):
         blocked=ET.Element('hierarchy')
         node(blocked, package='android', resource_id='android:id/aerr_close')

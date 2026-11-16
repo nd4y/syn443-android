@@ -77,3 +77,26 @@ sharing the same candidate remain usable. Target/TLS failure, cancellation, cloc
 rollback and late evidence do not become a confirmed bad-proxy classification.
 Per-group/path cancellation handlers are bounded by the existing flow-hold cap;
 one blocked socket close cannot prevent independent flows from being cancelled.
+
+## Internal engine outbound handoff
+
+The compiled `syn443-adaptive` adapter can delegate real sing-box TCP traffic to
+a hub group. Its reference is created before box construction and initialized
+against that exact box before Start. A private context marker alone cannot grant
+authority: service registry, actual router/manager, owned tag/group mappings,
+catalogue/pool and live lease must all match. There is no direct or UDP fallback.
+Closing the reference revokes all groups synchronously; a successful box.Close
+acknowledges a cleanup request and cannot substitute actual hub retirement.
+
+This adapter is not registered in the public Runtime, negotiated as a graph
+capability or admitted by accepted client policy. Its typed group options reject
+unknown/case/duplicate/null fields when decoded directly. The pinned upstream
+options decoder first collapses duplicate fields in the original engine JSON;
+therefore a strict whole-document decoder before upstream parsing is mandatory
+for future activation. The existing outer Android validation must not be removed
+or replaced by the typed outbound decoder.
+
+Four additional mandatory native ordinary/race cases cover actual box traffic,
+two-hop switching/draining, foreign-runtime/reference substitution, all-group
+withdrawal and unknown/blocked owner retirement. The required bridge set is32;
+CI and physical runtime activation remain separate acceptance stages.

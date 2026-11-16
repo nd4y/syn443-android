@@ -39,6 +39,10 @@ PATH_REQUIRED = {
     'TestPrivateAdaptiveHubStrictPlansModesReceiptsAndFreshness',
     'TestPrivateAdaptiveHubBoundedCacheRetainsActualOwnership',
     'TestPrivateAdaptiveHubBusyAndStopRequireActualOwnerExit',
+    'TestPrivateAdaptiveOutboundRealBoxTwoHopSwitchAndNoFallback',
+    'TestPrivateAdaptiveOutboundReferenceBindingAndInitialization',
+    'TestPrivateAdaptiveOutboundRejectsForeignFactoriesAndClosedOptions',
+    'TestPrivateAdaptiveOutboundStopRequiresActualHubRetirement',
 }
 
 
