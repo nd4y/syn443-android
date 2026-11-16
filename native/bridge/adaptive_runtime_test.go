@@ -235,6 +235,42 @@ func TestAdaptiveRuntimeExportedCommandsRequireActualTwoHopReceiptAndNativeEpoch
 }
 
 func TestAdaptiveRuntimeSharedBootDeadlinePreventsAnotherProbe(t *testing.T) {
+	t.Run("expired before cold construction", func(t *testing.T) {
+		var fixture privateAdaptiveOwnerFixture
+		fixture = newPrivateAdaptiveOwnerFixture(t, func(bool) (func(), bool) { fixture.now.Add(30_000); return func() {}, true })
+		var calls atomic.Int32
+		original := fixture.owner.hub.create
+		fixture.owner.hub.create = func(ctx context.Context, id, tag, previous string) (adapter.Outbound, error) {
+			calls.Add(1)
+			return original(ctx, id, tag, previous)
+		}
+		epoch, scope, _ := fixture.owner.context()
+		if !fixture.owner.start("cold-expired", epoch, scope, "inside", fixture.path) {
+			t.Fatal("compiled admission rejected before its budget observation")
+		}
+		report := awaitPrivateAdaptiveOwner(t, fixture.owner)
+		if report.Code != "probe_unavailable" || report.Receipt != "" || calls.Load() != 0 || fixture.entry.calls.Load() != 0 || fixture.exit.calls.Load() != 0 {
+			t.Fatal("aggregate-expired cold request constructed or dialed another hop")
+		}
+	})
+	t.Run("aggregate remainder bounds constructor stages", func(t *testing.T) {
+		var fixture privateAdaptiveOwnerFixture
+		fixture = newPrivateAdaptiveOwnerFixture(t, func(bool) (func(), bool) { fixture.now.Add(10_000); return func() {}, true })
+		var calls atomic.Int32
+		var starts, closes []string
+		fixture.owner.hub.create = func(_ context.Context, _, tag, previous string) (adapter.Outbound, error) {
+			calls.Add(1)
+			return &privateBudgetLifecycleNode{pathLifecycleNode: pathLifecycleNode{name: tag, dependency: previous, starts: &starts, closes: &closes}, firstStart: func() { fixture.now.Add(20_000) }}, nil
+		}
+		epoch, scope, _ := fixture.owner.context()
+		if !fixture.owner.start("cold-stage-budget", epoch, scope, "inside", fixture.path) {
+			t.Fatal("compiled aggregate budget request denied before construction")
+		}
+		report := awaitPrivateAdaptiveOwner(t, fixture.owner)
+		if report.Code != "probe_unavailable" || report.Receipt != "" || calls.Load() != 1 || fixture.entry.calls.Load() != 0 || fixture.exit.calls.Load() != 0 {
+			t.Fatal("constructor borrowed a fresh thirty seconds beyond the owner remainder")
+		}
+	})
 	var fixture privateAdaptiveOwnerFixture
 	var admissions atomic.Int32
 	fixture = newPrivateAdaptiveOwnerFixture(t, func(bool) (func(), bool) {

@@ -111,7 +111,17 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 	p.probing = true
 	s.proof = nil
 	p.mu.Unlock()
-	ctx, cancel := context.WithTimeout(parent, 12*time.Second)
+	duration := 12 * time.Second
+	if deadline, ok := parent.Value(privateAdaptiveWorkDeadlineKey{}).(int64); ok {
+		remaining := deadline - p.lease.clock()
+		if remaining < 0 {
+			remaining = 0
+		}
+		if remaining < 12_000 {
+			duration = time.Duration(remaining) * time.Millisecond
+		}
+	}
+	ctx, cancel := context.WithTimeout(parent, duration)
 	stop := context.AfterFunc(candidate.entry.path.ctx, cancel)
 	defer func() {
 		stop()
@@ -128,7 +138,7 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 		// A normal timer may not advance while suspended. Check the aggregate
 		// BOOTTIME budget before every target, not only before publishing proof.
 		now := p.lease.clock()
-		if ctx.Err() != nil || now < started || now-started >= 12_000 {
+		if !privateAdaptiveWorkCurrent(ctx, p.lease.clock) || now < started || now-started >= 12_000 {
 			return nil, errPrivatePath
 		}
 		code, complete := probeRouteWithClock(ctx, func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
@@ -167,7 +177,7 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 func (s *privatePathSelector) freshProbeLocked(ctx context.Context, e, previous *privatePoolEntry, epoch uint64, started int64) (int64, bool) {
 	p := s.pool
 	now := p.lease.clock()
-	return now, s.validLocked() && ctx.Err() == nil && s.active == previous && s.flowEpoch == epoch &&
+	return now, s.validLocked() && privateAdaptiveWorkCurrent(ctx, p.lease.clock) && s.active == previous && s.flowEpoch == epoch &&
 		now >= started && now-started < 12_000 && e.scope == s.scope && p.entries[e.id] == e &&
 		!e.draining && !e.queued && !e.retained && !e.closed && e.path.ctx.Err() == nil
 }

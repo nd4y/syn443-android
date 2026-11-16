@@ -91,7 +91,7 @@ func TestPrivateSelectionHardExitMismatchWithdrawsOnlyItsGroup(t *testing.T) {
 			readDone := make(chan error, 1)
 			go func() { _, err := flowA.Read(make([]byte, 1)); readDone <- err }()
 			body.Store(bad)
-			if proof, err := a.probeWithRoots(context.Background(), candidate, roots); proof != nil || err != errPrivatePath {
+			if proof, err := a.probeWithRoots(context.Background(), candidate, roots); proof != nil || err != errPrivateExitMismatch {
 				t.Fatal("wrong public exit minted proof")
 			}
 			select {
@@ -124,12 +124,16 @@ func TestPrivateSelectionUncertainExitEvidenceKeepsCurrentAuthority(t *testing.T
 	var body atomic.Value
 	body.Store(`{"ip":"192.0.2.1","country":"RU"}`)
 	var late atomic.Bool
+	var aggregateLate atomic.Bool
 	var now atomic.Int64
 	now.Store(bootMillis())
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, body.Load().(string))
 		if late.Load() {
 			now.Add(4000)
+		}
+		if aggregateLate.Load() {
+			now.Add(1000)
 		}
 	}))
 	defer server.Close()
@@ -174,6 +178,24 @@ func TestPrivateSelectionUncertainExitEvidenceKeepsCurrentAuthority(t *testing.T
 			selectionExitEcho(t, flow, "uncertain-evidence-keeps-owned-stream")
 		})
 	}
+	t.Run("aggregate owner deadline cannot revoke a still-selected path", func(t *testing.T) {
+		late.Store(false)
+		aggregateLate.Store(true)
+		body.Store(`{"ip":"192.0.2.1","country":"DE"}`)
+		before := now.Load()
+		work := context.WithValue(context.Background(), privateAdaptiveWorkDeadlineKey{}, before+500)
+		if proof, err := s.probeWithRoots(work, candidate, roots); proof != nil || err != errPrivatePath || now.Load() != before+1000 {
+			t.Fatal("late aggregate mismatch acquired attribution or skipped its real probe")
+		}
+		p.mu.Lock()
+		valid := s.active == candidate.entry && s.flowEpoch == 1
+		p.mu.Unlock()
+		if !valid {
+			t.Fatal("aggregate-expired target result revoked current group")
+		}
+		selectionExitEcho(t, flow, "aggregate-expired-target-keeps-owned-stream")
+		aggregateLate.Store(false)
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if proof, err := s.probeWithRoots(ctx, candidate, roots); proof != nil || err != errPrivatePath {
@@ -324,7 +346,7 @@ func TestPrivateSelectionBlockedGroupCloseCannotBlockOtherFlowWithdrawal(t *test
 	done := make(chan error, 1)
 	go func() { _, err := other.Read(make([]byte, 1)); done <- err }()
 	body.Store(`{"ip":"192.0.2.1","country":"DE"}`)
-	if proof, err := s.probeWithRoots(context.Background(), candidate, roots); proof != nil || err != errPrivatePath {
+	if proof, err := s.probeWithRoots(context.Background(), candidate, roots); proof != nil || err != errPrivateExitMismatch {
 		t.Fatal("hard mismatch did not revoke group")
 	}
 	select {

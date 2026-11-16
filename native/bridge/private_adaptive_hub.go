@@ -125,7 +125,7 @@ func (h *privateAdaptiveHub) makeGroupsLocked() bool {
 // One global receipt is enough: policy ranking consumes it before exploring the
 // next candidate. Successful checks do not switch a healthy current route.
 func (h *privateAdaptiveHub) prepareProbe(work context.Context, group string, path []string) (receipt *privateAdaptiveReceipt, err error) {
-	if work == nil || work.Err() != nil {
+	if !privateAdaptiveWorkCurrent(work, h.pool.lease.clock) {
 		return nil, errPrivatePath
 	}
 	path = append([]string(nil), path...)
