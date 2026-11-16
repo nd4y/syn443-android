@@ -41,8 +41,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class AdminEditorCoordinatorTest {
     private class Fixture(sharedStorage:Fixture?=null):Closeable {
         val context=ApplicationProvider.getApplicationContext<Context>()
-        val namespace=sharedStorage?.namespace ?:"admin-editor-test-"+UUID.randomUUID().toString().replace("-","")
-        val alias=sharedStorage?.alias ?:"syn443-admin-editor-test-"+Identity.random()
+        val namespace:String=sharedStorage?.namespace ?:"admin-editor-test-"+UUID.randomUUID().toString().replace("-","")
+        val alias:String=sharedStorage?.alias ?:"syn443-admin-editor-test-"+Identity.random()
         private val ownsStorage=sharedStorage==null
         val directory=File(context.noBackupFilesDir,namespace)
         val executor=Executors.newSingleThreadExecutor()
