@@ -1,5 +1,14 @@
 # Testing and release gates
 
+[Native comparison and local rebase](native-layered-editor.md) v89 source adds
+14 required identity JVM outcomes and21 Android outcomes. The pending floors
+are200 identity and398 unique passing actual outcomes on each API29/35/37
+emulator. All11 new stable handwritten comparison/projection classes join the
+unchanged90% per-class line-coverage requirement in both verifiers. These are
+mandatory source gates, not executed v89 acceptance; Actions, physical UX and
+live administration remain pending. The historical v88 paragraphs below retain
+their original narrower scope and counts.
+
 [Native layered administration](mobile-layered-editor-contract.md) v88 source
 adds 43 required identity outcomes and 44 Android outcomes. The identity floor
 is 186; every API29/35/37 emulator must report at least 377 unique passing actual

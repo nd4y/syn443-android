@@ -57,6 +57,9 @@ class AdminEditorCoordinatorTest {
         var revokeNext=false
         var failList=false
         var rejectPreview=""
+        var remoteOwnValue:Int?=null
+        var afterInventory:(()->Unit)?=null
+        private val inventories=mutableMapOf<Long,String>()
         var device="device-a"
         val owner=Identity.hash("synthetic-device-owner".toByteArray())
         val baseHash="a".repeat(64)
@@ -137,9 +140,15 @@ class AdminEditorCoordinatorTest {
             check(busy.compareAndSet(false,true))
             return executor.submit<T> {try {action()}finally {busy.set(false)}}.get(30,TimeUnit.SECONDS)
         }
-        fun run(kind:AdminEditorCoordinator.Kind,model:AdminEditorModel?=null,pages:List<String> = emptyList(),binding:String?=null,revision:Long?=null):AdminEditorModel=worker {
+        fun run(kind:AdminEditorCoordinator.Kind,model:AdminEditorModel?=null,pages:List<String> = emptyList(),binding:String?=null,revision:Long?=null,comparisonBinding:String=""):AdminEditorModel=worker {
             coordinator.execute(AdminEditorCoordinator.Command(kind,model?.device?:device,binding?:model?.documentBinding?:"",revision?:model?.localRevision?:0,
-                pages,model?.reviewBinding?:"",model?.reviewDeadlineElapsed?:0),access)
+                pages,model?.reviewBinding?:"",model?.reviewDeadlineElapsed?:0,comparisonBinding),access)
+        }
+        fun compare(kind:AdminEditorCoordinator.ComparisonKind,model:AdminEditorModel,current:AdminComparisonModel?=null,
+            section:AdminComparisonSection=current?.section?:AdminComparisonSection.CONFLICTS,offset:Int=0,row:String="",
+            side:AdminComparisonSide=AdminComparisonSide.BASE,page:Int=0,choice:String="",binding:String?=null)=worker {
+            coordinator.comparison(AdminEditorCoordinator.ComparisonCommand(kind,model.device,model.documentBinding,model.localRevision,
+                binding?:current?.binding?:"",section,offset,row,side,page,choice),access)
         }
         fun record()=worker {val o=protocol.layerOwnership(session);checkNotNull(store().recoverOwned(o.serviceHash,o.actor))}
         private fun authenticate() {
@@ -166,7 +175,14 @@ class AdminEditorCoordinatorTest {
                 put("expires_in",300);put("refresh_expires_in",86_400);put("scope",AdminBootstrap.SCOPE)}))
         }
         private fun reply(text:String)=Reply(200,mapOf("content-type" to listOf("application/json"),"date" to listOf(date(wall))),text.toByteArray(Charsets.UTF_8))
-        private fun inventory()="""{"device":"$device","owner":"$owner","state":"assigned","revision":$desiredRevision,"hash":"$baseHash","policyRevision":0,"mode":"wifi","approvalUntilMs":${WALL+3_600_000},"layers":[{"id":"template-a","kind":"template","priority":0,"revision":1,"changes":[{"path":"/schemaVersion","operation":"set","value":1}],"permissions":[{"path":"/schemaVersion","mode":"free"}]},{"id":"$device","kind":"device","priority":0,"revision":1,"changes":[],"permissions":[]}],"effective":{"document":{"schemaVersion":1},"fields":{"/schemaVersion":{"layerId":"template-a","kind":"template","revision":1}},"restrictions":[]},"currentRevision":$desiredRevision}"""
+        private fun inventory():String {
+            val ownRevision=if(remoteOwnValue==null)1 else 2
+            val ownChanges=remoteOwnValue?.let {"""[{"path":"/schemaVersion","operation":"set","value":$it}]"""}?:"[]"
+            val origin=if(remoteOwnValue==null)"""{"layerId":"template-a","kind":"template","revision":1}""" else """{"layerId":"$device","kind":"device","revision":$ownRevision}"""
+            val raw="""{"device":"$device","owner":"$owner","state":"assigned","revision":$desiredRevision,"hash":"$baseHash","policyRevision":0,"mode":"wifi","approvalUntilMs":${WALL+3_600_000},"layers":[{"id":"template-a","kind":"template","priority":0,"revision":1,"changes":[{"path":"/schemaVersion","operation":"set","value":1}],"permissions":[{"path":"/schemaVersion","mode":"free"}]},{"id":"$device","kind":"device","priority":0,"revision":$ownRevision,"changes":$ownChanges,"permissions":[]}],"effective":{"document":{"schemaVersion":${remoteOwnValue?:1}},"fields":{"/schemaVersion":$origin},"restrictions":[{"permission":{"path":"/schemaVersion","mode":"free"},"origin":{"layerId":"template-a","kind":"template","revision":1}}]},"currentRevision":$desiredRevision}"""
+            inventories.putIfAbsent(desiredRevision,raw)
+            return raw
+        }
         private fun ready(request:JSONObject):String {
             val p=request.getJSONObject("payload").getJSONObject("proposal");val o=protocol.layerOwnership(session);val id=Identity.hash((o.actor+"\u0000"+request.getString("requestId")).toByteArray())
             val b=p.getJSONArray("bundles").getJSONObject(0)
@@ -191,8 +207,8 @@ class AdminEditorCoordinatorTest {
                 originals[id]?.let {assertEquals(Identity.hash(raw.toByteArray()),it.first);return it.second}
             }
             val result=when(action) {
-                "configuration.inventory.get"->inventory()
-                "configuration.history.get"->inventory().replace("\"revision\":$desiredRevision","\"revision\":${payload.getLong("revision")}").dropLast(1)+",\"historical\":true}"
+                "configuration.inventory.get"->inventory().also {afterInventory?.invoke()}
+                "configuration.history.get"->{val captured=checkNotNull(inventories[payload.getLong("revision")]);captured.dropLast(1)+",\"historical\":true}"}
                 "configuration.layers.drafts.list"->{if(failList)throw AdminException(AdminFailure.ACCESS_DENIED)
                     JSONObject().put("targetKind","device").put("targetId",device).put("drafts",JSONArray().also {rows->saved?.let {rows.put(JSONObject().put("id",it.getString("id")).put("revision",it.getLong("revision")).put("savedAtMs",it.getLong("savedAtMs")))}}).toString()}
                 "configuration.layers.draft.get"->checkNotNull(saved).toString()
@@ -358,10 +374,129 @@ class AdminEditorCoordinatorTest {
     @Test fun compareAndChangedHeadRebaseFailClosedWithoutFlatteningOrDroppingPrivateEdits() {
         Fixture().use {f->
             var m=f.run(AdminEditorCoordinator.Kind.OPEN);val before=f.record().proposal
-            f.desiredRevision=3;m=f.run(AdminEditorCoordinator.Kind.COMPARE,m);assertEquals(AdminEditorPhase.CONFLICT,m.phase)
-            m=f.run(AdminEditorCoordinator.Kind.REBASE,m);assertEquals(AdminEditorPhase.LIMITED,m.phase);assertEquals("REBASE_REQUIRED",m.error)
-            assertArrayEquals(before,f.record().proposal);assertTrue(f.sent.isEmpty())
+            f.desiredRevision=3
+            val denied=f.run(AdminEditorCoordinator.Kind.REBASE,m);assertEquals(AdminEditorPhase.CONFLICT,denied.phase);assertEquals("COMPARISON_STALE",denied.error)
+            assertArrayEquals(before,f.record().proposal)
+            val compared=f.compare(AdminEditorCoordinator.ComparisonKind.LOAD,m)
+            assertEquals("",compared.error);assertTrue(compared.ready);assertEquals(2L,compared.baseRevision);assertEquals(3L,compared.currentRevision)
+            m=f.run(AdminEditorCoordinator.Kind.REBASE,m,comparisonBinding=compared.binding)
+            assertEquals(AdminEditorPhase.LOCAL_DIRTY,m.phase);assertEquals(3L,m.desiredHeadRevision);assertEquals(1L,m.privateDraftRevision)
+            val applied=JSONObject(m.pages.joinToString("")).getJSONArray("bundles").getJSONObject(0)
+            assertEquals(3L,applied.getLong("baseRevision"));assertEquals(f.baseHash,applied.getString("baseHash"))
+            assertEquals(1L,applied.getJSONArray("layers").getJSONObject(0).getLong("revision"));assertTrue(f.sent.isEmpty())
+            assertNotEquals(before.toString(Charsets.UTF_8),f.record().proposal.toString(Charsets.UTF_8))
+            assertEquals("",f.worker {f.coordinator.snapshot(f.access)}.comparisonBinding)
             m=f.run(AdminEditorCoordinator.Kind.CLOSE,m);assertEquals(AdminEditorPhase.INVENTORY,m.phase);assertTrue(m.pages.isEmpty())
+        }
+    }
+    @Test fun comparisonMetadataDetailsAndResolutionBindingsPrecedeExplicitLocalOnlyApply() {
+        Fixture().use {f->
+            var m=f.run(AdminEditorCoordinator.Kind.OPEN)
+            val edited=m.pages.joinToString("").replace("\"changes\":[],\"permissions\":[]","\"changes\":[{\"path\":\"/schemaVersion\",\"operation\":\"set\",\"value\":2}],\"permissions\":[]")
+            m=f.run(AdminEditorCoordinator.Kind.SAVE_LOCAL,m,listOf(edited));val retained=f.record()
+            f.desiredRevision=3;f.remoteOwnValue=3
+            val c=f.compare(AdminEditorCoordinator.ComparisonKind.LOAD,m);assertEquals("",c.error);assertFalse(c.ready);assertEquals(1,c.total)
+            val conflict=c.rows.single();assertEquals("VALUE_CHANGED",conflict.code);assertTrue(conflict.resolvable)
+            assertEquals("AdminComparisonRow([redacted])",conflict.toString());assertNull(c.detail)
+            val reads=f.calls.size
+            val detail=f.compare(AdminEditorCoordinator.ComparisonKind.DETAIL,m,c,row=conflict.id,side=AdminComparisonSide.LOCAL_VALUE)
+            assertEquals("",detail.error);assertTrue(checkNotNull(detail.detail).text.contains("\"value\":2"));assertEquals(reads,f.calls.size)
+            val local=f.compare(AdminEditorCoordinator.ComparisonKind.RESOLVE,m,c,row=conflict.id,choice="LOCAL")
+            assertTrue(local.ready);assertNotEquals(c.binding,local.binding);assertEquals(retained,f.record());assertTrue(f.sent.isEmpty())
+            val stale=f.compare(AdminEditorCoordinator.ComparisonKind.PAGE,m,c);assertEquals("COMPARISON_STALE",stale.error);assertTrue(stale.rows.isEmpty())
+            val current=f.compare(AdminEditorCoordinator.ComparisonKind.RESOLVE,m,local,row=conflict.id,choice="CURRENT")
+            assertTrue(current.ready);assertNotEquals(local.binding,current.binding)
+            val chosen=f.compare(AdminEditorCoordinator.ComparisonKind.RESOLVE,m,current,row=conflict.id,choice="LOCAL")
+            assertTrue(chosen.ready);assertEquals(local.binding,chosen.binding)
+            val diff=f.compare(AdminEditorCoordinator.ComparisonKind.PAGE,m,chosen,section=AdminComparisonSection.DIFF)
+            assertEquals("VALUE_CHANGED",diff.rows.single().code);assertNull(diff.detail);assertEquals(reads,f.calls.size)
+            val refused=f.run(AdminEditorCoordinator.Kind.REBASE,m,comparisonBinding=current.binding)
+            assertEquals("COMPARISON_STALE",refused.error);assertEquals(retained,f.record())
+            m=f.run(AdminEditorCoordinator.Kind.REBASE,m,comparisonBinding=chosen.binding)
+            assertEquals(AdminEditorPhase.LOCAL_DIRTY,m.phase);assertTrue(f.sent.isEmpty());assertTrue(m.localRevision>retained.revision)
+            val layers=JSONObject(m.pages.joinToString("")).getJSONArray("bundles").getJSONObject(0).getJSONArray("layers")
+            assertEquals(3L,layers.getJSONObject(1).getLong("revision"));assertEquals(2,layers.getJSONObject(1).getJSONArray("changes").getJSONObject(0).getInt("value"))
+            assertTrue(m.pages.joinToString("").contains("\"id\":\"template-a\",\"kind\":\"template\",\"priority\":0,\"revision\":1"))
+            assertEquals("",m.comparisonBinding);assertEquals("",m.reviewBinding)
+        }
+    }
+    @Test fun comparisonApplyRechecksFreshHeadSavedDraftCasAndActualEncryptedRecord() {
+        for(change in listOf("head","draft","store"))Fixture().use {f->
+            var m=f.run(AdminEditorCoordinator.Kind.OPEN);m=f.run(AdminEditorCoordinator.Kind.SAVE_DRAFT,m)
+            val c=f.compare(AdminEditorCoordinator.ComparisonKind.LOAD,m);assertTrue(c.ready)
+            val retained=f.record();val sent=f.sent.size
+            when(change) {
+                "head"->f.desiredRevision++
+                "draft"->{checkNotNull(f.saved).put("revision",2);checkNotNull(f.saved).getJSONObject("proposal").put("draftRevision",2)}
+                else->f.afterInventory={f.afterInventory=null;val actual=f.store().load(retained.owner);f.store().edit(actual,actual.proposal)}
+            }
+            val denied=f.run(AdminEditorCoordinator.Kind.REBASE,m,comparisonBinding=c.binding)
+            assertEquals(change,"COMPARISON_STALE",denied.error);assertEquals(AdminEditorPhase.CONFLICT,denied.phase);assertEquals(sent,f.sent.size)
+            val after=f.record();assertArrayEquals(retained.proposal,after.proposal);assertNull(after.pending)
+            assertEquals(if(change=="store")retained.revision+1 else retained.revision,after.revision)
+            assertEquals("",denied.comparisonBinding)
+        }
+    }
+    @Test fun normalPreviewRetainsReadOnlySameProposalDiffWithoutRenewingOriginalDeadline() {
+        Fixture().use {f->
+            var m=f.run(AdminEditorCoordinator.Kind.OPEN)
+            val raw=m.pages.joinToString("").replace("\"changes\":[],\"permissions\":[]","\"changes\":[{\"path\":\"/schemaVersion\",\"operation\":\"set\",\"value\":2}],\"permissions\":[]")
+            m=f.run(AdminEditorCoordinator.Kind.SAVE_LOCAL,m,listOf(raw));f.queuePreview=true
+            m=f.run(AdminEditorCoordinator.Kind.PREVIEW,m);assertEquals(AdminEditorPhase.UNCERTAIN,m.phase)
+            assertNull(f.worker {f.coordinator.comparisonSnapshot(f.access)})
+            m=f.run(AdminEditorCoordinator.Kind.POLL,m);assertEquals(AdminEditorPhase.REVIEW,m.phase)
+            val deadline=m.reviewDeadlineElapsed;val review=m.reviewBinding;val retained=f.record();val calls=f.calls.size
+            val c=checkNotNull(f.worker {f.coordinator.comparisonSnapshot(f.access)})
+            assertTrue(c.readOnly);assertFalse(c.ready);assertEquals(m.comparisonBinding,c.binding);assertEquals(AdminComparisonSection.DIFF,c.section)
+            assertEquals(2L,c.baseRevision);assertEquals(2L,c.currentRevision)
+            val entry=c.rows.single();val detail=f.compare(AdminEditorCoordinator.ComparisonKind.DETAIL,m,c,row=entry.id,side=AdminComparisonSide.AFTER)
+            assertEquals("2",checkNotNull(detail.detail).text);assertEquals(c.binding,detail.binding)
+            f.now+=30_000
+            val snapshot=f.worker {f.coordinator.snapshot(f.access)};assertEquals(deadline,snapshot.reviewDeadlineElapsed);assertEquals(review,snapshot.reviewBinding)
+            assertEquals(calls,f.calls.size);assertEquals(retained,f.record())
+            f.now=deadline+1
+            val historical=f.compare(AdminEditorCoordinator.ComparisonKind.PAGE,m,c,section=AdminComparisonSection.DIFF)
+            assertEquals("",historical.error);assertTrue(historical.readOnly);assertEquals(c.binding,historical.binding)
+            val expired=f.run(AdminEditorCoordinator.Kind.PUBLISH,m);assertEquals("REVIEW_EXPIRED",expired.error);assertEquals(calls,f.calls.size)
+            val denied=f.run(AdminEditorCoordinator.Kind.REBASE,expired,comparisonBinding=c.binding)
+            assertEquals("COMPARISON_READ_ONLY",denied.error);assertEquals(retained,f.record());assertEquals(1,f.sent.size)
+        }
+    }
+    @Test fun comparisonBoundsAndBootOrAccountLossNeverExposeStaleDetailsOrChangeEncryptedDraft() {
+        Fixture().use {f->
+            val m=f.run(AdminEditorCoordinator.Kind.OPEN);val c=f.compare(AdminEditorCoordinator.ComparisonKind.LOAD,m)
+            val retained=f.record();val calls=f.calls.size
+            val invalid=f.compare(AdminEditorCoordinator.ComparisonKind.PAGE,m,c,offset=-1);assertEquals("INVALID_COMPARISON",invalid.error)
+            val stale=f.compare(AdminEditorCoordinator.ComparisonKind.DETAIL,m,c,row=Identity.random());assertEquals("COMPARISON_STALE",stale.error);assertNull(stale.detail)
+            assertEquals(c.binding,checkNotNull(f.worker {f.coordinator.comparisonSnapshot(f.access)}).binding)
+            f.enabled=false
+            val revoked=f.compare(AdminEditorCoordinator.ComparisonKind.PAGE,m,c);assertEquals("REAUTHENTICATE",revoked.error);assertTrue(revoked.rows.isEmpty());assertNull(revoked.detail)
+            f.enabled=true
+            assertEquals("COMPARISON_STALE",f.compare(AdminEditorCoordinator.ComparisonKind.PAGE,m,c).error)
+            val fresh=f.compare(AdminEditorCoordinator.ComparisonKind.LOAD,m);assertEquals("",fresh.error)
+            f.boot++
+            val boot=f.compare(AdminEditorCoordinator.ComparisonKind.PAGE,m,fresh);assertEquals("REAUTHENTICATE",boot.error);assertTrue(boot.rows.isEmpty())
+            assertEquals(calls+2,f.calls.size) // fresh inventory and complete draft-list only.
+            assertEquals(retained,f.worker {f.store().load(retained.owner)});assertTrue(f.sent.isEmpty())
+        }
+    }
+    @Test fun comparisonDetailsAreExplicitBoundedPagesAndNeverReturnAnotherRowOrSection() {
+        Fixture().use {f->
+            var m=f.run(AdminEditorCoordinator.Kind.OPEN)
+            val large="x".repeat(9000)
+            val raw=m.pages.joinToString("").replace("\"changes\":[],\"permissions\":[]","\"changes\":[{\"path\":\"/schemaVersion\",\"operation\":\"set\",\"value\":\"$large\"}],\"permissions\":[]")
+            m=f.run(AdminEditorCoordinator.Kind.SAVE_LOCAL,m,raw.chunked(8192))
+            val c=f.compare(AdminEditorCoordinator.ComparisonKind.LOAD,m,section=AdminComparisonSection.DIFF)
+            assertTrue(c.ready);assertNull(c.detail);val row=c.rows.single();val calls=f.calls.size
+            val first=f.compare(AdminEditorCoordinator.ComparisonKind.DETAIL,m,c,row=row.id,side=AdminComparisonSide.AFTER)
+            val second=f.compare(AdminEditorCoordinator.ComparisonKind.DETAIL,m,c,row=row.id,side=AdminComparisonSide.AFTER,page=1)
+            assertEquals(2,checkNotNull(first.detail).totalPages);assertEquals(8192,first.detail!!.text.length)
+            assertEquals("\"$large\"",first.detail!!.text+second.detail!!.text)
+            val foreign=f.compare(AdminEditorCoordinator.ComparisonKind.DETAIL,m,c,row=Identity.random(),side=AdminComparisonSide.AFTER)
+            assertEquals("COMPARISON_STALE",foreign.error);assertNull(foreign.detail)
+            val wrong=f.compare(AdminEditorCoordinator.ComparisonKind.DETAIL,m,c,section=AdminComparisonSection.CONFLICTS,row=row.id,side=AdminComparisonSide.AFTER)
+            assertEquals("COMPARISON_STALE",wrong.error);assertNull(wrong.detail)
+            val page=f.compare(AdminEditorCoordinator.ComparisonKind.PAGE,m,c);assertNull(page.detail);assertEquals(calls,f.calls.size);assertTrue(f.sent.isEmpty())
         }
     }
     @Test fun recoveredPrivateDraftCasRequiresCompleteListAndCheckedGetRatherThanLocalRevisionGuess() {

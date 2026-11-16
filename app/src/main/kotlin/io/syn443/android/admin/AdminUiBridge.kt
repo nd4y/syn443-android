@@ -59,6 +59,8 @@ internal interface AdminUiBridge {
     suspend fun document(generation:Long,action:AdminReadAction,target:String):AdminDocument
     suspend fun editor(generation:Long,command:io.syn443.android.vpn.AdminEditorCoordinator.Command):AdminEditorModel =
         throw AdminUiFailure("UNAVAILABLE")
+    suspend fun comparison(generation:Long,command:io.syn443.android.vpn.AdminEditorCoordinator.ComparisonCommand):AdminComparisonModel =
+        throw AdminUiFailure("UNAVAILABLE")
     suspend fun webPanel():String
 }
 
@@ -174,15 +176,33 @@ internal class ResolverAdminUiBridge(private val resolver:ContentResolver):Admin
     override suspend fun editor(generation:Long,command:io.syn443.android.vpn.AdminEditorCoordinator.Command):AdminEditorModel=withContext(Dispatchers.IO) {
         require(generation>=0 && command.pages.size<=64 && command.pages.all {it.length<=8192} &&
             command.pages.sumOf {it.toByteArray(Charsets.UTF_8).size}<=262_144)
-        val id=UUID.randomUUID().toString().replace("-","")
         val input=Bundle().apply {
             putLong("generation",generation);putString("kind",command.kind.name);putString("device",command.device)
             putString("binding",command.binding);putLong("localRevision",command.localRevision)
             putStringArrayList("pages",ArrayList(command.pages));putString("reviewBinding",command.reviewBinding)
             putLong("reviewDeadline",command.reviewDeadline)
+            putString("comparisonBinding",command.comparisonBinding)
         }
+        AdminEditorWire.decode(editorReply(generation,"admin-editor-start",input,AdminEditorWire.MAX_BODY))
+    }
+    override suspend fun comparison(generation:Long,command:io.syn443.android.vpn.AdminEditorCoordinator.ComparisonCommand):AdminComparisonModel=withContext(Dispatchers.IO) {
+        require(generation>=0 && AdminWire.id.matches(command.device) && command.documentBinding.length in 1..128 &&
+            command.localRevision>0 && command.comparisonBinding.length<=43 && command.offset in 0..8194 && command.page in 0..255 &&
+            command.rowId.length<=43 && command.choice in setOf("","LOCAL","CURRENT"))
+        val input=Bundle().apply {
+            putLong("generation",generation);putString("kind",command.kind.name);putString("device",command.device)
+            putString("documentBinding",command.documentBinding);putLong("localRevision",command.localRevision)
+            putString("comparisonBinding",command.comparisonBinding);putString("section",command.section.name)
+            putInt("offset",command.offset);putString("rowId",command.rowId);putString("side",command.side.name)
+            putInt("page",command.page);putString("choice",command.choice)
+        }
+        AdminComparisonWire.decode(editorReply(generation,"admin-comparison-start",input,AdminComparisonWire.MAX_BODY))
+    }
+    private suspend fun editorReply(generation:Long,startMethod:String,input:Bundle,maxBody:Int):ByteArray=withContext(Dispatchers.IO) {
+        require(startMethod in setOf("admin-editor-start","admin-comparison-start") && maxBody in 1..524_288)
+        val id=UUID.randomUUID().toString().replace("-","")
         val resultInput=Bundle().apply {putLong("generation",generation)}
-        if(!rpc("admin-editor-start",id,input).getBoolean("admitted")) {
+        if(!rpc(startMethod,id,input).getBoolean("admitted")) {
             val current=status()
             throw AdminUiFailure(if(current.generation!=generation || current.phase!=AdminUiPhase.AUTHENTICATED)"REAUTHENTICATE" else "BUSY")
         }
@@ -195,7 +215,7 @@ internal class ResolverAdminUiBridge(private val resolver:ContentResolver):Admin
                 val meta=Canonical.parse(raw).jsonObject
                 when(meta.getValue("state").jsonPrimitive.content) {
                     "pending"->delay(1000)
-                    "done"->return@withContext AdminEditorWire.decode(reply.getByteArray("body")?:throw AdminUiFailure("INVALID_REPLY"))
+                    "done"->return@withContext (reply.getByteArray("body")?:throw AdminUiFailure("INVALID_REPLY")).also {require(it.size in 1..maxBody)}
                     "failed"->throw AdminUiFailure(meta["reason"]?.jsonPrimitive?.content?:"UNAVAILABLE")
                     "gone"->{
                         val current=status()

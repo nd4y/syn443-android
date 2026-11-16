@@ -4,6 +4,18 @@ Snapshot: 2026-11-16. Specification0.9 contains292 requirements and98 acceptance
 scenarios. Those numbers describe scope, not completed work or test counts.
 This document supersedes repository-wide readiness claims in historical stage notes.
 
+The v89 / `0.9.61-admin-compare` source candidate adds
+[native layer comparison and explicit local rebase](native-layered-editor.md).
+Fourteen new exact identity roots and21 exact Android roots raise the pending
+floors to200 identity and398 Android outcomes per API29/35/37. The richer CP57
+Go projection fixture is accepted at its exact recorded source/artifact; Android
+conformance, coverage, route tests and physical/live administration remain
+pending Actions and acceptance. Comparison is a local projection, not typed VPN
+compilation or publication authority. Initial assignment, real native OIDC/MFA
+and safe terminal reconciliation of generic unknown HTTP mutation outcomes
+remain open. Existing historical checkpoints below are not promoted by this
+source change.
+
 The v84 administrative-auth source and actual-main checks passed. Its exact
 Actions APK passed the [USB/Wi-Fi checkpoint](non-lte-acceptance-20261116.md):20
 physical outcomes, two real Wi-Fi interruptions, native-process recovery and15

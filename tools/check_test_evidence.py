@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=377
+    minimum=398
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=23
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=186
+    minimum=200
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -578,3 +578,48 @@ ADMIN_LAYER_EDITOR_REQUIRED = {
 }
 if mode in ADMIN_LAYER_EDITOR_REQUIRED:
     assert set(ADMIN_LAYER_EDITOR_REQUIRED[mode]) <= set(identities), "Missing layered editor, durable pending ownership or fresh-authentication outcomes"
+
+# Local comparison is a value projection, never typed settings or publication authority.
+ADMIN_LAYER_COMPARISON_REQUIRED = {
+    'identity': [
+        ('io.syn443.identity.AdminLayerComparisonTest', 'disjointThreeWayMergePreservesCurrentParentsPermissionsAndIndependentRevisionDomains'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'boundExplicitChoicesResolveSamePathConflictsWithoutExposingAnUnresolvedProposal'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'sameResultAndUnchangedLocalChooseCurrentRawWhileModeAndApprovalAreThreeWay'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'projectionAppliesDeletionContainersArraysAndGoLexicalChoiceAndRangeRules'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'projectionEnforcesLockedInheritedLocalPermissionsAndEqualPriorityGroupClaims'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'inconsistentActualEffectiveAndForeignScopeOrParentsAreRejectedBeforeComparison'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'goStringEscapingRawCompactAndInputOutputBoundsRemainClosed'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'inheritanceDeletionAndPrefixConflictsKeepDistinctIntentAndRequireBoundRegionChoice'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'concurrentCrossKindShadowingConflictsWhileIdenticalIntentCanCoexist'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'newCurrentPermissionsCanBlockMergedIntentWithoutBecomingAClientGrant'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'projectionDocumentsMatchAcceptedGo55ScenariosWithoutChangingTheGoldenResource'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'preparedReviewDiffAndConfigurationFactBindingRemainValuesWithoutCasOrLeaseAuthority'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'allAcceptedGoProjectionOutcomesChosenRebaseProjectionsAndGridHashesConform'),
+        ('io.syn443.identity.AdminLayerComparisonTest', 'computedSixteenKeyLeafPathsAllow1040WhileMutationPathsRemain512'),
+    ],
+    'emulator': [
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'comparisonMetadataDetailsAndResolutionBindingsPrecedeExplicitLocalOnlyApply'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'comparisonApplyRechecksFreshHeadSavedDraftCasAndActualEncryptedRecord'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'normalPreviewRetainsReadOnlySameProposalDiffWithoutRenewingOriginalDeadline'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'comparisonBoundsAndBootOrAccountLossNeverExposeStaleDetailsOrChangeEncryptedDraft'),
+        ('io.syn443.android.AdminEditorCoordinatorTest', 'comparisonDetailsAreExplicitBoundedPagesAndNeverReturnAnotherRowOrSection'),
+        ('io.syn443.android.AdminComparisonUiTest', 'pagedConflictsAndDiffEmitOnlyExplicitBoundPageAndSideRequests'),
+        ('io.syn443.android.AdminComparisonUiTest', 'resolvableChoicesUseLatestRowAndNeverApplyOrSelectAutomatically'),
+        ('io.syn443.android.AdminComparisonUiTest', 'detailViewerExposesOnlyOneExplicitValueOrOriginChunkWithBoundedPaging'),
+        ('io.syn443.android.AdminComparisonUiTest', 'localApplyRequiresReadyAndOneExplicitConfirmationWithoutPublicationOrAutomaticReplay'),
+        ('io.syn443.android.AdminComparisonUiTest', 'changedResolutionBindingRevisionDeviceAndBusyCannotConfirmAnOldSnapshot'),
+        ('io.syn443.android.AdminComparisonUiTest', 'readOnlyDiffKeepsExplicitPagingAndLineageButHidesEveryChoiceAndApply'),
+        ('io.syn443.android.AdminComparisonUiTest', 'modelBoundsCopySummariesAndRejectInvalidIdsUnicodeScopesAndHiddenRawLabels'),
+        ('io.syn443.android.AdminComparisonWireTest', 'closedComparisonFrameRoundTripsOwnedRowsHeadersAndOneDetail'),
+        ('io.syn443.android.AdminComparisonWireTest', 'exact64KiBWhitespaceAndNullDetailKeepHardFrameBounds'),
+        ('io.syn443.android.AdminComparisonWireTest', 'closedFrameRejectsDuplicateEscapedKeysTypesAndIntegersBeforeNarrowing'),
+        ('io.syn443.android.AdminComparisonWireTest', 'detailCanonicalEncodingUnicodeAndRowRelationsFailClosed'),
+        ('io.syn443.android.AdminComparisonWireTest', 'mainAndBinderRejectBeforeAnyComparisonSerializationOrParsing'),
+        ('io.syn443.android.AdminComparisonRouteTest', 'conflictLoadResolveDetailAndConfirmedApplyOnlySendBoundLocalRebase'),
+        ('io.syn443.android.AdminComparisonRouteTest', 'readOnlyPreviewComparisonRetainsOriginalReviewAndDirtyEditorCannotOpenOldDiff'),
+        ('io.syn443.android.AdminComparisonRouteTest', 'busyComparisonStopRapidResumeAndRemovalCannotRestoreLateValues'),
+        ('io.syn443.android.AdminComparisonRouteTest', 'staleAndFiniteComparisonErrorsRetainDraftButReauthenticationClearsPrivilegedRam'),
+    ],
+}
+if mode in ADMIN_LAYER_COMPARISON_REQUIRED:
+    assert set(ADMIN_LAYER_COMPARISON_REQUIRED[mode]) <= set(identities), "Missing layered comparison, explicit local rebase or original preview lifetime outcomes"

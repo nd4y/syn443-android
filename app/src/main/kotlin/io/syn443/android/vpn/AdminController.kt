@@ -427,7 +427,16 @@ internal class AdminController private constructor(private val context:Applicati
     }
     /** Same single controller worker and consume-once mailbox as administrative
      * reads. Binder never opens an editor, parses JSON or performs Keystore I/O. */
-    fun editorStart(id:String,expectedGeneration:Long,command:AdminEditorCoordinator.Command):Boolean {
+    fun editorStart(id:String,expectedGeneration:Long,command:AdminEditorCoordinator.Command):Boolean =
+        editorOperationStart(id,expectedGeneration,command.kind !in setOf(AdminEditorCoordinator.Kind.SAVE_LOCAL,AdminEditorCoordinator.Kind.CLOSE)) {coordinator,access->
+            io.syn443.android.admin.AdminEditorWire.encode(coordinator.execute(command,access))
+        }
+    fun comparisonStart(id:String,expectedGeneration:Long,command:AdminEditorCoordinator.ComparisonCommand):Boolean =
+        editorOperationStart(id,expectedGeneration,command.kind==AdminEditorCoordinator.ComparisonKind.LOAD) {coordinator,access->
+            io.syn443.android.admin.AdminComparisonWire.encode(coordinator.comparison(command,access))
+        }
+    private fun editorOperationStart(id:String,expectedGeneration:Long,refreshAccess:Boolean,
+        work:(AdminEditorCoordinator,AdminEditorCoordinator.Access)->ByteArray):Boolean {
         if(!operationID.matches(id))return false
         val selected=synchronized(commands) {
             if(busy || retirementRequested || phase!=Phase.AUTHENTICATED || generation!=expectedGeneration)return false
@@ -458,7 +467,7 @@ internal class AdminController private constructor(private val context:Applicati
                 }
                 // Offline writes use the original account lease; network commands
                 // refresh before the coordinator can prepare a durable mutation.
-                checkedSession(command.kind !in setOf(AdminEditorCoordinator.Kind.SAVE_LOCAL,AdminEditorCoordinator.Kind.CLOSE))
+                checkedSession(refreshAccess)
                 val access=object:AdminEditorCoordinator.Access {
                     override fun ownership()=owned.protocol.layerOwnership(checkedSession(false))
                     override fun check() {checkedSession(false)}
@@ -469,10 +478,9 @@ internal class AdminController private constructor(private val context:Applicati
                     if(test==null)AdminEditorStore(context)
                     else checkNotNull(test.editorStore) {"isolated_editor_store_required"}.invoke()
                 },::boot,::elapsed).also {editorCoordinator=it}
-                val model=coordinator.execute(command,access)
-                access.check()
-                val body=io.syn443.android.admin.AdminEditorWire.encode(model)
+                val body=work(coordinator,access)
                 try {
+                    require(body.size in 1..524_288);access.check()
                     context(admitted,owned.deviceBinding,owned.discoveryBinding)
                     synchronized(commands) {
                         val ticket=mailbox;val ended=elapsed()

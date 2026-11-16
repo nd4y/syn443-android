@@ -40,7 +40,8 @@ class AdminActivity:ComponentActivity() {
 internal data class AdminUiModel(val status:AdminUiStatus=AdminUiStatus(),val working:Boolean=false,
     val page:AdminDevicesPage?=null,val after:String="",val selected:String="",
     val configuration:AdminDocument?=null,val runtime:AdminDocument?=null,
-    val showConfiguration:Boolean=false,val showRuntime:Boolean=false,val message:String="",val editor:AdminEditorModel?=null) {
+    val showConfiguration:Boolean=false,val showRuntime:Boolean=false,val message:String="",val editor:AdminEditorModel?=null,
+    val comparison:AdminComparisonModel?=null) {
     override fun toString()="AdminUiModel([redacted])"
 }
 internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={},val logout:()->Unit={},
@@ -66,7 +67,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         sequence++
         val ticket=sequence
         operation=scope.launch {
-            model=model.copy(working=true,message="",editor=model.editor?.withBusy(true))
+            model=model.copy(working=true,message="",editor=model.editor?.withBusy(true),comparison=model.comparison?.withBusy(true))
             try {block(ticket)}
             catch(e:CancellationException){throw e}
             catch(e:Exception) {if(current(ticket)) {
@@ -77,9 +78,9 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
                 else if(model.status.phase==AdminUiPhase.INITIALIZING)
                     AdminUiModel(status=model.status.copy(phase=AdminUiPhase.UNAVAILABLE,busy=false),
                         working=true,message=adminErrorText(code))
-                else model.copy(message=adminErrorText(code),editor=model.editor?.withFailure(code))
+                else model.copy(message=adminErrorText(code),editor=model.editor?.withFailure(code),comparison=model.comparison?.withFailure(code))
             }}
-            finally {if(sequence==ticket){model=model.copy(working=false,editor=model.editor?.withBusy(false));operation=null}}
+            finally {if(sequence==ticket){model=model.copy(working=false,editor=model.editor?.withBusy(false),comparison=model.comparison?.withBusy(false));operation=null}}
         }
     }
     suspend fun status(ticket:Long):AdminUiStatus {
@@ -123,15 +124,29 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
     }
     LaunchedEffect(visible,foregroundEpoch) {if(visible)execute {refresh(it)}}
     fun editCommand(kind:io.syn443.android.vpn.AdminEditorCoordinator.Kind,pages:List<String> = emptyList(),
-        review:String="",deadline:Long=0) {
+        review:String="",deadline:Long=0,comparisonBinding:String="") {
         val captured=model.editor?:return
         val generation=model.status.generation
         execute {ticket->
             val command=io.syn443.android.vpn.AdminEditorCoordinator.Command(kind,captured.device,captured.documentBinding,
-                captured.localRevision,pages,review,deadline)
+                captured.localRevision,pages,review,deadline,comparisonBinding)
             val next=bridge.editor(generation,command)
             if(current(ticket,generation) && model.editor?.documentBinding==captured.documentBinding)
-                model=model.copy(editor=if(kind==io.syn443.android.vpn.AdminEditorCoordinator.Kind.CLOSE && next.localRevision==0L)null else next)
+                model=model.copy(editor=if(kind==io.syn443.android.vpn.AdminEditorCoordinator.Kind.CLOSE && next.localRevision==0L)null else next,comparison=null)
+        }
+    }
+    fun comparisonCommand(kind:io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind,
+        section:AdminComparisonSection=AdminComparisonSection.CONFLICTS,offset:Int=0,row:String="",
+        side:AdminComparisonSide=AdminComparisonSide.BASE,page:Int=0,choice:String="",binding:String?=null) {
+        val captured=model.editor?:return
+        val generation=model.status.generation
+        val expected=binding ?:model.comparison?.binding ?:captured.comparisonBinding
+        execute {ticket->
+            val command=io.syn443.android.vpn.AdminEditorCoordinator.ComparisonCommand(kind,captured.device,captured.documentBinding,
+                captured.localRevision,if(kind==io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.LOAD)"" else expected,
+                section,offset,row,side,page,choice)
+            val next=bridge.comparison(generation,command)
+            if(current(ticket,generation) && model.editor?.documentBinding==captured.documentBinding)model=model.copy(comparison=next)
         }
     }
     val actions=AdminUiActions(
@@ -179,7 +194,17 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         }},
     )
     val editor=model.editor
+    val comparison=model.comparison
     if(editor==null)AdminScreen(model,actions)
+    else if(comparison!=null)AdminComparisonScreen(comparison,AdminComparisonActions(
+        page={section,offset->comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.PAGE,section,offset)},
+        detail={row,side,page->comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.DETAIL,comparison.section,
+            comparison.offset,row,side,page)},
+        choose={row,choice->comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.RESOLVE,comparison.section,
+            comparison.offset,row,choice=choice)},
+        apply={binding,revision->if(revision==model.editor?.localRevision)editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.REBASE,comparisonBinding=binding)},
+        back={model=model.copy(comparison=null)},
+        reload={comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.LOAD)},web=actions.web))
     else AdminEditorScreen(editor,AdminEditorActions(
         saveLocal={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.SAVE_LOCAL,it)},
         saveDraft={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.SAVE_DRAFT)},
@@ -187,8 +212,10 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         publish={binding,deadline->editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.PUBLISH,review=binding,deadline=deadline)},
         poll={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.POLL)},
         retryExact={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.RETRY_EXACT)},
-        comparison={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.COMPARE)},
-        rebase={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.REBASE)},
+        comparison={comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.LOAD)},
+        rebase={comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.LOAD)},
+        viewComparison={comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.PAGE,
+            section=AdminComparisonSection.DIFF,binding=editor.comparisonBinding)},
         login={val generation=model.status.generation;model=model.copy(editor=null);execute {ticket->
             if(!bridge.logout(generation))throw AdminUiFailure("BUSY")
             refresh(ticket,load=false)
@@ -196,7 +223,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
             if(!bridge.login(observed.generation))throw AdminUiFailure("BUSY")
             refresh(ticket)
         }},
-        web=actions.web,back={model=model.copy(editor=null)},close={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.CLOSE)}))
+        web=actions.web,back={model=model.copy(editor=null,comparison=null)},close={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.CLOSE)}))
 }
 
 @Composable internal fun AdminScreen(model:AdminUiModel,actions:AdminUiActions) {

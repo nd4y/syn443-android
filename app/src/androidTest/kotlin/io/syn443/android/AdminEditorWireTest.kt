@@ -19,10 +19,10 @@ class AdminEditorWireTest {
     private fun bytes(value:String)=value.toByteArray(Charsets.UTF_8)
     private fun model(pages:List<String> = emptyList(),parents:List<AdminEditorParent> = emptyList(),
         recipients:List<String> = emptyList(),differences:List<String> = emptyList(),error:String="",deadline:Long=0,
-        localRevision:Long=0)=AdminEditorModel(device="synthetic-device",privateDraftRevision=3,desiredHeadRevision=7,
+        localRevision:Long=0,comparisonBinding:String="")=AdminEditorModel(device="synthetic-device",privateDraftRevision=3,desiredHeadRevision=7,
         localRevision=localRevision,phase=AdminEditorPhase.REVIEW,busy=true,readOnly=true,unassigned=true,
         documentBinding="document-a",pages=pages,parents=parents,reviewBinding="review-a",reviewDeadlineElapsed=deadline,
-        recipients=recipients,diffSummaries=differences,error=error)
+        recipients=recipients,diffSummaries=differences,error=error,comparisonBinding=comparisonBinding)
     private fun failure(code:String="INVALID_REPLY",action:()->Unit) {
         val caught=assertThrows(AdminUiFailure::class.java,action)
         assertEquals(code,caught.code);assertEquals("administrative_operation_failed",caught.message);assertNull(caught.cause)
@@ -37,7 +37,7 @@ class AdminEditorWireTest {
         val pages=mutableListOf("{\"private-value\":true}","Русский текст \uD83D\uDE00 \" \\ /\n\t\u0000\u2028\u2029")
         val parents=mutableListOf(AdminEditorParent("template","template-a",2),AdminEditorParent("group","group-a",4))
         val recipients=mutableListOf("device-a","device-b");val differences=mutableListOf("/network: изменение \uD83D\uDE00")
-        val original=model(pages,parents,recipients,differences,"REVIEW_EXPIRED",60_000,13)
+        val original=model(pages,parents,recipients,differences,"REVIEW_EXPIRED",60_000,13,encoded(ByteArray(32) {3}))
         pages.clear();parents.clear();recipients.clear();differences.clear()
         val encoded=AdminEditorWire.encode(original);val preserved=encoded.copyOf()
         val decoded=AdminEditorWire.decode(encoded);encoded.fill(0)
@@ -50,7 +50,9 @@ class AdminEditorWireTest {
         assertEquals(original.recipients,decoded.recipients);assertEquals(original.diffSummaries,decoded.diffSummaries)
         assertEquals("REVIEW_EXPIRED",decoded.error);assertArrayEquals(preserved,AdminEditorWire.encode(decoded))
         val document=Json.parseToJsonElement(preserved.toString(Charsets.UTF_8)).jsonObject
-        assertEquals(17,document.size);assertEquals(1,document.getValue("schemaVersion").jsonPrimitive.int)
+        assertEquals(18,document.size);assertEquals(1,document.getValue("schemaVersion").jsonPrimitive.int)
+        assertEquals(original.comparisonBinding,decoded.comparisonBinding)
+        assertEquals(original.comparisonBinding,document.getValue("comparisonBinding").jsonPrimitive.content)
         assertFalse("pages" in document);assertFalse("diffSummaries" in document)
         assertEquals(original.pages.map {encoded(bytes(it))},document.getValue("pages64").jsonArray.map {it.jsonPrimitive.content})
         assertEquals(original.diffSummaries.map {encoded(bytes(it))},document.getValue("diffSummaries64").jsonArray.map {it.jsonPrimitive.content})
@@ -111,6 +113,11 @@ class AdminEditorWireTest {
             original.replace("\"device\":\"\"","\"device\":\"\",\"device\":\"other\""),
             original.replace("\"device\":\"\"","\"device\":\"\",\"de\\u0076ice\":\"other\""),
             original.replace("\"device\":\"\"","\"Device\":\"\""),
+            original.replace(",\"comparisonBinding\":\"\"",""),
+            original.replace("\"comparisonBinding\":\"\"","\"comparisonBinding\":null"),
+            original.replace("\"comparisonBinding\":\"\"","\"comparisonBinding\":\"A\""),
+            original.replace("\"comparisonBinding\":\"\"","\"comparisonBinding\":\""+"A".repeat(42)+"B\""),
+            original.replace("\"comparisonBinding\":\"\"","\"comparisonBinding\":\"\",\"comparisonBinding\":\"\""),
             original.replace(",\"localRevision\":0",""),
             original.replace("\"localRevision\":0","\"localRevision\":null"),
             original.replace("\"localRevision\":0","\"localRevision\":\"0\""),
