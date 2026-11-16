@@ -36,10 +36,20 @@ class AdminProtocol internal constructor(private val identity:AdminIdentity,priv
     private fun status(reply:Reply) {
         if(reply.status!=200)throw AdminException(when(reply.status) {
             400,401->AdminFailure.REAUTHENTICATE
-            403->AdminFailure.ACCESS_DENIED
+            403->forbidden(reply)
             else->AdminFailure.INVALID_REPLY
         })
     }
+    private fun catalogCode(reply:Reply):String? = runCatching {
+            require(reply.body.size in 1..128 &&
+                reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+            val challenge=Identity.objectJSON(Policy.utf8(reply.body))
+            require(challenge.keys==setOf("code"))
+            challenge.getValue("code").text().also { require(it.matches(Regex("[a-z_]{1,64}"))) }
+        }.getOrNull()
+    /** This finite catalog denial is not a nonce challenge or permission grant. */
+    private fun forbidden(reply:Reply):AdminFailure =
+        if(catalogCode(reply)=="catalog_reauthentication_required")AdminFailure.REAUTHENTICATE else AdminFailure.ACCESS_DENIED
     private inline fun <T> checked(block:()->T):T=try {block()}
         catch(e:AdminException){throw e}
         catch(e:DeliveryException){throw AdminException(if(e.reason==DeliveryFailure.CANCELLED)AdminFailure.CANCELLED else AdminFailure.TRANSPORT)}
@@ -244,7 +254,7 @@ class AdminProtocol internal constructor(private val identity:AdminIdentity,priv
         }
         if(reply.status!=200)throw AdminException(when(reply.status) {
             401->AdminFailure.REAUTHENTICATE
-            403->AdminFailure.ACCESS_DENIED
+            403->forbidden(reply)
             in 500..599->AdminFailure.TRANSPORT
             else->AdminFailure.INVALID_REPLY
         })
@@ -267,6 +277,87 @@ class AdminProtocol internal constructor(private val identity:AdminIdentity,priv
         controlRead(AdminControl.Read.CONFIGURATION,id,session,scope) {document,time,wire->AdminControl.configuration(document,id,time,wire)}
     fun deviceRuntime(id:String,session:AdminSession,scope:IdentityScope):AdminDeviceRuntime =
         controlRead(AdminControl.Read.RUNTIME,id,session,scope) {document,time,wire->AdminControl.runtime(document,id,time,wire)}
+    /** Stable actor binding for private drafts. This value is not a role or MFA grant. */
+    fun layerActor(current:AdminSession):String=checked {
+        controlAccess(current)
+        Identity.hash((identity.metadata.issuer+"\u0000"+current.subject).toByteArray(Charsets.UTF_8))
+    }
+    /** Offline editing may outlive the short access token, never the original
+     * session, current signed discovery, BOOT or verified account. Value only. */
+    fun layerOwnership(current:AdminSession):AdminLayerOwnership=checked {
+        require(admission!=null)
+        validateSession(current)
+        val prior=admission.priorTime()
+        val trusted=if(prior==null)current.time else floor(current.time,prior)
+        val now=elapsed()
+        val window=trusted.window(boot(),now)
+        validateSession(current)
+        AdminLayerOwnership(identity.serviceBinding,
+            Identity.hash((identity.metadata.issuer+"\u0000"+current.subject).toByteArray(Charsets.UTF_8)),
+            identity.metadata.apiOrigin,window,boot(),now,current.sessionUntilElapsedMs)
+    }
+    /** Compute once on the controller worker after a checked response. UI clocks
+     * cannot renew the review ticket by reopening a dialog or receiving it late. */
+    fun layerReviewDeadline(preview:AdminLayerPreview,current:AdminSession):Long=checked {
+        val owned=layerOwnership(current)
+        require(!preview.replayOnly && preview.context.actor==owned.actor && preview.context.origin==owned.apiOrigin)
+        val reviewUntil=minOf(preview.expiresAtMs,Math.addExact(preview.issuedAtMs,90_000))
+        val remaining=reviewUntil-owned.time.upperMs
+        require(remaining in 1..90_000)
+        minOf(Math.addExact(owned.observedElapsedMs,remaining),owned.sessionUntilElapsedMs)
+    }
+    /** Exactly one explicit layer operation. Caller journals mutation bytes before
+     * invoking this method and owns reconciliation of an uncertain response. */
+    fun layerAction(action:AdminLayerRequest,current:AdminSession,scope:IdentityScope):AdminLayerReply=checked {
+        controlAccess(current)
+        val expected=action.expected
+        require(expected.actor.isEmpty() || expected.actor==layerActor(current))
+        require(expected.origin.isEmpty() || expected.origin==identity.metadata.apiOrigin)
+        val guard=checkNotNull(admission)
+        val body=action.bodyBytes()
+        try {
+            require(body.size in 1..262_144)
+            val prior=guard.priorTime()
+            val trusted=if(prior==null)current.time else floor(current.time,prior)
+            val started=start();val url=identity.metadata.apiOrigin+AdminControl.PATH
+            val proof=scope.request {
+                controlAccess(current)
+                Identity.proof(key.publicKey,key::sign,"POST",url,trusted.proofSecond(started.boot,started.elapsed),
+                    token=current.accessToken,body=body,maxBody=262_144)
+            }
+            val reply=scope.request {
+                val now=elapsed()
+                require(boot()==started.boot && now>=started.elapsed && now-started.elapsed<=20_000)
+                controlAccess(current)
+                exchange.request("POST",url,mapOf("Content-Type" to "application/json","Cache-Control" to "no-store",
+                    "Authorization" to "DPoP ${current.accessToken}","DPoP" to proof),body.copyOf(),it,action.maxReplyBytes)
+                    .also {controlAccess(current)}
+            }
+            if(reply.status!=200) {
+                val code=catalogCode(reply)
+                throw AdminException(when {
+                    reply.status==401->AdminFailure.REAUTHENTICATE
+                    reply.status==403->forbidden(reply)
+                    reply.status==409 && code=="catalog_revision_conflict"->AdminFailure.CONFLICT
+                    reply.status==400 && code=="catalog_invalid"->AdminFailure.INVALID_CONFIGURATION
+                    reply.status==429 && code=="catalog_quota"->AdminFailure.LIMITED
+                    reply.status in 500..599->AdminFailure.TRANSPORT
+                    else->AdminFailure.INVALID_REPLY
+                })
+            }
+            val time=observed(reply,started,trusted)
+            val result=scope.request {
+                require(reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+                require(reply.body.size in 1..action.maxReplyBytes)
+                controlAccess(current,time)
+                AdminLayerControl.parseReply(action,Policy.utf8(reply.body),time.window(boot(),elapsed()))
+                    .also {controlAccess(current,time)}
+            }
+            val accepted=guard.record(time)
+            controlAccess(current,accepted,admit=false)
+            result
+        }finally {body.fill(0)}
+    }
     /** No transport call and no device identity mutation, including after BOOT or expiry. */
     fun logout(session:AdminSession):AdminLogout=checked {
         require(session.authority==authority && session.keyThumbprint==thumbprint)

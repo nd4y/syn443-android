@@ -169,6 +169,7 @@ class AdminControllerTest {
             assertNotNull(result.url);savedBrowser=parameters(checkNotNull(URI(result.url).rawQuery))
             assertEquals(AdminBootstrap.CLIENT_ID,savedBrowser["client_id"])
             assertEquals(AdminBootstrap.CALLBACK,savedBrowser["redirect_uri"])
+            assertEquals("300",savedBrowser["max_age"])
             assertEquals("gone",controller.browserResult(id,gen()).state)
             return result
         }
@@ -275,7 +276,7 @@ class AdminControllerTest {
                 val body=buildJsonObject {
                     put("iss",metadata.issuer);put("sub",subject);put("aud",if(id)AdminBootstrap.CLIENT_ID else AdminBootstrap.AUDIENCE)
                     put("azp",AdminBootstrap.CLIENT_ID);put("iat",wall/1000);put("exp",wall/1000+300);put("jti","synthetic-$tokenNumber-${Identity.random()}")
-                    if(id)put("nonce",savedBrowser.getValue("nonce"))
+                    if(id) {put("nonce",savedBrowser.getValue("nonce"));put("auth_time",wall/1000)}
                     else {put("scope",AdminBootstrap.SCOPE);put("cnf",buildJsonObject {put("jkt",thumbprint)})}
                 }
                 val header=Identity.encode("""{"alg":"RS256","kid":"controller-rsa","typ":"JWT"}""".toByteArray())
@@ -433,6 +434,23 @@ class AdminControllerTest {
             assertFalse(f.controller.readStart(id(),gen,"configuration","x".repeat(65)))
         }
     }
+    @Test fun mailboxLeaseExpiryBeforeDispatchRejectsLateHttpWithoutLazyPollingOrReleasingBlockedOwner() {
+        Fixture().use {f ->
+            f.login();val owned=f.record();val generation=f.gen();val before=f.controlCalls();val gate=f.gate()
+            // Block the actual worker at its source admission, before signing
+            // or HTTP. Do not poll/readCancel: requireCurrent itself must enforce
+            // the mailbox lease rather than depending on lazy result cleanup.
+            f.onSource={gate.hold()}
+            val op=id();assertTrue(f.controller.readStart(op,generation,"devices",""));gate.reached()
+            f.elapsed+=60_001
+            assertTrue(f.snapshot().getBoolean("busy"));assertFalse(f.controller.shutdownForTest())
+            assertFalse(f.controller.readStart(id(),generation,"devices",""));assertEquals(before,f.controlCalls())
+            f.onSource=null;gate.release.countDown();f.phase("AUTHENTICATED")
+            assertEquals(before,f.controlCalls());assertEquals("gone",f.controller.readResult(op,generation).state)
+            assertEquals(owned,f.record());f.assertVpnPreserved()
+            assertEquals("done",f.read().state);assertEquals(before+1,f.controlCalls())
+        }
+    }
     @Test fun recreatedReservedBrowserAuthenticatedAndRetiringRecordsRequireFreshOwnedKeyRetirement() {
         for(phase in listOf(AdminKeyPhase.RESERVED,AdminKeyPhase.BROWSER,AdminKeyPhase.AUTHENTICATED,AdminKeyPhase.RETIRING))Fixture(false).use {f ->
             val seeded=f.seed(phase);val raw=f.file.readBytes();assertFalse(raw.toString(Charsets.ISO_8859_1).contains(seeded.alias))
@@ -487,6 +505,20 @@ class AdminControllerTest {
             f.onExchange=null;assertEquals("done",f.read().state)
             f.onExchange={call ->if(call.url==f.metadata.apiOrigin+"/v1/control/action")f.reply(status=401) else f.normal(call)}
             f.read();f.phase("REAUTHENTICATE");f.signedOutKeyAbsent(owned.alias)
+        }
+    }
+    @Test fun catalogFreshAuthenticationChallengeRetiresAdminOwnerWithoutRetryOrDeviceVpnChanges() {
+        Fixture().use {f ->
+            f.login();val owned=f.record();val trust=f.trustFingerprint()
+            f.onExchange={call->if(call.url==f.metadata.apiOrigin+"/v1/control/action")
+                f.reply("""{"code":"catalog_reauthentication_required"}""",403) else f.normal(call)}
+            f.read();f.phase("REAUTHENTICATE");f.signedOutKeyAbsent(owned.alias)
+            assertEquals(1,f.controlCalls());assertEquals(1,f.tokenCalls());assertEquals(0,f.refreshCalls())
+            assertEquals(trust,f.trustFingerprint());f.assertVpnPreserved()
+            val count=f.callCount();assertFalse(f.controller.readStart(id(),f.gen(),"devices",""));assertEquals(count,f.callCount())
+            f.onExchange=null;f.login()
+            assertNotEquals(owned.alias,f.record().alias);assertEquals(2,f.tokenCalls());assertEquals(1,f.controlCalls())
+            assertEquals(trust,f.trustFingerprint());f.assertVpnPreserved()
         }
     }
     @Test fun browserHandoffsExpireConsumeOnceAndCancelOnlyTheirBlockedFreshAuthorization() {

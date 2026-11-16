@@ -16,7 +16,7 @@ import java.net.URI
  * controller's current-generation admin-browser response, never by an Intent. */
 internal object AdminLoginBrowser {
     private val fields=setOf("client_id","redirect_uri","response_type","scope","state","nonce",
-        "code_challenge_method","code_challenge","dpop_jkt","acr_values")
+        "code_challenge_method","code_challenge","dpop_jkt","acr_values","max_age")
     private fun decode(raw:String):String {
         val out=ByteArrayOutputStream();var at=0
         while(at<raw.length) {
@@ -41,14 +41,14 @@ internal object AdminLoginBrowser {
             Regex("(?:/[^/]+)*/realms/[^/]+").matches(uri.path.removeSuffix(endpoint)))
         val query=linkedMapOf<String,String>()
         requireNotNull(uri.rawQuery).split('&').forEach {entry->
-            require(query.size<10 && '=' in entry)
+            require(query.size<11 && '=' in entry)
             val pair=entry.split('=',limit=2);val name=decode(pair[0]);require(name !in query)
             query[name]=decode(pair[1])
         }
         require(query.keys==fields && query["client_id"]==AdminBootstrap.CLIENT_ID &&
             query["redirect_uri"]==AdminBootstrap.CALLBACK && query["response_type"]=="code" &&
             query["scope"]==AdminBootstrap.SCOPE && query["code_challenge_method"]=="S256" &&
-            query["acr_values"]==AdminBootstrap.ASSURANCE_ACR)
+            query["acr_values"]==AdminBootstrap.ASSURANCE_ACR && query["max_age"]=="300")
         for(name in listOf("state","nonce","code_challenge","dpop_jkt")) {
             val value=query.getValue(name)
             require(value.matches(Regex("[A-Za-z0-9_-]{43}")) && Policy.decode64(value).size==32)

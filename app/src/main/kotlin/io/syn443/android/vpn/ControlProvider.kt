@@ -84,6 +84,24 @@ class ControlProvider : ContentProvider() {
                     val callback=requireNotNull(arg).also {require(it.length in 1..8192)}
                     return Bundle().apply {putBoolean("ok",true);putBoolean("admitted",AdminController.get(context).callback(callback))}
                 }
+                "admin-editor-start" -> {
+                    require(caller==Process.myUid())
+                    val id=requireNotNull(arg).also {require(it.matches(Regex("[a-f0-9]{32}")))}
+                    val input=requireNotNull(extras)
+                    require(input.keySet()==setOf("generation","kind","device","binding","localRevision","pages","reviewBinding","reviewDeadline"))
+                    val generation=input.getLong("generation",-1).also {require(it>=0)}
+                    val kind=AdminEditorCoordinator.Kind.valueOf(requireNotNull(input.getString("kind")))
+                    val device=requireNotNull(input.getString("device")).also {require(it.length<=64)}
+                    val binding=requireNotNull(input.getString("binding")).also {require(it.length<=128)}
+                    val local=input.getLong("localRevision",-1).also {require(it>=0)}
+                    val pages=requireNotNull(input.getStringArrayList("pages")).also {
+                        require(it.size<=64 && it.all {page->page.length<=8192} && it.sumOf {page->page.length}<=262_144)
+                    }
+                    val review=requireNotNull(input.getString("reviewBinding")).also {require(it.length<=128)}
+                    val deadline=input.getLong("reviewDeadline",-1).also {require(it>=0)}
+                    val command=AdminEditorCoordinator.Command(kind,device,binding,local,pages,review,deadline)
+                    return Bundle().apply {putBoolean("ok",true);putBoolean("admitted",AdminController.get(context).editorStart(id,generation,command))}
+                }
                 "admin-read-start", "admin-read-result", "admin-read-cancel" -> {
                     require(caller==Process.myUid())
                     val id=requireNotNull(arg).also {require(it.matches(Regex("[a-f0-9]{32}")))}

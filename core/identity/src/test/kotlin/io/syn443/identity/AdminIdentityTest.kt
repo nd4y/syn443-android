@@ -1,5 +1,6 @@
 package io.syn443.identity
 
+import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 import java.net.URI
@@ -28,7 +29,7 @@ class AdminIdentityTest {
         assertEquals(f.metadata.issuer+"/protocol/openid-connect/auth",url.toString().substringBefore('?'))
         val q=AdminAuthFixture.parameters(url.rawQuery)
         assertEquals(setOf("client_id","redirect_uri","response_type","scope","state","nonce",
-            "code_challenge_method","code_challenge","dpop_jkt","acr_values"),q.keys)
+            "code_challenge_method","code_challenge","dpop_jkt","acr_values","max_age"),q.keys)
         assertEquals(AdminBootstrap.CLIENT_ID,q["client_id"])
         assertEquals(AdminBootstrap.CALLBACK,q["redirect_uri"])
         assertEquals("openid syn443.control",q["scope"])
@@ -36,6 +37,7 @@ class AdminIdentityTest {
         assertEquals(Identity.hash(p.verifier.toByteArray(Charsets.US_ASCII)),q["code_challenge"])
         assertEquals(f.client.thumbprint,q["dpop_jkt"])
         assertEquals(AdminBootstrap.ASSURANCE_ACR,q["acr_values"])
+        assertEquals("300",q["max_age"])
         assertEquals(p.state,q["state"]);assertEquals(p.nonce,q["nonce"])
         assertTrue(f.calls.isEmpty())
     }
@@ -82,5 +84,25 @@ class AdminIdentityTest {
         assertFalse(f.pending.toString().contains(f.pending.verifier))
         assertFalse(f.identity.toString().contains(f.metadata.issuer))
         assertEquals("ACCESS_DENIED",AdminException(AdminFailure.ACCESS_DENIED).message)
+    }
+    @Test fun initialAuthenticationTimeHonorsBothTrustedWindowEdgesAtExactSecondBoundaries() {
+        val f=AdminAuthFixture();val issuer=f.client.discover(IdentityScope());val now=AdminAuthFixture.NOW
+        fun validate(authenticated:Long,time:TimeWindow) {
+            val reply=f.tokens(idChanges=mapOf("auth_time" to JsonPrimitive(authenticated)))
+            val data=Identity.objectJSON(reply.body.decodeToString())
+            val principal=f.identity.tokens(data.getValue("id_token").jsonPrimitive.content,
+                data.getValue("access_token").jsonPrimitive.content,issuer.keys,f.client.thumbprint,f.pending.nonce,time,true)
+            assertEquals("synthetic-user",principal.subject)
+        }
+        val exact=TimeWindow(now,now)
+        validate(now/1000-330,exact);validate(now/1000+30,exact)
+        assertThrows(Exception::class.java) {validate(now/1000-331,exact)}
+        assertThrows(Exception::class.java) {validate(now/1000+31,exact)}
+        val uncertain=TimeWindow(now,now+20_000)
+        validate(now/1000-310,uncertain);validate(now/1000+30,uncertain)
+        // The old SSO would pass against lowerMs alone, but not the entire window.
+        assertThrows(Exception::class.java) {validate(now/1000-311,uncertain)}
+        assertThrows(Exception::class.java) {validate(now/1000+31,uncertain)}
+        assertFalse(f.pending.consumed.get());assertEquals(2,f.calls.size)
     }
 }

@@ -61,6 +61,65 @@ class AdminProtocolTest {
         assertEquals(count,f.calls.size)
         assertFalse(first.toString().contains(first.refreshToken));assertFalse(issuer.toString().contains(f.metadata.issuer))
     }
+    @Test fun initialIdTokenRejectsMissingMalformedUnsafeAndStaleAuthenticationTimeDespiteFreshIssueTime() {
+        val invalid=listOf<JsonElement?>(null,JsonNull,JsonPrimitive("1800000000"),JsonPrimitive(1800000000.0),
+            JsonPrimitive(true),JsonPrimitive(0),JsonPrimitive(-1),JsonPrimitive(Long.MAX_VALUE),
+            JsonPrimitive(Long.MAX_VALUE/1000+1),JsonPrimitive(AdminAuthFixture.NOW/1000-3600),
+            JsonPrimitive(AdminAuthFixture.NOW/1000+31))
+        for(authenticated in invalid) {
+            val f=AdminAuthFixture();val issuer=f.client.discover(IdentityScope())
+            f.handler={f.tokens(idChanges=authenticated?.let {mapOf("auth_time" to it)} ?: emptyMap(),
+                includeAuthTime=authenticated!=null)}
+            AdminAuthFixture.failure(AdminFailure.INVALID_REPLY) {f.login(issuer)}
+            assertTrue(f.pending.consumed.get());assertEquals(3,f.calls.size)
+            assertEquals("authorization_code",AdminAuthFixture.parameters(checkNotNull(f.calls.last().body).decodeToString())["grant_type"])
+            assertThrows(AdminException::class.java) {f.login(issuer)}
+            assertEquals("a rejected consumed code cannot be retried",3,f.calls.size)
+        }
+    }
+    @Test fun refreshKeepsOldAuthenticationTimeOptionalWithoutRenewingMfaOrTheOriginalSessionLease() {
+        for(kind in 0..2) {
+            val f=AdminAuthFixture();val issuer=f.client.discover(IdentityScope());val first=f.login(issuer)
+            val deadline=first.sessionUntilElapsedMs
+            f.elapsed+=360_000
+            f.handler={when(kind) {
+                0->f.tokens(includeId=false)
+                1->f.tokens(includeAuthTime=false)
+                else->f.tokens(idChanges=mapOf("auth_time" to JsonPrimitive(AdminAuthFixture.NOW/1000)))
+            }}
+            val next=f.client.refresh(first,issuer,IdentityScope())
+            assertEquals(first.subject,next.subject);assertEquals(deadline,next.sessionUntilElapsedMs)
+            assertFalse(first.available());assertTrue(next.available());assertEquals(4,f.calls.size)
+            assertEquals(setOf("grant_type","client_id","refresh_token"),
+                AdminAuthFixture.parameters(checkNotNull(f.calls.last().body).decodeToString()).keys)
+        }
+    }
+    @Test fun catalogReauthenticationRequiresExactBoundedJsonAndNeverRetriesANonceOrWrongCode() {
+        val exact="""{"code":"catalog_reauthentication_required"}"""
+        val positives=listOf(exact,exact+"\n",exact+" ".repeat(128-exact.length))
+        val invalid=listOf("""{"error":"catalog_reauthentication_required"}""", """{"code":"catalog_denied"}""",
+            """{"error":"use_dpop_nonce"}""", """{"code":"catalog_reauthentication_required","extra":true}""",
+            """{"code":"catalog_reauthentication_required","code":"catalog_reauthentication_required"}""",
+            """{"code":"catalog_reauthentication_required","co\u0064e":"catalog_reauthentication_required"}""",
+            """{"Code":"catalog_reauthentication_required"}""", """{"code":null}""", """{"code":true}""",
+            """{"code":"CATALOG_REAUTHENTICATION_REQUIRED"}""",exact.dropLast(1),exact+" ".repeat(129-exact.length))
+        for((raw,expected) in positives.map {it to AdminFailure.REAUTHENTICATE}+invalid.map {it to AdminFailure.ACCESS_DENIED}) {
+            val f=AdminAuthFixture()
+            f.handler={f.reply(403,raw,mapOf("dpop-nonce" to listOf("untrusted-no-retry")))}
+            AdminAuthFixture.failure(expected) {f.client.discover(IdentityScope())}
+            assertEquals(1,f.calls.size);assertFalse(f.pending.consumed.get())
+        }
+        for(headers in listOf(mapOf("content-type" to listOf("text/plain")),
+            mapOf("content-type" to listOf("application/json","application/json")))) {
+            val f=AdminAuthFixture();f.handler={f.reply(403,exact,headers)}
+            AdminAuthFixture.failure(AdminFailure.ACCESS_DENIED) {f.client.discover(IdentityScope())}
+            assertEquals(1,f.calls.size)
+        }
+        val malformed=AdminAuthFixture()
+        malformed.handler={malformed.reply(403,exact).copy(body=byteArrayOf(0xc3.toByte(),0x28))}
+        AdminAuthFixture.failure(AdminFailure.ACCESS_DENIED) {malformed.client.discover(IdentityScope())}
+        assertEquals(1,malformed.calls.size)
+    }
     @Test fun refreshAllowsMissingIdTokenButRejectsChangedSubjectNonceAudienceOrKey() {
         val f=AdminAuthFixture();val issuer=f.client.discover(IdentityScope());val first=f.login(issuer)
         f.handler={call->if(call.url.endsWith("/token"))f.tokens(includeId=false) else f.normal(call)}
@@ -358,7 +417,7 @@ internal class AdminAuthFixture {
         else->error("Unexpected synthetic OAuth path")
     }
     fun tokens(subject:String="synthetic-user",includeId:Boolean=true,includeAtHash:Boolean=false,
-        accessChanges:Map<String,JsonElement> = emptyMap(),idChanges:Map<String,JsonElement> = emptyMap()):Reply {
+        accessChanges:Map<String,JsonElement> = emptyMap(),idChanges:Map<String,JsonElement> = emptyMap(),includeAuthTime:Boolean=true):Reply {
         fun token(id:Boolean,accessHash:String?=null):String {
             val fields=buildJsonObject {
                 put("iss",metadata.issuer);put("aud",if(id)AdminBootstrap.CLIENT_ID else AdminBootstrap.AUDIENCE)
@@ -366,6 +425,7 @@ internal class AdminAuthFixture {
                 put("jti",Identity.random())
                 if(id) {
                     put("nonce",pending.nonce)
+                    if(includeAuthTime)put("auth_time",wall/1000)
                     if(accessHash!=null)put("at_hash",accessHash)
                 } else {
                     put("scope",AdminBootstrap.SCOPE);put("cnf",buildJsonObject {put("jkt",client.thumbprint)})

@@ -57,6 +57,8 @@ internal interface AdminUiBridge {
     suspend fun callback(raw:String)
     suspend fun devices(generation:Long,after:String=""):AdminDevicesPage
     suspend fun document(generation:Long,action:AdminReadAction,target:String):AdminDocument
+    suspend fun editor(generation:Long,command:io.syn443.android.vpn.AdminEditorCoordinator.Command):AdminEditorModel =
+        throw AdminUiFailure("UNAVAILABLE")
     suspend fun webPanel():String
 }
 
@@ -168,6 +170,44 @@ internal class ResolverAdminUiBridge(private val resolver:ContentResolver):Admin
     override suspend fun document(generation:Long,action:AdminReadAction,target:String)=withContext(Dispatchers.IO) {
         require(action!=AdminReadAction.DEVICES)
         AdminWire.document(read(generation,action,target),action,target)
+    }
+    override suspend fun editor(generation:Long,command:io.syn443.android.vpn.AdminEditorCoordinator.Command):AdminEditorModel=withContext(Dispatchers.IO) {
+        require(generation>=0 && command.pages.size<=64 && command.pages.all {it.length<=8192} &&
+            command.pages.sumOf {it.toByteArray(Charsets.UTF_8).size}<=262_144)
+        val id=UUID.randomUUID().toString().replace("-","")
+        val input=Bundle().apply {
+            putLong("generation",generation);putString("kind",command.kind.name);putString("device",command.device)
+            putString("binding",command.binding);putLong("localRevision",command.localRevision)
+            putStringArrayList("pages",ArrayList(command.pages));putString("reviewBinding",command.reviewBinding)
+            putLong("reviewDeadline",command.reviewDeadline)
+        }
+        val resultInput=Bundle().apply {putLong("generation",generation)}
+        if(!rpc("admin-editor-start",id,input).getBoolean("admitted")) {
+            val current=status()
+            throw AdminUiFailure(if(current.generation!=generation || current.phase!=AdminUiPhase.AUTHENTICATED)"REAUTHENTICATE" else "BUSY")
+        }
+        val started=SystemClock.elapsedRealtime()
+        try {
+            while(SystemClock.elapsedRealtime()-started in 0..59_999) {
+                val reply=rpc("admin-read-result",id,resultInput)
+                val raw=reply.getString("json")?:throw AdminUiFailure("INVALID_REPLY")
+                require(raw.toByteArray(Charsets.UTF_8).size<=4096)
+                val meta=Canonical.parse(raw).jsonObject
+                when(meta.getValue("state").jsonPrimitive.content) {
+                    "pending"->delay(1000)
+                    "done"->return@withContext AdminEditorWire.decode(reply.getByteArray("body")?:throw AdminUiFailure("INVALID_REPLY"))
+                    "failed"->throw AdminUiFailure(meta["reason"]?.jsonPrimitive?.content?:"UNAVAILABLE")
+                    "gone"->{
+                        val current=status()
+                        throw AdminUiFailure(if(current.generation!=generation || current.phase!=AdminUiPhase.AUTHENTICATED)"REAUTHENTICATE" else "UNAVAILABLE")
+                    }
+                    else->throw AdminUiFailure("INVALID_REPLY")
+                }
+            }
+            throw AdminUiFailure("UNAVAILABLE")
+        }finally {
+            withContext(NonCancellable+Dispatchers.IO) {runCatching {rpc("admin-read-cancel",id,resultInput)}}
+        }
     }
     override suspend fun webPanel():String=withContext(Dispatchers.IO) {
         // Ordinary device navigation has its own generation and server hint.

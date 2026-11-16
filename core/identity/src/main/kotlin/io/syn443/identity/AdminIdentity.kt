@@ -11,7 +11,8 @@ import java.security.Signature
 import java.security.interfaces.RSAPublicKey
 import java.util.concurrent.atomic.AtomicBoolean
 
-enum class AdminFailure { CANCELLED, TRANSPORT, INVALID_REPLY, ACCESS_DENIED, REAUTHENTICATE, SESSION_EXPIRED }
+enum class AdminFailure { CANCELLED, TRANSPORT, INVALID_REPLY, ACCESS_DENIED, REAUTHENTICATE, SESSION_EXPIRED,
+    CONFLICT, INVALID_CONFIGURATION, LIMITED }
 class AdminException(val reason:AdminFailure):Exception(reason.name)
 
 /** Caller supplies metadata only after signed service verification. This is not a device Bootstrap. */
@@ -50,7 +51,7 @@ class AdminIdentity internal constructor(metadata:AdminBootstrap,val serviceBind
             "response_type" to "code","scope" to AdminBootstrap.SCOPE,"state" to pending.state,
             "nonce" to pending.nonce,"code_challenge_method" to "S256",
             "code_challenge" to Identity.hash(pending.verifier.toByteArray(Charsets.US_ASCII)),
-            "dpop_jkt" to thumbprint,"acr_values" to AdminBootstrap.ASSURANCE_ACR))
+            "dpop_jkt" to thumbprint,"acr_values" to AdminBootstrap.ASSURANCE_ACR,"max_age" to "300"))
     }
     /** Invalid foreign callbacks do not consume the current attempt. A validated callback is one-use. */
     internal fun callback(raw:String,pending:AdminPending,generation:Long,thumbprint:String,boot:Int,elapsed:Long):String {
@@ -88,6 +89,13 @@ class AdminIdentity internal constructor(metadata:AdminBootstrap,val serviceBind
             val id=claims(idToken,keys,AdminBootstrap.CLIENT_ID,time)
             require(id.getValue("sub").text()==actual)
             if(initial || "nonce" in id)require(id.getValue("nonce").text()==nonce)
+            if(initial) {
+                val authenticated=id.getValue("auth_time").integer()
+                require(authenticated>0 && authenticated<=Long.MAX_VALUE/1000)
+                val authenticatedMs=authenticated*1000
+                require(authenticatedMs<=Math.addExact(time.lowerMs,30_000) &&
+                    authenticatedMs>=Math.subtractExact(time.upperMs,330_000))
+            }
             id["at_hash"]?.let {
                 val digest=MessageDigest.getInstance("SHA-256").digest(accessToken.toByteArray(Charsets.US_ASCII))
                 require(it.text()==Identity.encode(digest.copyOfRange(0,16)))

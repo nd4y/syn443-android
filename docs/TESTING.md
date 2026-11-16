@@ -1,5 +1,25 @@
 # Testing and release gates
 
+[Native layered administration](mobile-layered-editor-contract.md) v88 source
+adds 42 required identity outcomes and 44 Android outcomes. The identity floor
+is 185; every API29/35/37 emulator must report at least 377 unique passing actual
+outcomes. The additions are 23 codec, four layer-reader, seven authenticated
+layer-protocol, four ownership and four fresh-authentication JVM cases; Android
+adds 12 encrypted-store, five private-wire, ten presentation, ten coordinator,
+four route and three existing-controller/browser cases. The 19 handwritten layer
+classes, including their owned DTOs and scoped JSON reader/document, require 90%
+line coverage through both Gradle and the independent class-presence verifier.
+Named-root and class-list regressions must match the real source methods.
+
+These v88 outcomes are source-pending, not executed acceptance. They cover the
+four distinct revision domains, exact Go-produced parent bytes, local encrypted
+pending envelopes, explicit reconciliation after lost acknowledgements, fresh
+administrative authentication and explicit preview/review/publication. They do
+not establish live mutation/MFA/ACL, physical editor UX or a complete product.
+Changed-head rebase is unsupported and fails closed; initial assignment and
+remaining administration still require the full web panel. No existing required
+outcome, skip/failure check, threshold or API matrix is removed.
+
 [Administrative service refresh](admin-service-discovery.md) v87 source adds
 eight required identity JVM outcomes and six Android outcomes: two signed Store
 cases, one ordinary-context adapter case and three controller fallback cases.
