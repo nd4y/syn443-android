@@ -63,7 +63,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         if(now>=binding.leaseDeadlineElapsed) {retireOwner=true;return}
         val previous=boundPolicy
         if(previous!=null && routeScope?.engine==scope.engine &&
-            (previous.boot!=binding.boot || now>=previous.leaseDeadlineElapsed)) {
+            (previous.boot!=binding.boot || now>=previous.leaseDeadlineElapsed || binding.revision<policyRevision)) {
             retireOwner=true;return
         }
         if(previous!=null && routeScope==scope && mode==networkMode &&
