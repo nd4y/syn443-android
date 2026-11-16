@@ -54,16 +54,31 @@ accepted on emulators. This APK has not been installed on the physical phone.
 
 The protected merge is `9a948fd3daf60f0f105027c74a3cdc7da7913bf0`, recorded at
 12:59:13 UTC. Its [actual-main Actions43871522969](https://github.com/nd4y/syn443-android/actions/runs/43871522969)
-was pending at this documentation snapshot. Source-run success must not be
-substituted for its final outcome. See [signed administrative metadata](mobile-admin-bootstrap.md).
+passed all eight jobs with an identical source tree. This does not imply a
+physical v83 installation. See [signed administrative metadata](mobile-admin-bootstrap.md).
 
-## Current development - Android v84
+## Administrative OAuth source - Android v84
 
-Implementation commit `027296f42ea99033eaeefcd21e5aa66ba2bcda59`, v84 / `0.9.56-admin-auth`,
-adds a separate [administrative OAuth core](mobile-admin-auth.md) and23 required
-synthetic JVM cases. Its own CI remains pending at this snapshot. It is not
-connected to Android UI, a separate Keystore/session journal or the control API,
-and has no physical native-admin login acceptance. It is not the installed APK.
+Source `110f817ca42dbabb9afe648c465809551a95c9db` passed all eight jobs in
+[Actions43876233986](https://github.com/nd4y/syn443-android/actions/runs/43876233986):
+287 unique actual outcomes per API29/35/37,43 newly affected mandatory JVM
+outcomes and53 native roots each ordinary/race. All outcomes passed without
+failure, error or skip. An independent raw report review confirms23 new admin
+OAuth cases and all eight handwritten security classes above90% line coverage.
+The protected merge is `d4dd7565a836ec4d31672e6c07aa3d336e462635`; its actual-main
+run and physical v84 acceptance remain separate pending gates at this snapshot.
+
+## Current source - Android v85
+
+The [signed discovery admission](mobile-admin-discovery.md) requires one current
+verified trust snapshot before and after administrative credential operations.
+The [adaptive RAM budget owner](probe-budget-owner.md) preserves debt across
+native/service/coordinator recreation in the same controller process. Eleven
+new JVM methods, six new Android cases and three new security-class coverage
+checks are required in Actions; none have yet executed for this candidate.
+The new cache fixtures remain emulator-only and retain their hardware guards.
+No physical native-admin callback/session, managed chain, full common energy
+governor or controller-process-death persistence is claimed.
 
 ## Earlier accepted foundation
 

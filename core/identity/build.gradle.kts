@@ -20,6 +20,7 @@ tasks.jacocoTestCoverageVerification {
             "io.syn443.identity.AdminIdentity", "io.syn443.identity.AdminIdentity.Companion", "io.syn443.identity.AdminPending",
             "io.syn443.identity.AdminProtocol", "io.syn443.identity.AdminIssuerState", "io.syn443.identity.AdminSession",
             "io.syn443.identity.AdminSessionFamily", "io.syn443.identity.AdminLogout",
+            "io.syn443.identity.AdminDiscovery", "io.syn443.identity.AdminDiscoveryGuard", "io.syn443.identity.AdminProtocol.Companion",
             "io.syn443.identity.IdentityOperation", "io.syn443.identity.IdentityOperation.Companion",
             "io.syn443.identity.LoginRecovery", "io.syn443.identity.LoginIntent", "io.syn443.identity.RegistrationTombstone",
             "io.syn443.identity.LoginPayload", "io.syn443.identity.LoginPayload.Companion", "io.syn443.identity.CapabilityNegotiation",

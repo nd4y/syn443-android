@@ -56,6 +56,96 @@ class BootstrapTrustStoreTest {
                 ?.forEach {check(it.delete())}
         }
     }
+    @Test fun adminDiscoveryTicketMatchesOneVerifiedSnapshotAndLeavesDeviceJournalUnchanged() {
+        assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        AdminFixture().use {f -> f.worker {
+            val store=f.store();val manifest=f.manifest()
+            val bootstrap=store.acceptDefaultDescriptor(manifest)
+            val (_,floor)=BootstrapTrust.descriptor(manifest,f.anchor,ServiceFloor(),f.now)
+            val direct=checkNotNull(BootstrapTrust.adminDiscovery(manifest,f.anchor,floor,bootstrap,f.now))
+            val journal=f.journal.readBytes();val authority=Identity.bootstrapAuthority(bootstrap)
+            val root=store.adaptiveAuthorityFingerprint()
+            val ticket=checkNotNull(store.adminDiscovery(bootstrap))
+            assertEquals(f.metadata,ticket.metadata);assertEquals(direct.binding,ticket.binding)
+            assertEquals(ticket.binding,checkNotNull(f.store().adminDiscovery(bootstrap)).binding)
+            assertEquals(ticket.metadata,store.adminBootstrap(bootstrap))
+            assertEquals(authority,Identity.bootstrapAuthority(bootstrap));assertEquals(root,store.adaptiveAuthorityFingerprint())
+            assertArrayEquals(journal,f.journal.readBytes())
+            for(detached in listOf(bootstrap.copy(serviceId="service-b"),
+                bootstrap.copy(issuer="https://other-id.example.invalid/realms/device"),
+                bootstrap.copy(clientId="foreign-device-client"),bootstrap.copy(apiOrigin="https://other-api.example.invalid"),
+                bootstrap.copy(controlPanelOrigin="https://other-console.example.invalid"),
+                bootstrap.copy(roots=mapOf("foreign-online" to bootstrap.roots.values.single())))) {
+                assertNull(store.adminDiscovery(detached));assertArrayEquals(journal,f.journal.readBytes())
+            }
+        }}
+    }
+    @Test fun signedAdminRevisionChangesDiscoveryBindingWithoutChangingDeviceIdentity() {
+        assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        AdminFixture().use {f -> f.worker {
+            val store=f.store();val bootstrap=store.acceptDefaultDescriptor(f.manifest())
+            val authority=Identity.bootstrapAuthority(bootstrap);val root=store.adaptiveAuthorityFingerprint()
+            val first=checkNotNull(store.adminDiscovery(bootstrap))
+            // Revision itself belongs to discovery authority, even if both
+            // administrative values and the ordinary device projection match.
+            val sameValues=f.descriptor.copy(revision=2)
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(f.manifest(sameValues)))
+            val journal=f.journal.readBytes();val renewed=checkNotNull(store.adminDiscovery(bootstrap))
+            assertEquals(first.metadata,renewed.metadata);assertNotEquals(first.binding,renewed.binding)
+            assertArrayEquals(journal,f.journal.readBytes())
+            val changed=sameValues.copy(revision=3,adminBootstrap=f.metadata.copy(apiOrigin="https://other-admin-api.example.invalid"))
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(f.manifest(changed)))
+            val current=f.journal.readBytes();val next=checkNotNull(f.store().adminDiscovery(bootstrap))
+            assertEquals(changed.adminBootstrap,next.metadata);assertNotEquals(renewed.binding,next.binding)
+            assertEquals(authority,Identity.bootstrapAuthority(bootstrap));assertEquals(root,store.adaptiveAuthorityFingerprint())
+            assertArrayEquals(current,f.journal.readBytes())
+        }}
+    }
+    @Test fun adminDiscoveryRejectsAbsentRemovedExpiredForeignCorruptAndRetiredRootSnapshots() {
+        assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+        AdminFixture().use {f -> f.worker {
+            val store=f.store()
+            val bootstrap=store.acceptDefaultDescriptor(f.manifest(f.descriptor.copy(adminBootstrap=null)))
+            fun lookup(expected:Bootstrap=bootstrap):AdminDiscovery? {
+                val journal=f.journal.readBytes()
+                return store.adminDiscovery(expected).also {assertArrayEquals(journal,f.journal.readBytes())}
+            }
+            assertNull(lookup())
+            val withAdmin=f.descriptor.copy(revision=2)
+            val manifest=f.manifest(withAdmin)
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(manifest))
+            assertNotNull(lookup())
+            val cache=f.caches().single();val authentic=cache.readBytes();val existing=f.caches().toSet()
+            val other=store.acceptDefaultDescriptor(f.manifest(withAdmin.copy(serviceId="service-b")))
+            val foreign=(f.caches().toSet()-existing).single()
+            foreign.writeBytes(authentic);assertNull(lookup(other)) // same key, wrong service AAD and signed floor.
+            val current=f.journal.readBytes()
+            cache.writeBytes(authentic.copyOf().apply {this[lastIndex]=(this[lastIndex].toInt() xor 1).toByte()})
+            assertNull(lookup())
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(manifest));assertArrayEquals(current,f.journal.readBytes())
+            cache.writeBytes(ByteArray(8193));assertNull(lookup())
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(manifest));assertArrayEquals(current,f.journal.readBytes())
+            f.lookupNow=withAdmin.expires
+            assertNull(lookup())
+            val removed=withAdmin.copy(revision=3,expires=f.now+7200,adminBootstrap=null)
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(f.manifest(removed)));assertNull(lookup())
+            cache.writeBytes(authentic) // authentic older floor must not be a fallback after removal.
+            assertNull(lookup())
+            val restored=removed.copy(revision=4,adminBootstrap=f.metadata)
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(f.manifest(restored)))
+            val beforeRoot=checkNotNull(lookup())
+            val next=pair();val nextAnchor=TrustAnchor("admin-fixture-next",Base64.getEncoder().encodeToString(next.public.encoded),2)
+            val transition=RootTransition(1,"syn443-root-transition",f.anchor.id,nextAnchor.id,nextAnchor.spki,2,f.now,f.now,f.now+7200)
+            val body=Canonical.json.encodeToJsonElement(transition)
+            val rotation=RootRotation(signed(f.root,f.anchor.id,body,"syn443-root-transition+jws"),
+                signed(next,nextAnchor.id,body,"syn443-root-transition+jws"))
+            store.rotate(Canonical.json.encodeToString(rotation));assertNull(lookup())
+            val fresh=restored.copy(rootEpoch=2,revision=5)
+            assertEquals(bootstrap,store.acceptDefaultDescriptor(f.manifest(fresh,next,nextAnchor.id)))
+            val ticket=checkNotNull(lookup());assertEquals(f.metadata,ticket.metadata)
+            assertNotEquals(beforeRoot.binding,ticket.binding)
+        }}
+    }
     @Test fun adminDescriptorCacheIsEncryptedProjectionBoundAndIndependentOfDeviceAuthority() {
         assumeTrue(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
         AdminFixture().use {f -> f.worker {

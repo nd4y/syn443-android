@@ -435,7 +435,7 @@ class TunnelService : VpnService() {
             stableSince = 0; successes = 0; lastProbe = 0
             boundGeneration = cp.generation
             LoginController.get(this).overlayStarting(checkNotNull(token),runningConfigHash)
-            adaptiveRoutes=ManagedAdaptiveRoutes.read(raw)
+            adaptiveRoutes=ManagedAdaptiveRoutes.read(raw,ControllerProbeBudget.adaptive)
             val routeSelection = adaptiveRoutes?.let {routes->
                 val policy=checkNotNull(adaptivePolicy())
                 routes.bind(checkNotNull(routeScope()),checkNotNull(adaptiveMode()),policy,SystemClock.elapsedRealtime())

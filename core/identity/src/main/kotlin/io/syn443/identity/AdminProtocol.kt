@@ -6,8 +6,8 @@ import io.syn443.policy.Policy
 import kotlinx.serialization.json.*
 
 /** Synchronous administrative OAuth worker. Android persistence/UI and API actions are separate layers. */
-class AdminProtocol(private val identity:AdminIdentity,private val key:ProofKey,private val exchange:IdentityExchange,
-    private val boot:()->Int,private val elapsed:()->Long) {
+class AdminProtocol internal constructor(private val identity:AdminIdentity,private val key:ProofKey,private val exchange:IdentityExchange,
+    private val boot:()->Int,private val elapsed:()->Long,private val admission:AdminDiscoveryGuard?=null) {
     val authority:String get()=identity.authority
     val thumbprint:String=Identity.thumbprint(key.publicKey)
     private val oidc=identity.metadata.issuer+"/protocol/openid-connect"
@@ -18,12 +18,15 @@ class AdminProtocol(private val identity:AdminIdentity,private val key:ProofKey,
         return TrustedTime.observe(requireNotNull(reply.single("date")),started.boot,started.elapsed,ended,floor)
     }
     private fun request(scope:IdentityScope,method:String,url:String,body:ByteArray?=null,
-        proof:String?=null,beforeDispatch:()->Unit={}):Reply=scope.request {
+        proof:String?=null,anonymous:Boolean=false,beforeDispatch:()->Unit={}):Reply=scope.request {
         val headers=linkedMapOf("Cache-Control" to "no-store")
         if(body!=null)headers["Content-Type"]="application/x-www-form-urlencoded"
         if(proof!=null)headers["DPoP"]=proof
+        admission?.check(requireDiscovered=!anonymous,anonymous=anonymous)
         beforeDispatch()
-        exchange.request(method,url,headers.toMap(),body?.copyOf(),it,65_536)
+        exchange.request(method,url,headers.toMap(),body?.copyOf(),it,65_536).also {
+            admission?.check(requireDiscovered=!anonymous,anonymous=anonymous)
+        }
     }
     private fun json(reply:Reply):JsonObject {
         require(reply.body.size in 1..65_536 &&
@@ -42,15 +45,22 @@ class AdminProtocol(private val identity:AdminIdentity,private val key:ProofKey,
         catch(e:DeliveryException){throw AdminException(if(e.reason==DeliveryFailure.CANCELLED)AdminFailure.CANCELLED else AdminFailure.TRANSPORT)}
         catch(_:Exception){throw AdminException(AdminFailure.INVALID_REPLY)}
 
-    fun newPending(generation:Long):AdminPending=checked {identity.pending(generation,thumbprint,boot(),elapsed())}
+    fun newPending(generation:Long):AdminPending=checked {
+        admission?.check()
+        identity.pending(generation,thumbprint,boot(),elapsed())
+    }
     fun authorization(pending:AdminPending,generation:Long):String=checked {
-        identity.authorization(pending,generation,thumbprint,boot(),elapsed())
+        admission?.check(requireDiscovered=true)
+        identity.authorization(pending,generation,thumbprint,boot(),elapsed()).also {admission?.check(requireDiscovered=true)}
     }
     /** Discovery is anchored only to the signed administrative issuer. No browser/device-origin fallback. */
     fun discover(scope:IdentityScope,floor:TrustedTime?=null):AdminIssuerState=checked {
         floor?.window(boot(),elapsed())
+        admission?.check(anonymous=true)
+        val prior=admission?.priorTime()
+        val effectiveFloor=if(prior==null)floor else if(floor==null)prior else this.floor(floor,prior)
         val started=start()
-        val reply=request(scope,"GET",identity.metadata.issuer+"/.well-known/openid-configuration")
+        val reply=request(scope,"GET",identity.metadata.issuer+"/.well-known/openid-configuration",anonymous=true)
         status(reply);val data=json(reply)
         require(data.getValue("issuer").text()==identity.metadata.issuer &&
             data.getValue("authorization_endpoint").text()==oidc+"/auth" &&
@@ -62,17 +72,21 @@ class AdminProtocol(private val identity:AdminIdentity,private val key:ProofKey,
         supports("id_token_signing_alg_values_supported","RS256")
         supports("dpop_signing_alg_values_supported","ES256")
         supports("code_challenge_methods_supported","S256")
-        val initial=observed(reply,started,floor)
+        val initial=observed(reply,started,effectiveFloor)
         val keysStarted=start()
-        val jwks=request(scope,"GET",oidc+"/certs")
+        val jwks=request(scope,"GET",oidc+"/certs",anonymous=true)
         status(jwks);json(jwks)
-        scope.request {
+        val state=scope.request {
             val keys=Identity.rsaKeys(Policy.utf8(jwks.body))
             val time=observed(jwks,keysStarted,initial)
+            admission?.check(time=time,anonymous=true)
             AdminIssuerState(keys,time,authority,thumbprint)
         }
+        val accepted=admission?.record(state.time)
+        if(accepted==null)state else AdminIssuerState(state.keys,accepted,authority,thumbprint)
     }
     private fun validateIssuer(issuer:AdminIssuerState) {
+        admission?.check(time=issuer.time,requireDiscovered=true)
         require(issuer.authority==authority && issuer.keyThumbprint==thumbprint)
         issuer.time.window(boot(),elapsed())
     }
@@ -118,9 +132,10 @@ class AdminProtocol(private val identity:AdminIdentity,private val key:ProofKey,
             identity.binding(pending,generation,thumbprint,boot(),elapsed())
             require(pending.consumed.get())
         })
-        scope.request {session(result,issuer,pending.nonce,null)}
+        scope.request {session(result,issuer,pending.nonce,null).also {admission?.check(time=result.time,requireDiscovered=true)}}
     }
     private fun validateSession(session:AdminSession,unused:Boolean=true) {
+        admission?.check(time=session.time,requireDiscovered=true)
         require(session.authority==authority && session.keyThumbprint==thumbprint && session.bootCount==boot())
         session.time.window(boot(),elapsed())
         if(session.family.isClosed() || unused && !session.available())throw AdminException(AdminFailure.REAUTHENTICATE)
@@ -144,7 +159,9 @@ class AdminProtocol(private val identity:AdminIdentity,private val key:ProofKey,
                     if(!previous.consume())throw AdminException(AdminFailure.REAUTHENTICATE)
                     dispatched=true
                 }
-                scope.request {session(result,issuer,previous.originalNonce,previous)}
+                scope.request {session(result,issuer,previous.originalNonce,previous).also {
+                    admission?.check(time=result.time,requireDiscovered=true)
+                }}
             }
         } catch(e:AdminException) {
             // The transport cannot prove whether a dispatched rotating refresh was committed.
@@ -192,5 +209,14 @@ class AdminProtocol(private val identity:AdminIdentity,private val key:ProofKey,
     fun logout(session:AdminSession):AdminLogout=checked {
         require(session.authority==authority && session.keyThumbprint==thumbprint)
         session.retire();AdminLogout(authority,thumbprint)
+    }
+    companion object {
+        /** Source must return one atomically verified current trust snapshot, on a background worker. */
+        fun fromDiscovery(source:()->AdminDiscovery?,key:ProofKey,exchange:IdentityExchange,
+            boot:()->Int,elapsed:()->Long):AdminProtocol {
+            val initial=try {source()} catch(_:Exception) {null}
+                ?:throw AdminException(AdminFailure.REAUTHENTICATE)
+            return AdminProtocol(initial.identity(),key,exchange,boot,elapsed,AdminDiscoveryGuard(initial,source,boot,elapsed))
+        }
     }
 }

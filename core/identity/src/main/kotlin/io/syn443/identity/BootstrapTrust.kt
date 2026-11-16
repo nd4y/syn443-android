@@ -163,6 +163,32 @@ object BootstrapTrust {
         require(value.revision>=floor.revision && (value.revision!=floor.revision || hash==floor.hash))
         return value to ServiceFloor(value.serviceId,value.revision,hash)
     }
+    /** Read-only admission from one current trust-store snapshot; never advances a service floor. */
+    fun adminDiscovery(raw:String,anchor:TrustAnchor,currentFloor:ServiceFloor,
+        expectedDeviceBootstrap:Bootstrap,nowSeconds:Long):AdminDiscovery?=try {
+        require(currentFloor.revision>0 && nowSeconds in 1..Long.MAX_VALUE/1000)
+        val expected=expectedDeviceBootstrap.copy(roots=expectedDeviceBootstrap.roots.toMap())
+        expected.validate()
+        val (value,verifiedFloor)=descriptor(raw,anchor,currentFloor,nowSeconds)
+        require(verifiedFloor==currentFloor)
+        val projected=Bootstrap(value.serviceId,value.issuer,value.clientId,value.apiOrigin,
+            value.roots.toMap(),controlPanelOrigin=value.controlPanelOrigin)
+        require(projected==expected)
+        val metadata=value.adminBootstrap
+        if(metadata==null)null else {
+            val binding=Identity.hash(Canonical.encode(buildJsonObject {
+                put("domain","syn443.admin-discovery.v1")
+                put("anchor",buildJsonObject {
+                    put("id",anchor.id);put("spki",anchor.spki);put("epoch",anchor.epoch);put("lastTransition",anchor.lastTransition)
+                })
+                put("floor",buildJsonObject {
+                    put("serviceId",currentFloor.serviceId);put("revision",currentFloor.revision);put("hash",currentFloor.hash)
+                })
+                put("deviceAuthority",Identity.bootstrapAuthority(expected))
+            }).toByteArray(Charsets.UTF_8))
+            AdminDiscovery(metadata,binding,value.issuedAt,value.notBefore,value.expires)
+        }
+    } catch(_:Exception) {null}
     private fun validate(transition:RootTransition,current:TrustAnchor,now:Long) {
         require(transition.schemaVersion==1 && transition.audience=="syn443-root-transition" &&
             transition.from==current.id && identifier.matches(transition.to) && transition.to!=current.id &&
