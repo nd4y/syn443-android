@@ -86,14 +86,11 @@ class TunnelService : VpnService() {
     private data class PendingFailover(val scope: RouteScope, val receipt: String, val decision: RouteDecisionStamp)
     private var pendingFailover: PendingFailover? = null
     private var adaptiveRoutes:ManagedAdaptiveRoutes?=null
-    private fun adaptivePolicy():Payload? {
+    private fun adaptivePolicy():AdaptivePolicyBinding? {
         val state=policies.read()
         if(!state.enrolled)return null
         val envelope=if(state.journal.phase=="applying")state.journal.candidate else state.journal.active
-        return policies.allowed(envelope,state)?.payload?.takeIf {
-            it.contentHash==runningConfigHash && it.algorithmRevision==Policy.ADAPTIVE_ALGORITHM &&
-                Policy.ROUTE_ADAPTIVE_TCP in it.requiredCapabilities
-        }
+        return policies.adaptiveBinding(envelope,state)?.takeIf {it.contentHash==runningConfigHash}
     }
     private fun adaptiveMode():NetworkMode?=when(probeContext?.network?.transport) {
         PhysicalTransport.WIFI->NetworkMode.WIFI
@@ -105,7 +102,7 @@ class TunnelService : VpnService() {
         val scope=routeScope() ?: return
         val policy=adaptivePolicy() ?: return
         val mode=adaptiveMode() ?: return
-        routes.bind(scope,mode,policy.revision)
+        routes.bind(scope,mode,policy,SystemClock.elapsedRealtime())
         if(force)routes.force()
         val power=getSystemService(android.os.PowerManager::class.java)
         val battery=getSystemService(android.os.BatteryManager::class.java).getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -441,7 +438,7 @@ class TunnelService : VpnService() {
             adaptiveRoutes=ManagedAdaptiveRoutes.read(raw)
             val routeSelection = adaptiveRoutes?.let {routes->
                 val policy=checkNotNull(adaptivePolicy())
-                routes.bind(checkNotNull(routeScope()),checkNotNull(adaptiveMode()),policy.revision)
+                routes.bind(checkNotNull(routeScope()),checkNotNull(adaptiveMode()),policy,SystemClock.elapsedRealtime())
                 routes.controlFrame()
             } ?: if (pendingLeaseDeadline > 0) RouteSnapshot.nativeSelectionPlan(runningConfigHash) else ""
             pendingConfig = PendingConfig(rendered, routeSelection)
@@ -499,7 +496,7 @@ class TunnelService : VpnService() {
                 val mode=adaptiveMode() ?: return@post
                 RouteSnapshot.owner(scope)
                 adaptiveRoutes?.let {routes->
-                    routes.bind(scope,mode,policy.revision)
+                    routes.bind(scope,mode,policy,SystemClock.elapsedRealtime())
                     routes.report(adaptive,SystemClock.elapsedRealtime()) {command->runCatching {host?.checkRoutes(session,command)}}
                     adaptiveTick()
                 }

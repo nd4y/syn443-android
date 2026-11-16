@@ -118,6 +118,19 @@ class BootstrapTrustStore(private val context:Context,private val namespace:Stri
 
     fun defaultBootstrap():Bootstrap = acceptDefaultDescriptor(checkNotNull(installationProfile).service)
 
+    /** Worker-only semantic root identity. Store revision, descriptor floors
+     * and trusted-time refreshes are deliberately not part of this stamp.
+     * Missing persisted trust is not evidence of stable root continuity. */
+    internal fun adaptiveAuthorityFingerprint():String? {
+        worker()
+        return synchronized(lock) {
+            if(!file.baseFile.exists() && !File(file.baseFile.path+".bak").exists() && !File(file.baseFile.path+".new").exists())return@synchronized null
+            val state=read()
+            val anchor=Canonical.encode(Canonical.parse(Canonical.json.encodeToString(state.anchor)))
+            Policy.hash("syn443/adaptive-bootstrap-authority/v1\n"+anchor+"\n"+installationHash(installed()))
+        }
+    }
+
     private fun defaultDescriptor(raw:String,state:TrustRecord,now:Long):Pair<ServiceDescriptor,ServiceFloor> {
         val (descriptor,floor)=BootstrapTrust.descriptor(raw,state.anchor,ServiceFloor(),now)
         installationProfile?.upgrade?.previousAnchor?.let {require(it.spki !in descriptor.roots.values)}

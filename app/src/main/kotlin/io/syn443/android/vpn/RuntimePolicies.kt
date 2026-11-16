@@ -57,6 +57,16 @@ internal class RuntimePolicies(private val context:Context,
             login.assignedRuntime.allowed(s,raw)
         }}.getOrNull()
     }
+    /** No parsing, hashing, key access or disk on the VPN handler. The worker
+     * prepared this metadata; current parent permission/time checks still run. */
+    fun adaptiveBinding(raw:String?,d:Snapshot=read()):AdaptivePolicyBinding? {
+        if(!d.enrolled || raw==null || raw!=(if(d.journal.phase=="applying")d.journal.candidate else d.journal.active))return null
+        return runCatching {login.assignedRead {s->
+            require(login.assignedRuntime.ticket(s)==d.ticket)
+            require(login.assignedRuntime.read(s).state.journal==d.journal)
+            login.assignedRuntime.adaptiveBinding(s,raw,checkNotNull(d.ticket))
+        }}.getOrNull()
+    }
     fun now(d:Snapshot):Long {
         if(!d.enrolled)return legacy.now(checkNotNull(d.legacy))
         return login.assignedRead {s->require(login.assignedRuntime.ticket(s)==d.ticket)

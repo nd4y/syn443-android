@@ -50,7 +50,7 @@ class LoginController private constructor(private val context:android.app.Applic
     private var invitePreview:InvitePreview?=null
     @Volatile private var invitePair=""
     @Volatile private var inviteState=""
-    internal val assignedRuntime=AssignedPolicyRuntime(::boot,::elapsed){overlayMaterials[it]}
+    internal val assignedRuntime=AssignedPolicyRuntime(::boot,::elapsed,{bootstrapTrust.adaptiveAuthorityFingerprint()}){overlayMaterials[it]}
     private val commands=Any()
     @Volatile private var commandEpoch=0L
     @Volatile private var workerEpoch= -1L

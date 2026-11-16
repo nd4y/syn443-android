@@ -1,6 +1,7 @@
 package io.syn443.decision
 
 import java.security.MessageDigest
+import java.nio.ByteBuffer
 
 enum class NetworkMode { HOME_WIFI, WIFI, CELLULAR_RESTRICTED, CELLULAR }
 enum class ExitClass {
@@ -55,6 +56,31 @@ class RouteFrontier(
     createdAtMs: Long,
     ttlMs: Long,
 ) {
+    /** RAM traversal hint only. It contains no path, metric, lease or receipt.
+     * There is no decoder, public constructor, copy method or field accessor. */
+    class Position private constructor(
+        private val owner: Any,
+        private val binding: String,
+        private val ordinal: Int,
+        private val hints: Int,
+        private val observedAtMs: Long,
+    ) {
+        internal fun read(expectedOwner: Any, expectedBinding: String, maximum: Int, hintCount: Int, createdAtMs: Long): Pair<Int, Int>? {
+            if (owner !== expectedOwner || binding != expectedBinding || ordinal !in 0..maximum || hints !in 0..hintCount ||
+                ordinal > 0 && hints != hintCount || createdAtMs < observedAtMs ||
+                createdAtMs !in 0..(Decision.MAX_TIME - 600_000)) return null
+            return ordinal to hints
+        }
+
+        override fun toString() = "FrontierPosition([redacted])"
+
+        companion object {
+            internal fun capture(owner: Any, binding: String, ordinal: Int, hints: Int, nowMs: Long) =
+                Position(owner, binding, ordinal, hints, nowMs)
+        }
+    }
+
+    private enum class Invalidation { NONE, EXPIRED, UNSAFE }
     private val required = requirements.toSet()
     private val byId: Map<String, RouteHop>
     private val byEdge: Map<Pair<String, String>, Set<PathFeature>>
@@ -67,7 +93,10 @@ class RouteFrontier(
     private var digits = IntArray(0)
     private var examined = 0
     private var lastNow = createdAtMs
-    private var invalidated = false
+    private var invalidation = Invalidation.NONE
+    private var owner: Any? = null
+    private var ownerBinding: String? = null
+    private var pristine = true
 
     init {
         require(Decision.validContext(context))
@@ -97,6 +126,86 @@ class RouteFrontier(
         hints = warmHints.map { it.toList() }.distinct().filter { path -> eligible(path) && slots.any { matches(it, path) } }
         digits = IntArray(slots.first().size)
         deadline = createdAtMs + ttlMs
+    }
+
+    /** Attach only before the graph factory exposes the cursor. Graph identity
+     * and its immutable raw-metadata hash both participate in every restore. */
+    @Synchronized
+    internal fun ownedBy(graphOwner: Any, groupID: String, graphStamp: String): RouteFrontier {
+        check(pristine && owner == null)
+        owner = graphOwner
+        val digest = MessageDigest.getInstance("SHA-256")
+        fun put(value: String) {
+            val raw = value.toByteArray(Charsets.UTF_8)
+            digest.update(ByteBuffer.allocate(4).putInt(raw.size).array())
+            digest.update(raw)
+        }
+        listOf("route-frontier-mixed-radix-v1", graphStamp, groupID, mode.name, intent.name,
+            context.networkEpoch.toString(), context.activationGeneration.toString(), context.configRevision,
+            context.algorithmRevision, context.engineGeneration.toString(), context.dependencyHash).forEach(::put)
+        put(required.size.toString())
+        required.map { it.name }.sorted().forEach(::put)
+        // Only effective hints can affect enumeration. Their IDs are already
+        // present in this bounded graph; never encode arbitrary rejected hints.
+        put(hints.size.toString())
+        hints.forEach { hint -> put(hint.size.toString()); hint.forEach(::put) }
+        ownerBinding = digest.digest().joinToString("") { "%02x".format(it) }
+        return this
+    }
+
+    private fun observe(current: Context, nowMs: Long): Boolean {
+        if (current != context || nowMs < lastNow || nowMs !in 0..Decision.MAX_TIME) {
+            invalidation = Invalidation.UNSAFE
+        } else {
+            lastNow = nowMs
+            if (invalidation == Invalidation.NONE && nowMs >= deadline) invalidation = Invalidation.EXPIRED
+        }
+        return invalidation == Invalidation.NONE
+    }
+
+    /** Expiry may renew a metadata scan; context/clock invalidation may not.
+     * Capturing or restoring a hint cannot authorize a native operation. */
+    @Synchronized
+    fun checkpoint(current: Context, nowMs: Long): Position? {
+        observe(current, nowMs)
+        pristine = false
+        val graphOwner = owner ?: return null
+        val binding = ownerBinding ?: return null
+        if (invalidation == Invalidation.UNSAFE || nowMs !in 0..(Decision.MAX_TIME - 600_000)) return null
+        return Position.capture(graphOwner, binding, examined, hintOffset, nowMs)
+    }
+
+    /** One bounded integer position replaces a potentially large visited set.
+     * Decode at most 64 template bounds and four mixed-radix digits. */
+    @Synchronized
+    internal fun restore(position: Position, createdAtMs: Long): Boolean {
+        if (!pristine || invalidation != Invalidation.NONE) return false
+        val graphOwner = owner ?: return false
+        val binding = ownerBinding ?: return false
+        val state = position.read(graphOwner, binding, maximum, hints.size, createdAtMs) ?: return false
+        var remaining = state.first
+        var index = 0
+        while (index < slots.size) {
+            val bound = slots[index].fold(1) { size, ids -> size * ids.size }
+            if (remaining < bound) break
+            remaining -= bound
+            index++
+        }
+        if (index == slots.size && remaining != 0) return false
+        val restored = if (index == slots.size) IntArray(0) else IntArray(slots[index].size)
+        if (index < slots.size) {
+            for (digit in restored.lastIndex downTo 0) {
+                restored[digit] = remaining % slots[index][digit].size
+                remaining /= slots[index][digit].size
+            }
+            if (remaining != 0) return false
+        }
+        templateOffset = index
+        digits = restored
+        examined = state.first
+        hintOffset = state.second
+        pristine = false
+        return true
     }
 
     private fun matches(template: List<List<String>>, path: List<String>): Boolean =
@@ -137,11 +246,10 @@ class RouteFrontier(
     @Synchronized
     fun next(current: Context, nowMs: Long, resultLimit: Int, scanLimit: Int): FrontierBatch {
         require(resultLimit in 1..16 && scanLimit in 1..256)
-        if (invalidated || current != context || nowMs < lastNow || nowMs >= deadline) {
-            invalidated = true
+        pristine = false
+        if (!observe(current, nowMs)) {
             return FrontierBatch(emptyList(), examined, maximum, false, true)
         }
-        lastNow = nowMs
         val result = ArrayList<PlannedPath>(resultLimit)
         while (hintOffset < hints.size && result.size < resultLimit) {
             result += path(hints[hintOffset++])

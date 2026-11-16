@@ -43,6 +43,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private var attempt=0L
     private var groupCursor=0
     private var policyRevision=0L
+    private var boundPolicy:AdaptivePolicyBinding?=null
     private var previousPolicyScope=""
     private var retireOwner=false
     private var lastCommandAt=Long.MIN_VALUE/2
@@ -51,9 +52,33 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
 
     fun bind(scope:RouteScope,networkMode:NetworkMode,revision:Long) {
         require(revision>0)
-        if(routeScope==scope && mode==networkMode && policyRevision==revision)return
+        if(boundPolicy==null && routeScope==scope && mode==networkMode && policyRevision==revision)return
+        boundPolicy=null
+        reset(scope,networkMode,revision,null)
+    }
+    /** Pure lease renewal labels the same live execution; it is not a native
+     * lease acknowledgement, receipt or permission to revive an expired box. */
+    fun bind(scope:RouteScope,networkMode:NetworkMode,binding:AdaptivePolicyBinding,now:Long) {
+        if(!advanceClock(now))return
+        if(now>=binding.leaseDeadlineElapsed) {retireOwner=true;return}
+        val previous=boundPolicy
+        if(previous!=null && routeScope?.engine==scope.engine &&
+            (previous.boot!=binding.boot || now>=previous.leaseDeadlineElapsed)) {
+            retireOwner=true;return
+        }
+        if(previous!=null && routeScope==scope && mode==networkMode &&
+            binding.revision>=policyRevision && binding.contentHash==previous.contentHash &&
+            binding.semanticAuthority==previous.semanticAuthority) {
+            boundPolicy=binding;policyRevision=binding.revision
+            return
+        }
+        boundPolicy=binding
+        reset(scope,networkMode,binding.revision,binding.semanticAuthority)
+    }
+    private fun reset(scope:RouteScope,networkMode:NetworkMode,revision:Long,authority:String?) {
+        val semantic=authority?.let {"|$it"} ?: ""
         val next=Context(scope.network,scope.activation,"r-$revision",Policy.ADAPTIVE_ALGORITHM,
-            scope.intent,Policy.hash("${scope.intent}|${scope.network}|${scope.activation}|${scope.engine}|${scope.config}|${wire.hash}|$networkMode|$revision"))
+            scope.intent,Policy.hash("${scope.intent}|${scope.network}|${scope.activation}|${scope.engine}|${scope.config}|${wire.hash}|$networkMode|$revision$semantic"))
         require(Decision.validContext(next))
         val sameEngine=routeScope?.engine==scope.engine
         previousPolicyScope=if(sameEngine)policyScope else ""
@@ -87,7 +112,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val reportedPolicy=raw.optString("policyScope")
         if(reportedPolicy!=policyScope && reportedPolicy!=previousPolicyScope)return
         if(epoch!=nativeEpoch || nativeScope.isNotEmpty() && scope!=nativeScope)
-            groups.values.forEach {it.failure=null;it.recheckFailed=false}
+            groups.values.forEach {it.frontier=null;it.failure=null;it.recheckFailed=false}
         nativeEpoch=epoch;nativeRunning=raw.optBoolean("running")
         if(nativeRunning && raw.optLong("workAgeMs",0)>35_000) {retireOwner=true;return}
         if(raw.optString("policyScope")!=policyScope || !raw.optBoolean("ready")) {
@@ -191,14 +216,34 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val groupID=rotated.firstOrNull {id->val g=groups.getValue(id);now>=g.nextAt &&
             (g.current==null || g.recheckFailed || now-g.measuredAt>=60_000 || unmetered && allowExplore && now>=g.exploreAt || g.improvement.isNotEmpty())} ?: return
         val group=groups.getValue(groupID)
+        // A bounded CPU quantum must yield even when it cannot emit/dispatch
+        // a candidate. Only rotating on I/O can starve other due groups.
+        groupCursor=(order.indexOf(groupID)+1)%order.size
         val explore=unmetered && allowExplore && group.current!=null && now>=group.exploreAt
         val recheck=group.current?.takeIf {!explore && !group.recheckFailed && now-group.measuredAt>=60_000}
         val retryImprovement=group.improvementPath
         var candidate=retryImprovement?.takeIf {now-group.measuredAt<=120_000} ?: recheck
         if(candidate==null) {
             if(group.frontier==null)group.frontier=wire.graph.frontier(groupID,current,mode,emptyList(),now,600_000)
-            val batch=checkNotNull(group.frontier).next(current,now,1,64)
-            if(batch.invalidated || batch.exhausted)group.frontier=null
+            var frontier=checkNotNull(group.frontier)
+            var batch=frontier.next(current,now,1,64)
+            if(batch.invalidated) {
+                // Only a TTL-expired, identically owned metadata cursor can
+                // resume. Context/clock changes discard the hint, never borrow
+                // native proofs or reset admissions, memory or selected paths.
+                val position=frontier.checkpoint(current,now)
+                val resumed=position?.let {wire.graph.resumeFrontier(groupID,current,mode,emptyList(),now,600_000,it)}
+                if(resumed==null) {
+                    group.frontier=null
+                    group.nextAt=now+if(group.current==null)60_000 else 300_000
+                    return
+                }
+                frontier=resumed;group.frontier=frontier
+                // The invalidated call scanned nothing. This is still one
+                // ordinary64-slot CPU quantum and at most one I/O attempt.
+                batch=frontier.next(current,now,1,64)
+            }
+            if(batch.exhausted)group.frontier=null
             candidate=batch.paths.firstOrNull()
             if(candidate==null) {group.nextAt=now+if(group.current==null)60_000 else 300_000;return}
         }
@@ -209,7 +254,6 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val request=UUID.randomUUID().toString()
         pending=Pending(request,groupID,candidate,attempt,now,nativeEpoch,nativeScope);admissions.addLast(now)
         if(explore)group.exploreAt=now+300_000
-        groupCursor=(order.indexOf(groupID)+1)%order.size
         send(frame("start").put("request",request).put("group",groupID).put("hops",JSONArray(candidate.hops)),now,dispatch)
     }
     fun force() {groups.values.forEach {it.nextAt=0;it.measuredAt=0}}
