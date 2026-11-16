@@ -435,9 +435,11 @@ class ManagedAdaptiveRoutesTest {
             failed(h,checkNotNull(h.tick(301000,false,false)),301000)
             val b=checkNotNull(h.tick(306000,false,false));assertFalse(samePath(a,b));failed(h,b,306000)
             val confirmed=checkNotNull(h.tick(311000,false,false));assertTrue(samePath(a,confirmed));h.selected(confirmed,311000)
-            val reserve=checkNotNull(h.tick(316000));assertFalse(samePath(a,reserve))
-            // Fresh A confirmation invalidates its still-young failure pairing.
-            assertEquals("discard",h.measured(reserve,316000,500).getString("command"))
+            // A fresh confirmation restores the normal energy-saving interval.
+            assertNull(h.tick(316000))
+            val reserve=checkNotNull(h.tick(371000));assertFalse(samePath(a,reserve))
+            // A former failure cannot bypass the healthy latency hold.
+            assertEquals("discard",h.measured(reserve,371000,500).getString("command"))
         }
         Harness(config()).use {h->
             val a=prepareHealthy(h);val b=checkNotNull(h.tick(301000))
