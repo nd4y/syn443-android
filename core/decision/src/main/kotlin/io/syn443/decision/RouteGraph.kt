@@ -3,6 +3,7 @@ package io.syn443.decision
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -38,12 +39,14 @@ class RouteGraph private constructor(
     private val templates: Map<String, RouteTemplate>,
     private val groups: Map<String, Group>,
     private val intentBounds: Map<ExitClass, Int>,
+    private val graphStamp: String,
 ) {
     private data class Group(
         val intent: ExitClass, val features: Set<PathFeature>, val templates: List<String>, val upperBound: Int,
     )
     private val hopByID = hops.associateBy { it.id }
     private val edgeByPair = edges.associate { (it.from to it.to) to it.features }
+    private val frontierOwner = Any()
 
     fun groupIDs(): List<String> = groups.keys.sorted()
     fun upperBound(groupID: String): Int? = groups[groupID]?.upperBound
@@ -72,7 +75,21 @@ class RouteGraph private constructor(
     ): RouteFrontier {
         val group = groups[groupID] ?: error("unknown_route_group")
         return RouteFrontier(context, mode, group.intent, group.features, hops, edges,
-            group.templates.map(templates::getValue), warmHints, createdAtMs, ttlMs)
+            group.templates.map(templates::getValue), warmHints, createdAtMs, ttlMs).ownedBy(frontierOwner, groupID, graphStamp)
+    }
+
+    /** Local RAM hint, not a wire token or selection proof. Reject rather than
+     * clamp/reinterpret a foreign position; ordinary cold construction remains
+     * separate and unchanged. No native resources or I/O are acquired here. */
+    fun resumeFrontier(
+        groupID: String, context: Context, mode: NetworkMode, warmHints: List<List<String>>,
+        createdAtMs: Long, ttlMs: Long, position: RouteFrontier.Position,
+    ): RouteFrontier? {
+        if (groupID !in groups || !Decision.validContext(context) ||
+            createdAtMs !in 0..(Decision.MAX_TIME - 600_000) || ttlMs !in 1..600_000 ||
+            warmHints.size > 2 || warmHints.any { it.size !in 1..4 || it.any { id -> !Decision.validId(id) } }) return null
+        val next = frontier(groupID, context, mode, warmHints, createdAtMs, ttlMs)
+        return next.takeIf { it.restore(position, createdAtMs) }
     }
 
     override fun toString(): String = "RouteGraph(hops=${hops.size},groups=${groups.size})"
@@ -164,7 +181,8 @@ class RouteGraph private constructor(
                     }
                     sum
                 }
-                return RouteGraph(hops, edges, templates, groups, intentBounds)
+                val stamp = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
+                return RouteGraph(hops, edges, templates, groups, intentBounds, stamp)
             } catch (_: Exception) {
                 // Do not retain parser exceptions containing private identifiers.
                 throw IllegalArgumentException("invalid_route_graph")

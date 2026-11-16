@@ -64,3 +64,39 @@ and16 new Android config/controller cases. Android matrices require259 actual
 outcomes each on API29/35/37; all prior lifecycle/privacy/coverage gates remain.
 Exact-source CI, signed-policy deployment and real Xperia TUN/chain/recovery
 acceptance remain distinct release gates. All fixtures are synthetic.
+
+## Lease renewal and bounded search continuity
+
+A normal five-minute signed lease renewal must not restart a still-authorized
+search or discard a healthy selected path. The identity worker prepares an
+execution-authority stamp after the existing signature, assignment and engine
+checks. Only revision and the four signed lease timestamps are excluded. The
+complete remaining payload, exact engine, signer, full pinned root set,
+bootstrap authority and installation trust anchor participate. The parent
+assignment renewal predicate is shared without relaxing its phase, epoch,
+revision, capability, gate or key-binding checks.
+
+The VPN handler reads this prepared metadata under the current assignment
+ticket, exact envelope, boot and deadline. An equal stamp may update the policy
+revision label while preserving the same native scope, pending one-use receipt,
+selection, failure memory and search position. It does not acknowledge a native
+lease extension. An expired old owner, a changed boot or a backward clock
+requires actual host retirement; a newer signed lease cannot revive that owner.
+Other authority, content, mode or runtime-context changes retain the hard reset.
+Missing installation-trust evidence permits only strict per-envelope identity,
+so it cannot establish continuity across renewals.
+
+Frontier expiry can resume from an opaque, RAM-only mixed-radix position bound
+to the exact graph instance, immutable metadata, group, full context and effective
+warm hints. This position carries no metric, lease, path authorization or native
+receipt and is neither serialized nor accepted over an API. Restoring scans at
+most64 template bounds and four digits; subsequent candidates still pass current
+eligibility and fresh native checks. Context or clock invalidation permanently
+disables that cursor's resume. A64-candidate CPU quantum yields to the next group
+even when it finds no eligible candidate. Total8/minute and128/hour admission
+limits survive force and context changes.
+
+These changes require named signed-policy, cursor and Android continuity outcomes
+in Actions. They do not by themselves establish actual managed-chain acceptance,
+unlimited search under changing network conditions, a common energy governor or
+a recovery reserve after routine checks consume the hourly budget.

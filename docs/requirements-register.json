@@ -29,8 +29,10 @@
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/private-path-construction.md",
         "docs/private-path-construction.md#fresh-proof-selection",
-        "docs/private-path-construction.md#snapshot-construction-handoff"
-      ]
+        "docs/private-path-construction.md#snapshot-construction-handoff",
+        "docs/managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity"
+      ],
+      "remainingScope": "Bounded TCP source primitive and continuity only; exact Actions and activated managed-chain evidence remain separate. Full mode classification, shared admission/energy, recovery reserve, persistent hints and rollout still required."
     },
     {
       "id": "ARC-04",
@@ -1005,8 +1007,11 @@
     {
       "id": "ALG-01",
       "text": "Основной цикл работает на устройстве и не ждёт онлайн-ответа control plane для каждого решения. Клиент обязан искать полезный путь в доступном разрешённом пространстве при сохранении bounded ресурсов. Ошибка неизвестного типа переводится в диагностируемое состояние, а не подавляется без следа или превращается в бесконечный restart.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity"
+      ],
+      "remainingScope": "Bounded TCP source primitive and continuity only; exact Actions and activated managed-chain evidence remain separate. Full mode classification, shared admission/energy, recovery reserve, persistent hints and rollout still required."
     },
     {
       "id": "ALG-02",
@@ -1017,8 +1022,11 @@
     {
       "id": "ALG-03",
       "text": "Route graph описывает физическую сеть, допустимые ingress, proxy hops, egress и назначения. Рёбра означают технически поддержанный способ открыть следующий hop через предыдущий. Возможности TCP/UDP/IPv4/IPv6/ICMP и транспорта проверяются по всему пути, а не только у первой ноды.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity"
+      ],
+      "remainingScope": "Bounded TCP source primitive and continuity only; exact Actions and activated managed-chain evidence remain separate. Full mode classification, shared admission/energy, recovery reserve, persistent hints and rollout still required."
     },
     {
       "id": "ALG-04",
@@ -1078,7 +1086,8 @@
       "text": "Неисследованные кандидаты не считаются неработающими. Фронтир/coverage сохраняются на последующие шаги с ограниченным сроком; ротация исключает вечную проверку только первых профилей. При изменении графа/сети проверяются совместимость состояния и актуальность результатов.",
       "status": "partial",
       "evidence": [
-        "docs/route-frontier.md"
+        "docs/route-frontier.md",
+        "docs/managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity"
       ]
     },
     {
@@ -1152,10 +1161,11 @@
       "status": "partial",
       "evidence": [
         "docs/route-lifecycle.md#reserve-probe-cooldown",
-        "docs/route-frontier.md"
+        "docs/route-frontier.md",
+        "docs/managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity"
       ],
       "implementationScope": "Signed internal Wi-Fi failover defers optional reserve probes during attributed cooldown and during metered maintenance. Required checks continue and a fresh selector failure triggers a full comparison.",
-      "remainingScope": "Other route classes and network modes, rotation and jitter, battery budgets and physical metered acceptance."
+      "remainingScope": "Bounded TCP source primitive and continuity only; exact Actions and activated managed-chain evidence remain separate. Full mode classification, shared admission/energy, recovery reserve, persistent hints and rollout still required."
     },
     {
       "id": "ALG-23",

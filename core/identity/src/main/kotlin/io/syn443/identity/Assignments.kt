@@ -2,6 +2,7 @@ package io.syn443.identity
 
 import io.syn443.policy.Journal
 import io.syn443.policy.Policy
+import io.syn443.policy.PolicyLeaseSemantics
 import io.syn443.policy.Verified
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.EncodeDefault
@@ -86,9 +87,7 @@ object Assignments {
             j.phase=="rolled_back" && raw!=j.lastGood)return false
         val oldPayload=Policy.json.decodeFromString<io.syn443.policy.Payload>(Policy.utf8(Policy.decode64(raw.split('.')[1])))
         val old=Policy.verifyBound(raw,payload.bootstrap.roots,login.deviceId,login.thumbprint,oldPayload.notBeforeMs)
-        val p=old.payload;val n=next.payload
-        return old.engineConfig==next.engineConfig && p.copy(revision=n.revision,issuedAtMs=n.issuedAtMs,
-            notBeforeMs=n.notBeforeMs,refreshAfterMs=n.refreshAfterMs,offlineUntilMs=n.offlineUntilMs)==n
+        return PolicyLeaseSemantics.sameContent(old,next)
     }
     /** Repeating this after a crash completes a same-generation journal/intent handoff. */
     fun receipt(state:AssignmentState,login:LoginIntent,payload:LoginPayload,boot:Int,elapsed:Long):String {

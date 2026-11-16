@@ -1,10 +1,10 @@
 # Implementation roadmap
 
-Latest scoped acceptance: [Android77 device chat and accepted source](chat-acceptance-20261115.md).
+Latest scoped acceptance: [Android79 USB/Wi-Fi and accepted main](non-lte-acceptance-20261116.md).
 Earlier milestone counts below remain dated foundation evidence.
 
 Current evidence and remaining scope: [implementation snapshot](implementation-status.md).
-Current accepted source and USB/Wi-Fi checks: [2026-11-15 checkpoint](non-lte-acceptance-20261115.md).
+Earlier accepted source and USB/Wi-Fi checks: [2026-11-15 checkpoint](non-lte-acceptance-20261115.md).
 The normative specification remains0.9; all292 requirements and98 scenarios are retained.
 
 ## M0 - contracts and executable reference core (foundation implemented)
@@ -46,10 +46,12 @@ Remnawave/x-ui/3x-ui remain extension contracts.
 ## M4 - autonomous routing and support (partial)
 The [exit-country checks and private TCP hub](exit-country-probe.md) connect
 declarations, normalized candidates and fresh native receipts internally. Managed
-graph activation and the shared scheduler remain open; no new graph capability
-or end-to-end autonomous routing acceptance is claimed by this contribution.
-Reference ranking, bounded per-target checks and a lazy graph frontier exist.
-The frontier is a JVM planner and is not wired into runtime route selection.
+graph signed-policy acceptance and the shared scheduler remain open. The
+[negotiated managed TCP runtime](managed-adaptive-runtime.md) wires a bounded
+frontier to owned native probes, one-use receipts and per-group selection.
+Pure-lease continuity and fair resumable progress require their own exact CI
+and managed-chain device checks. This is a scoped runtime primitive, not full
+four-mode autonomous routing acceptance.
 Basic SQL user/admin chat,
 Android/web UI and device media compression have scoped acceptance. Full contextual
 quarantine/graph exploration for four network modes, cohort rollout, central

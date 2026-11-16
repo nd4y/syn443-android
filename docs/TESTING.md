@@ -1,5 +1,13 @@
 # Testing and release gates
 
+[Lease/search continuity](managed-adaptive-runtime.md#lease-renewal-and-bounded-search-continuity)
+requires six named cursor JVM outcomes, five signed lease-semantics outcomes and
+13 Android continuity/fairness outcomes. Each API29/35/37 matrix requires272
+unique actual outcomes with no failures, errors or skips. The500-candidate
+simulation performs real signed assignment renewals every300s under unchanged
+8/minute and128/hour limits. Its native reports remain synthetic; actual signed
+managed-chain, Wi-Fi recovery and policy rollback are separate physical gates.
+
 The [exit-country primitive](exit-country-probe.md) adds strict native TLS/JSON
 cases, an independent signed capability verifier case and a mandatory Android
 configuration/status case. The floor is259 actual outcomes on each API29/35/37,

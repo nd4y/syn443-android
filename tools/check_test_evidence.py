@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=259
+    minimum=272
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -38,6 +38,8 @@ for path in paths:
         assert not any(case.find(k) is not None for k in ("skipped","failure","error")),(path,case.attrib)
         cases.append(case)
 assert len(cases)>=minimum,(mode,len(cases),minimum)
+identities=[(c.get("classname"),c.get("name")) for c in cases]
+assert len(identities)==len(set(identities)), "Duplicate actual test outcomes"
 if mode=="recovery":
     assert ("io.syn443.recovery.PhysicalNetworkSelectionTest","captiveCandidateCannotBeSelectedEvenWithPriorProof") in {
         (c.get("classname"),c.get("name")) for c in cases}, "Required captive network case missing"
@@ -373,3 +375,9 @@ if mode in ADAPTIVE_REQUIRED:
     if mode == 'emulator':
         ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'currentCheckFailureRequiresFreshBoundReplacementAndMonotonicTime'))
     assert set(ADAPTIVE_REQUIRED[mode]) <= {(c.get("classname"),c.get("name")) for c in cases}, "Missing actual managed adaptive outcome"
+
+
+# Pure lease continuity and RAM traversal hints never substitute for native evidence.
+CONTINUITY_REQUIRED = {'jvm': [('io.syn443.decision.RouteFrontierResumeTest', 'fiveHundredCandidatesResumeAcrossExpiryWithoutPrefixReplay'), ('io.syn443.decision.RouteFrontierResumeTest', 'positionBindsGraphInstanceGroupModeEveryContextFieldAndHints'), ('io.syn443.decision.RouteFrontierResumeTest', 'unsafeContextAndClockInvalidationCannotBecomeRenewableExpiry'), ('io.syn443.decision.RouteFrontierResumeTest', 'warmHintsAndSixtyFourOverlappingTemplatesStayDeduplicatedAfterRenewal'), ('io.syn443.decision.RouteFrontierResumeTest', 'fourSlotsAnd4096RawPositionsResumePastIneligibleAndDuplicateQuanta'), ('io.syn443.decision.RouteFrontierResumeTest', 'positionAndGraphOwnershipSurviveCallerBufferAndHintMutation')], 'policy': [('io.syn443.policy.PolicyLeaseSemanticsTest', 'exactlyFiveSignedLeaseFieldsMayChangeWithoutChangingContentOrAuthority'), ('io.syn443.policy.PolicyLeaseSemanticsTest', 'parentContentPredicateRetainsEveryOtherFieldAndExactEngine'), ('io.syn443.policy.PolicyLeaseSemanticsTest', 'authorityChangesForSignedCriticalPayloadChanges'), ('io.syn443.policy.PolicyLeaseSemanticsTest', 'realSignerRotationRootSetBootstrapAndInstallationAnchorAreIndependentFences'), ('io.syn443.policy.PolicyLeaseSemanticsTest', 'authorityRejectsUnknownMalformedSignerAndMismatchedVerifiedCopies')], 'emulator': [('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'fiveHundredLastWorkingPathSurvivesTTLAndHourlyPauseWithoutBudgetReset'), ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'emptyCPUQuantumYieldsToAnotherDueGroupWithoutAnotherProbe'), ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'cooldownCPUQuantumYieldsWithoutBypassingHalfOpenOrHealthyGroup'), ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'realContextNativeEpochAndClockChangesDoNotBorrowPositionsOrResetBudgets'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'signedPureLeaseUsesWorkerAuthorityAndCurrentReceiptWithoutHandlerHashing'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'missingCorruptAndMalformedAnchorKeepStrictEnvelopeIdentityAndParentPermission'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'preparedBindingsFenceBootDeadlineClockRawLoginAndCurrentTicket'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'stagedCandidateCannotRunAndApplyingBindingUsesParentActivationDeadline'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'sameTicketPreparedReplacementCannotLeakStaleAnchorBinding'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'selectedAAndPendingBReceiptSurvivePureRenewalWithSingleNativeAcknowledgement'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'signerAnchorAndNonLeaseFieldsResetScopeAndDiscardOldPendingProof'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'downgradeScopeModeAndBootCannotBorrowStableExecutionOrReviveOwner'), ('io.syn443.android.AssignedPolicyRuntimeContinuityTest', 'persistedAnchorFingerprintExcludesFloorsButRotatesAndCorruptionFailsClosed')]}
+if mode in CONTINUITY_REQUIRED:
+    assert set(CONTINUITY_REQUIRED[mode]) <= set(identities), "Missing actual policy/search continuity outcomes"
