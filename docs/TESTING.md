@@ -1,5 +1,19 @@
 # Testing and release gates
 
+Native administrative v86 source requires13 new identity JVM cases and34 new
+Android cases, including actual isolated Keystore/journal/controller ownership,
+refresh/cancellation and process-recreation paths, signed ordinary-device
+context fencing, private UI/browser and separate-account entry. The three API
+matrices require327 unique passing actual outcomes; the identity floor is135.
+Ten new handwritten API/JSON
+security classes also require independently verified90% line coverage. Existing
+names and gates remain mandatory. The configuration-only JSON reader has real
+wide-card, exact4096-origin and negative boundary cases; OAuth/signature/default
+JSON limits remain unchanged. All product builds and executable suites run in
+GitHub Actions. These synthetic tests are not live Keycloak/MFA/ACL, cellular,
+Doze, battery, endurance or physical managed-chain evidence.
+
+
 [Trusted mobile administrative navigation](mobile-admin-browser.md) adds four
 intent/URL cases and one prequeue-cancellation case; the prior current-generation
 discovery case remains mandatory. All API29/35/37 matrices require284 unique

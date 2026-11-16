@@ -48,6 +48,61 @@ class ControlProvider : ContentProvider() {
             initializeUnlocked()
             val store = StateStore.get(context)
             when (method) {
+                "admin-status" -> {
+                    require(caller==Process.myUid() && arg==null)
+                    return Bundle().apply {putBoolean("ok",true);putString("json",AdminController.get(context).status().toString())}
+                }
+                "admin-login", "admin-logout" -> {
+                    require(caller==Process.myUid())
+                    val generation=requireNotNull(arg?.toLongOrNull()).also {require(it>=0)}
+                    val admin=AdminController.get(context)
+                    return Bundle().apply {
+                        val admitted=if(method=="admin-login")admin.start(generation) else admin.logout(generation)
+                        putBoolean("ok",true);putBoolean("admitted",admitted)
+                    }
+                }
+                "admin-browser-start", "admin-browser-result", "admin-browser-cancel" -> {
+                    require(caller==Process.myUid())
+                    val id=requireNotNull(arg).also {require(it.matches(Regex("[a-f0-9]{32}")))}
+                    val generation=requireNotNull(extras).getLong("generation",-1).also {require(it>=0)}
+                    val admin=AdminController.get(context)
+                    return Bundle().apply {
+                        putBoolean("ok",true)
+                        when(method) {
+                            "admin-browser-start" -> putBoolean("admitted",admin.prepareBrowser(id,generation))
+                            "admin-browser-cancel" -> putBoolean("admitted",admin.browserCancel(id,generation))
+                            else -> {
+                                val result=admin.browserResult(id,generation)
+                                putString("json",org.json.JSONObject().put("state",result.state).put("reason",result.reason).toString())
+                                if(result.state=="done") {putString("url",result.url);putLong("expiresAtElapsedMs",result.expiresAtElapsedMs)}
+                            }
+                        }
+                    }
+                }
+                "admin-callback" -> {
+                    require(caller==Process.myUid())
+                    val callback=requireNotNull(arg).also {require(it.length in 1..8192)}
+                    return Bundle().apply {putBoolean("ok",true);putBoolean("admitted",AdminController.get(context).callback(callback))}
+                }
+                "admin-read-start", "admin-read-result", "admin-read-cancel" -> {
+                    require(caller==Process.myUid())
+                    val id=requireNotNull(arg).also {require(it.matches(Regex("[a-f0-9]{32}")))}
+                    val input=requireNotNull(extras);val generation=input.getLong("generation",-1).also {require(it>=0)}
+                    val admin=AdminController.get(context)
+                    return Bundle().apply {
+                        putBoolean("ok",true)
+                        when(method) {
+                            "admin-read-start" -> putBoolean("admitted",admin.readStart(id,generation,
+                                requireNotNull(input.getString("action")),requireNotNull(input.getString("target"))))
+                            "admin-read-cancel" -> putBoolean("admitted",admin.readCancel(id,generation))
+                            else -> {
+                                val result=admin.readResult(id,generation)
+                                putString("json",org.json.JSONObject().put("state",result.state).put("reason",result.reason).toString())
+                                if(result.state=="done")putByteArray("body",result.bodyBytes())
+                            }
+                        }
+                    }
+                }
                 "chat-start" -> {
                     require(caller==Process.myUid());val input=requireNotNull(extras)
                     return Bundle().apply {putBoolean("ok",LoginController.get(context).chatStart(requireNotNull(arg),input.getLong("generation",-1),requireNotNull(input.getString("action")),requireNotNull(input.getString("body"))))}

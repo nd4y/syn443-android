@@ -4,31 +4,47 @@ Snapshot: 2026-11-16. Specification0.9 contains292 requirements and98 acceptance
 scenarios. Those numbers describe scope, not completed work or test counts.
 This document supersedes repository-wide readiness claims in historical stage notes.
 
-The v83 [signed admin metadata foundation](mobile-admin-bootstrap.md) passed
-source and actual-main CI. The v84 [separate administrative OAuth core](mobile-admin-auth.md)
-source `110f817ca42dbabb9afe648c465809551a95c9db` passed all eight jobs in
-[Actions43876233986](https://github.com/nd4y/syn443-android/actions/runs/43876233986)
-and was protected-merged as `d4dd7565a836ec4d31672e6c07aa3d336e462635`.
-Its actual-main run is pending at this source snapshot. The three emulator
-matrices each contain287 unique passing Android outcomes;23 new administrative
-JVM methods and all eight handwritten security classes meet the existing90%
-coverage gate. Neither newer APK is installed at this snapshot.
+The v84 administrative-auth source and actual-main checks passed. Its exact
+Actions APK passed the [USB/Wi-Fi checkpoint](non-lte-acceptance-20261116.md):20
+physical outcomes, two real Wi-Fi interruptions, native-process recovery and15
+independent restoration checks. This is the currently installed checkpoint and
+uses a Direct policy; it is not native-admin SSO or managed-chain acceptance.
 
-Current v85 / `0.9.57-admin-trust` adds [current signed administrative admission](mobile-admin-discovery.md)
-and a [controller-owned adaptive RAM budget](probe-budget-owner.md). A credential
-operation requires the unchanged, current signed trust snapshot and a fresh
-trusted clock; device Bootstrap authority remains separate. The adaptive budget
-survives native/service/coordinator recreation in the same controller process.
-Eleven new JVM and six new Android outcomes are mandatory in Actions; this
-candidate has not yet passed CI. Durable admin controller/key/journal/callback,
-Control API/UI, controller-process-death admission and the common energy
-governor remain open. This is not real mobile-admin login/MFA or managed-chain
-acceptance.
+The v85 [current signed administrative admission](mobile-admin-discovery.md) and
+[controller-owned adaptive RAM budget](probe-budget-owner.md) source
+`69ca262301bf08490e816a782881bb10cda613a6` passed all eight jobs in
+[Actions43885499560](https://github.com/nd4y/syn443-android/actions/runs/43885499560):
+293 actual Android outcomes per API29/35/37,54 newly affected mandatory JVM
+outcomes and53 native roots each ordinary/race. Its protected merge is
+`f9af8f8186da7c5b7409aac445a698e6cc92db56`; actual-main CI remains pending at
+this source snapshot. Its APK has not been installed.
 
-## Current accepted checkpoint
+Current v86 / `0.9.58-native-admin` connects a separate
+[administrative controller](mobile-admin-controller.md),
+[owned key journal](mobile-admin-key-journal.md),
+[three read-only Control API actions](mobile-admin-control-api.md) and
+[dark native UI](mobile-admin-native-ui.md). Administrative credentials remain
+in RAM; controller-process recreation retires the persisted owned admin key and
+requires a fresh admin login. It preserves the ordinary VPN/device identity.
+A fresh worker verifies each browser handoff and returns a one-use URL with an
+original five-second deadline. A revoked or unpublishable refresh pair retires
+its whole family. Configuration replies preserve the full bounded document;
+their dedicated reader accommodates server-generated provenance without
+relaxing OAuth/signature JSON limits.
 
-The [v82 USB/Wi-Fi checkpoint](non-lte-acceptance-20261116.md) records the latest
-installed APK and its exact eight-job source CI:284 actual Android outcomes per
+The candidate requires13 new JVM and34 new Android outcomes,327 unique Android
+outcomes per API and ten new90% security-class coverage checks. They have not
+yet executed for this candidate. Live Keycloak mobile-client registration,
+current signed descriptor/API routing, real native login/ACL/MFA, editing,
+preview/publication/rollback, full mobile administration and physical acceptance
+remain separate. Main shortcut visibility still uses the existing web grant;
+explicit separate-account login is available in initially collapsed account
+settings without promoting that device session into an admin role.
+
+## Earlier physical/source checkpoints - v82 and v83
+
+The earlier [v82 USB/Wi-Fi checkpoint](non-lte-acceptance-20261116.md) records that
+historical installation and its exact eight-job source CI:284 actual Android outcomes per
 API and53 native roots in ordinary/race suites. The phone's final observed-window
 batch has20 outcomes, including11 virtual coordinator cases, plus two real
 six-second Wi-Fi cycles and native-process recovery. Identity/configuration,

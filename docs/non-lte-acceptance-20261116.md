@@ -3,7 +3,32 @@
 This records accepted revisions, separately from newer source under development.
 No private configuration, account, device identifier or physical log is included.
 
-## Current installed checkpoint - Android v82
+## Current installed checkpoint - Android v84
+
+Source `110f817ca42dbabb9afe648c465809551a95c9db` passed all eight source jobs in
+[Actions43876233986](https://github.com/nd4y/syn443-android/actions/runs/43876233986).
+Its protected actual-main `d4dd7565a836ec4d31672e6c07aa3d336e462635` passed all
+eight jobs in [Actions43884276314](https://github.com/nd4y/syn443-android/actions/runs/43884276314)
+with the identical source tree. Independent archives contain287 actual Android
+outcomes per API29/35/37 and53 native roots each ordinary/race.
+
+The exact Actions APK v84 passed20 unique physical outcomes without skips:
+nine UI/intent/country cases and11 virtual coordinator cases. Two real six-second
+Wi-Fi interruptions and an actual native-process failure recovered with a fresh
+PID, the application's own UID/TUN and independent HTTPS204. All15 independent
+cleanup checks passed: device key/binding, configuration, consent, authentication
+method and empty outbox were preserved; original settings/radios/screen state
+were restored. An encrypted private checkpoint precedes installation. This is
+Direct-policy operational acceptance, not a native-admin browser/session or
+managed adaptive-chain result.
+
+Two driver preflight stops preceded installation: Windows signer-output newline
+parsing and an enabled Wi-Fi setting in airplane mode. Both stopped before an
+installation dispatch, and their evidence remains retained. The earlier v82
+sleeping-screen/cleanup failure history below remains historical; v84 success
+does not determine the cause of the older cleanup exception.
+
+## Earlier installed checkpoint - Android v82
 
 Source `10bfdacbb07dc98ca278517a4aaf26f599126845` passed all eight required jobs
 in [Actions43859154434](https://github.com/nd4y/syn443-android/actions/runs/43859154434).
@@ -40,7 +65,7 @@ unplugged endurance. The Custom Tab cases establish URL/intent behavior, not a
 real browser/Keycloak/MFA session or authenticated administrator device-card
 readback.
 
-## Newer source checkpoint - Android v83
+## Earlier source checkpoint - Android v83
 
 The signed administrative metadata/cache foundation source
 `9d7f0ef0e5de648d875b5f438fb5357ec5abffe9` passed all eight required jobs in
@@ -66,19 +91,31 @@ outcomes and53 native roots each ordinary/race. All outcomes passed without
 failure, error or skip. An independent raw report review confirms23 new admin
 OAuth cases and all eight handwritten security classes above90% line coverage.
 The protected merge is `d4dd7565a836ec4d31672e6c07aa3d336e462635`; its actual-main
-run and physical v84 acceptance remain separate pending gates at this snapshot.
+run and physical v84 acceptance passed as recorded in the current installed
+checkpoint above.
 
-## Current source - Android v85
+## Signed admission and budget source - Android v85
 
-The [signed discovery admission](mobile-admin-discovery.md) requires one current
-verified trust snapshot before and after administrative credential operations.
-The [adaptive RAM budget owner](probe-budget-owner.md) preserves debt across
-native/service/coordinator recreation in the same controller process. Eleven
-new JVM methods, six new Android cases and three new security-class coverage
-checks are required in Actions; none have yet executed for this candidate.
-The new cache fixtures remain emulator-only and retain their hardware guards.
-No physical native-admin callback/session, managed chain, full common energy
-governor or controller-process-death persistence is claimed.
+Source `69ca262301bf08490e816a782881bb10cda613a6` passed all eight jobs in
+[Actions43885499560](https://github.com/nd4y/syn443-android/actions/runs/43885499560).
+The independently verified archives contain293 unique actual outcomes per
+API29/35/37 with zero failures, errors or skips,54 newly affected mandatory JVM
+outcomes and53 native roots each ordinary/race. Separate evidence verifies34
+admin-auth/discovery methods and11 handwritten security classes above90% line
+coverage. The protected merge is `f9af8f8186da7c5b7409aac445a698e6cc92db56`;
+actual-main CI remains pending. This APK has not been installed on the phone.
+
+## Current source - Android v86
+
+Native administration now has source for a separate owned key/journal,
+RAM session/controller, fresh one-use browser handoff, three read-only Control
+API actions and a dark private screen. Thirteen new JVM and34 new Android cases
+are mandatory in Actions; no v86 CI or physical result is claimed yet.
+Read-only device/configuration/runtime views do not implement native editing,
+preview, publication or rollback. Actual Keycloak/ACL/MFA and signed endpoint
+configuration, full mobile administration, managed chains and the complete
+shared energy governor remain open. See [controller](mobile-admin-controller.md)
+and [UI scope](mobile-admin-native-ui.md).
 
 ## Earlier accepted foundation
 

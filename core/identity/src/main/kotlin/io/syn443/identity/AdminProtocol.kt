@@ -134,8 +134,8 @@ class AdminProtocol internal constructor(private val identity:AdminIdentity,priv
         })
         scope.request {session(result,issuer,pending.nonce,null).also {admission?.check(time=result.time,requireDiscovered=true)}}
     }
-    private fun validateSession(session:AdminSession,unused:Boolean=true) {
-        admission?.check(time=session.time,requireDiscovered=true)
+    private fun validateSession(session:AdminSession,unused:Boolean=true,admit:Boolean=true) {
+        if(admit)admission?.check(time=session.time,requireDiscovered=true)
         require(session.authority==authority && session.keyThumbprint==thumbprint && session.bootCount==boot())
         session.time.window(boot(),elapsed())
         if(session.family.isClosed() || unused && !session.available())throw AdminException(AdminFailure.REAUTHENTICATE)
@@ -205,6 +205,68 @@ class AdminProtocol internal constructor(private val identity:AdminIdentity,priv
     }
     private fun refreshBody(refresh:String)=Identity.form(linkedMapOf("grant_type" to "refresh_token",
         "client_id" to AdminBootstrap.CLIENT_ID,"refresh_token" to refresh)).toByteArray(Charsets.UTF_8)
+    private fun controlAccess(session:AdminSession,time:TrustedTime?=null,admit:Boolean=true) {
+        if(admission==null)throw AdminException(AdminFailure.REAUTHENTICATE)
+        validateSession(session,admit=admit)
+        require(Identity.thumbprint(key.publicKey)==thumbprint)
+        if(elapsed()>=session.accessUntilElapsedMs)throw AdminException(AdminFailure.REAUTHENTICATE)
+        val expiry=Math.addExact(session.time.upperMs,session.accessUntilElapsedMs-session.time.elapsedMs)
+        admission.priorTime()?.let {
+            if(it.window(boot(),elapsed()).upperMs>=expiry)throw AdminException(AdminFailure.REAUTHENTICATE)
+        }
+        time?.let {
+            if(admit)admission.check(time=it,requireDiscovered=true)
+            // A newly observed server clock can reject an access token; it can never extend its lease.
+            if(it.window(boot(),elapsed()).upperMs>=expiry)throw AdminException(AdminFailure.REAUTHENTICATE)
+        }
+    }
+    private fun <T> controlRead(read:AdminControl.Read,target:String,current:AdminSession,scope:IdentityScope,
+        parse:(JsonObject,TimeWindow,String)->T):T=checked {
+        controlAccess(current)
+        val guard=checkNotNull(admission)
+        val body=AdminControl.request(read,target)
+        val prior=guard.priorTime()
+        val trusted=if(prior==null)current.time else floor(current.time,prior)
+        val started=start();val url=identity.metadata.apiOrigin+AdminControl.PATH
+        val proof=scope.request {
+            controlAccess(current)
+            Identity.proof(key.publicKey,key::sign,"POST",url,trusted.proofSecond(started.boot,started.elapsed),
+                token=current.accessToken,body=body)
+        }
+        val reply=scope.request {
+            val now=elapsed()
+            require(boot()==started.boot && now>=started.elapsed && now-started.elapsed<=20_000)
+            controlAccess(current)
+            exchange.request("POST",url,mapOf("Content-Type" to "application/json","Cache-Control" to "no-store",
+                "Authorization" to "DPoP ${current.accessToken}","DPoP" to proof),body.copyOf(),it,read.maxReply).also {
+                controlAccess(current)
+            }
+        }
+        if(reply.status!=200)throw AdminException(when(reply.status) {
+            401->AdminFailure.REAUTHENTICATE
+            403->AdminFailure.ACCESS_DENIED
+            in 500..599->AdminFailure.TRANSPORT
+            else->AdminFailure.INVALID_REPLY
+        })
+        val time=observed(reply,started,trusted)
+        val result=scope.request {
+            require(reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+            require(reply.body.size in 1..read.maxReply)
+            val wire=Policy.utf8(reply.body)
+            val document=AdminControl.objectReply(wire,read)
+            controlAccess(current,time)
+            parse(document,time.window(boot(),elapsed()),wire).also {controlAccess(current,time)}
+        }
+        val accepted=guard.record(time)
+        controlAccess(current,accepted,admit=false)
+        result
+    }
+    fun listDevices(after:String,session:AdminSession,scope:IdentityScope):AdminDevicePage =
+        controlRead(AdminControl.Read.DEVICES,after,session,scope) {document,time,wire->AdminControl.devices(document,after,time,wire)}
+    fun deviceConfiguration(id:String,session:AdminSession,scope:IdentityScope):AdminDeviceConfiguration =
+        controlRead(AdminControl.Read.CONFIGURATION,id,session,scope) {document,time,wire->AdminControl.configuration(document,id,time,wire)}
+    fun deviceRuntime(id:String,session:AdminSession,scope:IdentityScope):AdminDeviceRuntime =
+        controlRead(AdminControl.Read.RUNTIME,id,session,scope) {document,time,wire->AdminControl.runtime(document,id,time,wire)}
     /** No transport call and no device identity mutation, including after BOOT or expiry. */
     fun logout(session:AdminSession):AdminLogout=checked {
         require(session.authority==authority && session.keyThumbprint==thumbprint)

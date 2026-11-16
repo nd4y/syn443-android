@@ -4,12 +4,10 @@ import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -25,8 +23,6 @@ import org.json.JSONObject
 
 @Composable fun LoginControls(vpnStopped:Boolean) {
     val context=LocalContext.current;val scope=rememberCoroutineScope()
-    val panelToolbarColor=MaterialTheme.colorScheme.surface.toArgb()
-    val panelNavigationColor=MaterialTheme.colorScheme.background.toArgb()
     val uri=remember {"content://io.syn443.control".toUri()}
     var status by remember {mutableStateOf(JSONObject())}
     var message by remember {mutableStateOf("")}
@@ -123,16 +119,12 @@ import org.json.JSONObject
             if(command("auth-cancel")?.getBoolean("ok")!=true)message="Завершение не подтверждено. Повторите попытку."
         }},modifier=Modifier.testTag("auth-cancel")) {Text("Завершить сессию")}
         if(status.optInt("cleanupPending")>0)Text("Очистка регистрации на сервере продолжится после нового входа в тот же аккаунт.")
-        if(status.optBoolean("controlPanelAvailable"))TextButton(enabled=!status.optBoolean("busy"),onClick={scope.launch {
-            val reply=command("auth-admin-panel",generation.toString())
-            val url=reply?.getString("url")
-            if(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-                if(reply?.getBoolean("ok")==true && url!=null)runCatching {
-                    AdminPanelBrowser.open(context,url,panelToolbarColor,panelNavigationColor)
-                }.onSuccess {message=""}.onFailure {message="Не удалось открыть панель управления."}
-                else message="Доступ к панели нужно подтвердить заново. Подождите и повторите попытку."
-            }
-        }},modifier=Modifier.testTag("auth-admin-panel")) {Text("Администрирование")}
+        AdminEntryControls(phase in setOf("POLICY_CACHED","REFRESHING"),status.optBoolean("controlPanelAvailable"),
+            status.optBoolean("busy")) {
+            if(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))runCatching {
+                context.startActivity(Intent(context,io.syn443.android.admin.AdminActivity::class.java))
+            }.onFailure {message="Не удалось открыть администрирование."}
+        }
         val telemetryEnabled=status.optBoolean("telemetryEnabled")
         if(status.optBoolean("telemetryAvailable") || telemetryEnabled) {
             Text("Техническая телеметрия помогает разбирать сбои VPN. Отправляются коды событий, состояние VPN, версия приложения и тип сети без истории сайтов, адресов и учётных данных. Сводка состояния доступна вашему администратору. Её можно отключить этой кнопкой.")
