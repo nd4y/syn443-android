@@ -110,6 +110,14 @@ class NativeProtocolEvidenceTest(unittest.TestCase):
 
     def test_wrong_package_unknown_intermediate_or_renamed_outcome_never_satisfies_matrix(self):
         rows = self.rows()
+        for index in (0, len(rows) - 1):
+            changed = rows.copy()
+            row = json.loads(changed[index])
+            del row['Package']
+            row['ImportPath'] = BRIDGE
+            changed[index] = json.dumps(row)
+            with self.assertRaises(AssertionError):
+                verify(changed, self.source())
         for name in required_cases():
             changed = [self.event(json.loads(row)['Action'], name, Package='example.invalid/foreign')
                        if json.loads(row).get('Test') == name else row for row in rows]

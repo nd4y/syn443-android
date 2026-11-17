@@ -169,6 +169,7 @@ def verify(lines, source):
         if action == 'build-output':
             assert test is None and not started and not states, 'Late or test-bound bridge build output'
             continue
+        assert package == BRIDGE, 'Test lifecycle requires the actual bridge package'
         assert action in {'start', 'run', 'pause', 'cont', 'pass', 'output'}, 'Unknown bridge event action'
         if action == 'start':
             assert test is None and not started and not states, 'Duplicate or late bridge package start'
