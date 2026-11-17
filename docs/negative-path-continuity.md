@@ -1,5 +1,12 @@
 # Negative history on an observed stable path
 
+Initial source3a639e2b45de54c7c3b2a8172ef1b977fda9ccb1 passed all eight jobs in
+[Actions44117595153](https://github.com/nd4y/syn443-android/actions/runs/44117595153).
+Independent raw evidence confirms522 JVM and476 unique outcomes on each API29,
+35 and37, including all three new JVM and six Android continuity roots. The
+following [recovery evidence change](process-recovery-evidence.md) requires its
+own exact CI; protected resulting-main and physical acceptance remain separate.
+
 Validation and metered capability changes revoke route evidence and advance the
 Java network epoch. They can occur without a new network handle or link
 signature. Previously, the corresponding coordinator reset also discarded its

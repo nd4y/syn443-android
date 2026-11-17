@@ -1,5 +1,12 @@
 # Testing and release gates
 
+[Recovery fault evidence](process-recovery-evidence.md) adds eight synthetic
+Python helper/driver cases in the existing documents job. The original process
+fault commands,110s recovery deadline, all assertions and PASS predicates are
+retained. It adds no normal-poll ADB reads or new workers, and only bounded
+pre-cleanup observations on failure. This instrumentation is not a recovery
+fix or proof that the original API29 failure was a transient runner problem.
+
 [VLESS/XHTTP wire evidence](xhttp-wire-matrix.md) adds a source-bound native gate
 to each existing ordinary/race JSON stream: two roots, eight positive transport
 leaves and20 XHTTP authority-failure leaves, plus one independent hard-deadline

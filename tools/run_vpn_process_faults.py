@@ -13,10 +13,12 @@ import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
+from process_failure_evidence import FailureEvidence, MAX_COUNT, reverse_snapshot
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = 'io.syn443.android'
 URI = 'content://io.syn443.control'
+ACTIVE_OBSERVATION = None
 
 
 def adb(*args, timeout=30):
@@ -27,22 +29,27 @@ class ControlUnavailable(RuntimeError):
     """An emulator observation may be unavailable while Android replaces a process."""
 
 
-def call(method, arg=None):
+def call(method, arg=None, *, timeout=30):
     args = ['shell', 'content', 'call', '--uri', URI, '--method', method]
     if arg is not None:
         args += ['--arg', arg]
-    raw = adb(*args).decode()
+    raw = adb(*args, timeout=timeout).decode()
     if 'ok=false' in raw:
         raise AssertionError('Control command rejected: ' + method)
     result = re.search(r'json=(\{.*\})\}\]', raw)
     if 'ok=true' not in raw or result is None:
         raise ControlUnavailable('Control provider has not returned a response')
-    return json.loads(result[1])
+    value = json.loads(result[1])
+    if method == 'status' and ACTIVE_OBSERVATION is not None:
+        ACTIVE_OBSERVATION.evidence.status(value)
+    return value
 
 
-def pid(suffix):
-    raw = adb('shell', 'sh', '-c', "'pidof " + PACKAGE + suffix + " || true'").strip()
+def pid(suffix, *, timeout=30):
+    raw = adb('shell', 'sh', '-c', "'pidof " + PACKAGE + suffix + " || true'", timeout=timeout).strip()
     if not raw:
+        if suffix == ':engine' and ACTIVE_OBSERVATION is not None:
+            ACTIVE_OBSERVATION.evidence.native('')
         return ''
     matches = raw.split()
     if not all(re.fullmatch(rb'[1-9][0-9]{0,9}', item) for item in matches):
@@ -50,7 +57,10 @@ def pid(suffix):
     if len(matches) != 1:
         # pidof lists all matches. A poll must wait for exactly one owner.
         raise ControlUnavailable('Multiple matching emulator process IDs')
-    return matches[0].decode()
+    value = matches[0].decode()
+    if suffix == ':engine' and ACTIVE_OBSERVATION is not None:
+        ACTIVE_OBSERVATION.evidence.native(value)
+    return value
 
 
 def vpn_stopped():
@@ -65,6 +75,8 @@ def vpn_stopped():
 def await_condition(predicate, timeout=110):
     end = time.monotonic() + timeout
     while time.monotonic() < end:
+        if ACTIVE_OBSERVATION is not None:
+            ACTIVE_OBSERVATION.evidence.begin_poll()
         try:
             if predicate():
                 return
@@ -72,13 +84,28 @@ def await_condition(predicate, timeout=110):
             # Poll only. Never replay a Connect/Stop/fault command after an
             # ambiguous acknowledgement; the deadline and final assertions stay.
             pass
+        finally:
+            if ACTIVE_OBSERVATION is not None:
+                # Reuse only observations made by the unchanged predicate.
+                # No extra transport, probe or polling worker is introduced.
+                ACTIVE_OBSERVATION.sample()
         time.sleep(1)
     raise AssertionError('Process recovery deadline exceeded')
 
 
 class Proxy(socketserver.BaseRequestHandler):
     def handle(self):
+        self.server.handler_started()
+        completed = False
+        try:
+            self.handle_request()
+            completed = True
+        finally:
+            self.server.handler_finished(completed)
+
+    def handle_request(self):
         if not self.server.allowed:
+            self.server.count('rejected')
             return
         self.request.settimeout(15)
         stream = self.request.makefile('rb')
@@ -86,8 +113,10 @@ class Proxy(socketserver.BaseRequestHandler):
         target = self.server.ingress_target
         expected = ('CONNECT 127.0.0.1:' + str(target) + ' ').encode() if target else b'CONNECT 203.0.113.10:80 '
         if not first.startswith(expected):
+            self.server.count('rejected')
             return
         self.headers(stream)
+        self.server.count('connectHeaders')
         self.request.sendall(b'HTTP/1.1 200 Connection established\r\n\r\n')
         if target:
             with self.server.progress_lock:
@@ -107,8 +136,10 @@ class Proxy(socketserver.BaseRequestHandler):
                             total += len(data)
             return
         if not stream.readline(4096).startswith(b'GET /generate_204 '):
+            self.server.count('rejected')
             return
         self.headers(stream)
+        self.server.count('requestHeaders')
         self.request.sendall(b'HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
         with self.server.progress_lock:
             self.server.progress += 1
@@ -123,24 +154,96 @@ class Proxy(socketserver.BaseRequestHandler):
 
 class Server(socketserver.ThreadingTCPServer):
     daemon_threads = True
-    progress = 0
-    progress_lock = threading.Lock()
-    allowed = True
-    ingress_target = None
+
+    def __init__(self, address, handler, evidence_role):
+        self.progress = 0
+        self.progress_lock = threading.RLock()
+        self.allowed = True
+        self.ingress_target = None
+        self.evidence_role = evidence_role
+        self.counts = dict.fromkeys(('accepted', 'active', 'handled', 'errors',
+                                    'connectHeaders', 'requestHeaders', 'rejected'), 0)
+        super().__init__(address, handler)
+
+    def count(self, name):
+        with self.progress_lock:
+            self.counts[name] = min(MAX_COUNT, self.counts[name] + 1)
+
+    def get_request(self):
+        request = super().get_request()
+        self.count('accepted')
+        return request
+
+    def handler_started(self):
+        self.count('active')
+
+    def handler_finished(self, completed):
+        with self.progress_lock:
+            self.counts['active'] = max(0, self.counts['active'] - 1)
+            if completed:
+                self.counts['handled'] = min(MAX_COUNT, self.counts['handled'] + 1)
+
+    def handle_error(self, request, client_address):
+        # Retain the actual failure count without socketserver's raw address,
+        # exception message or stack dump. Request cleanup remains its owner.
+        self.count('errors')
+
+    def evidence_snapshot(self, thread_alive):
+        with self.progress_lock:
+            return dict(self.counts, role=self.evidence_role, allowed=self.allowed,
+                        progress=min(MAX_COUNT, self.progress), threadAlive=thread_alive)
+
+
+class ProcessObservation:
+    def __init__(self, native, ingress, egress, ingress_thread, egress_thread):
+        self.evidence = FailureEvidence(native)
+        self.started = time.monotonic()
+        self.ingress, self.egress = ingress, egress
+        self.ingress_thread, self.egress_thread = ingress_thread, egress_thread
+
+    def sample(self):
+        self.evidence.sample(int((time.monotonic() - self.started) * 1000),
+                             self.ingress.evidence_snapshot(self.ingress_thread.is_alive()),
+                             self.egress.evidence_snapshot(self.egress_thread.is_alive()))
+
+    def capture_failure(self, port):
+        # Capture before disconnect/reverse removal/server shutdown. These reads
+        # are diagnostic only and cannot replay a fault or extend its PASS wait.
+        self.evidence.begin_poll()
+        snapshot, reverse = None, None
+        try:
+            snapshot = call('status', timeout=2)
+        except Exception:
+            pass  # Unavailable remains explicit; never synthesize zero/Off.
+        try:
+            pid(':engine', timeout=2)
+        except Exception:
+            pass
+        try:
+            reverse = reverse_snapshot(adb('reverse', '--list', timeout=2), int(port))
+        except Exception:
+            pass
+        self.sample()
+        print('Process failure evidence: ' + json.dumps(self.evidence.report(reverse),
+                                                       separators=(',', ':'), allow_nan=False), flush=True)
+        return snapshot if type(snapshot) is dict else {}
 
 
 def main():
+    global ACTIVE_OBSERVATION
     hardware = adb('shell', 'getprop', 'ro.hardware').decode().strip()
     assert hardware in ('ranchu', 'goldfish'), 'Refuse to overwrite a physical device configuration'
     suite = ET.Element('testsuite', name='SYN443 external process recovery')
     out = ROOT / 'app/build/outputs/androidTest-results/external/TEST-vpn-process.xml'
     out.parent.mkdir(parents=True, exist_ok=True)
-    proxy = Server(('127.0.0.1', 0), Proxy)
-    ingress = Server(('127.0.0.1', 0), Proxy)
+    proxy = Server(('127.0.0.1', 0), Proxy, 'egress')
+    ingress = Server(('127.0.0.1', 0), Proxy, 'ingress')
     ingress.ingress_target = proxy.server_address[1]
     port = str(ingress.server_address[1])
-    threading.Thread(target=proxy.serve_forever, daemon=True).start()
-    threading.Thread(target=ingress.serve_forever, daemon=True).start()
+    proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    ingress_thread = threading.Thread(target=ingress.serve_forever, daemon=True)
+    proxy_thread.start()
+    ingress_thread.start()
     try:
         adb('reverse', 'tcp:' + port, 'tcp:' + port)
         adb('shell', 'appops', 'set', PACKAGE, 'ACTIVATE_VPN', 'allow')
@@ -197,6 +300,8 @@ def main():
                      'controllerDeathRetiresFrozenNativeAndPreservesIntent', 'nativeOwnerRecreationKeepsIntentAndRejectsOldCallbacks',
                      'controllerRestartBudgetSurvivesOwnerDeath'):
             case = ET.SubElement(suite, 'testcase', classname='io.syn443.android.ExternalVpnProcessTest', name=name)
+            observation = ProcessObservation(native, ingress, proxy, ingress_thread, proxy_thread)
+            ACTIVE_OBSERVATION = observation
             try:
                 progress = proxy.progress
                 if name.startswith('twoHop'):
@@ -269,11 +374,13 @@ def main():
                 assert call('status')['desiredOn']
                 print(name + ': passed', flush=True)
             except Exception:
-                snapshot = call('status')
+                snapshot = observation.capture_failure(port)
                 print('Recovery failure state: ' + json.dumps({k: snapshot.get(k) for k in
                       ('phase', 'reason', 'desiredOn', 'generation', 'resumeRequired', 'attempt', 'heavyWallMs', 'nextWallMs')}), flush=True)
                 ET.SubElement(case, 'failure', message='External process recovery failed; see job log')
                 raise
+            finally:
+                ACTIVE_OBSERVATION = None
     finally:
         try:
             call('disconnect')
