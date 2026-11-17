@@ -155,7 +155,7 @@ class Proxy(socketserver.BaseRequestHandler):
 class Server(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
-    def __init__(self, address, handler, evidence_role):
+    def __init__(self, address, handler, evidence_role=None):
         self.progress = 0
         self.progress_lock = threading.RLock()
         self.allowed = True
