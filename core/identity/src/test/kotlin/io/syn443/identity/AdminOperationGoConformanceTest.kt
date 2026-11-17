@@ -41,7 +41,7 @@ class AdminOperationGoConformanceTest {
             val proposal:AdminLayerProposal,val samples:List<Sample>) {
             override fun toString()="LoadedGoOperationCorpus([redacted])"
         }
-        private val loaded=try {
+        private val loaded:Loaded=try {
                 require(System.getenv("GITHUB_ACTIONS")=="true" && System.getenv("SYN443_OPERATION_SOURCE_SHA")==SOURCE)
                 val runner=Path.of(checkNotNull(System.getenv("RUNNER_TEMP"))).toRealPath()
                 val ownedPath=Path.of(checkNotNull(System.getenv("SYN443_OPERATION_OWNED")))
