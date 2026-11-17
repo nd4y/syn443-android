@@ -1,5 +1,13 @@
 # Testing and release gates
 
+[VLESS/XHTTP wire evidence](xhttp-wire-matrix.md) adds a source-bound native gate
+to each existing ordinary/race JSON stream: two roots, eight positive transport
+leaves and20 XHTTP authority-failure leaves,30 ordered outcomes in total plus
+one bridge package completion. Eight validator roots are discovered by the
+existing documents job. The53-path-root, Android/JVM/coverage and privacy gates
+are retained. This source-stage matrix requires exact-head Actions; no local
+execution or physical protocol acceptance is claimed.
+
 [Managed route search status](route-search-status.md) source adds ten exact
 Android outcomes (six coordinator and four snapshot/presentation cases). The
 pending per-API29/35/37 floor is437; identity remains249. Existing required

@@ -135,9 +135,13 @@
       "text": "CI проверяет совместимость engine-api, ядра оркестрации и адаптеров по матрице версий. Неподдерживаемая комбинация не публикуется. Замена NetBird или proxy engine обязательно проверяет их аварийную VLESS-цепочку, DNS, handover и завершение транспорта.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/xhttp-wire-matrix.md",
+        "tools/check_native_protocol_evidence.py",
+        "tools/test_native_protocol_evidence.py",
+        "native/bridge/vless_ssh_wire_test.go"
       ],
-      "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests.",
+      "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests. Source-stage closed VLESS eight-transport and XHTTP five-by-four authority matrix requires30 exact ordered outcomes and bridge package completion independently in ordinary/race streams; exact-head Actions pending.",
       "remainingScope": "Complete capabilities/version/SBOM/release/update and physical acceptance."
     },
     {
