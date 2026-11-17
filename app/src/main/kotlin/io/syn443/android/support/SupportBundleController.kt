@@ -308,7 +308,7 @@ class SupportBundleController private constructor(
     private fun remove(file: File, expected: FileIdentity) {
         directoryMatches(checkNotNull(file.parentFile), expected)
         regular(file)
-        Os.unlink(file.absolutePath)
+        Os.remove(file.absolutePath)
     }
 
     private fun encrypt(dir: File, directory: FileIdentity, id: String, bytes: ByteArray, key: ByteArray): Stored {

@@ -98,3 +98,10 @@ outcomes or coverage gates. Physical acceptance separately collects while VPN
 is running and offline, checks preview/cancel/export and verifies actual HTTPS,
 TUN, configuration, identity, intent and device-setting preservation. An
 unauthorized USB device cannot satisfy that gate.
+
+The initial source run44174896493 passed privacy, documents and native checks
+but did not compile the Android app: `Os.unlink` is absent from the public SDK.
+Cleanup now uses the public [Os.remove API](https://developer.android.com/reference/android/system/Os#remove%28java.lang.String%29)
+after the same owned-directory and regular-file validation. No hidden API or
+weaker path checks are used. The failed attempt remains in the evidence chain;
+emulator cases were not reached in that run.
