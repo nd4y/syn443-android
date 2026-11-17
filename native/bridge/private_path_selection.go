@@ -2,10 +2,7 @@ package bridge
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"math"
 	"net"
@@ -26,6 +23,7 @@ var errPrivateExitMismatch = errors.New("verified exit predicate mismatch")
 type privateCheckedFailure struct {
 	code            string
 	completedBootMS int64
+	checkPlan       *routeCheckPlanReport
 }
 
 type privateProbeDialKey struct{}
@@ -60,6 +58,7 @@ type privatePathSelector struct {
 	pool                     *privatePathPool
 	group, scope, checksHash string
 	checks                   []routeCheck
+	program                  *routeCheckProgram
 	active                   *privatePoolEntry
 	proof                    *privateSelectionProof
 	flowEpoch                uint64
@@ -78,30 +77,31 @@ type privateSelectionProof struct {
 	started, completed       int64
 	flowEpoch                uint64
 	selectionToken           uint64 // captured only by the exact successful commit
+	checkPlan                *routeCheckPlanReport
 }
 
 func newPrivatePathSelector(p *privatePathPool, scope, group string, checks []routeCheck) (*privatePathSelector, error) {
-	if p == nil || !privateGroupID.MatchString(group) || len(checks) < 1 || len(checks) > 4 {
-		return nil, errPrivatePath
-	}
-	owned := append([]routeCheck(nil), checks...)
-	for _, c := range owned {
-		if !validRouteCheck(c) {
-			return nil, errPrivatePath
-		}
-	}
-	raw, err := json.Marshal(owned)
+	program, err := newRouteCheckProgram(checks, nil)
 	if err != nil {
 		return nil, errPrivatePath
 	}
-	digest := sha256.Sum256(raw)
+	return newPrivatePathSelectorProgram(p, scope, group, program)
+}
+func newPrivatePathSelectorProgram(p *privatePathPool, scope, group string, program *routeCheckProgram) (*privatePathSelector, error) {
+	if p == nil || program == nil || !privateGroupID.MatchString(group) {
+		return nil, errPrivatePath
+	}
+	owned, err := newRouteCheckProgram(program.checks, program.profile)
+	if err != nil {
+		return nil, errPrivatePath
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed || p.ctx.Err() != nil || !privateManagedLease(p.lease) || scope != p.scope || len(p.selectors) >= privateGroupLimit || p.selectors[group] != nil {
 		return nil, errPrivatePath
 	}
 	flowContext, cancelFlows := context.WithCancel(p.ctx)
-	s := &privatePathSelector{pool: p, scope: scope, group: group, checks: owned, checksHash: hex.EncodeToString(digest[:]),
+	s := &privatePathSelector{pool: p, scope: scope, group: group, checks: owned.checks, program: owned, checksHash: owned.hash,
 		flowEpoch: 1, flowContext: flowContext, cancelFlows: cancelFlows}
 	p.selectors[group] = s
 	return s, nil
@@ -121,6 +121,13 @@ func (s *privatePathSelector) probe(parent context.Context, candidate *privatePa
 
 // An internal fixture seam only. Runtime callers never supply custom roots.
 func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *privatePathCandidate, roots *x509.CertPool) (proof *privateSelectionProof, err error) {
+	if s.program != nil && s.program.profile != nil {
+		defer func() {
+			if err != nil && profileErrorReport(err) == nil {
+				err = &routeCheckProfileError{cause: err, report: s.program.profile.emptyReport()}
+			}
+		}()
+	}
 	if parent == nil || parent.Err() != nil || candidate == nil || candidate.pool != s.pool {
 		return nil, errPrivatePath
 	}
@@ -167,50 +174,94 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 			proof, err = nil, errPrivatePath
 		}
 	}()
-	for _, check := range s.checks {
-		// A normal timer may not advance while suspended. Check the aggregate
-		// BOOTTIME budget before every target, not only before publishing proof.
-		now := p.lease.clock()
-		if !privateAdaptiveWorkCurrent(ctx, p.lease.clock) || now < started || now-started >= 12_000 {
-			return nil, errPrivatePath
+	var profileReport *routeCheckPlanReport
+	if s.program.profile != nil {
+		current := func() bool {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			now, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started)
+			return fresh && now-started < s.program.profile.DeadlineMS
 		}
-		observation := &privateProbeDialObservation{}
-		checkContext := context.WithValue(ctx, privateProbeDialKey{}, observation)
-		code, complete := probeRouteWithClock(checkContext, func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
-			return candidate.dialTCP(s.scope, ctx, network, dst)
-		}, check, roots, p.lease.clock)
-		if !complete || code != "ok" || ctx.Err() != nil {
-			if complete && ctx.Err() == nil && (check.Method == "https_exit_country" && code == "exit_country_mismatch" ||
-				check.Method == "https_exit_ip" && code == "exit_ip_mismatch") {
-				p.mu.Lock()
-				_, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started)
-				if previous == candidate.entry && fresh {
-					s.withdrawLocked()
-				}
-				p.mu.Unlock()
-				if fresh {
-					return nil, errPrivateExitMismatch
-				}
+		evaluation := evaluateRouteCheckProfile(ctx, s.program.profile, p.lease.clock, current, func(checkContext context.Context, check routeCheck) routeCheckProbeResult {
+			observation := &privateProbeDialObservation{}
+			checkContext = context.WithValue(checkContext, privateProbeDialKey{}, observation)
+			code, complete := probeRouteWithClock(checkContext, func(dialContext context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
+				return candidate.dialTCP(s.scope, dialContext, network, dst)
+			}, check, roots, p.lease.clock)
+			return routeCheckProbeResult{code: code, complete: complete, witness: observation.observedFailure()}
+		})
+		profileReport = evaluation.report
+		if profileReport.Outcome != checkTrue {
+			p.mu.Lock()
+			completed, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started)
+			fresh = fresh && completed-started < s.program.profile.DeadlineMS
+			if fresh && evaluation.hardExit && profileReport.Outcome == checkFalse && previous == candidate.entry {
+				s.withdrawLocked()
 			}
-			if complete && ctx.Err() == nil && observation.observedFailure() && privateCheckedProbeCode(code) {
-				p.mu.Lock()
-				completed, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started)
-				p.mu.Unlock()
-				if fresh {
-					return nil, &privateCheckedFailure{code: code, completedBootMS: completed}
-				}
+			p.mu.Unlock()
+			if !fresh {
+				return nil, &routeCheckProfileError{cause: errPrivatePath, report: profileReport.unknown()}
 			}
-			return nil, errPrivatePath
+			if evaluation.hardExit && profileReport.Outcome == checkFalse {
+				return nil, &routeCheckProfileError{cause: errPrivateExitMismatch, report: profileReport}
+			}
+			if profileReport.Outcome == checkFalse && evaluation.witness >= 0 && privateCheckedProbeCode(evaluation.code) {
+				return nil, &privateCheckedFailure{code: evaluation.code, completedBootMS: completed, checkPlan: profileReport}
+			}
+			return nil, &routeCheckProfileError{cause: errPrivatePath, report: profileReport}
+		}
+	} else {
+		for _, check := range s.checks {
+			// A normal timer may not advance while suspended. Check the aggregate
+			// BOOTTIME budget before every target, not only before publishing proof.
+			now := p.lease.clock()
+			if !privateAdaptiveWorkCurrent(ctx, p.lease.clock) || now < started || now-started >= 12_000 {
+				return nil, errPrivatePath
+			}
+			observation := &privateProbeDialObservation{}
+			checkContext := context.WithValue(ctx, privateProbeDialKey{}, observation)
+			code, complete := probeRouteWithClock(checkContext, func(ctx context.Context, network string, dst M.Socksaddr) (net.Conn, error) {
+				return candidate.dialTCP(s.scope, ctx, network, dst)
+			}, check, roots, p.lease.clock)
+			if !complete || code != "ok" || ctx.Err() != nil {
+				if complete && ctx.Err() == nil && (check.Method == "https_exit_country" && code == "exit_country_mismatch" ||
+					check.Method == "https_exit_ip" && code == "exit_ip_mismatch") {
+					p.mu.Lock()
+					_, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started)
+					if previous == candidate.entry && fresh {
+						s.withdrawLocked()
+					}
+					p.mu.Unlock()
+					if fresh {
+						return nil, errPrivateExitMismatch
+					}
+				}
+				if complete && ctx.Err() == nil && observation.observedFailure() && privateCheckedProbeCode(code) {
+					p.mu.Lock()
+					completed, fresh := s.freshProbeLocked(ctx, candidate.entry, previous, epoch, started)
+					p.mu.Unlock()
+					if fresh {
+						return nil, &privateCheckedFailure{code: code, completedBootMS: completed}
+					}
+				}
+				return nil, errPrivatePath
+			}
 		}
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	e := candidate.entry
 	now, fresh := s.freshProbeLocked(ctx, e, previous, epoch, started)
+	if s.program.profile != nil && now-started >= s.program.profile.DeadlineMS {
+		fresh = false
+	}
 	if !fresh {
+		if profileReport != nil {
+			return nil, &routeCheckProfileError{cause: errPrivatePath, report: profileReport.unknown()}
+		}
 		return nil, errPrivatePath
 	}
-	proof = &privateSelectionProof{selector: s, entry: e, previous: previous, scope: s.scope, group: s.group, checksHash: s.checksHash, started: started, completed: now, flowEpoch: epoch}
+	proof = &privateSelectionProof{selector: s, entry: e, previous: previous, scope: s.scope, group: s.group, checksHash: s.checksHash, started: started, completed: now, flowEpoch: epoch, checkPlan: profileReport}
 	s.proof = proof
 	return proof, nil
 }

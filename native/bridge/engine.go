@@ -60,9 +60,16 @@ func NewRuntime(config, routeSelection string, fd int32, protector Protector, na
 	if err := guard.set(leaseDeadline); err != nil {
 		return nil, err
 	}
-	engineConfig, adaptiveInput, err := adaptiveRuntimeConfig(config, routeSelection)
+	profileConfig, approvedProfiles, err := routeProfileMetadata(config)
+	if err != nil || len(approvedProfiles) > 0 && leaseDeadline <= 0 {
+		return nil, errors.New("invalid managed route profiles")
+	}
+	engineConfig, adaptiveInput, err := adaptiveRuntimeConfig(string(profileConfig), routeSelection)
 	if err != nil || adaptiveInput != nil && leaseDeadline <= 0 {
 		return nil, errors.New("invalid managed route configuration")
+	}
+	if len(approvedProfiles) > 0 && adaptiveInput == nil && routeSelection != "" {
+		return nil, errors.New("profile selector ownership unsupported")
 	}
 	netbird.DiagnosticsAllowed = guard.allowed
 	installOverlayPlatform(protector)
@@ -138,8 +145,16 @@ func NewRuntime(config, routeSelection string, fd int32, protector Protector, na
 		}
 	}
 	legacySelection := routeSelection
+	managedTags := map[string]string{}
 	if adaptiveInput != nil {
 		legacySelection = ""
+		for group, tag := range adaptiveInput.wire.groups {
+			managedTags[tag] = group
+		}
+	}
+	if !routes.configureProfiles(approvedProfiles, managedTags) {
+		cleanup()
+		return nil, errors.New("invalid route profile ownership")
 	}
 	if !routes.configureSelection(legacySelection) {
 		cleanup()
@@ -160,7 +175,7 @@ func NewRuntime(config, routeSelection string, fd int32, protector Protector, na
 			_ = instance.Close()
 			return nil, errors.New("managed catalogue validation failed")
 		}
-		hub, err := newPrivateAdaptiveHub(catalogue, wire.graphRaw, adaptiveInput.plans, adaptiveInput.scope, adaptiveInput.mode, 128, guard)
+		hub, err := newPrivateAdaptiveHubWithPrograms(catalogue, wire.graphRaw, adaptiveInput.programs, adaptiveInput.scope, adaptiveInput.mode, 128, guard)
 		if err != nil {
 			cleanup()
 			_ = instance.Close()

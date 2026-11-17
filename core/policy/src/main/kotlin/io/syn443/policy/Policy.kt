@@ -123,12 +123,13 @@ object Policy {
     const val RESERVE_PROBE_COOLDOWN = "route.reserve-cooldown.v1"
     const val ROUTE_EXIT_IP = "route.exit-ip.v1"
     const val ROUTE_EXIT_COUNTRY = "route.exit-country.v1"
+    const val ROUTE_CHECK_PLAN = "route.check-plan.v2"
     const val ROUTE_DECISION = "route.decision.v1"
     const val ROUTE_ADAPTIVE_TCP = "route.adaptive-tcp.v1"
     const val BASELINE_ALGORITHM = "m1-local-v1"
     const val CONFIRMED_ALGORITHM = "m4-confirmed-v1"
     const val ADAPTIVE_ALGORITHM = "m4-graph-tcp-v1"
-    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1", RESERVE_PROBE_COOLDOWN, ROUTE_EXIT_IP, ROUTE_EXIT_COUNTRY, ROUTE_DECISION, ROUTE_ADAPTIVE_TCP)
+    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1", RESERVE_PROBE_COOLDOWN, ROUTE_EXIT_IP, ROUTE_EXIT_COUNTRY, ROUTE_DECISION, ROUTE_ADAPTIVE_TCP, ROUTE_CHECK_PLAN)
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     fun decode64(value: String): ByteArray {
         require(value.matches(Regex("[A-Za-z0-9_-]+")))
@@ -200,14 +201,12 @@ object Policy {
                 p.requiredCapabilities.containsAll(setOf("route.health.v1", "route.failover.v1")) &&
                 engineConfig?.get("route_failover") is JsonObject)
         }
-        val routeChecks = engineConfig?.get("route_checks") as? JsonArray
-        fun hasMethod(method: String) = routeChecks?.any { plan ->
-            ((plan as? JsonObject)?.get("checks") as? JsonArray)?.any { check ->
-                ((check as? JsonObject)?.get("method") as? JsonPrimitive)?.content == method
-            } == true
-        } == true
-        val hasExitCheck = hasMethod("https_exit_ip")
-        val hasCountryCheck = hasMethod("https_exit_country")
+        val routeChecks = RouteCheckProfiles.inspectEngine(engine)
+        val hasProfiles = routeChecks.profileCount > 0
+        require(hasProfiles == (ROUTE_CHECK_PLAN in p.requiredCapabilities))
+        if (hasProfiles) require(p.schemaVersion == 2 && p.operation == "configure" && "route.health.v1" in p.requiredCapabilities)
+        val hasExitCheck = routeChecks.hasMethod("https_exit_ip")
+        val hasCountryCheck = routeChecks.hasMethod("https_exit_country")
         require(hasExitCheck == (ROUTE_EXIT_IP in p.requiredCapabilities))
         require(hasCountryCheck == (ROUTE_EXIT_COUNTRY in p.requiredCapabilities))
         if (hasExitCheck || hasCountryCheck) require(p.schemaVersion == 2 && p.operation == "configure" && "route.health.v1" in p.requiredCapabilities)

@@ -30,9 +30,10 @@ type routeCheck struct {
 	ExpectedExitClass string `json:"expected_exit_class,omitempty"`
 }
 type routePlan struct {
-	ID       string       `json:"id"`
-	Outbound string       `json:"outbound"`
-	Checks   []routeCheck `json:"checks"`
+	ID       string             `json:"id"`
+	Outbound string             `json:"outbound"`
+	Checks   []routeCheck       `json:"checks"`
+	Profile  *routeCheckProfile `json:"profile,omitempty"`
 }
 type routeRequest struct {
 	Request string      `json:"request"`
@@ -52,6 +53,7 @@ type routeResult struct {
 	Path             []string `json:"path"`
 	outbound         string
 	selectionProof   bool
+	CheckPlan        *routeCheckPlanReport `json:"checkPlan,omitempty"`
 }
 type routeNode struct{ ID, Detour, Kind string }
 type routeReport struct {
@@ -72,6 +74,7 @@ type routeRunner struct {
 	selectors      map[string]map[string]bool // Membership of noninterrupting selectors.
 	selectionGroup string
 	selectionPlans map[string]routePlan // Immutable approved checks, indexed by concrete member.
+	profilePlans   map[string]routePlan // V2 metadata owned before SDK construction.
 	selectionUsed  bool
 	restore        map[string]string
 	limit          func() time.Duration
@@ -124,6 +127,11 @@ func (r *routeRunner) configureSelection(raw string) bool {
 	}
 	approved := make(map[string]routePlan, len(members))
 	for _, path := range selection.Paths {
+		// V2 selector failover needs a separately pinned selector generation.
+		// A changing selector can never assemble a profile from mixed paths.
+		if path.Profile != nil {
+			return false
+		}
 		if !members[path.Outbound] || path.ID != r.nodes[path.Outbound].ID || len(r.fixedPath(path.Outbound)) == 0 {
 			return false
 		}
@@ -200,6 +208,31 @@ func (r *routeRunner) fixedPath(tag string) []string {
 	return path
 }
 
+// V2 ordinary checks permit owned direct only as a terminal. Keep the legacy
+// selection-proof filter above unchanged; selectors/overlay are not pinned here.
+func (r *routeRunner) v2ConcretePath(tag string) []string {
+	path, seen := []string{}, map[string]bool{}
+	for tag != "" {
+		node, ok := r.nodes[tag]
+		if !ok || seen[tag] || len(path) == 4 {
+			return nil
+		}
+		switch node.Kind {
+		case "http", "socks", "vless", "ssh":
+		case "direct":
+			if node.Detour != "" {
+				return nil
+			}
+		default:
+			return nil
+		}
+		seen[tag] = true
+		path = append(path, node.ID)
+		tag = node.Detour
+	}
+	return path
+}
+
 func (r *routeRunner) selectVerified(request, checkID, group, previous, candidate string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -249,16 +282,15 @@ func validRouteRequest(q routeRequest) bool {
 	seen := map[string]bool{}
 	count := 0
 	for _, p := range q.Routes {
-		if len(p.ID) < 1 || len(p.ID) > 24 || seen[p.ID] || len(p.Outbound) < 1 || len(p.Outbound) > 256 || len(p.Checks) < 1 || len(p.Checks) > 4 {
+		if len(p.ID) < 1 || len(p.ID) > 24 || seen[p.ID] || len(p.Outbound) < 1 || len(p.Outbound) > 256 {
 			return false
 		}
 		seen[p.ID] = true
-		for _, c := range p.Checks {
-			count++
-			if !validRouteCheck(c) {
-				return false
-			}
+		program, err := newRouteCheckProgram(p.Checks, p.Profile)
+		if err != nil {
+			return false
 		}
+		count += program.count() // Every declared leaf, not only visited branches.
 	}
 	return count <= 64
 }
@@ -418,24 +450,34 @@ func (c *authorizedRouteConn) NeedHandshakeForWrite() bool { return N.NeedHandsh
 func (r *routeRunner) runPlan(ctx context.Context, p routePlan) (result routeResult) {
 	start := time.Now()
 	approved := r.selectionPlans[p.Outbound]
+	program, programErr := newRouteCheckProgram(p.Checks, p.Profile)
+	approvedProgram, _ := newRouteCheckProgram(approved.Checks, approved.Profile)
 	result = routeResult{ID: p.ID, Complete: true, OK: true, Code: "ok", outbound: p.Outbound,
-		selectionProof: p.ID == approved.ID && slices.Equal(p.Checks, approved.Checks)}
+		selectionProof: p.ID == approved.ID && program.equal(approvedProgram)}
+	profileStarted := bootMillis()
 	defer func() {
 		if recover() != nil {
 			result.OK = false
 			result.Complete = false
 			result.Code = "probe_unavailable"
+			result.CheckPlan = result.CheckPlan.unknown()
 		}
 		// CLOCK_BOOTTIME authorization remains decisive after suspend, even when a
 		// normal monotonic timer did not advance. Never publish an expired success.
-		if !routeBudgetCurrent(ctx) || !r.allowed() {
+		profileExpired := p.Profile != nil && (profileStarted < 0 || bootMillis() < profileStarted || bootMillis()-profileStarted >= p.Profile.DeadlineMS)
+		if !routeBudgetCurrent(ctx) || !r.allowed() || profileExpired {
 			result.OK = false
 			result.Complete = false
 			result.Code = "cancelled"
+			result.CheckPlan = result.CheckPlan.unknown()
 		}
 		result.ElapsedMS = time.Since(start).Milliseconds()
 		result.SampledElapsedMS = bootMillis()
 	}()
+	if programErr != nil {
+		result.OK, result.Complete, result.Code = false, false, "unsupported"
+		return
+	}
 	if !r.allowed() || !routeBudgetCurrent(ctx) {
 		result.OK = false
 		result.Complete = false
@@ -448,6 +490,44 @@ func (r *routeRunner) runPlan(ctx context.Context, p routePlan) (result routeRes
 		result.OK = false
 		result.Complete = false
 		result.Code = "outbound_unavailable"
+		return
+	}
+	if program.profile != nil {
+		bound := r.v2ConcretePath(p.Outbound)
+		result.CheckPlan = program.profile.emptyReport()
+		approved := r.profilePlans[p.Outbound]
+		approvedProgram, _ := newRouteCheckProgram(approved.Checks, approved.Profile)
+		if len(bound) == 0 || approved.ID != p.ID || !program.equal(approvedProgram) {
+			result.OK, result.Complete, result.Code = false, false, "unsupported"
+			return
+		}
+		current := func() bool {
+			now := bootMillis()
+			return now >= profileStarted && now-profileStarted < program.profile.DeadlineMS && r.ctx.Err() == nil && r.allowed() && routeBudgetCurrent(ctx) && slices.Equal(bound, r.v2ConcretePath(p.Outbound))
+		}
+		evaluation := evaluateRouteCheckProfile(ctx, program.profile, bootMillis, current, func(checkContext context.Context, check routeCheck) routeCheckProbeResult {
+			observation := &privateProbeDialObservation{}
+			checkContext = context.WithValue(checkContext, privateProbeDialKey{}, observation)
+			code, complete := probeRoute(checkContext, func(dialContext context.Context, network string, target M.Socksaddr) (net.Conn, error) {
+				if dialContext.Err() != nil || !current() {
+					return nil, errLeaseExpired
+				}
+				conn, err, _ := privateSafeTCPDial(outbound, dialContext, network, target)
+				if !current() {
+					if conn != nil {
+						_ = conn.Close()
+					}
+					return nil, errLeaseExpired
+				}
+				if conn == nil || err != nil {
+					return conn, err
+				}
+				return &authorizedRouteConn{Conn: conn, allowed: current}, nil
+			}, check)
+			return routeCheckProbeResult{code: code, complete: complete, witness: observation.observedFailure()}
+		})
+		result.CheckPlan, result.Code = evaluation.report, evaluation.code
+		result.OK, result.Complete = evaluation.report.Outcome == checkTrue, evaluation.complete()
 		return
 	}
 	dial := func(c context.Context, n string, a M.Socksaddr) (net.Conn, error) {

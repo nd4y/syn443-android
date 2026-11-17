@@ -43,6 +43,14 @@ import org.json.JSONObject
                 },Modifier.testTag("route-${i+1}-search"))
             }
             if(!row.getBoolean("configured"))Text("Профиль проверки не назначен; доступность не подтверждена")
+            row.optJSONObject("checkPlan")?.let {plan->
+                Text("План проверки ${plan.optString("id")}: "+checkPlanOutcomeLabel(plan.optString("outcome")),Modifier.testTag("route-${i+1}-check-plan"))
+                val leaves=plan.optJSONArray("leaves")
+                if(leaves!=null && leaves.length() in 1..4)for(n in 0 until leaves.length()) {
+                    val leaf=leaves.getJSONObject(n)
+                    Text("${n+1}/${leaves.length()} ${leaf.optString("id")}: "+checkPlanOutcomeLabel(leaf.optString("outcome")),Modifier.testTag("route-${i+1}-check-leaf-${n+1}"))
+                }
+            }
             if(row.getBoolean("required"))Text("Обязательный маршрут")
             when(row.optString("selectionState")) {
                 "quarantined"->Text("Временно исключён из выбора. Повторная проверка через ${(row.getLong("retryInMs")+999)/1000} с")
@@ -61,4 +69,10 @@ import org.json.JSONObject
         Text("Stop сохраняет выключенное намерение. Системный lockdown при этом может блокировать сеть.")
         Button(onClick={context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS))},modifier=Modifier.testTag("vpn-system-settings")){Text("Настройки VPN в Android")}
     }
+}
+internal fun checkPlanOutcomeLabel(value:String)=when(value) {
+    "TRUE"->"условие подтверждено"
+    "FALSE"->"условие не выполнено"
+    "SKIPPED"->"проверка не выполнялась"
+    else->"результат не определён"
 }

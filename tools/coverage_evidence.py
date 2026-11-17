@@ -24,6 +24,12 @@ IDENTITY_CLASSES = {'io.syn443.identity.' + name for name in (
     'InvitationProtocol', 'InvitationOperation', 'InvitationOperation.Companion', 'InvitationState', 'InvitationPending', 'ManagedOverlay', 'OverlayAddress', 'OverlayCredentials', 'OverlayCredentialBinding', 'OverlaySetupSecret', 'OverlayOperation', 'OverlayEnrollment', 'OverlayEnrollments', 'OverlayAssignments')}
 
 
+POLICY_CHECK_PLAN_CLASSES = {
+    'io.syn443.policy.RouteCheckProfile', 'io.syn443.policy.RouteCheckProfile.Companion',
+    'io.syn443.policy.RouteCheckProfiles', 'io.syn443.policy.RouteCheckProfiles.Inspection',
+}
+
+
 def verify_classes(path, required):
     found = set()
     for row in ET.parse(path).getroot().iter('class'):

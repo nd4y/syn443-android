@@ -12,6 +12,7 @@ import io.syn443.recovery.RouteObservation
 import io.syn443.recovery.RouteScope
 import io.syn443.recovery.RouteState
 import io.syn443.recovery.RouteActivation
+import io.syn443.policy.RouteCheckProfile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.Inet6Address
@@ -21,7 +22,8 @@ import java.util.UUID
 /** Controller RAM only. Labels/targets are never written to events or native output. */
 object RouteSnapshot {
     internal data class FailoverCommand(val receipt:String,val checkId:String,val group:String,val previous:String,val candidate:String)
-    private data class Row(val id: String,val tag: String,val type: String,val required: Boolean,val checks: JSONArray,val chain: List<String>,val rules: Int)
+    private data class Row(val id: String,val tag: String,val type: String,val required: Boolean,val checks: JSONArray,val profile: RouteCheckProfile?,val chain: List<String>,val rules: Int)
+    private fun Row.configured() = profile != null || checks.length() > 0
     private var rows = emptyList<Row>()
     private var observations = emptyMap<String,RouteObservation>()
     private var searchScope:RouteScope?=null
@@ -49,6 +51,7 @@ object RouteSnapshot {
     private val ipv4Literal=Regex("(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}")
     private val ipv6Literal=Regex("[0-9a-fA-F:.]{2,45}")
     private var measuredPaths=emptyMap<String,JSONArray>()
+    private var checkPlans=emptyMap<String,JSONObject>()
     private val codesAllowed=setOf("ok","outbound_unavailable","cancelled","dial_failed","unsupported","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","exit_evidence_invalid","exit_ip_mismatch","exit_country_mismatch","path_changed","check_timeout","probe_unavailable")
     private val completedProbeFailures=setOf("dial_failed","ssh_banner_mismatch","tls_failed","request_failed","response_failed","http_response_mismatch","check_timeout")
 
@@ -69,9 +72,10 @@ object RouteSnapshot {
         val seen=mutableSetOf<String>()
         for(i in 0 until settings.length()) {
             val item=settings.getJSONObject(i)
-            require(item.keys().asSequence().all {it in setOf("outbound","required","checks")})
+            require(item.keys().asSequence().all {it in setOf("outbound","required","checks","profile")})
             require(item.getString("outbound") in tags && seen.add(item.getString("outbound")))
             if(item.has("required")) require(item.get("required") is Boolean)
+            if(RouteCheckPlans.profile(item)!=null)continue
             val checks=item.getJSONArray("checks");require(checks.length() in 1..4)
             for(j in 0 until checks.length()) {
                 val check=checks.getJSONObject(j)
@@ -92,10 +96,12 @@ object RouteSnapshot {
                     target.all {it.code in 33..126} && '\\' !in target && '#' !in target && !uri.rawAuthority.endsWith(":"))
             }
         }
+        RouteCheckPlans.requireConcrete(config)
     }
     @Synchronized fun configure(raw:String?, hash:String) {
-        if(revision==hash && rows.isNotEmpty()) return
         val config=JSONObject(raw ?: """{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}""")
+        if(raw!=null && RouteCheckPlans.hasProfiles(config))io.syn443.policy.RouteCheckProfiles.inspectEngine(raw)
+        if(revision==hash && rows.isNotEmpty()) return
         validate(config)
         failover=ManagedFailoverPlan.read(config)
         val outbounds=config.getJSONArray("outbounds")
@@ -105,14 +111,15 @@ object RouteSnapshot {
         val route=config.optJSONObject("route");val rules=route?.optJSONArray("rules") ?: JSONArray()
         rows=(0 until outbounds.length()).map {i->
             val o=outbounds.getJSONObject(i);val tag=o.getString("tag");val p=byTag[tag]
-            val checks=p?.getJSONArray("checks") ?: JSONArray()
+            val profile=p?.let {RouteCheckPlans.profile(it)}
+            val checks=if(profile==null)p?.getJSONArray("checks") ?: JSONArray() else JSONArray()
             val seen=mutableSetOf<String>();val chain=mutableListOf<String>()
             var cursor:JSONObject?=o
             while(cursor!=null && seen.add(cursor.getString("tag")) && chain.size<8) {
                 chain+=checkNotNull(tags[cursor.getString("tag")])
                 val next=cursor.optString("detour");cursor=(0 until outbounds.length()).map {outbounds.getJSONObject(it)}.firstOrNull {it.optString("tag")==next}
             }
-            Row(checkNotNull(tags[tag]),tag,o.getString("type"),p?.optBoolean("required")==true,checks,chain,
+            Row(checkNotNull(tags[tag]),tag,o.getString("type"),p?.optBoolean("required")==true,checks,profile,chain,
                 (0 until rules.length()).count {rules.optJSONObject(it)?.optString("outbound")==tag} + if(route?.optString("final")==tag) 1 else 0)
         }
         revision=hash;invalidate()
@@ -121,16 +128,18 @@ object RouteSnapshot {
     @Synchronized internal fun nativeSelectionPlan(configHash: String): String {
         val plan = failover?.takeIf { revision == configHash } ?: return ""
         val paths = rows.filter { it.tag in plan.members }.map { row ->
-            JSONObject().put("id", row.id).put("outbound", row.tag).put("checks", row.checks)
+            RouteCheckPlans.wire(row.id,row.tag,row.checks,row.profile)
         }
-        return JSONObject().put("selector", plan.selector).put("paths", JSONArray(paths)).toString()
+        return JSONObject().put("selector", plan.selector).put("paths", JSONArray(paths)).toString().also {
+            require(it.toByteArray(Charsets.UTF_8).size<=32768)
+        }
     }
 
-    @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();searchScope=null;searches=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000;activationAttempt=null
+    @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();searchScope=null;searches=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();checkPlans=emptyMap();lastStarted=-60_000;activationAttempt=null
         completedReceipt="";failoverAdmission=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
-        return rows.any {it.checks.length()>0} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
+        return rows.any {it.configured()} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
     }
     @Synchronized fun owner(scope:RouteScope?){if(live!=scope){invalidate();live=scope}}
     /** Coordinator-prepared diagnostics only; never route evidence. */
@@ -143,7 +152,12 @@ object RouteSnapshot {
     }
 
     /** Called only after the bound native adaptive owner reports a real result. */
-    @Synchronized internal fun adaptive(scope:RouteScope,tag:String,ok:Boolean,code:String,latency:Long?,hops:List<String>) {
+    @Synchronized internal fun adaptiveDiagnostic(scope:RouteScope,tag:String,value:JSONObject?,expected:String):JSONObject? {
+        if(scope!=live)return null
+        val profile=rows.singleOrNull {it.tag==tag && it.type=="syn443-adaptive"}?.profile ?: return null
+        return RouteCheckPlans.projection(value,profile,expected)
+    }
+    @Synchronized internal fun adaptive(scope:RouteScope,tag:String,ok:Boolean,code:String,latency:Long?,hops:List<String>,checkPlan:JSONObject?=null) {
         if(scope!=live || code !in setOf("ok","probe_unavailable","exit_mismatch","check_failed"))return
         val row=rows.singleOrNull {it.tag==tag && it.type=="syn443-adaptive"} ?: return
         val now=SystemClock.elapsedRealtime()
@@ -151,6 +165,8 @@ object RouteSnapshot {
         codes=codes+(row.id to code)
         if(latency!=null && latency in 0..30_000)timings=timings+(row.id to latency)
         measuredPaths=measuredPaths+(row.id to JSONArray(hops.take(4)))
+        val projection=row.profile?.let {RouteCheckPlans.projection(checkPlan,it,if(ok)"TRUE" else if(code=="probe_unavailable")"UNKNOWN" else "FALSE")}
+        checkPlans=if(projection!=null)checkPlans+(row.id to projection) else checkPlans-row.id
     }
     @Synchronized fun prepareActivation(scope:RouteScope,startedElapsed:Long):Boolean {
         require(startedElapsed>=0)
@@ -170,7 +186,7 @@ object RouteSnapshot {
             row.getBoolean("required") to state
         })
     }
-    @Synchronized fun accepts(only:String?)=rows.any {(only==null || it.id==only) && it.checks.length()>0}
+    @Synchronized fun accepts(only:String?)=rows.any {(only==null || it.id==only) && it.configured()}
     @Synchronized fun view(status:JSONObject):JSONObject = read(status.optBoolean("desiredOn"),status.optBoolean("engineActive") && live!=null,
         live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch")))
     private fun failoverContext(scope:RouteScope, algorithm:FailoverAlgorithm) =
@@ -190,17 +206,20 @@ object RouteSnapshot {
         val omittedReserves = if (meteredMaintenance && only==null && live==scope &&
             !force && !firstValidated && !confirmingFailure) failover?.members.orEmpty() else emptyList()
         val selected=rows.filter {row->
-            (only==null || row.id==only) && row.checks.length()>0 &&
+            (only==null || row.id==only) && row.configured() &&
                 (row.required || row.tag !in omittedReserves &&
                     admission?.let {(algorithm, state)->state.deferReserveProbe(failoverContext(scope,algorithm),row.tag,now)}!=true)
         }
         if(selected.isEmpty())return null
+        val request=UUID.randomUUID().toString()
+        val wire=JSONObject().put("request",request).put("routes",JSONArray(selected.map {row->RouteCheckPlans.wire(row.id,row.tag,row.checks,row.profile)})).toString()
+        require(wire.toByteArray(Charsets.UTF_8).size<=32768)
         skippedMeteredReserves=omittedReserves.isNotEmpty()
         // Never stamp a previous observation with this new scope.
-        current=scope;pending=UUID.randomUUID().toString();startedAt=now;lastStarted=now;queued=selected.map {it.id}.toSet()
+        current=scope;pending=request;startedAt=now;lastStarted=now;queued=selected.map {it.id}.toSet()
         if(firstValidated)validatedBatch=scope
         completedReceipt="";batchSequence++
-        return JSONObject().put("request",pending).put("routes",JSONArray(selected.map {row->JSONObject().put("id",row.id).put("outbound",row.tag).put("checks",row.checks)})).toString()
+        return wire
     }
     @Synchronized fun update(scope:RouteScope,raw:String):Boolean {
         if(raw.length>16_384 || current!=scope || pending.isEmpty())return false
@@ -209,11 +228,13 @@ object RouteSnapshot {
         val running=value.getBoolean("running")
         val results=value.getJSONArray("results");require(results.length()<=queued.size)
         val now=SystemClock.elapsedRealtime();val seen=mutableSetOf<String>()
-        var nextObservations=observations;var nextCodes=codes;var nextTimings=timings;var nextReceipts=receipts;var nextPaths=measuredPaths
+        var nextObservations=observations;var nextCodes=codes;var nextTimings=timings;var nextReceipts=receipts;var nextPaths=measuredPaths;var nextPlans=checkPlans
         for(i in 0 until results.length()) {
             val r=results.getJSONObject(i);val id=r.getString("id");val code=r.getString("code")
             require(id in queued && seen.add(id) && code in codesAllowed && r.getLong("elapsedMs") in 0..35_000)
             val complete=r.getBoolean("complete");val ok=r.getBoolean("ok")
+            val profile=rows.single {it.id==id}.profile
+            val diagnostic=profile?.let {RouteCheckPlans.projection(r.optJSONObject("checkPlan"),it,if(ok)"TRUE" else if(complete)"FALSE" else "UNKNOWN")}
             val sampled=r.getLong("sampledElapsedMs");require(sampled in 0..now)
             require(!ok || (complete && code=="ok"))
             val path=r.optJSONArray("path") ?: JSONArray()
@@ -222,9 +243,10 @@ object RouteSnapshot {
             if(receipts[id]!=pending) {
                 nextObservations=nextObservations+(id to RouteObservation(scope,sampled,complete,ok));nextCodes=nextCodes+(id to code);nextTimings=nextTimings+(id to r.getLong("elapsedMs"));nextReceipts=nextReceipts+(id to pending)
                 nextPaths=nextPaths+(id to path)
+                nextPlans=if(diagnostic!=null)nextPlans+(id to diagnostic) else nextPlans-id
             }
         }
-        observations=nextObservations;codes=nextCodes;timings=nextTimings;receipts=nextReceipts;measuredPaths=nextPaths
+        observations=nextObservations;codes=nextCodes;timings=nextTimings;receipts=nextReceipts;measuredPaths=nextPaths;checkPlans=nextPlans
         if(!running) {
             for(id in queued-seen) {observations=observations+(id to RouteObservation(scope,now,false,false));codes=codes+(id to "cancelled")}
             completedReceipt=pending
@@ -293,12 +315,14 @@ object RouteSnapshot {
             val sample=observations[row.id]
             val state=if(scope==null) {if(on) RouteState.UNAVAILABLE else RouteState.OFF} else RouteEvidence.classify(on,ready,scope,sample,row.id in queued,now)
             JSONObject().put("id",row.id).put("label",row.tag.take(80)).put("type",row.type).put("required",row.required).put("state",state.name.lowercase(java.util.Locale.ROOT))
-                .put("configured",row.checks.length()>0).put("chain",JSONArray(row.chain)).put("routingRules",row.rules)
+                .put("configured",row.configured()).put("chain",JSONArray(row.chain)).put("routingRules",row.rules)
                 .put("measuredPath",if(sample?.scope==scope)measuredPaths[row.id] ?: JSONArray() else JSONArray())
                 .put("reason",if(sample?.scope==scope)codes[row.id] ?: "not_checked" else "not_checked")
                 .put("ageMs",if(sample!=null && sample.scope==scope && now>=sample.elapsedMs)now-sample.elapsedMs else JSONObject.NULL)
                 .put("latencyMs",if(sample?.scope==scope)timings[row.id] ?: JSONObject.NULL else JSONObject.NULL)
                 .also {value->
+                    row.profile?.let {profile->value.put("checkPlan",if(on && ready && scope!=null && scope==live && sample?.scope==scope && row.id !in queued && state in setOf(RouteState.WORKING,RouteState.FAILED,RouteState.INCOMPLETE))
+                        checkPlans[row.id]?.let {JSONObject(it.toString())} ?: RouteCheckPlans.unknown(profile) else RouteCheckPlans.unknown(profile))}
                     if(row.type=="syn443-adaptive") {
                         val search=if(!on || !ready || scope==null || scope!=live || searchScope!=scope)
                             AdaptiveSearchState.WAITING_CONTEXT else searches[row.id] ?: AdaptiveSearchState.WAITING_CONTEXT
