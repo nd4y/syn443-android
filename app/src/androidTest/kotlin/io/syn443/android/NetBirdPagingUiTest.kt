@@ -25,6 +25,19 @@ class NetBirdPagingUiTest {
         try { block() } finally { compose.mainClock.autoAdvance = original }
     }
 
+    private fun advanceRendering() {
+        repeat(3) { compose.mainClock.advanceTimeByFrame() }
+    }
+
+    private fun settleAcknowledgement(section: String) {
+        // The ACK effect changes state after composition; rendering that change
+        // needs another frame. This bound cannot consume the 8s request lease.
+        compose.mainClock.advanceTimeUntil(timeoutMillis = 256) {
+            compose.onAllNodesWithTag("netbird-$section-pending").fetchSemanticsNodes().isEmpty()
+        }
+        compose.waitForIdle()
+    }
+
     private fun SemanticsNodeInteraction.scrollWithAdvancingClock(): SemanticsNodeInteraction {
         val original = compose.mainClock.autoAdvance
         val before = compose.mainClock.currentTime
@@ -70,7 +83,7 @@ class NetBirdPagingUiTest {
         compose.onNodeWithTag("netbird-peers-next").scrollWithAdvancingClock().assertIsEnabled()
         compose.mainClock.autoAdvance = false
         compose.onNodeWithTag("netbird-peers-next").performClick()
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         compose.onNodeWithTag("netbird-peers-pending").assertExists()
         lateinit var retiredRequest: String
         compose.runOnIdle {
@@ -79,7 +92,7 @@ class NetBirdPagingUiTest {
                 it.getJSONObject("peer_state").put("connection_unknown", true)
             } // A replacement owner has no echo of the prior outstanding UUID.
         }
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         compose.onNodeWithTag("netbird-connection").assertTextEquals("Cloud: н/д; signal: н/д")
         compose.onNodeWithTag("netbird-diagnose").assertIsNotEnabled()
         compose.onNodeWithTag("netbird-peers-pending").assertExists()
@@ -88,15 +101,15 @@ class NetBirdPagingUiTest {
                 it.getJSONObject("peer_state").put("connection_unknown", false)
             } // A new SDK sample still has no prior request echo.
         }
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         compose.onNodeWithTag("netbird-peers-pending").assertExists()
         compose.mainClock.advanceTimeBy(8_100)
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         compose.onNodeWithTag("netbird-peers-timeout").assertExists()
         compose.onNodeWithTag("netbird-peers-next").assertIsEnabled()
         compose.runOnIdle { assertEquals(2, commands.size) }
         compose.onNodeWithTag("netbird-peers-next").performClick()
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         lateinit var fresh: String
         compose.runOnIdle {
             assertEquals(3, commands.size)
@@ -104,14 +117,14 @@ class NetBirdPagingUiTest {
             assertNotEquals(retiredRequest, fresh)
             value.value = NetBirdReportFixture.overlay(peerPage = 1, peerRequest = retiredRequest)
         }
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         compose.onNodeWithTag("netbird-peers-pending").assertExists()
         compose.runOnIdle {
             value.value = NetBirdReportFixture.overlay(peerPage = 1, peerRequest = fresh).also {
                 it.getJSONObject("peer_state").put("connection_unknown", false)
             }
         }
-        compose.mainClock.advanceTimeByFrame()
+        settleAcknowledgement("peers")
         compose.onNodeWithTag("netbird-peers-pending").assertDoesNotExist()
         compose.runOnIdle { assertEquals(3, commands.size) }
     }
@@ -128,9 +141,9 @@ class NetBirdPagingUiTest {
         compose.onNodeWithTag("netbird-result-16").assertDoesNotExist()
         compose.onNodeWithTag("netbird-peers-prev").assertIsNotEnabled()
         compose.onNodeWithTag("netbird-peers-next").scrollWithAdvancingClock().performClick()
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         compose.onNodeWithTag("netbird-diagnostics-next").scrollWithAdvancingClock().assertIsEnabled().performClick()
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         compose.onNodeWithTag("netbird-peers-next").assertIsNotEnabled()
         compose.onNodeWithTag("netbird-diagnostics-next").assertIsNotEnabled()
         lateinit var peer: String
@@ -145,14 +158,14 @@ class NetBirdPagingUiTest {
             value.value = NetBirdReportFixture.overlay(total = 1024, peerPage = 1, diagnosticPage = 1,
                 peerRequest = peer, diagnosticRequest = "unrelated")
         }
-        compose.mainClock.advanceTimeByFrame()
+        settleAcknowledgement("peers")
         compose.onNodeWithTag("netbird-peers-prev").assertIsEnabled()
         compose.onNodeWithTag("netbird-diagnostics-next").assertIsNotEnabled()
         compose.runOnIdle {
             value.value = NetBirdReportFixture.overlay(total = 1024, peerPage = 63, diagnosticPage = 63,
                 diagnosticRequest = diagnostic)
         }
-        compose.mainClock.advanceTimeByFrame()
+        settleAcknowledgement("diagnostics")
         compose.onNodeWithTag("netbird-peers-next").assertIsNotEnabled()
         compose.onNodeWithTag("netbird-diagnostics-next").assertIsNotEnabled()
         compose.onNodeWithTag("netbird-peers-prev").assertIsEnabled()
@@ -160,14 +173,14 @@ class NetBirdPagingUiTest {
         compose.onNodeWithTag("netbird-peer-0").assertTextContains("synthetic-1008.example.invalid", substring = true)
         compose.onNodeWithTag("netbird-result-0").assertTextContains("synthetic-1008.example.invalid", substring = true)
         compose.onNodeWithTag("netbird-diagnose").scrollWithAdvancingClock().performClick()
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         compose.onNodeWithTag("netbird-refresh").scrollWithAdvancingClock().performClick()
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         compose.runOnIdle {
             assertEquals(listOf("netbird-view", "netbird-view", "netbird-diagnose", "status"), commands.map { it.first })
             value.value = JSONObject().put("active", "true").put("peer_state", JSONObject().put("active", "true"))
         }
-        compose.mainClock.advanceTimeByFrame()
+        advanceRendering()
         compose.onNodeWithTag("netbird-diagnose").assertIsNotEnabled()
         compose.onNodeWithTag("netbird-connection").assertTextEquals("Cloud: н/д; signal: н/д")
         compose.onNodeWithTag("netbird-transport").assertTextEquals("Способ подключения: неизвестно")

@@ -79,6 +79,16 @@ instrumentation deadline fails the harness before external scenarios; it does
 not claim that interruption stops JNI. Disposable-emulator cleanup follows.
 These markers are diagnostics and cannot satisfy any passing-outcome gate.
 
+The following run44153507385 completed instrumentation instead of hanging;
+API29 exposed two paging assertions that read semantics after only one paused
+clock frame. A matching response clears pending through a LaunchedEffect and
+needs a following recomposition. The test now waits at most256ms of virtual
+time for each matching acknowledgement, retaining its existing assertions.
+Unrelated and retired responses receive three frames before their negative
+assertions, so a delayed erroneous clear cannot hide behind the first frame.
+The explicit8.1second timeout and command-count checks remain. This is a
+test-clock propagation correction, not evidence of a production paging bug.
+
 Exact source Actions must retain all prior JVM, Android, native ordinary/race,
 coverage, contract, ABI, artifact and privacy gates and execute the new bounded
 projection, parser, ownership and UI cases. Source CI, protected merge/main CI,
