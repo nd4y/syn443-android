@@ -3,7 +3,7 @@ import ast
 import re
 import tempfile
 import unittest
-from coverage_evidence import IDENTITY_CLASSES, POLICY_CHECK_PLAN_CLASSES, verify_classes
+from coverage_evidence import ADAPTIVE_BUDGET_CLASSES, IDENTITY_CLASSES, POLICY_CHECK_PLAN_CLASSES, verify_classes
 
 
 class CoverageEvidenceTest(unittest.TestCase):
@@ -157,7 +157,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         })
         for mode, count, floor, folder in [
             ('identity', 57, 249, 'core/identity/src/test/kotlin/io/syn443/identity'),
-            ('emulator', 65, 446, 'app/src/androidTest/kotlin/io/syn443/android'),
+            ('emulator', 65, 464, 'app/src/androidTest/kotlin/io/syn443/android'),
         ]:
             self.assertEqual(count, len(required[mode]))
             self.assertEqual(expected[mode], set(required[mode]))
@@ -207,7 +207,7 @@ class CoverageEvidenceTest(unittest.TestCase):
                 'AdminOperationReconcileTest': 18, 'AdminOperationProtocolTest': 7, 'AdminOperationHttpTest': 3,
                 'AdminOperationVersionTest': 6, 'AdminOperationGoConformanceTest': 6, 'AdminEditorAuthorityTest': 6,
                 'BoundedHttpCancellationRaceTest': 3}),
-            ('emulator', 29, 446, 'app/src/androidTest/kotlin/io/syn443/android', {
+            ('emulator', 29, 464, 'app/src/androidTest/kotlin/io/syn443/android', {
                 'AdminPublishDispatchDeadlineTest': 3, 'AdminOperationCoordinatorTest': 10, 'AdminOperationUiTest': 5,
                 'AdminOperationWireTest': 3, 'AdminOperationRouteTest': 3, 'AdminEditorOwnerMigrationTest': 5}),
         ]:
@@ -244,7 +244,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual(10, len(required))
         self.assertEqual(10, len(set(required)))
         self.assertEqual(expected, set(required))
-        self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=446\n')
+        self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=464\n')
         self.assertRegex(source, r'elif mode=="identity":\n(?:    [^\n]*\n)*?    minimum=249\n')
 
     def test_check_plan_roots_are_source_bound_and_every_missing_or_foreign_outcome_fails(self):
@@ -262,7 +262,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         admission = compile(ast.fix_missing_locations(ast.Module(body=guard.body[:3], type_ignores=[])), '<check-plan-admission>', 'exec')
         for mode, floor, folder, classes in [
             ('policy', 31, 'core/policy/src/test/kotlin/io/syn443/policy', {'RouteCheckProfileTest': 8, 'RouteCheckPlanPolicyTest': 3}),
-            ('emulator', 446, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 9}),
+            ('emulator', 464, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 9}),
         ]:
             expected = set()
             for classname, count in classes.items():
@@ -314,3 +314,116 @@ class CoverageEvidenceTest(unittest.TestCase):
                  isinstance(node.args[-1], ast.Name) and node.args[-1].id == 'POLICY_CHECK_PLAN_CLASSES']
         self.assertEqual(1, len(calls))
         self.assertIn('core/policy/build/reports/jacoco/test/jacocoTestReport.xml', ast.unparse(calls[0]))
+
+
+    def test_durable_budget_roots_require_every_unique_actual_name_and_exact_source_inventory(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / 'tools/check_test_evidence.py').read_text(encoding='utf-8')
+        tree = ast.parse(source)
+        declaration, = [node for node in tree.body if isinstance(node, ast.Assign) and
+                        any(isinstance(target, ast.Name) and target.id == 'DURABLE_BUDGET_REQUIRED' for target in node.targets)]
+        required = ast.literal_eval(declaration.value)
+        self.assertEqual({'jvm', 'emulator'}, set(required))
+        guard, = [node for node in tree.body if isinstance(node, ast.If) and
+                  isinstance(node.test, ast.Compare) and any(isinstance(value, ast.Name) and value.id == 'DURABLE_BUDGET_REQUIRED'
+                                                           for value in node.test.comparators)]
+        # Run the actual checker fragments in Actions, including its unchanged
+        # global duplicate-outcome guard and both Android source owners.
+        unique, = [node for node in tree.body if isinstance(node, ast.Assert) and
+                   isinstance(node.msg, ast.Constant) and node.msg.value == 'Duplicate actual test outcomes']
+        uniqueness = compile(ast.fix_missing_locations(ast.Module(body=[unique], type_ignores=[])), '<actual-unique>', 'exec')
+        admission = compile(ast.fix_missing_locations(ast.Module(body=guard.body[:3], type_ignores=[])), '<durable-admission>', 'exec')
+        complete = compile(ast.fix_missing_locations(ast.Module(body=guard.body, type_ignores=[])), '<durable-source>', 'exec')
+        for mode, floor, folder, classes in [
+            ('jvm', 15, 'core/decision/src/test/kotlin/io/syn443/decision', {'io.syn443.decision.AdaptiveProbeCheckpointTest': 7}),
+            ('emulator', 464, 'app/src/androidTest/kotlin/io/syn443/android', {
+                'io.syn443.android.AdaptiveProbeStoreTest': 10, 'io.syn443.android.AdaptiveAdmissionCoordinatorTest': 8}),
+        ]:
+            originals = {}
+            expected = set()
+            for owner, count in classes.items():
+                path = root / folder / (owner.rsplit('.', 1)[1] + '.kt')
+                original = path.read_text(encoding='utf-8')
+                methods = re.findall(r'@Test\s+fun\s+(\w+)', original)
+                self.assertEqual(count, len(methods)); self.assertEqual(count, len(set(methods)))
+                expected.update((owner, name) for name in methods)
+                originals[owner] = (path.name, original, methods)
+            self.assertEqual(expected, set(required[mode])); self.assertEqual(sum(classes.values()), len(required[mode]))
+            self.assertRegex(source, rf'(?:if|elif) mode=="{mode}":\n(?:    [^\n]*\n)*?    minimum={floor}\n')
+            def check(identities, table=required):
+                exec(admission, {'DURABLE_BUDGET_REQUIRED': table, 'mode': mode, 'identities': identities})
+            check(expected)
+            exec(uniqueness, {'identities': list(expected)})
+            with self.assertRaises(AssertionError):
+                exec(uniqueness, {'identities': list(expected) + [required[mode][0]]})
+            for missing in expected:
+                with self.assertRaises(AssertionError):
+                    check(expected - {missing})
+                with self.assertRaises(AssertionError):
+                    check(expected - {missing} | {('foreign.' + missing[0], missing[1])})
+            with self.assertRaises(AssertionError):
+                check(set())
+            duplicated = dict(required); duplicated[mode] = required[mode] + [required[mode][0]]
+            with self.assertRaises(AssertionError):
+                check(expected, duplicated)
+            with tempfile.TemporaryDirectory() as directory:
+                fixture_root = Path(directory)
+                for filename, original, _ in originals.values():
+                    fixture = fixture_root / folder / filename
+                    fixture.parent.mkdir(parents=True, exist_ok=True)
+                    fixture.write_text(original, encoding='utf-8')
+                scope = {'DURABLE_BUDGET_REQUIRED': required, 'mode': mode, 'identities': expected, 'root': fixture_root, 're': re}
+                exec(complete, scope.copy())
+                for filename, original, methods in originals.values():
+                    fixture = fixture_root / folder / filename
+                    dropped = re.sub(r'@Test\s+(?=fun\s+' + re.escape(methods[0]) + r'\b)', '', original, count=1)
+                    self.assertNotEqual(original, dropped)
+                    for changed in (original.replace(methods[0], 'changedSyntheticName'),
+                                    original.replace(methods[0], methods[1]), dropped,
+                                    original + '\n@Test fun unexpectedSyntheticRoot() {}\n'):
+                        fixture.write_text(changed, encoding='utf-8')
+                        with self.assertRaises(AssertionError):
+                            exec(complete, scope.copy())
+                    fixture.unlink()
+                    with self.assertRaises(FileNotFoundError):
+                        exec(complete, scope.copy())
+                    fixture.write_text(original, encoding='utf-8')
+        self.assertRegex(source, r'elif mode=="policy":\n(?:    [^\n]*\n)*?    minimum=31\n')
+        self.assertRegex(source, r'elif mode=="identity":\n(?:    [^\n]*\n)*?    minimum=249\n')
+        collector = ast.parse((root / 'tools/collect_public_emulator.py').read_text(encoding='utf-8'))
+        declaration, = [node for node in collector.body if isinstance(node, ast.Assign) and
+                        any(isinstance(target, ast.Name) and target.id == 'CLASS' for target in node.targets)]
+        pattern = re.compile(ast.literal_eval(declaration.value.args[0]))
+        for name in ('AdaptiveProbeStoreTest', 'AdaptiveAdmissionCoordinatorTest'):
+            self.assertIsNotNone(pattern.fullmatch('io.syn443.android.' + name))
+            self.assertIsNone(pattern.fullmatch('foreign.' + name))
+
+    def test_durable_budget_four_decision_classes_need_complete_nonempty_ninety_percent_evidence(self):
+        expected = {'io.syn443.decision.AdaptiveProbeBudget', 'io.syn443.decision.AdaptiveProbeBudget.Companion',
+                    'io.syn443.decision.AdaptiveProbeBudget.Checkpoint', 'io.syn443.decision.AdaptiveProbeBudget.Entry'}
+        self.assertEqual(expected, ADAPTIVE_BUDGET_CLASSES)
+        self.assertFalse(expected & (IDENTITY_CLASSES | POLICY_CHECK_PLAN_CLASSES))
+        def row(name, covered=9, missed=1, counter=True):
+            vm = name.replace('io.syn443.decision.', 'io/syn443/decision/')
+            for nested in ('Companion', 'Checkpoint', 'Entry'):
+                vm = vm.replace('.' + nested, '$' + nested)
+            body = f'<counter type="LINE" covered="{covered}" missed="{missed}"/>' if counter else ''
+            return f'<class name="{vm}">{body}</class>'
+        names = sorted(expected)
+        rows = [row(name) for name in names]
+        verify_classes(self.report('<report>' + ''.join(rows) + '</report>'), expected)
+        for changed in names:
+            for replacement in ('', row(changed, counter=False), row(changed, 8, 2), row(changed, 0, 0),
+                                row(changed, -1, 10), row('foreign.' + changed)):
+                contents = ''.join(replacement if name == changed else row(name) for name in names)
+                with self.assertRaises(AssertionError):
+                    verify_classes(self.report('<report>' + contents + '</report>'), expected)
+        for contents in (rows + [rows[0]], [value.replace('</class>', '<counter type="LINE" covered="9" missed="1"/></class>') for value in rows]):
+            with self.assertRaises(AssertionError):
+                verify_classes(self.report('<report>' + ''.join(contents) + '</report>'), expected)
+        tree = ast.parse((Path(__file__).resolve().parent / 'check_test_evidence.py').read_text(encoding='utf-8'))
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and
+                 isinstance(node.func, ast.Name) and node.func.id == 'verify_classes' and node.args and
+                 isinstance(node.args[-1], ast.Name) and node.args[-1].id == 'ADAPTIVE_BUDGET_CLASSES']
+        self.assertEqual(1, len(calls))
+        self.assertIn('core/decision/build/reports/jacoco/test/jacocoTestReport.xml', ast.unparse(calls[0]))

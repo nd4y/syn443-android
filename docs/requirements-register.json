@@ -61,8 +61,13 @@
     {
       "id": "ARC-06",
       "text": "Единый admission controller на устройстве обслуживает recovery, обязательное подтверждение активного пути, явную диагностику, исследование резервов и telemetry в таком порядке. Он учитывает общие sockets/bytes/CPU-time/queue budgets и conservative handshake/redirect/retry overhead. Low-priority jobs могут быть отложены/отменены; critical recovery использует общий reserve, не отдельный лимит каждого компонента. UI cancel подтверждается не позднее2секунд, native stop - bounded lifecycle, а не UI wait.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/durable-adaptive-budget.md",
+        "docs/implementation-status.md#evidence-index-and-register-semantics"
+      ],
+      "implementationScope": "The accepted controller RAM start ledger and the current durable-adaptive source candidate retain fixed start ceilings and a recovery reserve. The new source adds owned relative-age checkpoints, asynchronous sync/readback before handoff and current controller/host deadline fences; its new Actions and physical gates are separate.",
+      "remainingScope": "The common socket/byte/CPU/queue governor across ordinary health, activation, diagnostics, telemetry and SDK work is not implemented. Actual energy and physical managed-chain acceptance remain open."
     },
     {
       "id": "ARC-07",
@@ -913,8 +918,13 @@
     {
       "id": "AUTO-07",
       "text": "Неисправный кандидат временно исключается circuit breaker по BAD-01-10. Повторы управления используют ограниченный экспоненциальный backoff/jitter с базовой задержкой от1 до60секунд и не отменяют cooldown конкретного пути. Тяжёлое восстановление ограничено тремя попытками за10минут в общем скользящем окне. После лимита клиент сохраняет исправные пути, намерение и допустимое последующее восстановление по REC-02, показывает причину/время допуска; бесконечного частого цикла перезапуска всего VPN нет. Предел60секунд не обходит NoNetwork, Doze, cooldown, общий budget и ограничения ОС.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/durable-adaptive-budget.md",
+        "docs/implementation-status.md#evidence-index-and-register-semantics"
+      ],
+      "implementationScope": "Durable desired intent and bounded native restart admission have accepted USB/Wi-Fi recovery evidence. The current adaptive-ledger source candidate prevents process/context/force/reboot debt resets and local stale handoffs; it does not replace path-specific cooldown.",
+      "remainingScope": "A unified cross-subsystem recovery reserve, complete persistent quarantine/backoff context and the full four-mode fault matrix remain open. New durable-adaptive execution evidence is tracked separately."
     },
     {
       "id": "AUTO-08",
@@ -1026,11 +1036,12 @@
         "docs/m1-vpn.md",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/non-lte-acceptance-20261115.md",
-        "docs/chat-acceptance-20261115.md"
+        "docs/chat-acceptance-20261115.md",
+        "docs/durable-adaptive-budget.md"
       ],
       "text": "До реализации поставляются версия transition table и нормативный recovery-policy contract: типы transient/permanent/user-action ошибок, параметры bounded backoff/jitter, floor при network flapping, окно устойчивого успеха, общие rolling budgets, retry eligibility и минимальная recovery scope. Монотонные времена действуют внутри boot; после reboot/clock jump/повреждённого checkpoint применяется ограниченная консервативная реконструкция, не мгновенный массовый retry и не бесконечное откладывание. Неограниченный polling, постоянный wakelock и обход Doze не являются реализацией одной кнопки. Все команды/таймеры/эффекты fenced по intentGeneration и контексту ARC-03; перед эффектом актуальность проверяется вновь. Детерминированные simulator/model/trace fixtures с управляемыми clock/jitter/fault injection и воспроизводимые Android-тесты входят в GitHub Actions при реализации; AC82-AC90 обязательны в M1, реальные Wi-Fi/LTE/restricted LTE, Doze и поведение ОС отдельно подтверждаются на Pixel. Новая декларативная policy не может отключить локальные hard limits/Stop или добавить удалённый исполняемый код.",
-      "implementationScope": " The dated2026-11-15 checkpoint records exact accepted source, CI and physical/live scope; statuses remain partial.",
-      "remainingScope": " Full normative clauses and excluded physical/operational gates remain required."
+      "implementationScope": "Existing durable intent/backoff and the dated USB/Wi-Fi recovery checkpoints remain accepted only for their recorded scope. The new adaptive source uses closed boot/relative-age checkpoints, conservative reconstruction, durable reservation/clock seals, one storage actor and context/lease/host handoff fences.",
+      "remainingScope": "Full normative transition/reference-policy conformance, common scheduling, activated managed chains, LTE/restricted LTE, natural Doze, unplugged energy and endurance acceptance remain open."
     },
     {
       "id": "ALG-01",
@@ -1580,10 +1591,11 @@
       "text": "Действуют бюджеты планировщика, дедупликация совпадающих проверок и ограничение параллелизма. Размер HTTP тела, regex/JSON predicates, число этапов, redirect count и CPU evaluator ограничены; нет загрузки/исполнения скриптов или произвольного кода из проверки. Приватные targets разрешаются явным назначением, а не фоновым сканом всей LAN.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/durable-adaptive-budget.md"
       ],
-      "implementationScope": "Per-outbound TCP/SSH/TLS/HTTPS all-of profiles and bounded scoped status/check/cancel.",
-      "remainingScope": "Full traffic-rule plans, any/quorum/stages, exit attribution and profile editor."
+      "implementationScope": "Bounded legacy checks and the accepted four-leaf all/any/quorum/sequential v2 source preserve local cost/deadline/worker limits. The current durable-adaptive source candidate adds persistent start debt and asynchronous storage admission without route authority or a negative proxy verdict.",
+      "remainingScope": "Reusable traffic-rule profiles/editor, parallel/conditional/fallback execution, broader predicates, shared cross-subsystem resource accounting and approved physical managed-profile acceptance remain open."
     },
     {
       "id": "CHK-12",
@@ -3360,8 +3372,8 @@
   "evidenceSnapshot": {
     "date": "2026-11-17",
     "inventory": "docs/implementation-status.md",
-    "androidSource": "69ca262301bf08490e816a782881bb10cda613a6",
-    "controlPlaneSource": "63067b67e5c13ed74109b0ea855b7e77bfb7530c",
-    "scope": "Accepted component source checkpoints remain distinct from full-product and physical acceptance. Current v89 comparison/local-rebase source requires200 identity and398 per-API emulator outcomes; new Actions and live integration remain pending. Accepted CP57 richer projection artifact provenance is recorded in docs/native-layered-editor.md; prior accepted source hashes are retained here."
+    "androidSource": "5d5fc52577b4a9ac87bcec650b352515ff68d276",
+    "controlPlaneSource": "f7f610ba9bf9bd55066d0df2bc772048312bf39f",
+    "scope": "Accepted bounded check-profile sources are distinct from whole-product and managed-device rollout. Android source Actions 44062289165 confirms 509 JVM outcomes, 446 per API 29/35/37 and 504 native outcomes in each ordinary/race stream; protected main 01002b9 passed replacement scheduled Actions 44071449067 after a cancelled push. CP64 source and protected main have separate accepted evidence. The following app93 durable-adaptive source candidate requires its own new Actions/main/phone acceptance; full common scheduling, native administrator SSO, actual managed profiles and excluded physical gates remain open."
   }
 }

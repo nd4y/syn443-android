@@ -4,10 +4,10 @@ root=Path(__file__).resolve().parent.parent
 mode=sys.argv[1]
 if mode=="jvm":
     paths=list((root/"core/decision/build/test-results/test").glob("TEST-*.xml"))
-    minimum=8
+    minimum=15
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=446
+    minimum=464
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -776,3 +776,68 @@ if mode in CHECK_PLAN_REQUIRED:
 if mode == "policy":
     from coverage_evidence import POLICY_CHECK_PLAN_CLASSES, verify_classes
     verify_classes(root/"core/policy/build/reports/jacoco/test/jacocoTestReport.xml", POLICY_CHECK_PLAN_CLASSES)
+
+
+DURABLE_BUDGET_REQUIRED = {'jvm': [('io.syn443.decision.AdaptiveProbeCheckpointTest',
+          'checkpointOwnsEntriesAndExportDoesNotObserveSpendOrExposeHistory'),
+         ('io.syn443.decision.AdaptiveProbeCheckpointTest',
+          'sameBootRestorationExpiresOnlyActualElapsedDebtAtExactBoundaries'),
+         ('io.syn443.decision.AdaptiveProbeCheckpointTest',
+          'newBootRetainsSpacingMinuteHourAndRoutineRecoveryReserves'),
+         ('io.syn443.decision.AdaptiveProbeCheckpointTest',
+          'onlyANewValidBootClearsClockSealWithoutClearingSavedStarts'),
+         ('io.syn443.decision.AdaptiveProbeCheckpointTest',
+          'malformedCheckpointsRejectImpossibleCountsAgesOrderingAndTime'),
+         ('io.syn443.decision.AdaptiveProbeCheckpointTest',
+          'sequentialProcessAndRebootCheckpointsNeverReplenishAdmissionDebt'),
+         ('io.syn443.decision.AdaptiveProbeCheckpointTest',
+          'reservedLatestHandoffPreservesActualSpacingAcrossDelayProcessAndBoot')],
+ 'emulator': [('io.syn443.android.AdaptiveProbeStoreTest',
+               'firstLoadAndAdmissionAreDurableBeforeOneBoundedMainCallback'),
+              ('io.syn443.android.AdaptiveProbeStoreTest',
+               'sameBootReopenKeepsSpacingMinuteAndHourDebtAndNewBootCarriesAges'),
+              ('io.syn443.android.AdaptiveProbeStoreTest',
+               'sameBootRollbackPersistsClockSealAndRebootPreservesReservedDebt'),
+              ('io.syn443.android.AdaptiveProbeStoreTest',
+               'malformedMissingPartialAndOversizeExistingStateNeverResetAnOwner'),
+              ('io.syn443.android.AdaptiveProbeStoreTest',
+               'syncDirectoryAndExactReadbackFailuresGrantNothingAndNeverRefundLiveDebt'),
+              ('io.syn443.android.AdaptiveProbeStoreTest',
+               'blockedSyncRetainsOneActualOwnerAndExpiredHandoffCannotDispatch'),
+              ('io.syn443.android.AdaptiveProbeStoreTest',
+               'copiedPreviewAndStaleCallerSamplesCannotSealOrReplenishTheWorker'),
+              ('io.syn443.android.AdaptiveProbeStoreTest',
+               'competingActorsCannotReplaceTheLifetimeFileOwnerOrEraseAnInterruptedStore'),
+              ('io.syn443.android.AdaptiveProbeStoreTest',
+               'mainAndBinderEntryOnlyScheduleWorkerIoAndLateMainDeliveryKeepsItsOriginalFence'),
+              ('io.syn443.android.AdaptiveProbeStoreTest',
+               'ordinaryDenialsDoNotWriteAndAFailedClockSealNeverBecomesAProxyFailureOrFreshBudget'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'asyncGrantNeedsMatchingNativeSelectionBeforeReadiness'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'busyDeniedAndLateGrantsLeaveCandidateEligibleWithoutCommands'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'networkPolicyAndOwnerRebindsRejectDelayedAdmission'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'nativeEpochScopeAndReadinessChangesRejectDelayedAdmission'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'originalAndCurrentLeaseDeadlinesFenceWaitingGrant'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'externalAuthorityFenceRejectsCompletionWithoutStrandingNextAttempt'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'deniedHalfOpenAdmissionDoesNotAcquireRetryOwnership'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'sixteenGroupsRetainFairProgressRoutineReserveAndHourlyDebtAcrossRebind')]}
+if mode in DURABLE_BUDGET_REQUIRED:
+    required = set(DURABLE_BUDGET_REQUIRED[mode])
+    assert len(required) == len(DURABLE_BUDGET_REQUIRED[mode]) == (7 if mode == "jvm" else 18), "Duplicate durable budget requirement"
+    assert required <= set(identities), "Missing exact durable adaptive budget checkpoint or storage outcomes"
+    for classname in {classname for classname, _ in required}:
+        folder = "core/decision/src/test/kotlin/io/syn443/decision" if mode == "jvm" else "app/src/androidTest/kotlin/io/syn443/android"
+        source = (root / folder / (classname.rsplit(".", 1)[1] + ".kt")).read_text(encoding="utf-8")
+        methods = re.findall(r"@Test\s+fun\s+(\w+)", source)
+        expected = {name for owner, name in required if owner == classname}
+        assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "Durable budget test source inventory drift"
+if mode == "jvm":
+    from coverage_evidence import ADAPTIVE_BUDGET_CLASSES, verify_classes
+    verify_classes(root/"core/decision/build/reports/jacoco/test/jacocoTestReport.xml", ADAPTIVE_BUDGET_CLASSES)

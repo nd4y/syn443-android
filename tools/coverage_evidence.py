@@ -30,6 +30,12 @@ POLICY_CHECK_PLAN_CLASSES = {
 }
 
 
+ADAPTIVE_BUDGET_CLASSES = {
+    'io.syn443.decision.AdaptiveProbeBudget', 'io.syn443.decision.AdaptiveProbeBudget.Companion',
+    'io.syn443.decision.AdaptiveProbeBudget.Checkpoint', 'io.syn443.decision.AdaptiveProbeBudget.Entry',
+}
+
+
 def verify_classes(path, required):
     found = set()
     for row in ET.parse(path).getroot().iter('class'):
