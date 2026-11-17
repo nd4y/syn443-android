@@ -352,3 +352,20 @@ The original oversized-input case must return its typed storage failure on API29
 and large/canonical/escaped inputs must pass without skipped checks. The external
 direct-boot fixture also requires bounded fresh hierarchy acquisition; it never
 retries PIN entry or relaxes locked-storage/VPN recovery checks.
+
+## Bounded check-profile v2 component
+
+The [closed profile contract](route-check-profiles-v2.md) retains legacy all-of
+checks and adds source support for four-leaf all/any/quorum and sequential stages.
+The common locked fixture has9 valid,37 invalid,6 malformed/raw and51 truth cases
+plus a legacy hash golden. Each consuming codec and the actual native evaluator
+must execute its applicable cases in Actions, with exact required outcome gates.
+The control-plane core and PostgreSQL streams exercise addressed capabilities,
+real publication and independent raw issued-program validation. Native ordinary
+and race streams also require real two-hop checks, per-leaf failure attribution,
+whole-plan substitution rejection, budget/cancellation and current-owner fences.
+
+The new capability remains unadvertised by normal enrollment until coordinated
+rollout. Source, CI, protected-main, installed-APK and real managed-profile gates
+are distinct. No composition fixture closes parallel/conditional/fallback plans,
+physical managed chains, LTE, battery, natural Doze or endurance acceptance.

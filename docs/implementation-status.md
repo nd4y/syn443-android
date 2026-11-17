@@ -1,5 +1,12 @@
 # Implementation and acceptance snapshot
 
+The [bounded check-profile v2 component](route-check-profiles-v2.md) adds source
+support for all/any/quorum and sequential stages while preserving legacy checks,
+mandatory transport/exit gates and local proof/resource limits. Its Actions,
+integration and physical regression gates must be recorded separately. Normal
+enrollment still advertises the previous capability set; this source component
+does not activate a managed profile or close the full CHK-04 / AC58 requirement.
+
 Snapshot: 2026-11-17. Specification0.9 contains292 requirements and98 acceptance
 scenarios. Those numbers describe scope, not completed work or test counts.
 This document supersedes repository-wide readiness claims in historical stage notes.
@@ -9,8 +16,11 @@ adds bounded per-group progress without changing route selection or readiness
 authority. Exact bdbb7f4ffbed2d0f00265e52ba99a5e62206ed7a passed all8 jobs in
 [Actions44019011044](https://github.com/nd4y/syn443-android/actions/runs/44019011044),
 including437 outcomes per API29/35/37 and all ten new search cases. Protected
-integration00fa13228b5dace5ff213e40ad73e364cb0ef754 has separate resulting-main
-and device gates; source CI alone does not establish either of them. The full
+integration00fa13228b5dace5ff213e40ad73e364cb0ef754 passed all8 resulting-main
+jobs in [Actions44026532486](https://github.com/nd4y/syn443-android/actions/runs/44026532486).
+Separate USB/Wi-Fi acceptance passed79 physical cases, two Wi-Fi recovery cycles
+and native-process fault recovery while preserving identity and configuration.
+The ten new search simulations remain CI-only, and a real managed chain is open. The full
 autonomous-routing requirement is not closed by this diagnostic projection.
 
 The [operation-reconciliation source](operation-reconciliation-android.md)

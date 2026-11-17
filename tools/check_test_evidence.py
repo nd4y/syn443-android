@@ -1,5 +1,5 @@
 from pathlib import Path
-import sys,xml.etree.ElementTree as ET
+import re,sys,xml.etree.ElementTree as ET
 root=Path(__file__).resolve().parent.parent
 mode=sys.argv[1]
 if mode=="jvm":
@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=437
+    minimum=446
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -16,7 +16,7 @@ elif mode=="recovery":
     minimum=15
 elif mode=="policy":
     paths=list((root/"core/policy/build/test-results/test").glob("TEST-*.xml"))
-    minimum=20
+    minimum=31
 elif mode=="observability":
     paths=list((root/"core/observability/build/test-results/test").glob("TEST-*.xml"))
     minimum=10
@@ -726,3 +726,53 @@ ADAPTIVE_SEARCH_REQUIRED = [
 ]
 if mode=="emulator":
     assert set(ADAPTIVE_SEARCH_REQUIRED) <= set(identities), "Missing exact bounded adaptive search diagnostic outcomes"
+
+CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
+             'sharedClosedProfilesAcceptNineValidAndRejectAllFortyThreeInvalidVectors'),
+            ('io.syn443.policy.RouteCheckProfileTest',
+             'ownedSortedLeavesAndCompleteWirePreserveOrderedExpressionsWithoutLeakingTargets'),
+            ('io.syn443.policy.RouteCheckProfileTest',
+             'securityLeavesAreUnconditionalAndPublicIntentRequiresMatchingCountryGate'),
+            ('io.syn443.policy.RouteCheckProfileTest', 'sevenNodeDepthFourProgramAndExactIntegerEndpointsStayBounded'),
+            ('io.syn443.policy.RouteCheckProfileTest',
+             'duplicateDefinitionsReferencesAndUnknownOrUnusedLeavesCannotInflateQuorum'),
+            ('io.syn443.policy.RouteCheckProfileTest', 'originalEngineFieldRetainsDuplicateEscapedAndNumericLexemeGuards'),
+            ('io.syn443.policy.RouteCheckProfileTest',
+             'profileByteCostAndUnsafePrimitiveTargetsFailBeforeRuntimeConstruction'),
+            ('io.syn443.policy.RouteCheckProfileTest',
+             'legacyOrderedArrayHashAndOpaqueMetadataAreNotConvertedIntoVersionTwo'),
+            ('io.syn443.policy.RouteCheckPlanPolicyTest',
+             'signedCompositionRequiresExactCapabilityHealthConfigureAndKeyBinding'),
+            ('io.syn443.policy.RouteCheckPlanPolicyTest',
+             'countryAndIpLeavesKeepIndependentCapabilitiesAndCannotHideInAlternatives'),
+            ('io.syn443.policy.RouteCheckPlanPolicyTest',
+             'legacySignedBytesRemainOpaqueAndNullDuplicateCaseOrMixedProfileCannotDowngrade')],
+ 'emulator': [('io.syn443.android.RouteCheckPlanTest',
+               'ordinaryRequestOwnsWholeProfileAndNeverFlattensOrBorrowsMutatedInput'),
+              ('io.syn443.android.RouteCheckPlanTest',
+               'originalDuplicateNumericNullAndMixedProfileFieldsFailBeforeActivation'),
+              ('io.syn443.android.RouteCheckPlanTest',
+               'concretePathIncludesTerminalDirectButRejectsVariableOverlayCycleAndFailover'),
+              ('io.syn443.android.RouteCheckPlanTest',
+               'adaptiveCountryMustBeUnconditionalMatchingGateAndWholeProfileReachesNativeRender'),
+              ('io.syn443.android.RouteCheckPlanTest', 'leafProjectionIsOwnedRedactedAndScopeBoundWithoutGrantingReadiness'),
+              ('io.syn443.android.RouteCheckPlanTest',
+               'unknownCancelledAndForeignDiagnosticNeverBecomeFailedProxyOrWorkingRoute'),
+              ('io.syn443.android.RouteCheckPlanTest',
+               'legacyArraysAndEnrollmentAdvertisementStayUnchangedWhenEvaluatorIsImplemented'),
+              ('io.syn443.android.RouteCheckPlanTest', 'readOnlyPlanLabelsAreFiniteAndRecompositionDoesNotDispatch'),
+              ('io.syn443.android.RouteCheckPlanTest',
+               'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
+if mode in CHECK_PLAN_REQUIRED:
+    required = set(CHECK_PLAN_REQUIRED[mode])
+    assert len(required) == (11 if mode == "policy" else 9)
+    assert required <= set(identities), "Missing exact closed check-plan, policy or passive projection outcomes"
+    for classname in {classname for classname, _ in required}:
+        folder = "core/policy/src/test/kotlin/io/syn443/policy" if mode == "policy" else "app/src/androidTest/kotlin/io/syn443/android"
+        source = (root / folder / (classname.rsplit(".", 1)[1] + ".kt")).read_text(encoding="utf-8")
+        methods = re.findall(r"@Test\s+fun\s+(\w+)", source)
+        expected = {name for owner, name in required if owner == classname}
+        assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "Check-plan test source inventory drift"
+if mode == "policy":
+    from coverage_evidence import POLICY_CHECK_PLAN_CLASSES, verify_classes
+    verify_classes(root/"core/policy/build/reports/jacoco/test/jacocoTestReport.xml", POLICY_CHECK_PLAN_CLASSES)

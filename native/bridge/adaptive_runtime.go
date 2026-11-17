@@ -10,6 +10,7 @@ import (
 type adaptiveRuntimeInput struct {
 	wire        *privateAdaptiveWire
 	plans       map[string][]routeCheck
+	programs    map[string]*routeCheckProgram
 	scope, mode string
 }
 
@@ -93,9 +94,10 @@ func adaptiveRuntimeConfig(raw, control string) ([]byte, *adaptiveRuntimeInput, 
 		return nil, nil, errPrivatePath
 	}
 	var checks []struct {
-		Outbound string       `json:"outbound"`
-		Required bool         `json:"required"`
-		Checks   []routeCheck `json:"checks"`
+		Outbound string             `json:"outbound"`
+		Required bool               `json:"required"`
+		Checks   []routeCheck       `json:"checks"`
+		Profile  *routeCheckProfile `json:"profile"`
 	}
 	// The raw member preflight precedes typed bool/string zero-value collapse.
 	checkValues, ok := root["route_checks"].([]any)
@@ -104,14 +106,25 @@ func adaptiveRuntimeConfig(raw, control string) ([]byte, *adaptiveRuntimeInput, 
 	}
 	seen := map[string]bool{}
 	plans := map[string][]routeCheck{}
+	programs := map[string]*routeCheckProgram{}
 	for i, check := range checks {
 		item, ok := checkValues[i].(map[string]any)
-		if !ok || len(item) < 2 || len(item) > 3 || tags[check.Outbound] == nil || seen[check.Outbound] || len(check.Checks) < 1 || len(check.Checks) > 4 {
+		if !ok || len(item) < 2 || len(item) > 3 || tags[check.Outbound] == nil || seen[check.Outbound] {
 			return nil, nil, errPrivatePath
+		}
+		_, legacy := item["checks"]
+		_, current := item["profile"]
+		if legacy == current || current && check.Profile == nil {
+			return nil, nil, errPrivatePath
+		}
+		if current {
+			if _, required := item["required"].(bool); !required {
+				return nil, nil, errPrivatePath
+			}
 		}
 		for key, value := range item {
 			switch key {
-			case "outbound", "checks":
+			case "outbound", "checks", "profile":
 			case "required":
 				if _, ok := value.(bool); !ok {
 					return nil, nil, errPrivatePath
@@ -121,7 +134,11 @@ func adaptiveRuntimeConfig(raw, control string) ([]byte, *adaptiveRuntimeInput, 
 			}
 		}
 		seen[check.Outbound] = true
-		for _, predicate := range check.Checks {
+		program, err := newRouteCheckProgram(check.Checks, check.Profile)
+		if err != nil {
+			return nil, nil, errPrivatePath
+		}
+		for _, predicate := range program.allChecks() {
 			if !validRouteCheck(predicate) {
 				return nil, nil, errPrivatePath
 			}
@@ -129,6 +146,7 @@ func adaptiveRuntimeConfig(raw, control string) ([]byte, *adaptiveRuntimeInput, 
 		for group, tag := range wire.groups {
 			if tag == check.Outbound {
 				plans[group] = append([]routeCheck(nil), check.Checks...)
+				programs[group] = program
 			}
 		}
 	}
@@ -175,7 +193,7 @@ func adaptiveRuntimeConfig(raw, control string) ([]byte, *adaptiveRuntimeInput, 
 	if err != nil {
 		return nil, nil, errPrivatePath
 	}
-	return clean, &adaptiveRuntimeInput{wire: wire, plans: plans, scope: scope, mode: mode}, nil
+	return clean, &adaptiveRuntimeInput{wire: wire, plans: plans, programs: programs, scope: scope, mode: mode}, nil
 }
 
 func copyAdaptiveSeen(source map[string]bool) map[string]bool {

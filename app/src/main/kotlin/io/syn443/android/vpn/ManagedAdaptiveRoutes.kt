@@ -30,7 +30,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         var search:AdaptiveSearchState=AdaptiveSearchState.WAITING_CONTEXT)
     private data class Pending(val request:String,val group:String,val path:PlannedPath,val attempt:Long,val startedAt:Long,
         val nativeEpoch:Long,val nativeScope:String,var action:String="probe",var latency:Long=0,var receipt:String="",var retries:Int=0,
-        var recovery:CurrentFailure?=null)
+         var recovery:CurrentFailure?=null,var checkPlan:JSONObject?=null)
     private val groups=wire.graph.groupIDs().associateWith {Group()}
     private val order=groups.keys.sortedWith(compareBy<String>({wire.groupTags()[it]!=priorityTag},{it}))
     private var context:Context?=null
@@ -206,6 +206,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             val elapsed=raw.optLong("probeMs",-1);if(elapsed !in 0..11999)return
             work.latency=elapsed
             work.receipt=receipt
+            work.checkPlan=RouteSnapshot.adaptiveDiagnostic(currentScope,wire.groupTags().getValue(work.group),raw.optJSONObject("checkPlan"),"TRUE")
             val same=group.current?.id==work.path.id
             if(same) {group.failure=null;group.recheckFailed=false}
             work.recovery=recoveryFailure(group,work,now)
@@ -235,7 +236,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             group.improvement="";group.improvementPath=null;group.improvementCount=0;group.recheckFailed=false;group.failure=null
             memory?.record(checkNotNull(context),key(work.group,work.path),work.attempt,now,ProbeVerdict.VERIFIED)
             group.search=AdaptiveSearchState.VERIFIED
-            RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),true,"ok",work.latency,work.path.hops)
+            RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),true,"ok",work.latency,work.path.hops,work.checkPlan)
         } else if(work.action=="probe" && code in setOf("probe_unavailable","exit_mismatch","check_failed")) {
             val checkedAt=if(code=="check_failed") {
                 if(raw.optString("checkCode") !in checkedFailures)return
@@ -258,7 +259,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             group.nextAt=now+5000
             if(group.current==null || group.current?.id==work.path.id) {
                 group.search=AdaptiveSearchState.SEARCH_INCOMPLETE
-                RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),false,code,null,emptyList())
+                RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),false,code,null,emptyList(),
+                    RouteSnapshot.adaptiveDiagnostic(currentScope,wire.groupTags().getValue(work.group),raw.optJSONObject("checkPlan"),if(code=="probe_unavailable")"UNKNOWN" else "FALSE"))
             }
         } else if(work.action=="discard" && code=="discarded") {
             // A second independent fresh measurement is needed before a latency switch.

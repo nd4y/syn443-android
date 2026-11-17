@@ -59,6 +59,7 @@ type privateAdaptiveOwnerReport struct {
 	WorkAgeMS            int64                    `json:"workAgeMs"`
 	SelectionToken       uint64                   `json:"selectionToken,omitempty"`
 	RecheckHints         []privatePathRecheckHint `json:"recheckHints"`
+	CheckPlan            *routeCheckPlanReport    `json:"checkPlan,omitempty"`
 }
 
 func (privateAdaptiveOwnerReport) String() string     { return "PrivateAdaptiveOwnerReport([redacted])" }
@@ -311,7 +312,18 @@ func (o *privateAdaptiveOwner) run(ctx context.Context, cancel context.CancelFun
 			return
 		}
 		o.report.Code, o.report.CheckCode, o.report.CheckCompletedBootMS, o.report.ElapsedMS = "probe_unavailable", "", 0, 0
+		o.report.CheckPlan = nil
 		fresh := !panicked && released && ctx.Err() == nil && started >= 0 && now >= started && now-started < 30_000 && privateAdaptiveWorkCurrent(ctx, o.hub.pool.lease.clock)
+		profileReport := profileErrorReport(err)
+		if receipt != nil && receipt.proof != nil {
+			profileReport = receipt.proof.checkPlan.clone()
+		}
+		if profileReport != nil {
+			if !fresh {
+				profileReport = profileReport.unknown()
+			}
+			o.report.CheckPlan = profileReport.clone()
+		}
 		if errors.Is(err, errPrivateExitMismatch) && fresh {
 			o.report.Code = "exit_mismatch"
 		}
@@ -346,6 +358,7 @@ func (o *privateAdaptiveOwner) snapshot() string {
 	defer o.mu.Unlock()
 	o.refreshWorkerLocked()
 	report := o.report
+	report.CheckPlan = report.CheckPlan.clone()
 	report.NativeEpoch, report.Scope, report.Running, report.Ready = o.epoch, o.scope, o.busy, o.currentLocked()
 	report.PolicyScope = o.policyScope
 	if report.Code == "check_failed" {
@@ -355,6 +368,7 @@ func (o *privateAdaptiveOwner) snapshot() string {
 			// observation metadata permanently, while retaining actual flows.
 			o.report.Code, o.report.CheckCode, o.report.CheckCompletedBootMS = "probe_unavailable", "", 0
 			report.Code, report.CheckCode, report.CheckCompletedBootMS = "probe_unavailable", "", 0
+			o.report.CheckPlan, report.CheckPlan = o.report.CheckPlan.unknown(), report.CheckPlan.unknown()
 		}
 	}
 	if o.busy {
@@ -379,6 +393,7 @@ func (o *privateAdaptiveOwner) snapshot() string {
 	if !report.Ready {
 		report.Receipt = ""
 		report.SelectionToken = 0
+		o.report.CheckPlan, report.CheckPlan = o.report.CheckPlan.unknown(), report.CheckPlan.unknown()
 	}
 	raw, err := json.Marshal(report)
 	if err != nil || len(raw) > 32768 {

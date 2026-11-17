@@ -38,6 +38,8 @@ gofmt -w "$root"/native/bridge/*.go "$root"/native/engine-netbird/*.go
 cp -R "$root/native/engine-netbird" "$work/"
 cp -R "$root/native/routegraph" "$work/"
 cp "$root"/native/bridge/*.go "$root"/native/bridge/go.mod "$root"/native/bridge/go.sum "$work/bridge/"
+mkdir -p "$work/bridge/testdata"
+cp "$root/contracts/v1/route-check-profile-v2-vectors.json" "$work/bridge/testdata/route-check-profile-v2-vectors.json"
 cd "$work/bridge"
 export GOMAXPROCS="${GOMAXPROCS:-2}" GOFLAGS="-p=1" GOTOOLCHAIN=local
 export GOMEMLIMIT="${GOMEMLIMIT:-1400MiB}" GOGC="${GOGC:-50}"
@@ -53,11 +55,13 @@ go test -json -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbi
 python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-tests.jsonl"
 python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-tests.jsonl" --path-candidates
 python3 "$root/tools/check_native_protocol_evidence.py" "$work/native-tests.jsonl"
+python3 "$root/tools/check_native_check_plan_evidence.py" "$work/native-tests.jsonl"
 if [ "${SYN443_RACE:-0}" = 1 ]; then
     go test -json -race -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbird | tee "$work/native-race-tests.jsonl"
     python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-race-tests.jsonl"
     python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-race-tests.jsonl" --path-candidates
     python3 "$root/tools/check_native_protocol_evidence.py" "$work/native-race-tests.jsonl"
+    python3 "$root/tools/check_native_check_plan_evidence.py" "$work/native-race-tests.jsonl"
     go test -race -count=1 -timeout=90s -tags=with_gvisor,with_utls,with_quic \
       github.com/sagernet/sing-box/transport/v2raygrpclite \
       github.com/sagernet/sing-box/transport/v2rayxhttp \

@@ -51,6 +51,7 @@ object EngineConfig {
             value(0); require(reader.peek() == android.util.JsonToken.END_DOCUMENT)
         }
         val value = JSONObject(raw)
+        if (RouteCheckPlans.hasProfiles(value)) io.syn443.policy.RouteCheckProfiles.inspectEngine(raw)
         require(value.keys().asSequence().all { it in setOf("outbounds", "dns", "route", "route_checks", "route_failover", "adaptive_routes") }) { "unsupported root field" }
         val adaptive = if (value.has("adaptive_routes")) {
             require(utf8Bytes(raw) <= 262144)
@@ -128,6 +129,11 @@ object EngineConfig {
                 require(it.get("outbound") is String); it.getString("outbound") == tag
             }
             val row = plans.single()
+            val profile = RouteCheckPlans.profile(row)
+            if (profile != null) {
+                profile.requireIntent(requireNotNull(runtime.graph.groupInfo(group)).intent.name)
+                continue
+            }
             val checks = row.getJSONArray("checks")
             require(checks.length() in 1..4)
             val intent = requireNotNull(runtime.graph.groupInfo(group)).intent
@@ -324,7 +330,9 @@ object EngineConfig {
         // Native adaptive construction extracts its immutable approved checks
         // together with adaptive_routes before parsing ordinary SDK options.
         val adaptive = value.has("adaptive_routes")
-        if (!adaptive) value.remove("route_checks")
+        val checks = value.optJSONArray("route_checks")
+        val hasProfiles = checks != null && (0 until checks.length()).any { checks.getJSONObject(it).has("profile") }
+        if (!adaptive && !hasProfiles) value.remove("route_checks")
         value.remove("route_failover")
         value.put("log", JSONObject().put("disabled", true))
         val outbounds = value.getJSONArray("outbounds")

@@ -3,7 +3,7 @@ import ast
 import re
 import tempfile
 import unittest
-from coverage_evidence import IDENTITY_CLASSES, verify_classes
+from coverage_evidence import IDENTITY_CLASSES, POLICY_CHECK_PLAN_CLASSES, verify_classes
 
 
 class CoverageEvidenceTest(unittest.TestCase):
@@ -157,7 +157,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         })
         for mode, count, floor, folder in [
             ('identity', 57, 249, 'core/identity/src/test/kotlin/io/syn443/identity'),
-            ('emulator', 65, 437, 'app/src/androidTest/kotlin/io/syn443/android'),
+            ('emulator', 65, 446, 'app/src/androidTest/kotlin/io/syn443/android'),
         ]:
             self.assertEqual(count, len(required[mode]))
             self.assertEqual(expected[mode], set(required[mode]))
@@ -207,7 +207,7 @@ class CoverageEvidenceTest(unittest.TestCase):
                 'AdminOperationReconcileTest': 18, 'AdminOperationProtocolTest': 7, 'AdminOperationHttpTest': 3,
                 'AdminOperationVersionTest': 6, 'AdminOperationGoConformanceTest': 6, 'AdminEditorAuthorityTest': 6,
                 'BoundedHttpCancellationRaceTest': 3}),
-            ('emulator', 29, 437, 'app/src/androidTest/kotlin/io/syn443/android', {
+            ('emulator', 29, 446, 'app/src/androidTest/kotlin/io/syn443/android', {
                 'AdminPublishDispatchDeadlineTest': 3, 'AdminOperationCoordinatorTest': 10, 'AdminOperationUiTest': 5,
                 'AdminOperationWireTest': 3, 'AdminOperationRouteTest': 3, 'AdminEditorOwnerMigrationTest': 5}),
         ]:
@@ -244,5 +244,73 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual(10, len(required))
         self.assertEqual(10, len(set(required)))
         self.assertEqual(expected, set(required))
-        self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=437\n')
+        self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=446\n')
         self.assertRegex(source, r'elif mode=="identity":\n(?:    [^\n]*\n)*?    minimum=249\n')
+
+    def test_check_plan_roots_are_source_bound_and_every_missing_or_foreign_outcome_fails(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / 'tools/check_test_evidence.py').read_text(encoding='utf-8')
+        tree = ast.parse(source)
+        declaration, = [node for node in tree.body if isinstance(node, ast.Assign) and
+                        any(isinstance(target, ast.Name) and target.id == 'CHECK_PLAN_REQUIRED' for target in node.targets)]
+        required = ast.literal_eval(declaration.value)
+        self.assertEqual({'policy', 'emulator'}, set(required))
+        guard, = [node for node in tree.body if isinstance(node, ast.If) and
+                  isinstance(node.test, ast.Compare) and any(isinstance(value, ast.Name) and value.id == 'CHECK_PLAN_REQUIRED'
+                                                           for value in node.test.comparators)]
+        # Exercise the actual finite admission assertions, not a mirrored helper.
+        admission = compile(ast.fix_missing_locations(ast.Module(body=guard.body[:3], type_ignores=[])), '<check-plan-admission>', 'exec')
+        for mode, floor, folder, classes in [
+            ('policy', 31, 'core/policy/src/test/kotlin/io/syn443/policy', {'RouteCheckProfileTest': 8, 'RouteCheckPlanPolicyTest': 3}),
+            ('emulator', 446, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 9}),
+        ]:
+            expected = set()
+            for classname, count in classes.items():
+                methods = re.findall(r'@Test\s+fun\s+(\w+)', (root / folder / (classname + '.kt')).read_text(encoding='utf-8'))
+                self.assertEqual(count, len(methods)); self.assertEqual(count, len(set(methods)))
+                expected.update(('io.syn443.' + ('policy.' if mode == 'policy' else 'android.') + classname, name) for name in methods)
+            self.assertEqual(expected, set(required[mode])); self.assertEqual(len(expected), len(required[mode]))
+            self.assertRegex(source, rf'(?:if|elif) mode=="{mode}":\n(?:    [^\n]*\n)*?    minimum={floor}\n')
+            def check(identities):
+                exec(admission, {'CHECK_PLAN_REQUIRED': required, 'mode': mode, 'identities': identities})
+            check(expected)
+            for missing in expected:
+                with self.assertRaises(AssertionError):
+                    check(expected - {missing})
+                with self.assertRaises(AssertionError):
+                    check(expected - {missing} | {('foreign.' + missing[0], missing[1])})
+            with self.assertRaises(AssertionError):
+                check(set())
+        collector = ast.parse((root / 'tools/collect_public_emulator.py').read_text(encoding='utf-8'))
+        declaration, = [node for node in collector.body if isinstance(node, ast.Assign) and
+                        any(isinstance(target, ast.Name) and target.id == 'CLASS' for target in node.targets)]
+        pattern = re.compile(ast.literal_eval(declaration.value.args[0]))
+        self.assertIsNotNone(pattern.fullmatch('io.syn443.android.RouteCheckPlanTest'))
+        self.assertIsNone(pattern.fullmatch('foreign.RouteCheckPlanTest'))
+
+    def test_check_plan_four_logic_classes_require_complete_nonempty_ninety_percent_policy_evidence(self):
+        expected = {'io.syn443.policy.RouteCheckProfile', 'io.syn443.policy.RouteCheckProfile.Companion',
+                    'io.syn443.policy.RouteCheckProfiles', 'io.syn443.policy.RouteCheckProfiles.Inspection'}
+        self.assertEqual(expected, POLICY_CHECK_PLAN_CLASSES)
+        self.assertFalse(expected & IDENTITY_CLASSES)
+        def row(name, covered=9, missed=1, counter=True):
+            name = name.replace('io.syn443.policy.', 'io/syn443/policy/').replace('.Companion', '$Companion').replace('.Inspection', '$Inspection')
+            body = f'<counter type="LINE" covered="{covered}" missed="{missed}"/>' if counter else ''
+            return f'<class name="{name}">{body}</class>'
+        names = sorted(expected)
+        rows = [row(name) for name in names]
+        verify_classes(self.report('<report>' + ''.join(rows) + '</report>'), expected)
+        for changed in names:
+            for replacement in ('', row(changed, counter=False), row(changed, 8, 2), row(changed, 0, 0), row('foreign.' + changed)):
+                contents = ''.join(replacement if name == changed else row(name) for name in names)
+                with self.assertRaises(AssertionError):
+                    verify_classes(self.report('<report>' + contents + '</report>'), expected)
+        with self.assertRaises(AssertionError):
+            verify_classes(self.report('<report>' + ''.join(rows + [rows[0]]) + '</report>'), expected)
+        root = Path(__file__).resolve().parent.parent
+        tree = ast.parse((root / 'tools/check_test_evidence.py').read_text(encoding='utf-8'))
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and
+                 isinstance(node.func, ast.Name) and node.func.id == 'verify_classes' and node.args and
+                 isinstance(node.args[-1], ast.Name) and node.args[-1].id == 'POLICY_CHECK_PLAN_CLASSES']
+        self.assertEqual(1, len(calls))
+        self.assertIn('core/policy/build/reports/jacoco/test/jacocoTestReport.xml', ast.unparse(calls[0]))

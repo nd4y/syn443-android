@@ -23,6 +23,7 @@ type privateAdaptiveHub struct {
 	create       func(context.Context, string, string, string) (adapter.Outbound, error) // compiled owner callback, never wire data
 	pool         *privatePathPool
 	checks       map[string][]routeCheck
+	programs     map[string]*routeCheckProgram
 	groups       map[string]*privatePathSelector
 	cache        map[string]*privatePathCandidate
 	scope, mode  string
@@ -52,6 +53,20 @@ func privateAdaptiveWorkCurrent(ctx context.Context, clock func() int64) bool {
 }
 
 func newPrivateAdaptiveHub(c *privatePathCatalogue, metadata []byte, plans map[string][]routeCheck, scope, mode string, capacity int, lease *leaseGuard) (*privateAdaptiveHub, error) {
+	if c == nil || len(plans) < 1 || len(plans) > privateGroupLimit {
+		return nil, errPrivatePath
+	}
+	programs := make(map[string]*routeCheckProgram, len(plans))
+	for id, checks := range plans {
+		program, err := newRouteCheckProgram(checks, nil)
+		if err != nil {
+			return nil, errPrivatePath
+		}
+		programs[id] = program
+	}
+	return newPrivateAdaptiveHubWithPrograms(c, metadata, programs, scope, mode, capacity, lease)
+}
+func newPrivateAdaptiveHubWithPrograms(c *privatePathCatalogue, metadata []byte, plans map[string]*routeCheckProgram, scope, mode string, capacity int, lease *leaseGuard) (*privateAdaptiveHub, error) {
 	if c == nil || !privateScopeID.MatchString(scope) || !privateAdaptiveMode(mode) {
 		return nil, errPrivatePath
 	}
@@ -64,6 +79,7 @@ func newPrivateAdaptiveHub(c *privatePathCatalogue, metadata []byte, plans map[s
 		return nil, errPrivatePath
 	}
 	owned := make(map[string][]routeCheck, len(plans))
+	programs := make(map[string]*routeCheckProgram, len(plans))
 	for _, id := range g.GroupIDs() {
 		info, _ := g.GroupInfo(id)
 		// Explicit TCP-only integration. Never silently discard requested UDP
@@ -71,11 +87,16 @@ func newPrivateAdaptiveHub(c *privatePathCatalogue, metadata []byte, plans map[s
 		if !slices.Contains(info.Features, "TCP") || slices.Contains(info.Features, "UDP") || slices.Contains(info.Features, "ICMP") {
 			return nil, errPrivatePath
 		}
-		checks := append([]routeCheck(nil), plans[id]...)
-		if len(checks) < 1 || len(checks) > 4 {
+		input := plans[id]
+		if input == nil {
 			return nil, errPrivatePath
 		}
-		country := false
+		program, err := newRouteCheckProgram(input.checks, input.profile)
+		if err != nil {
+			return nil, errPrivatePath
+		}
+		checks := program.allChecks()
+		country := program.hasCountryGate(info.Intent)
 		for _, check := range checks {
 			if !validRouteCheck(check) {
 				return nil, errPrivatePath
@@ -84,19 +105,18 @@ func newPrivateAdaptiveHub(c *privatePathCatalogue, metadata []byte, plans map[s
 				if info.Intent == "INTERNAL" || check.ExpectedExitClass != info.Intent {
 					return nil, errPrivatePath
 				}
-				country = true
 			}
 		}
 		if info.Intent != "INTERNAL" && !country {
 			return nil, errPrivatePath
 		}
-		owned[id] = checks
+		owned[id], programs[id] = append([]routeCheck(nil), program.checks...), program
 	}
 	p, err := newPrivatePathPool(c.ctx, scope, capacity, lease)
 	if err != nil {
 		return nil, errPrivatePath
 	}
-	h := &privateAdaptiveHub{graph: g, catalogue: c, create: c.create, pool: p, checks: owned, scope: scope, mode: mode, cache: map[string]*privatePathCandidate{}}
+	h := &privateAdaptiveHub{graph: g, catalogue: c, create: c.create, pool: p, checks: owned, programs: programs, scope: scope, mode: mode, cache: map[string]*privatePathCandidate{}}
 	if !h.makeGroupsLocked() {
 		p.Close()
 		return nil, errPrivatePath
@@ -109,9 +129,9 @@ func privateAdaptiveMode(mode string) bool {
 }
 
 func (h *privateAdaptiveHub) makeGroupsLocked() bool {
-	h.groups = make(map[string]*privatePathSelector, len(h.checks))
+	h.groups = make(map[string]*privatePathSelector, len(h.programs))
 	for _, id := range h.graph.GroupIDs() {
-		s, err := newPrivatePathSelector(h.pool, h.scope, id, h.checks[id])
+		s, err := newPrivatePathSelectorProgram(h.pool, h.scope, id, h.programs[id])
 		if err != nil {
 			return false
 		}
