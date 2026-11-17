@@ -275,7 +275,22 @@ class AdminPublishDispatchDeadlineTest {
         private val actor get()=Identity.hash((metadata.issuer+"\u0000"+subject).toByteArray(Charsets.UTF_8))
         private val baseHash="a".repeat(64)
         fun store()=AdminEditorStore.isolatedForTest(context,editorNamespace,editorAlias)
-        fun editorRecord():AdminEditorRecord?=onWorker {store().recoverOwned(verifiedContext().discovery.binding,actor)}
+        fun editorRecord():AdminEditorRecord?=onWorker {
+            val current=verifiedContext()
+            // Match BootstrapTrust.adminDiscovery's v2 durable editor binding.
+            // The actual controller/RPC keeps its complete current discovery
+            // binding; this test-only owner lookup never migrates a legacy row.
+            val stable=Identity.hash(Canonical.encode(buildJsonObject {
+                put("domain","syn443.admin-editor.authority.v2")
+                put("serviceId",projected.serviceId)
+                put("anchor",buildJsonObject {
+                    put("id",anchor.id);put("spki",anchor.spki);put("epoch",anchor.epoch);put("lastTransition",anchor.lastTransition)
+                })
+                put("deviceAuthority",Identity.bootstrapAuthority(projected))
+                put("adminBootstrap",Canonical.parse(Canonical.json.encodeToString(current.discovery.metadata)))
+            }).toByteArray(Charsets.UTF_8))
+            store().recoverOwned(stable,actor)
+        }
         fun publishCalls()=synchronized(calls) {calls.count {call->call.url==metadata.apiOrigin+"/v1/control/action" &&
             JSONObject(Policy.utf8(checkNotNull(call.body))).getString("action")=="configuration.publish"}}
         fun publishedBody()=synchronized(calls) {checkNotNull(calls.single {call->call.url==metadata.apiOrigin+"/v1/control/action" &&
