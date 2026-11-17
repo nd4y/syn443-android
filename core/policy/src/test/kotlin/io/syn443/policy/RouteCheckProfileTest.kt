@@ -15,7 +15,9 @@ class RouteCheckProfileTest {
     }
     @Test fun sharedClosedProfilesAcceptNineValidAndRejectAllFortyThreeInvalidVectors() {
         val raw=checkNotNull(javaClass.getResourceAsStream("/route-check-profile-v2-vectors.json")).use {it.readBytes().toString(Charsets.UTF_8)}
-        val vectors=Canonical.parse(raw).jsonObject
+        // The trusted vector container deliberately carries invalid/unsafe
+        // profile numbers. Each case still enters the strict production decoder.
+        val vectors=Json.parseToJsonElement(raw).jsonObject
         assertEquals(9,vectors.getValue("validCases").jsonArray.size)
         assertEquals(37,vectors.getValue("invalidCases").jsonArray.size)
         assertEquals(6,vectors.getValue("invalidRawCases").jsonArray.size)

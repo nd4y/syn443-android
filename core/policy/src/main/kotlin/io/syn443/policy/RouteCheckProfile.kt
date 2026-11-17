@@ -136,6 +136,7 @@ class RouteCheckProfile private constructor(
 /** Strict, scoped extraction avoids normalizing numeric lexemes or duplicate keys.
  * It does not widen Canonical's global limits or validate other engine features. */
 object RouteCheckProfiles {
+    private val number = Regex("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
     class Inspection internal constructor(val profileCount: Int, private val names: Set<String>) {
         fun hasMethod(method: String): Boolean = method in names
         override fun toString(): String = "RouteCheckInspection([redacted])"
@@ -163,8 +164,27 @@ object RouteCheckProfiles {
                 if (method != null) methods.add(method)
             }
         }
-        if (profiles > 0) require(field.toByteArray(Charsets.UTF_8).size <= 24000)
+        if (profiles > 0) {
+            require(field.toByteArray(Charsets.UTF_8).size <= 24000)
+            requireJsonAtoms(raw)
+        }
         return Inspection(profiles, methods.toSet())
+    }
+    /** JsonElement's tree reader can retain unquoted unknown atoms. Validate
+     * their grammar without canonicalizing or imposing envelope array limits. */
+    private fun requireJsonAtoms(raw: String) {
+        val pending = java.util.ArrayDeque<Pair<JsonElement, Int>>()
+        pending.addLast(Canonical.json.parseToJsonElement(raw) to 0)
+        while (pending.isNotEmpty()) {
+            val (value, depth) = pending.removeLast()
+            require(depth <= 32)
+            when (value) {
+                is JsonObject -> value.values.forEach { pending.addLast(it to depth + 1) }
+                is JsonArray -> value.forEach { pending.addLast(it to depth + 1) }
+                is JsonPrimitive -> if (!value.isString) require(value === JsonNull ||
+                    value.content in setOf("true", "false") || number.matches(value.content))
+            }
+        }
     }
     private fun extract(raw: String): String? {
         var i = 0

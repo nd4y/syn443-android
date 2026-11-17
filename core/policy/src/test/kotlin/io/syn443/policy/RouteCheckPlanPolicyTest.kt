@@ -26,7 +26,7 @@ class RouteCheckPlanPolicyTest {
         return input+"."+enc(signature)
     }
     private fun verify(p:Payload)=Policy.verifyBound(sign(p),mapOf("composition" to Base64.getEncoder().encodeToString(key.public.encoded)),"composition-device",thumb,now)
-    private fun rejected(block:()->Unit) {try {block();fail("composition acquired unsupported authority")}catch(_:IllegalArgumentException){}catch(_:IllegalStateException){}}
+    private fun rejected(label:String="case",block:()->Unit) {try {block();fail("composition_admission_case_$label")}catch(_:IllegalArgumentException){}catch(_:IllegalStateException){}}
     @Test fun signedCompositionRequiresExactCapabilityHealthConfigureAndKeyBinding() {
         val base=payload()
         assertEquals(engine(),verify(base).engineConfig)
@@ -60,13 +60,32 @@ class RouteCheckPlanPolicyTest {
         val omitted=old.replace("\"required\":true,", "")
         assertEquals(omitted,verify(payload(omitted).copy(requiredCapabilities=legacy.requiredCapabilities)).engineConfig)
         rejected {verify(legacy.copy(requiredCapabilities=legacy.requiredCapabilities+Policy.ROUTE_CHECK_PLAN))}
-        for(raw in listOf(engine("\"profile\":null"),engine("\"profile\":[]"),engine("\"Profile\":$profile"),
+        for((index,raw) in listOf(engine("\"profile\":null"),engine("\"profile\":[]"),engine("\"Profile\":$profile"),
             engine("\"checks\":[],\"profile\":$profile"),engine().replace("\"revision\":1","\"revision\":1.0"),
             engine().replace("\"revision\":1","\"revision\":1,\"\\u0072evision\":1"),engine().dropLast(1)+",\"unrelated\":tru}",
             engine().replace("\"required\":true,", ""),engine().replace("\"required\":true", "\"required\":\"true\""),
-            engine().replace("\"outbound\":\"entry\"", "\"outbound\":1"),engine().replace("\"required\":true", "\"required\":true,\"\\u0072equired\":true"))) {
-            rejected {verify(payload(raw))}
-            rejected {verify(payload(raw).copy(requiredCapabilities=legacy.requiredCapabilities))}
+            engine().replace("\"outbound\":\"entry\"", "\"outbound\":1"),engine().replace("\"required\":true", "\"required\":true,\"\\u0072equired\":true")).withIndex()) {
+            rejected("profile-shape-$index") {verify(payload(raw))}
+            rejected("profile-shape-no-cap-$index") {verify(payload(raw).copy(requiredCapabilities=legacy.requiredCapabilities))}
+        }
+        // These are actual signed-policy calls, not direct extractor assertions.
+        // Extra fields remain opaque to Policy; EngineConfig validates its own
+        // supported fields and finite/typed values before any engine activation.
+        val invalidAtoms=listOf("tru","fals","undefined","TRUE","False","nul","NaN","Infinity","+1","01","1.","1e","-")
+        for((index,atom) in invalidAtoms.withIndex()) {
+            val top=engine().dropLast(1)+",\"outside\":$atom}"
+            val nested=engine().dropLast(1)+",\"outside\":{\"level\":[1,{\"value\":$atom}]}}"
+            rejected("atom-top-$index") {verify(payload(top))}
+            rejected("atom-nested-$index") {verify(payload(nested))}
+        }
+        val validAtoms=listOf("0","-12","1.5","-0.25","1e2","-2.500E+3","null","true","false","\"tru\"","\"undefined\"",
+            "[0,1.5,1e2,null,true,false,\"tru\",{\"value\":2.5E-1}]",(0 until 256).joinToString(",","[","]"))
+        for((index,atom) in validAtoms.withIndex()) {
+            val raw=engine().dropLast(1)+",\"outside\":{\"value\":$atom}"
+            val verified=try {verify(payload(raw))}catch(failure:Exception) {
+                throw AssertionError("valid_atom_case_${index}_${failure.javaClass.simpleName}")
+            }
+            assertTrue("opaque_atom_case_$index",raw==verified.engineConfig)
         }
     }
 }
