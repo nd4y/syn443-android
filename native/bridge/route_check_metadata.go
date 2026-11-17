@@ -37,7 +37,7 @@ func routeProfilePresence(raw []byte) (bool, error) {
 		// RawMessages or recursive copies. The JSON decoder's existing syntax
 		// and nesting limits apply; V2's smaller bounds are enforced only once
 		// its actual object member has been observed, never by keyword search.
-		token, err := d.Token()
+		token, err = d.Token()
 		if err != nil {
 			return false, errPrivatePath
 		}

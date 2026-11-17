@@ -240,6 +240,15 @@ func TestCheckPlanV2GlobalAbortAndLeafWitnessAreIndependent(t *testing.T) {
 		if result.report.Outcome != checkUnknown || result.witness != -1 || result.hardExit {
 			t.Fatal("global invalidity published partial authority", abort)
 		}
+		attempted := 0
+		for _, leaf := range result.report.Leaves {
+			if leaf.Outcome == checkUnknown {
+				attempted++
+			}
+		}
+		if attempted != calls || abort == "final-fence" && result.report.Leaves[1].Outcome != checkUnknown || abort != "final-fence" && result.report.Leaves[0].Outcome != checkUnknown {
+			t.Fatal("interrupted actual leaf was presented as never attempted", abort)
+		}
 	}
 	calls := 0
 	result := evaluateRouteCheckProfile(context.Background(), p.profile, func() int64 { return 1000 }, func() bool { return true }, func(context.Context, routeCheck) routeCheckProbeResult {
@@ -442,7 +451,7 @@ func TestCheckPlanV2ProfileTimeoutClosesRealReadAndSkipsLaterStage(t *testing.T)
 	proof, err := selector.probe(context.Background(), candidate)
 	report := profileErrorReport(err)
 	var failure *privateCheckedFailure
-	if proof != nil || err == nil || errors.As(err, &failure) || report == nil || report.Outcome != checkUnknown || report.Leaves[1].Outcome != checkSkipped || calls.Load() != 1 {
+	if proof != nil || err == nil || errors.As(err, &failure) || report == nil || report.Outcome != checkUnknown || report.Leaves[0].Outcome != checkUnknown || report.Leaves[1].Outcome != checkSkipped || calls.Load() != 1 {
 		t.Fatal("aggregate timeout retained partial failure authority or admitted later I/O")
 	}
 }

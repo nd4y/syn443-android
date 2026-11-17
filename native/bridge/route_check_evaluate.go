@@ -111,6 +111,9 @@ func evaluateRouteCheckProfile(parent context.Context, p *routeCheckProfile, clo
 			return checkUnknown, -1
 		}
 		leaf := p.Leaves[index]
+		// SKIPPED means no invocation was attempted. A callback interrupted by
+		// a global boundary stays UNKNOWN even if its result cannot be promoted.
+		result.report.Leaves[index].Outcome, result.report.Leaves[index].Code = checkUnknown, "probe_unavailable"
 		observed := probe(ctx, leaf.Check)
 		if !valid() {
 			invalid = true
