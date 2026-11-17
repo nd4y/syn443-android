@@ -32,10 +32,17 @@ class NetBirdPagingUiTest {
     private fun settleAcknowledgement(section: String) {
         // The ACK effect changes state after composition; rendering that change
         // needs another frame. This bound cannot consume the 8s request lease.
-        compose.mainClock.advanceTimeUntil(timeoutMillis = 256) {
-            compose.onAllNodesWithTag("netbird-$section-pending").fetchSemanticsNodes().isEmpty()
+        // Clock callbacks execute on the UI thread, where synchronized
+        // semantics queries are forbidden. Read only after each clock call has
+        // returned to the instrumentation thread.
+        repeat(16) {
+            compose.mainClock.advanceTimeByFrame()
+            if (compose.onAllNodesWithTag("netbird-$section-pending").fetchSemanticsNodes().isEmpty()) {
+                compose.waitForIdle()
+                return
+            }
         }
-        compose.waitForIdle()
+        throw AssertionError("Matching view acknowledgement did not render within 256ms")
     }
 
     private fun SemanticsNodeInteraction.scrollWithAdvancingClock(): SemanticsNodeInteraction {
