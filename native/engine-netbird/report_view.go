@@ -198,21 +198,24 @@ func (v reportView) valid(rows int) bool {
 
 // Inspect at most96 input bytes/runes worth of output, and clone only that
 // prefix. A small DTO must not retain a backing string from the full SDK roster.
-func reportFQDN(raw string) (string, bool) {
+func reportFQDN(raw string) (string, bool) { return reportText(raw, 96) }
+
+func reportText(raw string, maximum int) (string, bool) {
+	maximum = max(0, min(maximum, 512))
 	var out strings.Builder
-	out.Grow(96)
+	out.Grow(maximum)
 	at := 0
 	changed := false
-	for at < len(raw) && out.Len() < 96 {
+	for at < len(raw) && out.Len() < maximum {
 		r, n := utf8.DecodeRuneInString(raw[at:])
 		if r == utf8.RuneError && n == 1 {
 			changed = true
 		}
-		if r < 32 || r == 127 {
+		if r < 32 || r >= 127 && r <= 159 {
 			r = utf8.RuneError
 			changed = true
 		}
-		if out.Len()+utf8.RuneLen(r) > 96 {
+		if out.Len()+utf8.RuneLen(r) > maximum {
 			break
 		}
 		out.WriteRune(r)
@@ -597,7 +600,11 @@ func boundedModule(s moduleState) moduleState {
 	}
 	s.Mode = reportMode(s.Mode)
 	s.Reason = reportCode(s.Reason)
-	s.Failure = reportCode(s.Failure)
+	// The startup path already redacts this authorized local error text. Keep
+	// useful words and punctuation; treating it as an enum erased real errors.
+	var changed bool
+	s.Failure, changed = reportText(s.Failure, 512)
+	s.FailureTruncated = s.FailureTruncated || changed
 	s.Retry.Attempt = max(0, min(s.Retry.Attempt, 30))
 	s.Retry.Next = reportNumber(s.Retry.Next)
 	s.Sampled = reportNumber(s.Sampled)

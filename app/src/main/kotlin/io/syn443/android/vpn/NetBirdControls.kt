@@ -62,6 +62,7 @@ internal fun NetBirdControls(overlay: JSONObject, command: (String, String?) -> 
         if (model.stale) Text("Статус NetBird устарел или ещё не получен")
         model.reason?.let { Text("NetBird: $it") }
         model.failure?.let { Text("Ошибка NetBird: $it") }
+        if (model.failureTruncated == true) Text("Сообщение об ошибке ограничено", Modifier.testTag("netbird-failure-truncated"))
         TextButton(onClick = { command("status", null) }, modifier = Modifier.testTag("netbird-refresh")) {
             Text("Обновить статус NetBird")
         }

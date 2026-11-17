@@ -10,7 +10,11 @@ SDK allocation is outside this wrapper's bound.
 Our connection projection contains at most16 peer rows. The diagnostic job
 retains at most1024 results and independently owned valid probe targets; it
 does not retain the complete SDK peer slice for its worker lifetime. Display
-strings and numeric fields are bounded before serialization. A diagnostic
+strings and numeric fields are bounded before serialization.
+Already redacted local startup errors retain readable text within512 UTF-8
+bytes, with an explicit limitation marker; they are not silently treated as
+enumerated codes or written to durable logs by this view.
+A diagnostic
 snapshot projects at most16 results before JSON encoding. The combined overlay
 report remains within64KiB without discarding the connection header because of
 an oversized roster. Failed component projection is explicitly unavailable.

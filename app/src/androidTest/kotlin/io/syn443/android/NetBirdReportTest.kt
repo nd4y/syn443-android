@@ -77,6 +77,23 @@ class NetBirdReportTest {
         assertEquals("Cloud: true; signal: true", direct.connection)
         assertEquals("Подключение напрямую; relay используется как резерв", direct.transport)
         assertTrue(direct.canDiagnose); assertFalse(direct.stale)
+        for (message in listOf("connection refused", "tls_failed", "Нет ответа от узла", "я".repeat(256))) {
+            value.put("last_failure", message)
+            assertEquals(message, read(value).failure)
+        }
+        value.put("last_failure_truncated", true)
+        assertEquals(true, read(value).failureTruncated)
+        assertEquals("NetBirdReport([redacted])", read(value).toString())
+        value.put("last_failure_truncated", "true")
+        assertNull(read(value).failureTruncated)
+        value.put("last_failure_truncated", false)
+        assertEquals(false, read(value).failureTruncated)
+        for (bad in listOf("", "connection\nrefused", "control\u0085value", "x".repeat(513), "я".repeat(257), "\uD800",
+            1, true, JSONObject.NULL, JSONObject())) {
+            value.put("last_failure", bad)
+            assertNull(read(value).failure)
+        }
+        value.put("last_failure", "connection refused").put("last_failure_truncated", true)
         value.getJSONObject("peer_state").put("connection_unknown", false).put("metadata_unknown", true)
         val boundedFallback = read(value)
         assertEquals("Cloud: true; signal: true", boundedFallback.connection)

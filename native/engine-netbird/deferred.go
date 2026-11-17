@@ -49,13 +49,14 @@ type retryState struct {
 	Next    int64 `json:"next_at_ms"`
 }
 type moduleState struct {
-	Active  bool       `json:"active"`
-	Phase   string     `json:"phase"`
-	Reason  string     `json:"reason"`
-	Mode    string     `json:"mode"`
-	Retry   retryState `json:"retry"`
-	Sampled int64      `json:"sampled_at_ms"`
-	Failure string     `json:"last_failure,omitempty"`
+	Active           bool       `json:"active"`
+	Phase            string     `json:"phase"`
+	Reason           string     `json:"reason"`
+	Mode             string     `json:"mode"`
+	Retry            retryState `json:"retry"`
+	Sampled          int64      `json:"sampled_at_ms"`
+	Failure          string     `json:"last_failure,omitempty"`
+	FailureTruncated bool       `json:"last_failure_truncated,omitempty"`
 }
 
 var deferredPeer struct {

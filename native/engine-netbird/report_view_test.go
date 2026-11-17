@@ -252,6 +252,19 @@ func TestReportViewPartialCancelledAndInvalidTargetsNeverClaimComplete(t *testin
 }
 
 func TestReportViewUTF8IdentifiersAndNumericBoundsAreOwned(t *testing.T) {
+	message := "session startup: connection refused [redacted]"
+	state := boundedModule(moduleState{Mode: "direct", Failure: message})
+	if state.Failure != message || state.FailureTruncated {
+		t.Fatal("readable authorized startup error was erased or changed")
+	}
+	state = boundedModule(moduleState{Mode: "direct", Failure: strings.Repeat("😀", 1024)})
+	if len(state.Failure) != 512 || !state.FailureTruncated || !utf8.ValidString(state.Failure) {
+		t.Fatal("error message escaped its UTF8 byte bound")
+	}
+	state = boundedModule(moduleState{Mode: "direct", Failure: redactStartupFailure(errors.New("connect using synthetic-token-value failed"), "synthetic-token-value")})
+	if state.Failure != "connect using [redacted] failed" || strings.Contains(state.Failure, "synthetic-token-value") {
+		t.Fatal("bounded message lost the existing startup redaction")
+	}
 	p := &reportTestPeer{snapshot: reportRoster(16)}
 	o := reportOwner(t, p)
 	p.snapshot.FQDN = strings.Repeat("😀", 10000)
