@@ -27,6 +27,10 @@ main b7689dc has a separate failed run44115155327: API29 timed out during the
 retained controller-death TCP recovery scenario; the other seven jobs passed.
 The exact data-path cause is not yet verified. Source acceptance does not erase
 that main-stage failure, and phone acceptance remains open.
+The [failure-evidence change](process-recovery-evidence.md) adds bounded
+observations without relaxing the original110s or PASS criterion. Its new
+Actions/main checks are separate; the original cause and phone acceptance
+remain open.
 
 The [durable adaptive admission candidate](durable-adaptive-budget.md) adds an
 owned counter checkpoint and asynchronous storage before dispatch. Process,
