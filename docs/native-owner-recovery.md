@@ -17,7 +17,12 @@ the same Java RouteScope. A positive row could remain visible until its evidence
 TTL expired, and recovery could wait for the old routine cadence.
 
 The coordinator now tracks the last observed native scope separately from the
-configured ready scope. An accepted owner transition immediately retracts:
+configured ready scope. A changed epoch/scope is accepted only from a reset
+report: literal empty request/group/receipt, an empty hops array, code idle or
+not_ready and absent/empty recheck hints. Native invalidate/configure reset these
+fields before exposing a new owner. An old result or passive traffic hint cannot
+establish a new owner or discard the current pending command. An accepted owner
+transition immediately retracts:
 
 - selected paths, positive measurements, latency and selection/hint tokens;
 - improvement candidates, cursors and local failure confirmations belonging to
@@ -37,7 +42,8 @@ history or cross-network evidence transfer.
 
 An old pending native command becomes a tombstone. A separate draining barrier
 blocks new starts until the current native epoch/scope and current policy report
-both literal Boolean ready=true and running=false. Missing fields, strings,
+both literal Boolean ready=true and running=false in a reset-shaped idle report.
+Missing fields, strings,
 configure dispatch, a ready-but-busy report, stale epoch or foreign policy do not
 prove worker completion. Dropping a logical asynchronous admission callback does
 not release its real storage worker or refund its reserved quantum.
