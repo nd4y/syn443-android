@@ -6,8 +6,11 @@ This document supersedes repository-wide readiness claims in historical stage no
 
 The version91 [managed route search status candidate](route-search-status.md)
 adds bounded per-group progress without changing route selection or readiness
-authority. Ten new exact Android roots raise the pending per-API floor to437;
-its Actions, resulting-main and device acceptance remain open. The full
+authority. Exact bdbb7f4ffbed2d0f00265e52ba99a5e62206ed7a passed all8 jobs in
+[Actions44019011044](https://github.com/nd4y/syn443-android/actions/runs/44019011044),
+including437 outcomes per API29/35/37 and all ten new search cases. Protected
+integration00fa13228b5dace5ff213e40ad73e364cb0ef754 has separate resulting-main
+and device gates; source CI alone does not establish either of them. The full
 autonomous-routing requirement is not closed by this diagnostic projection.
 
 The [operation-reconciliation source](operation-reconciliation-android.md)
@@ -21,8 +24,9 @@ Exact c2a549b9a4ad2609bc69bab3caf54af29899a8e7 passed all8 jobs in
 [Actions44012133076](https://github.com/nd4y/syn443-android/actions/runs/44012133076):
 498 JVM/337 identity cases,427 outcomes on each API29/35/37 and53 native roots
 in ordinary/race runs. All104 required coverage classes meet90%. Protected
-integration2ca75cab has resulting-main CI44018639542 pending; delivery and real
-native administrator acceptance remain separate.
+integration2ca75cab passed all8 jobs in resulting-main CI44018639542. Its
+[v90 USB/Wi-Fi checkpoint](non-lte-acceptance-20261117.md) passed79 physical
+outcomes; real native administrator acceptance remains separate.
 
 The third candidate CI ran334 identity cases:333 passed and one existing
 socket-cancellation assertion failed (`TRANSPORT` observed, `CANCELLED`
@@ -34,8 +38,10 @@ fixture failure used the old descriptor-owner binding before reaching its
 deadline assertions; its test-only correction also passed that source run.
 Those earlier attempts remain failures, with no coverage exception.
 
-The currently installed accepted checkpoint is v89 /
-`0.9.61-admin-compare`, with68 scoped physical USB/Wi-Fi outcomes. Its
+The earlier accepted v89 / `0.9.61-admin-compare` checkpoint passed68 scoped
+physical USB/Wi-Fi outcomes. The later [v90 checkpoint](non-lte-acceptance-20261117.md)
+adds eleven presentation cases and accepted real recovery without establishing
+authenticated mobile publication. Its
 [comparison and local-rebase scope](native-layered-editor.md), pure presentation
 fixtures and recovery checks do not establish authenticated native admin SSO,
 live server ACL/MFA or a real publication. The richer CP57 Go projection

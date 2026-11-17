@@ -5,11 +5,13 @@ Exact c2a549b9a4ad2609bc69bab3caf54af29899a8e7 passed all8 jobs in
 [Actions44012133076](https://github.com/nd4y/syn443-android/actions/runs/44012133076),
 including498 JVM cases,337 identity cases,427 unique passing outcomes per
 API29/35/37 and53 native roots in ordinary/race runs. All104 required coverage
-classes meet90%. Protected integration2ca75cab has resulting-main CI44018639542
-pending; APK delivery and live integration remain separate. The
-currently installed accepted phone checkpoint is v89 with68 scoped USB/Wi-Fi
-physical outcomes. That earlier checkpoint does not accept this implementation
-or establish real native administrator SSO, server MFA/ACL or publication.
+classes meet90%. Protected integration2ca75cab passed all8 jobs in
+resulting-main CI44018639542. The exact v90 APK then passed79 scoped physical
+USB/Wi-Fi outcomes, with two real Wi-Fi cycles and native process recovery;
+see the [dated checkpoint](non-lte-acceptance-20261117.md). Its presentation and
+recovery cases do not establish real native administrator SSO, server MFA/ACL,
+publication or live reconciliation. The earlier v89 receipt retains its68-case
+historical scope.
 
 ## Exact pending operation and explicit recovery
 

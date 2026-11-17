@@ -11,10 +11,12 @@ execution or physical protocol acceptance is claimed.
 
 [Managed route search status](route-search-status.md) source adds ten exact
 Android outcomes (six coordinator and four snapshot/presentation cases). The
-pending per-API29/35/37 floor is437; identity remains249. Existing required
+per-API29/35/37 floor is437; identity remains249. These ten exact outcomes
+passed Actions44019011044 on sourcebdbb7f4, within437 per API. Existing required
 outcomes, coverage thresholds and privacy gates remain unchanged. These are
-source-stage requirements, not acceptance of this version91 M4 slice or
-the separate version90 delivery. Historical candidate counts below are retained.
+source-stage requirements do not establish version91 device or managed-chain
+acceptance. The separate [v90 delivery](non-lte-acceptance-20261117.md) has its
+own79-case physical receipt. Historical candidate counts below are retained.
 
 [Operation outcome reconciliation](operation-reconciliation-android.md) source
 adds49 exact identity JVM roots across seven test classes and29 exact Android
