@@ -124,12 +124,12 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
     }
     LaunchedEffect(visible,foregroundEpoch) {if(visible)execute {refresh(it)}}
     fun editCommand(kind:io.syn443.android.vpn.AdminEditorCoordinator.Kind,pages:List<String> = emptyList(),
-        review:String="",deadline:Long=0,comparisonBinding:String="") {
+        review:String="",deadline:Long=0,comparisonBinding:String="",operationBinding:String="") {
         val captured=model.editor?:return
         val generation=model.status.generation
         execute {ticket->
             val command=io.syn443.android.vpn.AdminEditorCoordinator.Command(kind,captured.device,captured.documentBinding,
-                captured.localRevision,pages,review,deadline,comparisonBinding)
+                captured.localRevision,pages,review,deadline,comparisonBinding,operationBinding)
             val next=bridge.editor(generation,command)
             if(current(ticket,generation) && model.editor?.documentBinding==captured.documentBinding)
                 model=model.copy(editor=if(kind==io.syn443.android.vpn.AdminEditorCoordinator.Kind.CLOSE && next.localRevision==0L)null else next,comparison=null)
@@ -212,6 +212,8 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         publish={binding,deadline->editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.PUBLISH,review=binding,deadline=deadline)},
         poll={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.POLL)},
         retryExact={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.RETRY_EXACT)},
+        checkOutcome={editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.CHECK_OUTCOME,operationBinding=model.editor?.operationBinding?:"")},
+        sealPending={binding->editCommand(io.syn443.android.vpn.AdminEditorCoordinator.Kind.SEAL_PENDING,operationBinding=binding)},
         comparison={comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.LOAD)},
         rebase={comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.LOAD)},
         viewComparison={comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.PAGE,

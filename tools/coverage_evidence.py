@@ -14,6 +14,8 @@ IDENTITY_CLASSES = {'io.syn443.identity.' + name for name in (
     'AdminLayerConflict', 'AdminLayerDifference', 'AdminLayerDiff', 'AdminLayerComparison',
     'AdminLayerComparison.Inputs', 'AdminLayerComparison.Row', 'AdminLayerComparison.Companion',
     'AdminLayerProjectionException', 'AdminLayerProjection', 'AdminLayerValues', 'AdminLayerProjector',
+    'AdminOperationRequest', 'AdminOperationJob', 'AdminOperationReceipt', 'AdminOperationReconcile',
+    'AdminOperationIntent', 'AdminOperationOutcome', 'AdminOperationJobState',
     'RuntimeObservation', 'RuntimeObservation.Report', 'RuntimeObservation.Snapshot',
     'AuthProtocol', 'IdentityScope', 'TrustedTime', 'TrustedTime.Companion',
     'IdentityOperation', 'IdentityOperation.Companion',

@@ -186,7 +186,18 @@ object BootstrapTrust {
                 })
                 put("deviceAuthority",Identity.bootstrapAuthority(expected))
             }).toByteArray(Charsets.UTF_8))
-            AdminDiscovery(metadata,binding,value.issuedAt,value.notBefore,value.expires)
+            // Durable editor ownership excludes descriptor lease/floor churn.
+            // Current RPC/session admission still uses the complete binding above.
+            val editorBinding=Identity.hash(Canonical.encode(buildJsonObject {
+                put("domain","syn443.admin-editor.authority.v2")
+                put("serviceId",value.serviceId)
+                put("anchor",buildJsonObject {
+                    put("id",anchor.id);put("spki",anchor.spki);put("epoch",anchor.epoch);put("lastTransition",anchor.lastTransition)
+                })
+                put("deviceAuthority",Identity.bootstrapAuthority(expected))
+                put("adminBootstrap",Canonical.parse(Canonical.json.encodeToString(metadata)))
+            }).toByteArray(Charsets.UTF_8))
+            AdminDiscovery(metadata,binding,value.issuedAt,value.notBefore,value.expires,editorBinding)
         }
     } catch(_:Exception) {null}
     private fun validate(transition:RootTransition,current:TrustAnchor,now:Long) {

@@ -16,13 +16,14 @@ enum class AdminFailure { CANCELLED, TRANSPORT, INVALID_REPLY, ACCESS_DENIED, RE
 class AdminException(val reason:AdminFailure):Exception(reason.name)
 
 /** Caller supplies metadata only after signed service verification. This is not a device Bootstrap. */
-class AdminIdentity internal constructor(metadata:AdminBootstrap,val serviceBinding:String) {
+class AdminIdentity internal constructor(metadata:AdminBootstrap,val serviceBinding:String,
+    internal val editorServiceHash:String=serviceBinding) {
     val metadata:AdminBootstrap=metadata.copy()
     val authority:String
     init {
         authority=try {
             this.metadata.validate()
-            require(digest(serviceBinding))
+            require(digest(serviceBinding) && digest(editorServiceHash))
             Identity.hash(Canonical.encode(buildJsonObject {
                 put("adminBootstrap",Canonical.parse(Canonical.json.encodeToString(this@AdminIdentity.metadata)))
                 put("serviceBinding",serviceBinding)

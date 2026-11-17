@@ -103,7 +103,11 @@ jobs:
           bash -n tools/prepare_media_tools.sh
           bash tools/prepare_media_tools.sh
       - run: python3 tools/generate_chat_media_fixture.py
-      - run: ./gradlew :core:decision:test :core:decision:jacocoTestReport :core:host-lifecycle:check :core:host-lifecycle:jacocoTestReport :core:recovery:test :core:policy:test :core:observability:check :core:health:check :core:identity:check :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - run: bash tools/prepare-operation-wire-conformance.sh ./gradlew :core:decision:test :core:decision:jacocoTestReport :core:host-lifecycle:check :core:host-lifecycle:jacocoTestReport :core:recovery:test :core:policy:test :core:observability:check :core:health:check :core:identity:check :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - run: python3 tools/check_test_evidence.py jvm
       - run: python3 tools/check_test_evidence.py host
       - run: python3 tools/check_test_evidence.py recovery

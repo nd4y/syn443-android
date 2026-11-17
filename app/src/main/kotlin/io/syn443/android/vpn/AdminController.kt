@@ -181,8 +181,11 @@ internal class AdminController private constructor(private val context:Applicati
         fun admitted() {context(expected,binding,discovery)}
         val metadata=context(expected,binding,discovery).discovery.metadata
         val oidc=metadata.issuer+"/protocol/openid-connect"
+        val control=metadata.apiOrigin+"/v1/control/action"
+        val reconciliation=metadata.apiOrigin+"/v1/control/configuration/reconcile"
         require(method=="GET" && url in setOf(metadata.issuer+"/.well-known/openid-configuration",oidc+"/certs") ||
-            method=="POST" && url in setOf(oidc+"/token",metadata.apiOrigin+"/v1/control/action"))
+            method=="POST" && url in setOf(oidc+"/token",control,reconciliation))
+        if(url==reconciliation)require(maxBody==1_048_576 && body!=null && body.size in 1..524_288)
         require(headers.keys.none {it.equals("Origin",ignoreCase=true)})
         val physical=if(test==null)PhysicalIdentityRoute.capture(context) else null
         val route=physical?.let {owned->object:HttpRoute {
@@ -192,8 +195,9 @@ internal class AdminController private constructor(private val context:Applicati
         }}
         if(method=="POST" && url.endsWith("/protocol/openid-connect/token"))posts.incrementAndGet()
         val reply=test?.exchange?.request(method,url,headers,body,child,maxBody)
-            ?:http.exchange(method,url,headers,body,child,maxBody=maxBody,route=checkNotNull(route),
-                maxRequestBody=if(url==metadata.apiOrigin+"/v1/control/action")262_144 else 8192)
+            ?:if(url==reconciliation)http.configurationReconcile(metadata.apiOrigin,headers,checkNotNull(body),child,route=checkNotNull(route))
+            else http.exchange(method,url,headers,body,child,maxBody=maxBody,route=checkNotNull(route),
+                maxRequestBody=if(url==control)262_144 else 8192)
         admitted();reply
     }
     fun status():JSONObject=synchronized(commands) {JSONObject().put("generation",generation).put("phase",phase.name)
@@ -428,21 +432,30 @@ internal class AdminController private constructor(private val context:Applicati
     /** Same single controller worker and consume-once mailbox as administrative
      * reads. Binder never opens an editor, parses JSON or performs Keystore I/O. */
     fun editorStart(id:String,expectedGeneration:Long,command:AdminEditorCoordinator.Command):Boolean =
-        editorOperationStart(id,expectedGeneration,command.kind !in setOf(AdminEditorCoordinator.Kind.SAVE_LOCAL,AdminEditorCoordinator.Kind.CLOSE)) {coordinator,access->
+        editorOperationStart(id,expectedGeneration,command.kind !in setOf(AdminEditorCoordinator.Kind.SAVE_LOCAL,AdminEditorCoordinator.Kind.CLOSE),
+            if(command.kind==AdminEditorCoordinator.Kind.PUBLISH)command.reviewDeadline else null) {coordinator,access->
             io.syn443.android.admin.AdminEditorWire.encode(coordinator.execute(command,access))
         }
     fun comparisonStart(id:String,expectedGeneration:Long,command:AdminEditorCoordinator.ComparisonCommand):Boolean =
         editorOperationStart(id,expectedGeneration,command.kind==AdminEditorCoordinator.ComparisonKind.LOAD) {coordinator,access->
             io.syn443.android.admin.AdminComparisonWire.encode(coordinator.comparison(command,access))
         }
-    private fun editorOperationStart(id:String,expectedGeneration:Long,refreshAccess:Boolean,
+    private fun editorOperationStart(id:String,expectedGeneration:Long,refreshAccess:Boolean,reviewUntilElapsed:Long?=null,
         work:(AdminEditorCoordinator,AdminEditorCoordinator.Access)->ByteArray):Boolean {
         if(!operationID.matches(id))return false
         val selected=synchronized(commands) {
             if(busy || retirementRequested || phase!=Phase.AUTHENTICATED || generation!=expectedGeneration)return false
             val owned=owner?.takeIf {it.session!=null} ?:return false
             val now=elapsed();if(now<0 || now>Long.MAX_VALUE-60_000)return false
-            clearMailbox();mailbox=Mailbox(id,expectedGeneration,now,now+60_000)
+            // A fresh confirmation never outlives its original review. The
+            // mailbox remains checked through journal completion, signing and
+            // the captured route's pre-write guard, including without polling.
+            // Existing mailboxes use inclusive ranges; review expiry is strict.
+            val until=if(reviewUntilElapsed==null)now+60_000 else {
+                if(reviewUntilElapsed<=now)return false
+                minOf(now+60_000,reviewUntilElapsed-1)
+            }
+            clearMailbox();mailbox=Mailbox(id,expectedGeneration,now,until)
             busy=true;activeRead=id;epoch to owned
         }
         return enqueue {
@@ -472,6 +485,8 @@ internal class AdminController private constructor(private val context:Applicati
                     override fun ownership()=owned.protocol.layerOwnership(checkedSession(false))
                     override fun check() {checkedSession(false)}
                     override fun action(request:AdminLayerRequest)=owned.protocol.layerAction(request,checkedSession(true),scope)
+                    override fun configurationRequestVersion()=owned.protocol.configurationRequestVersion(checkedSession(true),scope)
+                    override fun reconcile(request:AdminOperationRequest)=owned.protocol.operationReconcile(request,checkedSession(true),scope)
                     override fun reviewDeadline(preview:AdminLayerPreview)=owned.protocol.layerReviewDeadline(preview,checkedSession(false))
                 }
                 val coordinator=editorCoordinator ?:AdminEditorCoordinator({

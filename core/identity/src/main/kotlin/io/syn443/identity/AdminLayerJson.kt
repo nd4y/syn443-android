@@ -27,6 +27,12 @@ internal object AdminLayerJson {
         require(raw.length in 1..MAX_BYTES && raw.toByteArray(Charsets.UTF_8).size<=MAX_BYTES)
         return Reader(raw,inventory).parse()
     }
+    /** Reconciliation replies only: a Go RawMessage can grow while the HTTP
+     * encoder escapes HTML. Ordinary layer/OAuth admission remains unchanged. */
+    fun reconciliationDocument(raw:String):Document {
+        require(raw.length in 1..1_048_576 && raw.toByteArray(Charsets.UTF_8).size<=1_048_576)
+        return Reader(raw,false).parse()
+    }
     private class Reader(private val text:String,private val inventory:Boolean) {
         private var at=0
         private var nodes=0

@@ -88,7 +88,8 @@ class ControlProvider : ContentProvider() {
                     require(caller==Process.myUid())
                     val id=requireNotNull(arg).also {require(it.matches(Regex("[a-f0-9]{32}")))}
                     val input=requireNotNull(extras)
-                    require(input.keySet()==setOf("generation","kind","device","binding","localRevision","pages","reviewBinding","reviewDeadline","comparisonBinding"))
+                    val fields=setOf("generation","kind","device","binding","localRevision","pages","reviewBinding","reviewDeadline","comparisonBinding")
+                    require(input.keySet()==fields || input.keySet()==fields+"operationBinding")
                     val generation=input.getLong("generation",-1).also {require(it>=0)}
                     val kind=AdminEditorCoordinator.Kind.valueOf(requireNotNull(input.getString("kind")))
                     val device=requireNotNull(input.getString("device")).also {require(it.length<=64)}
@@ -100,7 +101,8 @@ class ControlProvider : ContentProvider() {
                     val review=requireNotNull(input.getString("reviewBinding")).also {require(it.length<=128)}
                     val deadline=input.getLong("reviewDeadline",-1).also {require(it>=0)}
                     val comparison=requireNotNull(input.getString("comparisonBinding")).also {require(it.length<=43)}
-                    val command=AdminEditorCoordinator.Command(kind,device,binding,local,pages,review,deadline,comparison)
+                    val operation=input.getString("operationBinding","").also {require(it.length<=43)}
+                    val command=AdminEditorCoordinator.Command(kind,device,binding,local,pages,review,deadline,comparison,operation)
                     return Bundle().apply {putBoolean("ok",true);putBoolean("admitted",AdminController.get(context).editorStart(id,generation,command))}
                 }
                 "admin-comparison-start" -> {

@@ -62,6 +62,21 @@ class BoundedHttp:AutoCloseable {
         return exchangeUri(method,uri,headers,body,scope,timeoutMs,maxBody,factory,route,false,connect)
     }
 
+    /** Fixed administrative reconciliation only. Other identity exchanges keep
+     * their existing request and response ceilings. A captured physical route
+     * remains mandatory; this is a resource boundary, not authorization. */
+    fun configurationReconcile(origin:String,headers:Map<String,String>,body:ByteArray,scope:Scope=Scope(),
+        timeoutMs:Long=20_000,factory:SSLSocketFactory=SSLSocketFactory.getDefault() as SSLSocketFactory,
+        route:HttpRoute):Reply {
+        Identity.controlOrigin(origin)
+        require(timeoutMs in 1..20_000 && body.size in 1..524_288)
+        require(headers.keys.none {it.equals("Origin",ignoreCase=true)})
+        val uri=Identity.https(origin+AdminOperationReconcile.PATH)
+        return exchangeUri("POST",uri,headers,body,scope,timeoutMs,1_048_576,factory,route,false) {_,_,_->
+            error("Reconciliation requires a captured route")
+        }
+    }
+
     internal fun subscription(uri:URI,headers:Map<String,String>,scope:Scope,timeoutMs:Long,route:HttpRoute,
         factory:SSLSocketFactory):Reply {
         require(timeoutMs in 1..30_000 && uri.scheme=="https" && uri.host!=null)
@@ -128,6 +143,9 @@ class BoundedHttp:AutoCloseable {
         } catch(e:CancellationException) {throw DeliveryException(DeliveryFailure.CANCELLED)
         } catch(e:InterruptedException) {Thread.currentThread().interrupt();throw DeliveryException(DeliveryFailure.CANCELLED)
         } catch(e:ExecutionException) {
+            // Closing the owned socket may finish the worker before cancel()
+            // reaches Future.cancel. Explicit cancellation still owns the result.
+            scope.active()
             throw when(val cause=e.cause) {
                 is DeliveryException->cause
                 is java.net.UnknownHostException->DeliveryException(DeliveryFailure.DNS)

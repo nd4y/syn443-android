@@ -1,26 +1,41 @@
 # Implementation and acceptance snapshot
 
-Snapshot: 2026-11-16. Specification0.9 contains292 requirements and98 acceptance
+Snapshot: 2026-11-17. Specification0.9 contains292 requirements and98 acceptance
 scenarios. Those numbers describe scope, not completed work or test counts.
 This document supersedes repository-wide readiness claims in historical stage notes.
 
-The v89 / `0.9.61-admin-compare` source candidate adds
-[native layer comparison and explicit local rebase](native-layered-editor.md).
-Fourteen new exact identity roots and21 exact Android roots raise the pending
-floors to200 identity and398 Android outcomes per API29/35/37. The richer CP57
-Go projection fixture is accepted at its exact recorded source/artifact; Android
-conformance, coverage, route tests and physical/live administration remain
-pending Actions and acceptance. Comparison is a local projection, not typed VPN
-compilation or publication authority. Initial assignment, real native OIDC/MFA
-and safe terminal reconciliation of generic unknown HTTP mutation outcomes
-remain open. Existing historical checkpoints below are not promoted by this
-source change.
+The [operation-reconciliation source candidate](operation-reconciliation-android.md)
+adds body-bound historical receipts, explicit lookup and confirmed atomic
+absence sealing, original publication deadlines and stable encrypted editor
+ownership. Forty-nine exact JVM roots across seven test classes and29 exact
+Android roots raise pending floors to249 identity and427 per API29/35/37. All seven new operation core types
+join the unchanged90% independent class-coverage gate. Actual Go conformance
+requires a same-run owned temporary corpus, not a packaged or uploaded fixture.
+This source is pending Actions, coverage, integration and live acceptance.
+
+The third candidate CI ran334 identity cases:333 passed and one existing
+socket-cancellation assertion failed (`TRANSPORT` observed, `CANCELLED`
+required). Earlier26 fixture failures were fixed with valid strict templates,
+without relaxing validation or tests. A one-line Scope-priority correction
+and three bounded real-loopback cancellation/transport/worker-retirement
+regressions are source-ready for the next CI. They do not close that failed
+attempt or add an exception to the unchanged coverage requirement.
+
+The currently installed accepted checkpoint is v89 /
+`0.9.61-admin-compare`, with68 scoped physical USB/Wi-Fi outcomes. Its
+[comparison and local-rebase scope](native-layered-editor.md), pure presentation
+fixtures and recovery checks do not establish authenticated native admin SSO,
+live server ACL/MFA or a real publication. The richer CP57 Go projection
+artifact remains a separate accepted checkpoint. Initial device assignment
+still uses the web panel; local comparison is neither typed VPN compilation
+nor publication authority. Live outcome-reconciliation integration remains
+open despite this source implementation.
 
 The v84 administrative-auth source and actual-main checks passed. Its exact
 Actions APK passed the [USB/Wi-Fi checkpoint](non-lte-acceptance-20261116.md):20
 physical outcomes, two real Wi-Fi interruptions, native-process recovery and15
-independent restoration checks. This is the currently installed checkpoint and
-uses a Direct policy; it is not native-admin SSO or managed-chain acceptance.
+independent restoration checks. This historical checkpoint used a Direct policy
+and is superseded by v89 above; it is not native-admin SSO or managed-chain acceptance.
 
 The v85 [current signed administrative admission](mobile-admin-discovery.md) and
 [controller-owned adaptive RAM budget](probe-budget-owner.md) source

@@ -33,6 +33,8 @@ tasks.jacocoTestCoverageVerification {
             "io.syn443.identity.AdminLayerConflict", "io.syn443.identity.AdminLayerDifference", "io.syn443.identity.AdminLayerDiff", "io.syn443.identity.AdminLayerComparison",
             "io.syn443.identity.AdminLayerComparison.Inputs", "io.syn443.identity.AdminLayerComparison.Row", "io.syn443.identity.AdminLayerComparison.Companion",
             "io.syn443.identity.AdminLayerProjectionException", "io.syn443.identity.AdminLayerProjection", "io.syn443.identity.AdminLayerValues", "io.syn443.identity.AdminLayerProjector",
+            "io.syn443.identity.AdminOperationRequest", "io.syn443.identity.AdminOperationJob", "io.syn443.identity.AdminOperationReceipt", "io.syn443.identity.AdminOperationReconcile",
+            "io.syn443.identity.AdminOperationIntent", "io.syn443.identity.AdminOperationOutcome", "io.syn443.identity.AdminOperationJobState",
             "io.syn443.identity.IdentityOperation", "io.syn443.identity.IdentityOperation.Companion",
             "io.syn443.identity.LoginRecovery", "io.syn443.identity.LoginIntent", "io.syn443.identity.RegistrationTombstone",
             "io.syn443.identity.LoginPayload", "io.syn443.identity.LoginPayload.Companion", "io.syn443.identity.CapabilityNegotiation",

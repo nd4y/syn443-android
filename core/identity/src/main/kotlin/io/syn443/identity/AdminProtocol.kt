@@ -2,6 +2,7 @@ package io.syn443.identity
 
 import io.syn443.identity.AdminIdentity.Companion.integer
 import io.syn443.identity.AdminIdentity.Companion.text
+import io.syn443.policy.Canonical
 import io.syn443.policy.Policy
 import kotlinx.serialization.json.*
 
@@ -292,9 +293,9 @@ class AdminProtocol internal constructor(private val identity:AdminIdentity,priv
         val now=elapsed()
         val window=trusted.window(boot(),now)
         validateSession(current)
-        AdminLayerOwnership(identity.serviceBinding,
+        AdminLayerOwnership(identity.editorServiceHash,
             Identity.hash((identity.metadata.issuer+"\u0000"+current.subject).toByteArray(Charsets.UTF_8)),
-            identity.metadata.apiOrigin,window,boot(),now,current.sessionUntilElapsedMs)
+            identity.metadata.apiOrigin,window,boot(),now,current.sessionUntilElapsedMs,identity.serviceBinding)
     }
     /** Compute once on the controller worker after a checked response. UI clocks
      * cannot renew the review ticket by reopening a dialog or receiving it late. */
@@ -351,6 +352,118 @@ class AdminProtocol internal constructor(private val identity:AdminIdentity,priv
                 require(reply.body.size in 1..action.maxReplyBytes)
                 controlAccess(current,time)
                 AdminLayerControl.parseReply(action,Policy.utf8(reply.body),time.window(boot(),elapsed()))
+                    .also {controlAccess(current,time)}
+            }
+            val accepted=guard.record(time)
+            controlAccess(current,accepted,admit=false)
+            result
+        }finally {body.fill(0)}
+    }
+    /** Read-only eligibility for a NEW mutation only. No cached feature grant,
+     * session/MFA renewal or reinterpretation of a retained operation. */
+    fun configurationRequestVersion(current:AdminSession,scope:IdentityScope):Int=checked {
+        controlAccess(current)
+        val guard=checkNotNull(admission)
+        val body=Canonical.encode(buildJsonObject {
+            put("version",1);put("action","configuration.protocol.get")
+            put("requestId",Identity.random());put("payload",buildJsonObject {})
+        }).toByteArray(Charsets.UTF_8)
+        try {
+            require(body.size in 1..8192)
+            val prior=guard.priorTime()
+            val trusted=if(prior==null)current.time else floor(current.time,prior)
+            val started=start();val url=identity.metadata.apiOrigin+AdminControl.PATH
+            val proof=scope.request {
+                controlAccess(current)
+                Identity.proof(key.publicKey,key::sign,"POST",url,trusted.proofSecond(started.boot,started.elapsed),
+                    token=current.accessToken,body=body)
+            }
+            val reply=scope.request {
+                val now=elapsed()
+                require(boot()==started.boot && now>=started.elapsed && now-started.elapsed<=20_000)
+                controlAccess(current)
+                exchange.request("POST",url,mapOf("Content-Type" to "application/json","Cache-Control" to "no-store",
+                    "Authorization" to "DPoP ${current.accessToken}","DPoP" to proof),body.copyOf(),it,4096)
+                    .also {controlAccess(current)}
+            }
+            require(reply.body.size<=4096 && reply.headers.keys.none {it.equals("dpop-nonce",true)})
+            if(reply.status==404 || reply.status==405 || reply.status==400 && catalogCode(reply)=="catalog_invalid") {
+                // An unsupported read provides no trusted clock or new authority.
+                return@checked scope.request {controlAccess(current);1}
+            }
+            if(reply.status!=200) {
+                val code=catalogCode(reply)
+                throw AdminException(when {
+                    reply.status==401->AdminFailure.REAUTHENTICATE
+                    reply.status==403->forbidden(reply)
+                    reply.status==409 && code=="catalog_revision_conflict"->AdminFailure.CONFLICT
+                    reply.status==429 && code=="catalog_quota"->AdminFailure.LIMITED
+                    reply.status in 500..599->AdminFailure.TRANSPORT
+                    else->AdminFailure.INVALID_REPLY
+                })
+            }
+            val time=observed(reply,started,trusted)
+            val version=scope.request {
+                require(reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json" && reply.body.isNotEmpty())
+                controlAccess(current,time)
+                val value=Identity.objectJSON(Policy.utf8(reply.body))
+                require(value.keys==setOf("version","configurationRequestVersion"))
+                val schema=value.getValue("version").jsonPrimitive
+                val selected=value.getValue("configurationRequestVersion").jsonPrimitive
+                require(!schema.isString && schema.content=="1" && !selected.isString && selected.content in setOf("1","2"))
+                selected.content.toInt().also {controlAccess(current,time)}
+            }
+            val accepted=guard.record(time)
+            controlAccess(current,accepted,admit=false)
+            version
+        }finally {body.fill(0)}
+    }
+    /** An explicit lookup/seal of exact retained bytes. The result is a value
+     * receipt, never a fresh preview, publication or device activation grant. */
+    fun operationReconcile(action:AdminOperationRequest,current:AdminSession,scope:IdentityScope):AdminOperationReceipt=checked {
+        controlAccess(current)
+        require(action.actor==layerActor(current) && action.origin==identity.metadata.apiOrigin)
+        val url=identity.metadata.apiOrigin+"/v1/control/configuration/reconcile"
+        require(action.uri==url && action.maxReplyBytes==1_048_576)
+        val guard=checkNotNull(admission);val body=action.bodyBytes()
+        try {
+            // Canonical four-field framing of a full256KiB original remains
+            // below350000 bytes, so existing proof admission needs no widening.
+            require(body.size in 1..360_448)
+            val prior=guard.priorTime()
+            val trusted=if(prior==null)current.time else floor(current.time,prior)
+            val started=start()
+            val proof=scope.request {
+                controlAccess(current)
+                Identity.proof(key.publicKey,key::sign,"POST",url,trusted.proofSecond(started.boot,started.elapsed),
+                    token=current.accessToken,body=body,maxBody=360_448)
+            }
+            val reply=scope.request {
+                val now=elapsed()
+                require(boot()==started.boot && now>=started.elapsed && now-started.elapsed<=20_000)
+                controlAccess(current)
+                exchange.request("POST",url,mapOf("Content-Type" to "application/json","Cache-Control" to "no-store",
+                    "Authorization" to "DPoP ${current.accessToken}","DPoP" to proof),body.copyOf(),it,action.maxReplyBytes)
+                    .also {controlAccess(current)}
+            }
+            if(reply.status!=200) {
+                val code=catalogCode(reply)
+                throw AdminException(when {
+                    reply.status==401->AdminFailure.REAUTHENTICATE
+                    reply.status==403->forbidden(reply)
+                    reply.status==409 && code=="catalog_revision_conflict"->AdminFailure.CONFLICT
+                    reply.status==400 && code=="catalog_invalid"->AdminFailure.INVALID_CONFIGURATION
+                    reply.status==429 && code=="catalog_quota"->AdminFailure.LIMITED
+                    reply.status in setOf(404,405) || reply.status in 500..599->AdminFailure.TRANSPORT
+                    else->AdminFailure.INVALID_REPLY
+                })
+            }
+            val time=observed(reply,started,trusted)
+            val result=scope.request {
+                require(reply.single("content-type")?.substringBefore(';')?.trim()?.lowercase()=="application/json")
+                require(reply.body.size in 1..action.maxReplyBytes)
+                controlAccess(current,time)
+                AdminOperationReconcile.parseReply(action,Policy.utf8(reply.body),time.window(boot(),elapsed()))
                     .also {controlAccess(current,time)}
             }
             val accepted=guard.record(time)

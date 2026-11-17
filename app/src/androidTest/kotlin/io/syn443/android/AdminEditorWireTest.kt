@@ -50,7 +50,7 @@ class AdminEditorWireTest {
         assertEquals(original.recipients,decoded.recipients);assertEquals(original.diffSummaries,decoded.diffSummaries)
         assertEquals("REVIEW_EXPIRED",decoded.error);assertArrayEquals(preserved,AdminEditorWire.encode(decoded))
         val document=Json.parseToJsonElement(preserved.toString(Charsets.UTF_8)).jsonObject
-        assertEquals(18,document.size);assertEquals(1,document.getValue("schemaVersion").jsonPrimitive.int)
+        assertEquals(21,document.size);assertEquals(1,document.getValue("schemaVersion").jsonPrimitive.int)
         assertEquals(original.comparisonBinding,decoded.comparisonBinding)
         assertEquals(original.comparisonBinding,document.getValue("comparisonBinding").jsonPrimitive.content)
         assertFalse("pages" in document);assertFalse("diffSummaries" in document)

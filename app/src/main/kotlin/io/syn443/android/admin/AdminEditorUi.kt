@@ -19,7 +19,7 @@ internal class AdminEditorModel(
     pages:List<String> = emptyList(),parents:List<AdminEditorParent> = emptyList(),
     val reviewBinding:String="",val reviewDeadlineElapsed:Long=0,
     recipients:List<String> = emptyList(),diffSummaries:List<String> = emptyList(),
-    val error:String="",val comparisonBinding:String=""
+    val error:String="",val comparisonBinding:String="",val operationBinding:String="",val operationOutcome:String="",val canSeal:Boolean=false
 ) {
     val pages:List<String> = Collections.unmodifiableList(ArrayList(pages))
     val parents:List<AdminEditorParent> = Collections.unmodifiableList(ArrayList(parents))
@@ -34,6 +34,9 @@ internal class AdminEditorModel(
         require(parents.size<=20)
         require(reviewBinding.isEmpty() || editorBinding.matches(reviewBinding))
         require(comparisonBinding.isEmpty() || editorDigest(comparisonBinding))
+        require(operationBinding.isEmpty() || editorDigest(operationBinding))
+        require(operationOutcome in setOf("","UNKNOWN","NO_EFFECT","RECORDED","RECORDED_RESULT_UNAVAILABLE"))
+        require(!canSeal || operationBinding.isNotEmpty() && operationOutcome=="UNKNOWN" && phase==AdminEditorPhase.UNCERTAIN)
         require(reviewDeadlineElapsed>=0 && recipients.size<=64 && recipients.all {editorId.matches(it)} && recipients.toSet().size==recipients.size)
         require(diffSummaries.size<=64 && diffSummaries.all {it.length<=512 && editorUnicode(it)})
     }
@@ -53,11 +56,12 @@ internal class AdminEditorActions(
     val edited:()->Unit={},val saveLocal:(List<String>)->Unit={},val saveDraft:()->Unit={},
     val preview:()->Unit={},val publish:(String,Long)->Unit={_,_->},
     val poll:()->Unit={},val retryExact:()->Unit={},val login:()->Unit={},
-    val comparison:()->Unit={},val rebase:()->Unit={},val web:()->Unit={},val back:()->Unit={},val close:()->Unit={},val viewComparison:()->Unit={}
+    val comparison:()->Unit={},val rebase:()->Unit={},val web:()->Unit={},val back:()->Unit={},val close:()->Unit={},val viewComparison:()->Unit={},
+    val checkOutcome:()->Unit={},val sealPending:(String)->Unit={}
 )
 
 internal fun AdminEditorModel.withBusy(value:Boolean)=AdminEditorModel(device,privateDraftRevision,desiredHeadRevision,localRevision,
-    phase,value,readOnly,unassigned,documentBinding,pages,parents,reviewBinding,reviewDeadlineElapsed,recipients,diffSummaries,error,comparisonBinding)
+    phase,value,readOnly,unassigned,documentBinding,pages,parents,reviewBinding,reviewDeadlineElapsed,recipients,diffSummaries,error,comparisonBinding,operationBinding,operationOutcome,canSeal)
 internal fun AdminEditorModel.withFailure(code:String)=AdminEditorModel(device,privateDraftRevision,desiredHeadRevision,localRevision,
     AdminEditorPhase.UNAVAILABLE,false,true,unassigned,documentBinding,pages,parents,error=code)
 
@@ -68,6 +72,9 @@ internal fun adminEditorErrorText(code:String):String=when(if(code.length in 1..
     "REAUTHENTICATE","REAUTHENTICATION_REQUIRED","SESSION_EXPIRED"->"Нужно снова подтвердить административный доступ. Локальная копия сохранена."
     "REVIEW_EXPIRED"->"Срок проверки истёк. Запросите новую проверку перед публикацией."
     "BUSY"->"Предыдущая операция ещё выполняется."
+    "OUTCOME_UNKNOWN"->"Сервер пока не подтвердил результат. Исходные запрос и локальная копия сохранены."
+    "OUTCOME_CHECK_REQUIRED"->"Сначала проверьте результат этой операции."
+    "RESULT_UNAVAILABLE"->"Сервер зарегистрировал операцию, но её результат уже недоступен. Сверьте текущую конфигурацию в панели; автоматический повтор не выполняется."
     else->"Данные временно недоступны. Проверьте состояние и повторите действие."
 }
 

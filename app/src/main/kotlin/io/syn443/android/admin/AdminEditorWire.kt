@@ -20,7 +20,7 @@ internal object AdminEditorWire {
     private val kinds=setOf("template","group","user","device","local")
     private val fields=setOf("schemaVersion","device","privateDraftRevision","desiredHeadRevision","localRevision",
         "phase","busy","readOnly","unassigned","documentBinding","pages64","parents","reviewBinding",
-        "reviewDeadlineElapsed","recipients","diffSummaries64","error","comparisonBinding")
+        "reviewDeadlineElapsed","recipients","diffSummaries64","error","comparisonBinding","operationBinding","operationOutcome","canSeal")
 
     private fun utf8Size(value:String):Int {
         val raw=value.toByteArray(Charsets.UTF_8)
@@ -54,6 +54,9 @@ internal object AdminEditorWire {
         require(value.documentBinding.isEmpty() || binding.matches(value.documentBinding))
         require(value.reviewBinding.isEmpty() || binding.matches(value.reviewBinding))
         require(value.comparisonBinding.isEmpty() || editorDigest(value.comparisonBinding))
+        require(value.operationBinding.isEmpty() || editorDigest(value.operationBinding))
+        require(value.operationOutcome in setOf("","UNKNOWN","NO_EFFECT","RECORDED","RECORDED_RESULT_UNAVAILABLE"))
+        require(!value.canSeal || value.phase==AdminEditorPhase.UNCERTAIN && value.operationOutcome=="UNKNOWN" && value.operationBinding.isNotEmpty())
         require(value.pages.size<=64 && value.pages.all {it.length<=8192 && editorUnicode(it)})
         require(value.pages.sumOf(::utf8Size)<=MAX_PAGE_BYTES)
         require(value.pages.isEmpty() || value.documentBinding.isNotEmpty())
@@ -113,6 +116,9 @@ internal object AdminEditorWire {
             field("diffSummaries64") {out.encodedArray(value.diffSummaries)}
             field("error") {out.text(value.error)}
             field("comparisonBinding") {out.text(value.comparisonBinding)}
+            field("operationBinding") {out.text(value.operationBinding)}
+            field("operationOutcome") {out.text(value.operationOutcome)}
+            field("canSeal") {out.raw(value.canSeal.toString())}
             out.raw("}");out.body()
         }
     }
@@ -212,6 +218,7 @@ internal object AdminEditorWire {
             var phase=AdminEditorPhase.INVENTORY;var busy=false;var readOnly=false;var unassigned=false
             var document="";var pages:List<String> = emptyList();var parents:List<AdminEditorParent> = emptyList()
             var review="";var deadline=0L;var recipients:List<String> = emptyList();var differences:List<String> = emptyList();var error="";var comparison=""
+            var operation="";var outcome="";var canSeal=false
             do {
                 val name=text(32);require(name in fields && seen.add(name));expect(':')
                 when(name) {
@@ -233,12 +240,16 @@ internal object AdminEditorWire {
                     "diffSummaries64"->differences=encodedStrings(512,MAX_DIFF_BYTES)
                     "error"->error=text(64)
                     "comparisonBinding"->comparison=text(43)
+                    "operationBinding"->operation=text(43)
+                    "operationOutcome"->outcome=text(32)
+                    "canSeal"->canSeal=boolean()
                 }
             }while(take(','))
             expect('}');space();require(at==source.length && seen==fields)
             return AdminEditorModel(device=device,privateDraftRevision=privateRevision,desiredHeadRevision=desiredRevision,
                 localRevision=localRevision,phase=phase,busy=busy,readOnly=readOnly,unassigned=unassigned,documentBinding=document,
-                pages=pages,parents=parents,reviewBinding=review,reviewDeadlineElapsed=deadline,recipients=recipients,diffSummaries=differences,error=error,comparisonBinding=comparison)
+                pages=pages,parents=parents,reviewBinding=review,reviewDeadlineElapsed=deadline,recipients=recipients,diffSummaries=differences,error=error,comparisonBinding=comparison,
+                operationBinding=operation,operationOutcome=outcome,canSeal=canSeal)
         }
     }
 }

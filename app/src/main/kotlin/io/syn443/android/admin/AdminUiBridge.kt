@@ -182,6 +182,7 @@ internal class ResolverAdminUiBridge(private val resolver:ContentResolver):Admin
             putStringArrayList("pages",ArrayList(command.pages));putString("reviewBinding",command.reviewBinding)
             putLong("reviewDeadline",command.reviewDeadline)
             putString("comparisonBinding",command.comparisonBinding)
+            putString("operationBinding",command.operationBinding)
         }
         AdminEditorWire.decode(editorReply(generation,"admin-editor-start",input,AdminEditorWire.MAX_BODY))
     }
