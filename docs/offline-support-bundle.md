@@ -105,3 +105,8 @@ Cleanup now uses the public [Os.remove API](https://developer.android.com/refere
 after the same owned-directory and regular-file validation. No hidden API or
 weaker path checks are used. The failed attempt remains in the evidence chain;
 emulator cases were not reached in that run.
+
+The next run44177494225 compiled the app and test sources, then stopped at
+the existing `UseKtx` lint rule for the new document-result URI conversion.
+That call now uses the pinned AndroidX `toUri` extension. The lint rule and
+all test assertions remain; this failed attempt also reached no emulator.

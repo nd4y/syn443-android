@@ -15,6 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -75,7 +76,7 @@ internal fun DiagnosticsRoute(
     // clearing it and losing the user's selected document when operation is busy.
     LaunchedEffect(pendingExportDestination, busy) {
         if (pendingExportDestination.isEmpty() || pendingExportId.isEmpty() || busy) return@LaunchedEffect
-        val target = Uri.parse(pendingExportDestination)
+        val target = pendingExportDestination.toUri()
         val reviewedId = pendingExportId
         val reviewedHash = pendingExportHash
         val reviewedBytes = pendingExportBytes
