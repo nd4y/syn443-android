@@ -3385,8 +3385,8 @@
   "evidenceSnapshot": {
     "date": "2026-11-17",
     "inventory": "docs/implementation-status.md",
-    "androidSource": "cdf2df59929ed3609fc481ad3e98694da7daf4e1",
+    "androidSource": "512e54e1f3f2002193cb9baafbd40e59f9c35638",
     "controlPlaneSource": "f7f610ba9bf9bd55066d0df2bc772048312bf39f",
-    "scope": "Accepted bounded check-profile and durable-adaptive sources remain distinct from whole-product and managed-device rollout. Android cdf source Actions44084709221 confirms516 JVM/464 per API29/35/37/native504 each ordinary-race, with separate budget7+18 and prior profile gates. Protected PR94 main889d1bf awaits its new Actions44094180350; phone remains a separate private acceptance gate. CP64 source/main evidence is separate. App94 native-owner recovery source requires its own Actions/main/phone proof. Full common scheduling, native administrator SSO, actual managed profiles and excluded physical gates remain open. The following app95 negative-path source candidate requires separate Actions/main/phone evidence and does not implement persistent BAD08 or verified physical network identity."
+    "scope": "Accepted bounded check-profile, durable-adaptive and native-owner recovery sources remain distinct from whole-product and managed-device rollout. Owner source512e Actions44102955347 confirms519 JVM/470 per API29/35/37/native504 each ordinary-race; all116 earlier Kotlin sources and three prior negative regression roots are retained. Protected PR95 mainb7689dc awaits its separate Actions44115155327; phone acceptance remains open. CP64 source/main evidence is separate. App95 negative-path continuity requires its own Actions/main/phone proof. Full common scheduling, native administrator SSO, actual managed profiles, BAD08 persistence and excluded physical gates remain open."
   }
 }

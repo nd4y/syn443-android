@@ -12,7 +12,11 @@ adaptive readiness and makes groups recovery-due after an accepted native
 epoch/scope change. It retains compatible negative evidence and shared start
 debt, and waits for typed current-owner idle before replacing pending work.
 Source-level protocol evidence is distinct from physical reproduction and the
-historical crash RCA. Its own Actions, main and phone gates remain open.
+historical crash RCA. Source 512e54e1f3f2002193cb9baafbd40e59f9c35638 passed all
+eight jobs in [Actions 44102955347](https://github.com/nd4y/syn443-android/actions/runs/44102955347).
+Independent raw evidence confirms 519 JVM and 470 unique outcomes per API 29/35/37,
+including all three retained regression roots on every API. The protected
+main b7689dc has a separate pending run 44115155327; phone acceptance remains open.
 
 The [durable adaptive admission candidate](durable-adaptive-budget.md) adds an
 owned counter checkpoint and asynchronous storage before dispatch. Process,

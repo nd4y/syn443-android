@@ -411,6 +411,13 @@ are negative/boundary cases. Timeout and configure are not worker completion.
 Synthetic reports do not establish a physical native scope transition, managed
 route rollout, the original crash root cause, cellular or battery acceptance.
 
+Exact corrected source 512e54e1f3f2002193cb9baafbd40e59f9c35638 passed all eight
+jobs in [Actions 44102955347](https://github.com/nd4y/syn443-android/actions/runs/44102955347).
+Independent raw evidence confirms 519 JVM and 470 outcomes per API 29/35/37, with
+all 116 prior Kotlin test files unchanged. The three retained negatives that
+caught the first candidate each pass on all three APIs. Main and phone acceptance
+remain separate.
+
 ## Compatible negative history candidate
 
 The [continuity design](negative-path-continuity.md) adds three JVM roots and six
