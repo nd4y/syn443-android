@@ -213,6 +213,15 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         RouteSnapshot.adaptiveOwnerChanged(checkNotNull(routeScope),wire.groupTags().values.toSet())
         if(!checkNotNull(memory).revokeVerified(checkNotNull(context),now))retireOwner=true
     }
+    /** invalidate/configure reset the native report before exposing a new
+     * owner. An old result or traffic hint cannot establish that transition. */
+    private fun nativeResetReport(raw:JSONObject):Boolean {
+        if(listOf("request","group","receipt").any {raw.opt(it)!=""})return false
+        if(raw.opt("code") !in setOf("idle","not_ready"))return false
+        val hops=raw.optJSONArray("hops") ?: return false
+        if(hops.length()!=0)return false
+        return !raw.has("recheckHints") || raw.optJSONArray("recheckHints")?.length()==0
+    }
     private fun reportCurrent(raw:JSONObject,now:Long,dispatch:(String)->Unit) {
         if(retireOwner || context==null)return
         if(!advanceClock(now) || raw.toString().length>32768)return
@@ -221,7 +230,9 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         if(epoch<nativeEpoch || !scope.matches(Regex("[a-f0-9]{64}")))return
         val reportedPolicy=raw.optString("policyScope")
         if(reportedPolicy!=policyScope && reportedPolicy!=previousPolicyScope)return
-        if(nativeEpoch>0 && observedNativeScope.isNotEmpty() && (epoch!=nativeEpoch || scope!=observedNativeScope))nativeOwnerChanged(now)
+        val ownerChanged=nativeEpoch>0 && observedNativeScope.isNotEmpty() && (epoch!=nativeEpoch || scope!=observedNativeScope)
+        if(ownerChanged && !nativeResetReport(raw))return
+        if(ownerChanged)nativeOwnerChanged(now)
         nativeEpoch=epoch;observedNativeScope=scope
         if(retireOwner)return
         if(drainingSince?.let {now-it>35_000}==true) {retireOwner=true;return}
@@ -241,7 +252,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         }
         nativeReady=true;nativeScope=scope
         if(drainingSince!=null) {
-            if(nativeRunning)return
+            if(nativeRunning || !nativeResetReport(raw) || raw.opt("code")!="idle")return
             // snapshot.running is the real busy owner, cleared only after
             // workerDone closes following cleanup and admission release.
             pending=null;drainingSince=null

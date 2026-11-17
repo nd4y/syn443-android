@@ -151,8 +151,8 @@ class AdaptiveOwnerTransitionTest {
             assertEquals(unchangedEpoch, h.epoch)
             h.assertRetracted()
             val commands = h.commands.size
-            // A valid prior same-epoch scope is conservatively another change,
-            // never a reusable selection proof or positive measurement.
+            // A foreign old result cannot establish an owner transition or
+            // supply a reusable selection proof or positive measurement.
             h.report(staleSelected, 7_100)
             assertEquals(commands, h.commands.size)
             h.assertRetracted()
@@ -204,8 +204,11 @@ class AdaptiveOwnerTransitionTest {
     @Test fun foreignAndMalformedReportsCannotReleaseAnOwnerTransition() {
         Harness(config()).use { h ->
             h.ready(1_000)
-            checkNotNull(h.tick(1_000))
+            val old = checkNotNull(h.tick(1_000))
             h.changeOwner(2_000, running = true)
+            val hints = JSONArray().put(JSONObject().put("group", old.getString("group"))
+                .put("selectionToken", 1).put("sequence", 1).put("completedBootMs", 1_000)
+                .put("code", "traffic_network_failure"))
             val cases = listOf<(JSONObject) -> Unit>(
                 { it.put("nativeEpoch", 1) },
                 { it.put("policyScope", Policy.hash("synthetic-foreign-policy")) },
@@ -219,11 +222,31 @@ class AdaptiveOwnerTransitionTest {
                 { it.put("running", "false") },
                 { it.put("running", JSONObject.NULL) },
                 { it.put("running", 0) },
+                { it.put("request", old.getString("request")) },
+                { it.put("group", old.getString("group")) },
+                { it.put("hops", JSONArray(old.getJSONArray("hops").toString())) },
+                { it.put("receipt", Policy.hash(old.getString("request"))) },
+                { it.put("code", "verified") },
+                { it.put("code", "not_ready") },
+                { it.put("recheckHints", JSONArray(hints.toString())) },
+                { it.put("recheckHints", JSONObject()) },
+                { it.put("recheckHints", "[]") },
+                { it.put("recheckHints", JSONObject.NULL) },
+                { it.put("scope", Policy.hash("synthetic-foreign-result-owner"))
+                    .put("request", old.getString("request")).put("group", old.getString("group"))
+                    .put("hops", JSONArray(old.getJSONArray("hops").toString())).put("code", "verified")
+                    .put("receipt", Policy.hash(old.getString("request"))) },
+                { it.put("nativeEpoch", 3).put("request", old.getString("request"))
+                    .put("group", old.getString("group")).put("hops", JSONArray(old.getJSONArray("hops").toString()))
+                    .put("code", "verified").put("receipt", Policy.hash(old.getString("request"))) },
+                { it.put("scope", Policy.hash("synthetic-foreign-hint-owner"))
+                    .put("recheckHints", JSONArray(hints.toString())) },
+                { it.put("nativeEpoch", 3).put("recheckHints", JSONArray(hints.toString())) },
             )
             for ((index, mutate) in cases.withIndex()) {
                 val frame = h.status()
                 mutate(frame)
-                val now = 3_000L + index * 1_000
+                val now = 3_000L + index * 500
                 h.report(frame, now)
                 h.controller.force()
                 assertNull("malformed owner frame $index released work", h.tick(now + 100))
