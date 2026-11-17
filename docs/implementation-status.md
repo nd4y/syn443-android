@@ -23,6 +23,13 @@ observations without relaxing the original110s or PASS criterion. Its new
 Actions/main checks are separate; the original cause and phone acceptance
 remain open.
 
+The following continuity/diagnostic source8ff3039 passed seven jobs in
+run44129925465, but API37 failed its external Always-on scenario behind an
+uncorrelated foreground ANR. Its430 instrumentation cases passed. The
+[Settings evidence revision](vpn-settings-evidence.md) preserves that refusal
+and adds bounded failure-stage observations; it does not claim an ANR fix or
+an accepted source/main release.
+
 The [durable adaptive admission candidate](durable-adaptive-budget.md) adds an
 owned counter checkpoint and asynchronous storage before dispatch. Process,
 service, network and force changes cannot erase its debt. Conservative reboot
