@@ -31,6 +31,7 @@ class EngineHostService : Service() {
     @Volatile private var latestNetwork: NetworkUpdate? = null
     @Volatile private var adaptiveInvalidated=false
     private val proofRunning=java.util.concurrent.atomic.AtomicBoolean()
+    private val overlayViewQueued=java.util.concurrent.atomic.AtomicBoolean()
     private var managedProofEnabled=false
     private var routePoll:Runnable?=null // native worker only
     private var adaptivePoll:Runnable?=null
@@ -182,6 +183,16 @@ class EngineHostService : Service() {
             if (session != token) return
             worker.post { if (session == token) engine?.diagnoseNetBird() }
         }
+        override fun netBirdView(session: String, request: String) {
+            val runtime = engine ?: return
+            if (session != token || android.os.Binder.getCallingUid() != Process.myUid() ||
+                OverlayViewRequest.parse(request) == null || !overlayViewQueued.compareAndSet(false, true)) return
+            // Retain the slot until the actual queued task exits, even after a UI timeout.
+            if (!worker.post {
+                try { if (session == token && engine === runtime) runCatching { runtime.netBirdView(request) } }
+                finally { overlayViewQueued.set(false) }
+            }) overlayViewQueued.set(false)
+        }
         override fun checkRoutes(session:String,request:String) {
             if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid() || request.length>32768)return
             worker.post {if(session==token) {
@@ -234,6 +245,7 @@ class EngineHostService : Service() {
         override fun stop(token: String) = binder.stop(token)
         override fun pulse(token: String) = binder.pulse(token)
         override fun diagnoseNetBird(token: String) = binder.diagnoseNetBird(token)
+        override fun netBirdView(token: String, request: String) = binder.netBirdView(token, request)
         override fun checkRoutes(token:String,request:String)=binder.checkRoutes(token,request)
         override fun cancelRouteChecks(token:String)=binder.cancelRouteChecks(token)
         override fun selectVerifiedRoute(token:String,receipt:String,checkId:String,group:String,previous:String,candidate:String)=

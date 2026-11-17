@@ -1,5 +1,14 @@
 # Testing and release gates
 
+[Bounded NetBird report views](netbird-report-views.md) add eight exact Android
+outcomes: five model, two paging UI and one actual packaged gomobile/local
+command case. Each API29/35/37 requires484 unique outcomes; all prior mandatory
+roots and coverage thresholds remain. Native streams must each contain eight
+source-bound module and two bridge report roots plus both package completions,
+in addition to the retained path/XHTTP/check-plan gates. The diagnostic-cache
+fixtures gain valid owned peer/count data without changing their assertions.
+These are source requirements, pending exact Actions and separate phone checks.
+
 [VLESS/XHTTP wire evidence](xhttp-wire-matrix.md) adds a source-bound native gate
 to each existing ordinary/race JSON stream: two roots, eight positive transport
 leaves and20 XHTTP authority-failure leaves, plus one independent hard-deadline

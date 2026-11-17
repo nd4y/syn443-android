@@ -1,5 +1,12 @@
 # Implementation and acceptance snapshot
 
+The [bounded NetBird report candidate](netbird-report-views.md) projects16 rows
+per section before encoding, retains at most1024 owned diagnostic results and
+targets, and exposes explicit counts, unknown state and read-only local paging.
+Source, Actions, resulting-main and physical acceptance remain separate. This
+repairs a report-loss/presentation defect; SDK full-snapshot allocation, a tunnel
+crash RCA and the common socket/byte/CPU governor remain open.
+
 The [negative path-history candidate](negative-path-continuity.md) preserves only
 compatible cooldown and half-open debt across validation/metered changes on the
 same observed OS path in one live service. Every positive route proof is still
@@ -16,7 +23,10 @@ historical crash RCA. Source 512e54e1f3f2002193cb9baafbd40e59f9c35638 passed all
 eight jobs in [Actions 44102955347](https://github.com/nd4y/syn443-android/actions/runs/44102955347).
 Independent raw evidence confirms 519 JVM and 470 unique outcomes per API 29/35/37,
 including all three retained regression roots on every API. The protected
-main b7689dc has a separate pending run 44115155327; phone acceptance remains open.
+main b7689dc has a separate failed run44115155327: API29 timed out during the
+retained controller-death TCP recovery scenario; the other seven jobs passed.
+The exact data-path cause is not yet verified. Source acceptance does not erase
+that main-stage failure, and phone acceptance remains open.
 
 The [durable adaptive admission candidate](durable-adaptive-budget.md) adds an
 owned counter checkpoint and asynchronous storage before dispatch. Process,

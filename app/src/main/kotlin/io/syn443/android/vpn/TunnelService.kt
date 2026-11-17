@@ -257,6 +257,14 @@ class TunnelService : VpnService() {
         if (intent?.action == "fault-owner" && io.syn443.android.BuildConfig.DEBUG) retire(true)
         if (intent?.action == "fault-hang" && io.syn443.android.BuildConfig.DEBUG && verifiedPid()) Process.sendSignal(hostPid, 19)
         if (intent?.action == "netbird-diagnose" && ready) token?.let { host?.diagnoseNetBird(it) }
+        if (intent?.action == "netbird-view" && ready) {
+            val request = intent.getStringExtra("viewRequest")
+            if (OverlayViewRequest.parse(request) != null) token?.let { session ->
+                // A page request racing host death must not crash the controller
+                // or classify a proxy as failed. Its unmatched echo expires in UI.
+                runCatching { host?.netBirdView(session, request) }
+            }
+        }
         if(intent?.action=="routes-check")checkRoutes(true,intent.getStringExtra("routeId"),manual=true)
         if(intent?.action=="routes-cancel") {RouteSnapshot.cancelled();token?.let {host?.cancelRouteChecks(it)}}
         if (intent?.action == "policy-refresh") forcePolicyFetch = true

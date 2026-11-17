@@ -45,17 +45,21 @@ type observablePeer interface {
 	NotifyNetworkChange()
 }
 type ProbeResult struct {
-	IP        string `json:"ip"`
-	FQDN      string `json:"fqdn"`
-	State     string `json:"state"`
-	RTTMillis int64  `json:"rtt_ms,omitempty"`
+	IP            string `json:"ip"`
+	FQDN          string `json:"fqdn"`
+	State         string `json:"state"`
+	RTTMillis     int64  `json:"rtt_ms,omitempty"`
+	IPValid       bool   `json:"ip_valid"`
+	FQDNTruncated bool   `json:"fqdn_truncated"`
 }
 type DiagnosticJob struct {
-	Stale    bool          `json:"stale"`
-	State    string        `json:"state"`
-	Started  time.Time     `json:"started,omitempty"`
-	Finished time.Time     `json:"finished,omitempty"`
-	Results  []ProbeResult `json:"results"`
+	Stale          bool          `json:"stale"`
+	State          string        `json:"state"`
+	Started        time.Time     `json:"started,omitempty"`
+	Finished       time.Time     `json:"finished,omitempty"`
+	Results        []ProbeResult `json:"results"`
+	total, planned int
+	unknown        bool
 }
 
 func activeOutbound() *Outbound {
@@ -69,52 +73,28 @@ func marshal(v any) string { b, _ := json.Marshal(v); return string(b) }
 func RuntimeStatus() string {
 	o := activeOutbound()
 	if o == nil {
-		return `{"active":false,"peers":[]}`
+		return marshal(unknownConnection(connectionHeader{Mode: "unknown", ConnectionUnknown: true}, reportSelection{}))
 	}
+	return runtimeStatusFor(o)
+}
+
+func runtimeStatusFor(o *Outbound) string {
 	client, err := o.getClient()
 	if err != nil {
-		return `{"active":false,"peers":[]}`
+		return marshal(unknownConnection(connectionHeader{Mode: reportMode(o.options.ConnectionMode), ConnectionUnknown: true}, o.reportViews().Peers))
 	}
 	p, ok := client.(observablePeer)
 	if !ok {
-		return `{"active":false,"peers":[]}`
+		return marshal(unknownConnection(connectionHeader{Mode: reportMode(o.options.ConnectionMode), ConnectionUnknown: true}, o.reportViews().Peers))
 	}
-	mode := "vless"
-	if o.options.ConnectionMode == "direct" {
-		mode = "direct"
-	}
-	selected := o.options.Detour
-	if mode == "direct" {
-		selected = ""
-	} else {
-		seen := map[string]bool{}
-		for selected != "" && !seen[selected] && len(seen) < 64 {
-			seen[selected] = true
-			out, ok := o.manager.Outbound(selected)
-			if !ok {
-				break
-			}
-			group, ok := out.(interface{ Now() string })
-			if !ok {
-				break
-			}
-			selected = group.Now()
-		}
-	}
-	return marshal(struct {
-		Active        bool      `json:"active"`
-		Mode          string    `json:"mode"`
-		Tag           string    `json:"tag"`
-		ProxyGroup    string    `json:"proxy_group"`
-		SelectedProxy string    `json:"selected_proxy"`
-		Sampled       time.Time `json:"sampled_at"`
-		embed.ConnectionSnapshot
-	}{true, mode, o.Tag(), o.options.Detour, selected, time.Now(), p.ConnectionSnapshot()})
+	// The SDK owns its full snapshot allocation. Our DTO copies only one page.
+	snapshot := p.ConnectionSnapshot()
+	return marshal(projectConnection(o, snapshot, o.reportViews().Peers))
 }
 func RuntimeDiagnostics() string {
 	o := activeOutbound()
 	if o == nil {
-		return `{"state":"unavailable","results":[]}`
+		return unavailableDiagnosticReport(nil, "unavailable")
 	}
 	return o.diagnosticsSnapshot()
 }
@@ -124,7 +104,7 @@ func RuntimeDiagnostics() string {
 func (o *Outbound) diagnosticsSnapshot() string {
 	o.diagMu.Lock()
 	defer o.diagMu.Unlock()
-	return marshal(o.job)
+	return marshal(o.diagnosticReportLocked())
 }
 func CancelDiagnostics() string {
 	o := activeOutbound()
@@ -138,29 +118,44 @@ func CancelDiagnostics() string {
 	return RuntimeDiagnostics()
 }
 func StartDiagnostics() string {
+	return startDiagnostics(nil)
+}
+
+// The nil production path has no callback. Tests can order a physical epoch
+// change precisely after watcher retirement, without a scheduling sleep.
+func startDiagnostics(afterSnapshot func(bool)) string {
 	o := activeOutbound()
 	if o == nil {
-		return `{"state":"unavailable","results":[]}`
+		return unavailableDiagnosticReport(nil, "unavailable")
 	}
 	client, err := o.getClient()
 	if err != nil {
-		return `{"state":"unavailable","results":[]}`
+		return unavailableDiagnosticReport(o, "unavailable")
 	}
 	p, ok := client.(observablePeer)
 	if !ok {
-		return `{"state":"unavailable","results":[]}`
+		return unavailableDiagnosticReport(o, "unavailable")
 	}
 	o.diagMu.Lock()
 	if _, err := o.getClient(); err != nil {
 		o.diagMu.Unlock()
-		return `{"state":"unavailable","results":[]}`
+		return unavailableDiagnosticReport(o, "unavailable")
 	}
-	if o.job.State == "running" || o.job.State == "preparing" {
-		result := marshal(o.job)
+	if o.diagBusy || o.job.State == "running" || o.job.State == "preparing" {
+		result := marshal(o.diagnosticReportLocked())
 		o.diagMu.Unlock()
 		return result
 	}
 	epoch := o.diagEpoch
+	o.diagBusy = true
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			o.diagMu.Lock()
+			o.diagBusy = false
+			o.diagMu.Unlock()
+		}
+	}()
 	started := time.Now()
 	limit := o.diagnosticSnapshotTimeout
 	if limit <= 0 || limit > 10*time.Second {
@@ -168,7 +163,7 @@ func StartDiagnostics() string {
 	}
 	snapshotContext, snapshotCancel := context.WithTimeout(o.ctx, limit)
 	o.diagCancel = snapshotCancel
-	o.job = DiagnosticJob{State: "preparing", Started: started, Results: []ProbeResult{}}
+	o.job = DiagnosticJob{State: "preparing", Started: started, Results: []ProbeResult{}, unknown: true}
 	o.diagMu.Unlock()
 	stopSnapshotWatch := context.AfterFunc(snapshotContext, func() {
 		o.diagMu.Lock()
@@ -185,15 +180,27 @@ func StartDiagnostics() string {
 	// updates, teardown or cached diagnostics across an SDK call. Admission
 	// remains occupied until this single worker actually returns; the timer only
 	// publishes local unavailability and never spawns a replacement SDK reader.
-	peers := p.ConnectionSnapshot().Peers
-	stopSnapshotWatch()
+	snapshot := p.ConnectionSnapshot()
+	watchStopped := stopSnapshotWatch()
+	if afterSnapshot != nil {
+		afterSnapshot(watchStopped)
+	}
 	o.diagMu.Lock()
 	snapshotError := snapshotContext.Err()
 	late := time.Since(started) >= limit
 	snapshotCancel()
 	if epoch != o.diagEpoch {
+		// The watcher may already have been stopped when InterfaceUpdated cancels
+		// the snapshot. Retire only this captured preparing record; otherwise it
+		// would block every later request after the actual worker exits.
+		if o.job.State == "preparing" && o.job.Started.Equal(started) {
+			o.job.State = "cancelled"
+			o.job.Stale = true
+			o.job.unknown = true
+			o.job.Finished = time.Now()
+		}
 		o.diagMu.Unlock()
-		return `{"state":"stale","results":[]}`
+		return unavailableDiagnosticReport(o, "stale")
 	}
 	if snapshotError != nil || late {
 		o.job.State = "cancelled"
@@ -201,50 +208,70 @@ func StartDiagnostics() string {
 			o.job.State = "unavailable"
 		}
 		o.job.Finished = time.Now()
-		result := marshal(o.job)
+		result := marshal(o.diagnosticReportLocked())
 		o.diagMu.Unlock()
 		return result
 	}
 	if o.job.State == "running" {
-		result := marshal(o.job)
+		result := marshal(o.diagnosticReportLocked())
 		o.diagMu.Unlock()
 		return result
 	}
 	if _, err := o.getClient(); err != nil {
 		o.diagMu.Unlock()
-		return `{"state":"unavailable","results":[]}`
+		return unavailableDiagnosticReport(o, "unavailable")
 	}
 	// A network restart can briefly expose an empty recorder while the control
 	// connection is already up. Zero attempted probes is not a completed health
 	// check; make this condition explicit and allow a fresh subsequent request.
-	if len(peers) == 0 {
+	if len(snapshot.Peers) == 0 {
 		now := time.Now()
 		o.job = DiagnosticJob{State: "no_peers", Started: now, Finished: now, Results: []ProbeResult{}}
 		o.diagMu.Unlock()
 		return RuntimeDiagnostics()
 	}
-	// Avoid unbounded jobs for a pathological roster. Every peer is listed, with a
-	// distinct limit result beyond the supported active probe budget.
+	if len(snapshot.Peers) > reportMaximumTotal {
+		o.job = DiagnosticJob{State: "unavailable", Started: started, Finished: time.Now(), Results: []ProbeResult{}, unknown: true}
+		result := marshal(o.diagnosticReportLocked())
+		o.diagMu.Unlock()
+		return result
+	}
+	// Retain only bounded, owned DTOs and exact valid target strings. Workers do
+	// not capture the SDK's full slice or any unbounded FQDN backing allocation.
+	type target struct {
+		index int
+		ip    string
+	}
+	retained := min(len(snapshot.Peers), ReportRetainedLimit)
+	results := make([]ProbeResult, retained)
+	targets := make([]target, 0, retained)
+	for i := 0; i < retained; i++ {
+		peer := snapshot.Peers[i]
+		ip, valid := reportIP(peer.IP)
+		fqdn, truncated := reportFQDN(peer.FQDN)
+		state := "invalid_target"
+		if valid {
+			state = "queued"
+			targets = append(targets, target{i, ip})
+		}
+		results[i] = ProbeResult{IP: ip, IPValid: valid, FQDN: fqdn, FQDNTruncated: truncated, State: state}
+	}
 	ctx, cancel := context.WithTimeout(o.ctx, 2*time.Minute)
 	o.diagCancel = cancel
-	o.job = DiagnosticJob{State: "running", Started: time.Now(), Results: make([]ProbeResult, len(peers))}
-	for i, p := range peers {
-		state := "queued"
-		if i >= 1024 {
-			state = "limit"
-		}
-		o.job.Results[i] = ProbeResult{IP: p.IP, FQDN: p.FQDN, State: state}
-	}
+	o.job = DiagnosticJob{State: "running", Started: time.Now(), Results: results, total: len(snapshot.Peers), planned: len(targets)}
+	snapshot.Peers = nil
+	handedOff = true
 	o.diagMu.Unlock()
 	go func() {
 		defer cancel()
 		var wg sync.WaitGroup
-		queue := make(chan int)
+		queue := make(chan target)
 		for worker := 0; worker < 4; worker++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for i := range queue {
+				for target := range queue {
+					i := target.index
 					state := "cancelled"
 					var rtt time.Duration
 					if ctx.Err() == nil && (DiagnosticsAllowed == nil || DiagnosticsAllowed()) {
@@ -253,7 +280,7 @@ func StartDiagnostics() string {
 						o.diagMu.Unlock()
 						probeCtx, stop := context.WithTimeout(ctx, 12*time.Second)
 						var err error
-						rtt, err = p.ProbePeer(probeCtx, peers[i].IP)
+						rtt, err = p.ProbePeer(probeCtx, target.ip)
 						stop()
 						state = "reply"
 						if err != nil {
@@ -265,16 +292,13 @@ func StartDiagnostics() string {
 					}
 					o.diagMu.Lock()
 					o.job.Results[i].State = state
-					o.job.Results[i].RTTMillis = rtt.Milliseconds()
+					o.job.Results[i].RTTMillis = min(reportNumber(rtt.Milliseconds()), 12000)
 					o.diagMu.Unlock()
 				}
 			}()
 		}
-		for i := range peers {
-			if i >= 1024 {
-				break
-			}
-			queue <- i
+		for _, target := range targets {
+			queue <- target
 		}
 		close(queue)
 		wg.Wait()
@@ -282,9 +306,12 @@ func StartDiagnostics() string {
 		o.job.State = "completed"
 		if ctx.Err() != nil {
 			o.job.State = "cancelled"
+		} else if report := o.diagnosticReportLocked(); report.MetadataUnknown || report.Coverage.Checked != report.Coverage.Total || report.Coverage.Planned != report.Coverage.Total || report.Coverage.Omitted != 0 {
+			o.job.State = "partial"
 		}
 		o.job.Finished = time.Now()
 		o.diagCancel = nil
+		o.diagBusy = false
 		o.diagMu.Unlock()
 	}()
 	return RuntimeDiagnostics()
