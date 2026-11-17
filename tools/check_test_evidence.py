@@ -4,10 +4,10 @@ root=Path(__file__).resolve().parent.parent
 mode=sys.argv[1]
 if mode=="jvm":
     paths=list((root/"core/decision/build/test-results/test").glob("TEST-*.xml"))
-    minimum=18
+    minimum=21
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=470
+    minimum=476
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -874,3 +874,29 @@ if mode in OWNER_TRANSITION_REQUIRED:
 if mode == "jvm":
     from coverage_evidence import OWNER_HEALTH_CLASSES, verify_classes
     verify_classes(root/"core/decision/build/reports/jacoco/test/jacocoTestReport.xml", OWNER_HEALTH_CLASSES)
+
+
+PATH_CONTINUITY_REQUIRED = {'jvm': [('io.syn443.decision.RouteHealthContinuityTest', 'samePathForkRetainsOnlyNegativeEntriesAndOriginalDeadlines'),
+         ('io.syn443.decision.RouteHealthContinuityTest', 'repeatedForksRetainHalfOpenDebtAndRejectOldContextResults'),
+         ('io.syn443.decision.RouteHealthContinuityTest',
+          'invalidForkContextClockAndCapacityCannotCreateFreshEvidence')],
+ 'emulator': [('io.syn443.android.AdaptivePathContinuityTest',
+               'metadataChangesRetainOpaqueTokenButLossPathAndTransportRotateIt'),
+              ('io.syn443.android.AdaptivePathContinuityTest',
+               'compatibleMetadataRebindKeepsCooldownWithoutReadinessOrOldNativeProof'),
+              ('io.syn443.android.AdaptivePathContinuityTest',
+               'repeatedMetadataRebindsNeverExtendCooldownOrHalfOpenDebt'),
+              ('io.syn443.android.AdaptivePathContinuityTest', 'changedTokenOwnerModeAndPolicyRejectNegativeCarry'),
+              ('io.syn443.android.AdaptivePathContinuityTest', 'expiredLeaseBootAndClockCannotReviveCarriedHistory'),
+              ('io.syn443.android.AdaptivePathContinuityTest',
+               'physicalContextRoundTripRequiresFreshAckAndKeepsAdmissionDebt')]}
+if mode in PATH_CONTINUITY_REQUIRED:
+    required = set(PATH_CONTINUITY_REQUIRED[mode])
+    assert len(required) == len(PATH_CONTINUITY_REQUIRED[mode]) == (3 if mode == "jvm" else 6), "Duplicate negative path continuity requirement"
+    assert required <= set(identities), "Missing exact compatible negative path continuity outcomes"
+    for classname in {classname for classname, _ in required}:
+        folder = "core/decision/src/test/kotlin/io/syn443/decision" if mode == "jvm" else "app/src/androidTest/kotlin/io/syn443/android"
+        source = (root / folder / (classname.rsplit(".", 1)[1] + ".kt")).read_text(encoding="utf-8")
+        methods = re.findall(r"@Test\s+fun\s+(\w+)", source)
+        expected = {name for owner, name in required if owner == classname}
+        assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "Negative path continuity source inventory drift"

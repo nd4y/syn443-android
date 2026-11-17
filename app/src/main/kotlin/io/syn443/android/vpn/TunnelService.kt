@@ -103,7 +103,7 @@ class TunnelService : VpnService() {
         val session=token ?: return
         val policy=adaptivePolicy() ?: return
         val mode=adaptiveMode() ?: return
-        routes.bind(scope,mode,policy,SystemClock.elapsedRealtime())
+        routes.bind(scope,mode,policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
         if(force)routes.force()
         val power=getSystemService(android.os.PowerManager::class.java)
         val battery=getSystemService(android.os.BatteryManager::class.java).getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
@@ -177,6 +177,7 @@ class TunnelService : VpnService() {
     }
     private val networkObservations = linkedMapOf<Network, NetworkObservation>()
     private var probeContext: PhysicalProbeContext? = null // RAM only. Never log link properties.
+    private val physicalPathContinuity=PhysicalPathContinuity()
 
     // Use the ordered callback values. A synchronous snapshot can skip a
     // validation loss and reuse pre-loss evidence after validation returns.
@@ -187,6 +188,7 @@ class TunnelService : VpnService() {
             }
         }
         override fun onLost(network: Network) {
+            physicalPathContinuity.lost(network.networkHandle)
             if (networkObservations.remove(network) != null) refreshNetwork()
         }
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
@@ -308,6 +310,7 @@ class TunnelService : VpnService() {
         }.take(PhysicalNetworkSelection.MAX_CANDIDATES).toList()
         val handle = PhysicalNetworkSelection.choose(candidates.map { it.second.network }, incumbent?.networkHandle, internetHealthy)
         val (selected, context) = candidates.firstOrNull { it.second.network.handle == handle } ?: (null to null)
+        physicalPathContinuity.observe(context)
         val waiting = if (selected == null && candidates.any { it.second.network.captive }) "captive_portal" else "network_unavailable"
         if (context == probeContext) {
             if(selected==null && networkWaitReason!=waiting) {
@@ -453,7 +456,7 @@ class TunnelService : VpnService() {
             adaptiveRoutes=ManagedAdaptiveRoutes.read(raw) {ControllerProbeBudget.get(this)}
             val routeSelection = adaptiveRoutes?.let {routes->
                 val policy=checkNotNull(adaptivePolicy())
-                routes.bind(checkNotNull(routeScope()),checkNotNull(adaptiveMode()),policy,SystemClock.elapsedRealtime())
+                routes.bind(checkNotNull(routeScope()),checkNotNull(adaptiveMode()),policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
                 routes.controlFrame()
             } ?: if (pendingLeaseDeadline > 0) RouteSnapshot.nativeSelectionPlan(runningConfigHash) else ""
             pendingConfig = PendingConfig(rendered, routeSelection)
@@ -512,7 +515,7 @@ class TunnelService : VpnService() {
                 val mode=adaptiveMode() ?: return@post
                 RouteSnapshot.owner(scope)
                 adaptiveRoutes?.let {routes->
-                    routes.bind(scope,mode,policy,SystemClock.elapsedRealtime())
+                    routes.bind(scope,mode,policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
                     routes.rejectAdmission(rejected,SystemClock.elapsedRealtime())
                     adaptiveTick()
                 }
@@ -524,7 +527,7 @@ class TunnelService : VpnService() {
                 val mode=adaptiveMode() ?: return@post
                 RouteSnapshot.owner(scope)
                 adaptiveRoutes?.let {routes->
-                    routes.bind(scope,mode,policy,SystemClock.elapsedRealtime())
+                    routes.bind(scope,mode,policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
                     routes.report(adaptive,SystemClock.elapsedRealtime()) {command->runCatching {host?.checkRoutes(session,command)}}
                     adaptiveTick()
                 }

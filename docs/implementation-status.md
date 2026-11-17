@@ -1,11 +1,34 @@
 # Implementation and acceptance snapshot
 
+The [negative path-history candidate](negative-path-continuity.md) preserves only
+compatible cooldown and half-open debt across validation/metered changes on the
+same observed OS path in one live service. Every positive route proof is still
+retracted. The opaque service token, exact policy/boot/lease fences and bounded
+owned copy do not implement persistent BAD-08 history or physical network identity.
+Its source, Actions, main and physical acceptance are separate.
+
 The [native-owner recovery candidate](native-owner-recovery.md) retracts stale
 adaptive readiness and makes groups recovery-due after an accepted native
 epoch/scope change. It retains compatible negative evidence and shared start
 debt, and waits for typed current-owner idle before replacing pending work.
 Source-level protocol evidence is distinct from physical reproduction and the
-historical crash RCA. Its own Actions, main and phone gates remain open.
+historical crash RCA. Source 512e54e1f3f2002193cb9baafbd40e59f9c35638 passed all
+eight jobs in [Actions 44102955347](https://github.com/nd4y/syn443-android/actions/runs/44102955347).
+Independent raw evidence confirms 519 JVM and 470 unique outcomes per API 29/35/37,
+including all three retained regression roots on every API. The protected
+main b7689dc has a separate failed run44115155327: API29 timed out during the
+retained controller-death TCP recovery scenario; the other seven jobs passed.
+The [failure-evidence change](process-recovery-evidence.md) adds bounded
+observations without relaxing the original110s or PASS criterion. Its new
+Actions/main checks are separate; the original cause and phone acceptance
+remain open.
+
+The following continuity/diagnostic source8ff3039 passed seven jobs in
+run44129925465, but API37 failed its external Always-on scenario behind an
+uncorrelated foreground ANR. Its430 instrumentation cases passed. The
+[Settings evidence revision](vpn-settings-evidence.md) preserves that refusal
+and adds bounded failure-stage observations; it does not claim an ANR fix or
+an accepted source/main release.
 
 The [durable adaptive admission candidate](durable-adaptive-budget.md) adds an
 owned counter checkpoint and asynchronous storage before dispatch. Process,

@@ -1,5 +1,18 @@
 # Testing and release gates
 
+[Owned VPN Settings evidence](vpn-settings-evidence.md) adds six synthetic
+helper cases to the existing documents job. It preserves the actual Always-on
+and lockdown scenario, owner checks, timeouts and recovery authority; an unknown
+ANR stays a failure. Finite correlation diagnostics and launch classification
+add no transport. This is evidence collection, not an ANR recovery fix.
+
+[Recovery fault evidence](process-recovery-evidence.md) adds eight synthetic
+Python helper/driver cases in the existing documents job. The original process
+fault commands,110s recovery deadline, all assertions and PASS predicates are
+retained. It adds no normal-poll ADB reads or new workers, and only bounded
+pre-cleanup observations on failure. This instrumentation is not a recovery
+fix or proof that the original API29 failure was a transient runner problem.
+
 [VLESS/XHTTP wire evidence](xhttp-wire-matrix.md) adds a source-bound native gate
 to each existing ordinary/race JSON stream: two roots, eight positive transport
 leaves and20 XHTTP authority-failure leaves, plus one independent hard-deadline
@@ -410,3 +423,22 @@ old receipts, repeated transitions and the original35-second retirement fence
 are negative/boundary cases. Timeout and configure are not worker completion.
 Synthetic reports do not establish a physical native scope transition, managed
 route rollout, the original crash root cause, cellular or battery acceptance.
+
+Exact corrected source 512e54e1f3f2002193cb9baafbd40e59f9c35638 passed all eight
+jobs in [Actions 44102955347](https://github.com/nd4y/syn443-android/actions/runs/44102955347).
+Independent raw evidence confirms 519 JVM and 470 outcomes per API 29/35/37, with
+all 116 prior Kotlin test files unchanged. The three retained negatives that
+caught the first candidate each pass on all three APIs. Main and phone acceptance
+remain separate.
+
+## Compatible negative history candidate
+
+The [continuity design](negative-path-continuity.md) adds three JVM roots and six
+Android roots. Expected totals become522 JVM and476 outcomes per API29/35/37,
+with218 affected Android outcomes and a source-bound decision minimum21. The
+existing RouteHealthMemory90% and all prior coverage/native gates remain.
+The new roots must preserve absolute cooldown and half-open deadlines through
+repeated compatible metadata changes, deny incompatible/expired/old-context
+carry, require fresh native selection and retain shared start debt. Physical
+token tests use synthetic observations, never real network identifiers. No
+source fixture closes managed rollout, LTE, persistence or battery acceptance.
