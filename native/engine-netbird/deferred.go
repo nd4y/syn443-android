@@ -36,6 +36,7 @@ type Deferred struct {
 	once           sync.Once
 	state          atomic.Value
 	report         atomic.Value
+	header         atomic.Value // last bounded connection header, independent of paged JSON validity
 	diagnostics    atomic.Value
 	failure        atomic.Value
 	startupCodes   atomic.Value
@@ -48,13 +49,14 @@ type retryState struct {
 	Next    int64 `json:"next_at_ms"`
 }
 type moduleState struct {
-	Active  bool       `json:"active"`
-	Phase   string     `json:"phase"`
-	Reason  string     `json:"reason"`
-	Mode    string     `json:"mode"`
-	Retry   retryState `json:"retry"`
-	Sampled int64      `json:"sampled_at_ms"`
-	Failure string     `json:"last_failure,omitempty"`
+	Active           bool       `json:"active"`
+	Phase            string     `json:"phase"`
+	Reason           string     `json:"reason"`
+	Mode             string     `json:"mode"`
+	Retry            retryState `json:"retry"`
+	Sampled          int64      `json:"sampled_at_ms"`
+	Failure          string     `json:"last_failure,omitempty"`
+	FailureTruncated bool       `json:"last_failure_truncated,omitempty"`
 }
 
 var deferredPeer struct {
@@ -78,8 +80,10 @@ func NewDeferredOutbound(ctx context.Context, router adapter.Router, logger log.
 	}
 	d := &Deferred{Outbound: peer, current: peer, makePeer: makePeer, ctx: ctx, cancel: cancel, done: make(chan struct{}), options: peer.options, startupTimeout: 46 * time.Second, cleanupTimeout: 16 * time.Second}
 	d.state.Store(moduleState{Active: true, Phase: "Configured", Mode: peer.options.ConnectionMode})
-	d.report.Store(`{"active":false,"peers":[]}`)
-	d.diagnostics.Store(`{"state":"unavailable","results":[]}`)
+	header := connectionHeader{Mode: reportMode(peer.options.ConnectionMode), ConnectionUnknown: true}
+	d.header.Store(header)
+	d.report.Store(marshal(unknownConnection(header, reportSelection{})))
+	d.diagnostics.Store(marshal(unknownDiagnostics(reportSelection{}, false)))
 	d.failure.Store("")
 	d.startupCodes.Store([]string(nil))
 	deferredPeer.Lock()
@@ -206,6 +210,7 @@ func (d *Deferred) run() {
 				return
 			}
 			d.mu.Lock()
+			d.resetReportViewsLocked()
 			d.current = peer
 			d.mu.Unlock()
 		}
@@ -233,8 +238,13 @@ func (d *Deferred) run() {
 				defer ticker.Stop()
 				stableSince := time.Time{}
 				for {
-					report := RuntimeStatus()
-					d.report.Store(report)
+					if !d.reportOwnerCurrent(peer) {
+						return
+					}
+					report := runtimeStatusFor(peer)
+					if !d.publishConnectionReport(peer, report) {
+						return
+					}
 					var snapshot struct {
 						Management bool `json:"management_connected"`
 						Signal     bool `json:"signal_connected"`
@@ -373,12 +383,29 @@ func (d *Deferred) sampleDiagnostics(peer localDiagnosticSource, interval time.D
 		if d.ctx.Err() != nil {
 			return
 		}
+		owner, _ := peer.(*Outbound)
+		if owner != nil && !d.reportOwnerCurrent(owner) {
+			return
+		}
 		local := peer.diagnosticsSnapshot()
 		// Stop may have arrived while waiting for the short local job lock.
 		if d.ctx.Err() != nil {
 			return
 		}
+		if len(local) > reportSectionBytes {
+			selection := reportSelection{}
+			if owner, ok := peer.(*Outbound); ok {
+				selection = owner.reportViews().Diagnostics
+			}
+			local = marshal(unknownDiagnostics(selection, false))
+		}
+		d.mu.RLock()
+		if d.ctx.Err() != nil || owner != nil && d.current != owner {
+			d.mu.RUnlock()
+			return
+		}
 		d.diagnostics.Store(local)
+		d.mu.RUnlock()
 		select {
 		case <-d.ctx.Done():
 			return
@@ -387,7 +414,8 @@ func (d *Deferred) sampleDiagnostics(peer localDiagnosticSource, interval time.D
 	}
 }
 
-// Host reads only atomics. No recorder, local job lock or JSON producer runs here.
+// Host never calls a recorder. Both sections are bounded DTOs before the final
+// marshal, so an invalid cached component cannot erase a good connection header.
 func DeferredStatus() string {
 	deferredPeer.RLock()
 	peer := deferredPeer.current
@@ -395,24 +423,53 @@ func DeferredStatus() string {
 	if peer == nil {
 		return `{"active":false,"phase":"Off"}`
 	}
-	result := struct {
-		moduleState
-		PeerState    json.RawMessage `json:"peer_state"`
-		Diagnostics  json.RawMessage `json:"diagnostics"`
-		StartupCodes []string        `json:"startup_codes,omitempty"`
-	}{peer.state.Load().(moduleState), json.RawMessage(peer.report.Load().(string)), json.RawMessage(peer.diagnostics.Load().(string)), peer.startupCodes.Load().([]string)}
+	state, ok := peer.state.Load().(moduleState)
+	if !ok {
+		state = moduleState{Active: true, Phase: "Unknown", Mode: peer.options.ConnectionMode}
+	}
+	state = boundedModule(state)
+	views := reportSelections{}
 	peer.mu.RLock()
 	current := peer.current
+	if current != nil {
+		views = current.reportViews()
+	}
+	header := peer.boundedHeader()
+	peerRaw, _ := peer.report.Load().(string)
+	diagnosticRaw, _ := peer.diagnostics.Load().(string)
 	peer.mu.RUnlock()
+	connection := unknownConnection(header, views.Peers)
+	if peerRaw != "" {
+		var owned connectionReport
+		if decodeReport(peerRaw, &owned) && validConnectionReport(owned) {
+			connection = owned
+		}
+	}
+	diagnostics := unknownDiagnostics(views.Diagnostics, false)
+	if diagnosticRaw != "" {
+		var owned diagnosticReport
+		if decodeReport(diagnosticRaw, &owned) && validDiagnosticReport(owned) {
+			diagnostics = owned
+		}
+	}
+	startup, _ := peer.startupCodes.Load().([]string)
+	result := struct {
+		moduleState
+		PeerState    connectionReport `json:"peer_state"`
+		Diagnostics  diagnosticReport `json:"diagnostics"`
+		StartupCodes []string         `json:"startup_codes,omitempty"`
+	}{state, connection, diagnostics, boundedStartupCodes(startup)}
 	if current != nil {
 		// Only our bounded collector lock; never call an SDK recorder here.
 		if codes := current.startup.snapshot(); len(codes) > 0 {
-			result.StartupCodes = codes
+			result.StartupCodes = boundedStartupCodes(codes)
 		}
 	}
 	data, err := json.Marshal(result)
-	if err != nil || len(data) > 65536 {
-		return `{"active":true,"phase":"Unknown","reason":"diagnostics_unavailable"}`
+	if err != nil || len(data) > ReportMaximumBytes {
+		result.PeerState = unknownConnection(header, views.Peers)
+		result.Diagnostics = unknownDiagnostics(views.Diagnostics, false)
+		data, _ = json.Marshal(result) // fixed-size typed fallback, never a whole-roster splice
 	}
 	return string(data)
 }

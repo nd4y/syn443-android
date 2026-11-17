@@ -27,8 +27,8 @@ func TestLocalDiagnosticCacheProgressDoesNotWaitForBlockedSdkRoster(t *testing.T
 	defer cancel()
 	client := &blockedSnapshotPeer{entered: make(chan struct{}), release: make(chan struct{})}
 	peer := &Outbound{ctx: ctx, client: client, ready: true, options: OutboundOptions{ConnectionMode: "direct"}}
-	peer.job = DiagnosticJob{State: "running", Started: time.Now(), Results: []ProbeResult{{State: "checking"}}}
-	d := &Deferred{ctx: ctx}
+	peer.job = DiagnosticJob{State: "running", Started: time.Now(), Results: []ProbeResult{{IP: "192.0.2.1", IPValid: true, State: "checking"}}, total: 1, planned: 1}
+	d := &Deferred{ctx: ctx, current: peer}
 	d.diagnostics.Store(`{}`)
 	runtimePeer.Lock()
 	previous := runtimePeer.outbound
@@ -76,7 +76,7 @@ func TestDiagnosticCacheCannotBorrowTheGlobalReplacementOutbound(t *testing.T) {
 	defer cancel()
 	own := &Outbound{job: DiagnosticJob{State: "cancelled"}}
 	foreign := &Outbound{job: DiagnosticJob{State: "completed"}}
-	d := &Deferred{ctx: ctx}
+	d := &Deferred{ctx: ctx, current: own}
 	d.diagnostics.Store(`{}`)
 	runtimePeer.Lock()
 	previous := runtimePeer.outbound
@@ -167,7 +167,7 @@ func TestBlockedDiagnosticRosterReportsTimeoutWithoutReplacementWorkersOrLateSuc
 	case <-time.After(time.Second):
 		t.Fatal("recorder did not enter")
 	}
-	d := &Deferred{ctx: ctx}
+	d := &Deferred{ctx: ctx, current: peer}
 	d.diagnostics.Store(`{}`)
 	done := make(chan struct{})
 	go func() { d.sampleDiagnostics(peer, time.Millisecond); close(done) }()

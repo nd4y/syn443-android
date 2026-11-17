@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=21
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=476
+    minimum=484
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -900,3 +900,27 @@ if mode in PATH_CONTINUITY_REQUIRED:
         methods = re.findall(r"@Test\s+fun\s+(\w+)", source)
         expected = {name for owner, name in required if owner == classname}
         assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "Negative path continuity source inventory drift"
+
+OVERLAY_REPORT_REQUIRED = {
+    'io.syn443.android.NetBirdReportTest': {
+        'unknownConnectionFieldsNeverBecomeDisconnectedZeroPeersOrVless',
+        'knownAndLegacySnapshotsRetainExplicitConnectionAndProxyLabels',
+        'pagedPeerCountsDistinguishDisplayedRetainedAndOmittedRows',
+        'completedPartialCancelledAndUnknownCoverageNeverClaimAllChecked',
+        'malformedPagesFieldsUtf8AndOverLimitPayloadsFailBounded',
+    },
+    'io.syn443.android.NetBirdPagingUiTest': {
+        'onlyCurrentViewResponseCompletesPendingPageWithoutExtraCommands',
+        'peerAndDiagnosticPagingControlsRespectBoundsAndOutstandingRequests',
+    },
+    'io.syn443.android.NetBirdViewBridgeTest': {
+        'nativeViewBridgeExistsAndInactiveQueryStartsNoEngineOrProbe',
+    },
+}
+if mode == "emulator":
+    required = {(owner, name) for owner, names in OVERLAY_REPORT_REQUIRED.items() for name in names}
+    assert len(required) == 8 and required <= set(identities), "Missing exact NetBird report outcomes"
+    for classname, expected in OVERLAY_REPORT_REQUIRED.items():
+        source = (root / "app/src/androidTest/kotlin/io/syn443/android" / (classname.rsplit(".", 1)[1] + ".kt")).read_text(encoding="utf-8")
+        methods = re.findall(r"@Test\s+fun\s+(\w+)", source)
+        assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "NetBird report source inventory drift"

@@ -18,9 +18,23 @@ restore_instrumentation_display() {
   fi
 }
 
+print_netbird_test_progress() {
+  # Only fixed synthetic source identities/phases may reach the public log.
+  # These lifecycle markers cannot replace the actual JUnit outcome evidence.
+  local report='io\.syn443\.android\.NetBirdReportTest#(unknownConnectionFieldsNeverBecomeDisconnectedZeroPeersOrVless|knownAndLegacySnapshotsRetainExplicitConnectionAndProxyLabels|pagedPeerCountsDistinguishDisplayedRetainedAndOmittedRows|completedPartialCancelledAndUnknownCoverageNeverClaimAllChecked|malformedPagesFieldsUtf8AndOverLimitPayloadsFailBounded)'
+  local paging='io\.syn443\.android\.NetBirdPagingUiTest#(onlyCurrentViewResponseCompletesPendingPageWithoutExtraCommands|peerAndDiagnosticPagingControlsRespectBoundsAndOutstandingRequests)'
+  local bridge='io\.syn443\.android\.NetBirdViewBridgeTest#nativeViewBridgeExistsAndInactiveQueryStartsNoEngineOrProbe'
+  printf '\n=== Synthetic NetBird test progress (diagnostics only) ===\n'
+  timeout 10s adb -e logcat -d -v raw -s Syn443TestProgress:I '*:S' \
+    | tr -d '\r' \
+    | grep -E -- "^SYN443_TEST_PROGRESS ((START|FINISH|FAIL) ($report|$paging|$bridge)|PHASE $bridge (construct|lookup|view_peers|diagnostics|invalid|close))$" \
+    | tail -64 || true
+}
+
 collect_diagnostics() {
   result=$?
   trap - EXIT
+  print_netbird_test_progress || true
   restore_instrumentation_display || true
   python3 tools/print_emulator_reports.py || true
   printf '\n=== Disposable runner memory/disk ===\n'
@@ -63,7 +77,9 @@ adb -e shell wm dismiss-keyguard
 result=0
 # Capture the actual failing assertion before long native fault scenarios. A
 # failed instrumentation run cannot satisfy the mandatory evidence gate anyway.
-if ! ./gradlew :app:connectedDebugAndroidTest --info --stacktrace --max-workers=1 '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8'; then
+# Bound the owning host invocation, without pretending interruption stops JNI.
+# A deadline fails this harness; it never proceeds to the external scenarios.
+if ! timeout --signal=TERM --kill-after=20s 20m ./gradlew :app:connectedDebugAndroidTest --info --stacktrace --max-workers=1 '-Pandroid.testInstrumentationRunnerArguments.listener=io.syn443.android.NetBirdTestProgress' '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8'; then
   python3 tools/print_emulator_reports.py || true
   exit 1
 fi

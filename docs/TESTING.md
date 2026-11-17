@@ -1,5 +1,20 @@
 # Testing and release gates
 
+[Bounded NetBird report views](netbird-report-views.md) add eight exact Android
+outcomes: five model, two paging UI and one actual packaged gomobile/local
+command case. Each API29/35/37 requires484 unique outcomes; all prior mandatory
+roots and coverage thresholds remain. Native streams must each contain eight
+source-bound module and two bridge report roots plus both package completions,
+in addition to the retained path/XHTTP/check-plan gates. The diagnostic-cache
+fixtures gain valid owned peer/count data without changing their assertions.
+These are source requirements, pending exact Actions and separate phone checks.
+The packaged view test uses the actual public Runtime constructor without
+starting it. The emulator instrumentation host has a20minute deadline and
+prints only the eight allowlisted new test identities and fixed JNI phases on
+exit. Markers never replace JUnit outcomes. Paging test scrolls temporarily
+advance frames, preserve the8second pending window and restore clock mode on
+failure. Earlier canceled runs remain failed acceptance attempts.
+
 [Owned VPN Settings evidence](vpn-settings-evidence.md) adds six synthetic
 helper cases to the existing documents job. It preserves the actual Always-on
 and lockdown scenario, owner checks, timeouts and recovery authority; an unknown

@@ -9,6 +9,8 @@ object OverlaySnapshot {
     private var received = 0L
     @Synchronized fun update(raw: String) {
         require(raw.length <= 65_536)
+        require(raw.toByteArray(Charsets.UTF_8).size <= 65_536)
+        require(NetBirdPresentation.validUnicode(raw))
         JSONObject(raw)
         payload = raw
         received = SystemClock.elapsedRealtime()

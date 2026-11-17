@@ -1,5 +1,12 @@
 # Implementation and acceptance snapshot
 
+The [bounded NetBird report candidate](netbird-report-views.md) projects16 rows
+per section before encoding, retains at most1024 owned diagnostic results and
+targets, and exposes explicit counts, unknown state and read-only local paging.
+Source, Actions, resulting-main and physical acceptance remain separate. This
+repairs a report-loss/presentation defect; SDK full-snapshot allocation, a tunnel
+crash RCA and the common socket/byte/CPU governor remain open.
+
 The [negative path-history candidate](negative-path-continuity.md) preserves only
 compatible cooldown and half-open debt across validation/metered changes on the
 same observed OS path in one live service. Every positive route proof is still
@@ -18,6 +25,8 @@ Independent raw evidence confirms 519 JVM and 470 unique outcomes per API 29/35/
 including all three retained regression roots on every API. The protected
 main b7689dc has a separate failed run44115155327: API29 timed out during the
 retained controller-death TCP recovery scenario; the other seven jobs passed.
+The exact data-path cause is not yet verified. Source acceptance does not erase
+that main-stage failure, and phone acceptance remains open.
 The [failure-evidence change](process-recovery-evidence.md) adds bounded
 observations without relaxing the original110s or PASS criterion. Its new
 Actions/main checks are separate; the original cause and phone acceptance
