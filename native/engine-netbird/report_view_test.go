@@ -147,7 +147,7 @@ func TestReportViewPeersPageRealRosterWithoutWholeSliceRetention(t *testing.T) {
 	for _, n := range []int{0, 1, 16, 17, 1024, 1025, 4096} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
 			p := &reportTestPeer{snapshot: reportRoster(n)}
-			o := reportOwner(t, p)
+			reportOwner(t, p)
 			if !RequestView(reportViewRequest("peers", 63, "page")) {
 				t.Fatal("view admission")
 			}
