@@ -81,7 +81,7 @@ class RouteCheckPlanPolicyTest {
         val validAtoms=listOf("0","-12","1.5","-0.25","1e2","-2.500E+3","null","true","false","\"tru\"","\"undefined\"",
             "[0,1.5,1e2,null,true,false,\"tru\",{\"value\":2.5E-1}]",(0 until 256).joinToString(",","[","]"))
         for((index,atom) in validAtoms.withIndex()) {
-            val raw=engine().dropLast(1)+",\"outside\":{\"value\":$atom}"
+            val raw=engine().dropLast(1)+",\"outside\":{\"value\":$atom}}"
             val verified=try {verify(payload(raw))}catch(failure:Exception) {
                 throw AssertionError("valid_atom_case_${index}_${failure.javaClass.simpleName}")
             }
