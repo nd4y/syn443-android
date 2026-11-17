@@ -1,7 +1,12 @@
 # Android operation outcome reconciliation
 
-This source candidate adds explicit recovery of a possibly sent administrator
-mutation. It is pending exact-head Actions, coverage and live integration. The
+This source adds explicit recovery of a possibly sent administrator mutation.
+Exact c2a549b9a4ad2609bc69bab3caf54af29899a8e7 passed all8 jobs in
+[Actions44012133076](https://github.com/nd4y/syn443-android/actions/runs/44012133076),
+including498 JVM cases,337 identity cases,427 unique passing outcomes per
+API29/35/37 and53 native roots in ordinary/race runs. All104 required coverage
+classes meet90%. Protected integration2ca75cab has resulting-main CI44018639542
+pending; APK delivery and live integration remain separate. The
 currently installed accepted phone checkpoint is v89 with68 scoped USB/Wi-Fi
 physical outcomes. That earlier checkpoint does not accept this implementation
 or establish real native administrator SSO, server MFA/ACL or publication.
@@ -83,8 +88,8 @@ cause, so a socket failure cannot overtake an explicit cancel while the cancel
 thread has not yet reached `Future.cancel`. The three new actual loopback
 socket tests require that ordering, preserve ordinary uncancelled transport
 classification and keep both permits/queue limits until real workers retire.
-The49-root candidate and this correction remain pending next CI; the existing
-failure is retained as failure evidence. No new production coverage type or
+The49-root candidate and this correction passed in the accepted source run
+above; the earlier failure is retained as failure evidence. No new production coverage type or
 coverage exception is introduced.
 
 Seven new production types join the same90% per-class gate:

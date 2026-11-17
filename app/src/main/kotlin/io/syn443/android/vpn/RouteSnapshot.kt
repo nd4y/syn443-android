@@ -24,6 +24,8 @@ object RouteSnapshot {
     private data class Row(val id: String,val tag: String,val type: String,val required: Boolean,val checks: JSONArray,val chain: List<String>,val rules: Int)
     private var rows = emptyList<Row>()
     private var observations = emptyMap<String,RouteObservation>()
+    private var searchScope:RouteScope?=null
+    private var searches=emptyMap<String,AdaptiveSearchState>()
     private var codes = emptyMap<String,String>()
     private var timings = emptyMap<String,Long>()
     private var receipts = emptyMap<String,String>()
@@ -124,13 +126,22 @@ object RouteSnapshot {
         return JSONObject().put("selector", plan.selector).put("paths", JSONArray(paths)).toString()
     }
 
-    @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000;activationAttempt=null
+    @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();searchScope=null;searches=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();lastStarted=-60_000;activationAttempt=null
         completedReceipt="";failoverAdmission=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
         return rows.any {it.checks.length()>0} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
     }
     @Synchronized fun owner(scope:RouteScope?){if(live!=scope){invalidate();live=scope}}
+    /** Coordinator-prepared diagnostics only; never route evidence. */
+    @Synchronized internal fun adaptiveSearch(scope:RouteScope,states:Map<String,AdaptiveSearchState>) {
+        if(scope!=live || states.size>16)return
+        // Copy only configured adaptive rows. No graph IDs, paths, receipts or
+        // native scopes are exposed by this additive diagnostic projection.
+        searchScope=scope
+        searches=rows.filter {it.type=="syn443-adaptive"}.mapNotNull {row->states[row.tag]?.let {row.id to it}}.toMap()
+    }
+
     /** Called only after the bound native adaptive owner reports a real result. */
     @Synchronized internal fun adaptive(scope:RouteScope,tag:String,ok:Boolean,code:String,latency:Long?,hops:List<String>) {
         if(scope!=live || code !in setOf("ok","probe_unavailable","exit_mismatch","check_failed"))return
@@ -269,7 +280,11 @@ object RouteSnapshot {
         return FailoverCommand(choice.receipt,candidate.id,group.tag,choice.previous,choice.candidate)
     }
     @Synchronized fun read(on:Boolean,ready:Boolean,scope:RouteScope?):JSONObject {
-        val now=SystemClock.elapsedRealtime()
+        return readAt(on,ready,scope,SystemClock.elapsedRealtime())
+    }
+    /** Internal deterministic test seam. Production callers cannot supply a clock. */
+    @Synchronized internal fun readAt(on:Boolean,ready:Boolean,scope:RouteScope?,now:Long):JSONObject {
+        require(now>=0)
         if(pending.isNotEmpty() && now-startedAt>=35_000) {
             current?.let {s->for(id in queued) if(receipts[id]!=pending) {observations=observations+(id to RouteObservation(s,now,false,false));codes=codes+(id to "cancelled")}}
             pending="";queued=emptySet()
@@ -284,6 +299,15 @@ object RouteSnapshot {
                 .put("ageMs",if(sample!=null && sample.scope==scope && now>=sample.elapsedMs)now-sample.elapsedMs else JSONObject.NULL)
                 .put("latencyMs",if(sample?.scope==scope)timings[row.id] ?: JSONObject.NULL else JSONObject.NULL)
                 .also {value->
+                    if(row.type=="syn443-adaptive") {
+                        val search=if(!on || !ready || scope==null || scope!=live || searchScope!=scope)
+                            AdaptiveSearchState.WAITING_CONTEXT else searches[row.id] ?: AdaptiveSearchState.WAITING_CONTEXT
+                        // A selected acknowledgement alone cannot keep a UI
+                        // claim fresh across TTL, readiness or scope changes.
+                        val visible=if(search==AdaptiveSearchState.VERIFIED && state!=RouteState.WORKING)
+                            AdaptiveSearchState.SEARCH_INCOMPLETE else search
+                        value.put("search",JSONObject().put("state",visible.name))
+                    }
                     if(scope!=null && scope==live)failoverAdmission?.second?.cooldown(row.tag,now)?.let {cooldown->
                         value.put("selectionState",cooldown.readiness.name.lowercase(java.util.Locale.ROOT))
                             .put("retryInMs",(checkNotNull(cooldown.retryAtMs)-now).coerceAtLeast(0))
@@ -293,3 +317,5 @@ object RouteSnapshot {
         return JSONObject().put("routes",JSONArray(values)).put("running",pending.isNotEmpty()).put("requiredReady",RouteEvidence.requiredReady(values.map {it.getBoolean("required") to RouteState.valueOf(it.getString("state").uppercase(java.util.Locale.ROOT))}))
     }
 }
+/** Read-only search progress. These values never authorize a route or packets. */
+internal enum class AdaptiveSearchState { WAITING_CONTEXT, SEARCHING, BUDGET_WAIT, SEARCH_INCOMPLETE, VERIFIED }
