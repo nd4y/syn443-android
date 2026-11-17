@@ -8,6 +8,7 @@ BRIDGE = 'io.syn443/bridge'
 POSITIVE_ROOT = 'TestRegisteredVLESSTLSTransportsActualPayloadAndDetour'
 NEGATIVE_ROOT = 'TestRegisteredXHTTPAuthorityFailuresCannotReachTargetDirectly'
 FIXTURE_ROOT = 'TestPayloadWireClosesDeadlineIgnoringConnOnContextExpiry'
+ROOTS = (POSITIVE_ROOT, NEGATIVE_ROOT, FIXTURE_ROOT)
 POSITIVE_TRANSPORTS = ('tls', 'ws', 'grpc', 'xhttp-h2', 'xhttp-h3', 'xhttp-packet-up', 'xhttp-auto', 'xhttp-stream-up')
 XHTTP_TRANSPORTS = ('xhttp-h2', 'xhttp-h3', 'xhttp-packet-up', 'xhttp-auto', 'xhttp-stream-up')
 FAILURES = ('uuid', 'certificate', 'server-name', 'refused')
@@ -15,7 +16,7 @@ MAX_BYTES = 64 * 1024 * 1024
 
 
 def required_cases():
-    return frozenset({POSITIVE_ROOT, NEGATIVE_ROOT, FIXTURE_ROOT} |
+    return frozenset(set(ROOTS) |
                      {POSITIVE_ROOT + '/' + transport for transport in POSITIVE_TRANSPORTS} |
                      {NEGATIVE_ROOT + '/' + transport + '/' + failure
                       for transport in XHTTP_TRANSPORTS for failure in FAILURES})
@@ -160,7 +161,7 @@ def verify(lines, source, helper_source):
         for key in ('Package', 'ImportPath', 'Test'):
             assert key not in row or isinstance(row[key], str) and row[key], 'Invalid native protocol metadata'
         assert package is not None or imported is not None, 'Missing native protocol package'
-        target = test is not None and any(test == root or test.startswith(root + '/') for root in (POSITIVE_ROOT, NEGATIVE_ROOT, FIXTURE_ROOT))
+        target = test is not None and any(test == root or test.startswith(root + '/') for root in ROOTS)
         if target:
             assert test in required and package == BRIDGE and imported in (None, BRIDGE), 'Foreign or unbound protocol outcome'
         if package != BRIDGE and imported != BRIDGE:
@@ -186,13 +187,13 @@ def verify(lines, source, helper_source):
                 assert action == 'output', 'Invalid bridge package event order'
         elif action == 'run':
             assert test not in states and len(states) < 65536, 'Duplicate or unbounded bridge test'
-            if target and test not in (POSITIVE_ROOT, NEGATIVE_ROOT):
+            if target and test not in ROOTS:
                 parent = test.split('/')[0]
                 assert states.get(parent) == 'running', 'Protocol leaf before or after its parent'
             states[test] = 'running'
         elif action == 'pass':
             assert states.get(test) == 'running', 'Bridge pass without one start'
-            if test in (POSITIVE_ROOT, NEGATIVE_ROOT):
+            if test in ROOTS:
                 assert all(states.get(name) == 'passed' for name in required if name.startswith(test + '/')), 'Protocol parent passed before its leaves'
             states[test] = 'passed'
         elif action in {'pause', 'cont'}:

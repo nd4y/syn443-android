@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import unittest
-from check_native_protocol_evidence import (BRIDGE, FAILURES, FIXTURE_ROOT, NEGATIVE_ROOT, POSITIVE_ROOT,
+from check_native_protocol_evidence import (BRIDGE, FAILURES, FIXTURE_ROOT, NEGATIVE_ROOT, POSITIVE_ROOT, ROOTS,
                                             POSITIVE_TRANSPORTS, XHTTP_TRANSPORTS,
                                             required_cases, source_bindings, verify)
 
@@ -32,7 +32,7 @@ class NativeProtocolEvidenceTest(unittest.TestCase):
     def rows(self):
         rows = [self.event('start')]
         required = required_cases()
-        for root in (POSITIVE_ROOT, NEGATIVE_ROOT, FIXTURE_ROOT):
+        for root in ROOTS:
             rows.append(self.event('run', root))
             for leaf in sorted(name for name in required if name.startswith(root + '/')):
                 rows.extend([self.event('run', leaf), self.event('pass', leaf)])
@@ -43,6 +43,12 @@ class NativeProtocolEvidenceTest(unittest.TestCase):
     def test_requires_thirty_protocol_and_one_fixture_ordered_passes_and_package_completion(self):
         self.assertEqual(31, verify(self.rows(), self.source(), self.helper_source()))
         self.assertEqual(31, len(required_cases()))
+        # Actual Go registration emits the standalone fixture before the two
+        # protocol roots. It must not require itself as an already-running parent.
+        rows = self.rows()
+        fixture_first = rows[:1] + [self.event('run', FIXTURE_ROOT), self.event('pass', FIXTURE_ROOT)]
+        fixture_first += [row for row in rows[1:] if json.loads(row).get('Test') != FIXTURE_ROOT]
+        self.assertEqual(31, verify(fixture_first, self.source(), self.helper_source()))
         # Unrelated package output does not substitute for bridge evidence.
         rows = [json.dumps({'Action': 'output', 'Package': 'example.invalid/other', 'Output': 'synthetic'})] + self.rows()
         self.assertEqual(31, verify(rows, self.source(), self.helper_source()))
