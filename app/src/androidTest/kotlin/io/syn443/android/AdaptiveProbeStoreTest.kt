@@ -209,6 +209,26 @@ class AdaptiveProbeStoreTest {
             f.ready(actor);armed.set(true);assertFalse(f.request(actor).allowed)
             assertFalse(actor.invalidated());assertFalse(actor.canStart(20_000,false))
         }
+        Fixture().use {f->
+            // Swap only this owned synthetic directory after the write. The
+            // opened replacement is a regular file, so fstat must reject it
+            // before directory sync can be mistaken for durable admission.
+            val held=File(f.directory.parentFile,f.directory.name+"-held")
+            assertFalse(held.exists())
+            val armed=AtomicBoolean(false)
+            val actor=f.create {stage->if(armed.get() && stage==DurableAdaptiveProbeBudget.IoStage.BEFORE_DIRECTORY_SYNC) {
+                check(f.directory.renameTo(held));check(f.directory.createNewFile())
+            }}
+            f.ready(actor);armed.set(true)
+            try {
+                assertFalse(f.request(actor).allowed);assertFalse(actor.invalidated())
+                assertFalse(actor.canStart(20_000,false));assertTrue(f.directory.isFile)
+            }finally {
+                f.close(actor)
+                check(f.directory.isFile && f.directory.delete())
+                check(held.isDirectory && held.renameTo(f.directory))
+            }
+        }
     }
     @Test fun blockedSyncRetainsOneActualOwnerAndExpiredHandoffCannotDispatch() {
         Fixture().use {f->

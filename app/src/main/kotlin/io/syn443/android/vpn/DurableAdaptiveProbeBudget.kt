@@ -240,8 +240,11 @@ internal class DurableAdaptiveProbeBudget private constructor(
             }
         }
         private fun syncDirectory(value:File) {
-            val descriptor=Os.open(value.absolutePath,OsConstants.O_RDONLY or OsConstants.O_DIRECTORY or OsConstants.O_CLOEXEC,0)
-            try {Os.fsync(descriptor)}finally {Os.close(descriptor)}
+            val descriptor=Os.open(value.absolutePath,OsConstants.O_RDONLY or OsConstants.O_CLOEXEC,0)
+            try {
+                check(OsConstants.S_ISDIR(Os.fstat(descriptor).st_mode))
+                Os.fsync(descriptor)
+            }finally {Os.close(descriptor)}
         }
         fun close() {
             workerOnly()
