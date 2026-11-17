@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	M "github.com/sagernet/sing/common/metadata"
@@ -276,14 +277,21 @@ func TestCheckPlanV2GlobalAbortAndLeafWitnessAreIndependent(t *testing.T) {
 }
 
 func TestCheckPlanV2AdaptiveTwoHopAlternativesNeverReachTargetDirectly(t *testing.T) {
-	rejected := listenWire(t, func(c net.Conn) { _, _ = io.Copy(c, c) })
-	accepted := listenWire(t, func(c net.Conn) { _, _ = io.Copy(c, c) })
+	const banner = "SSH-2.0-syn443-owned-fixture\r\n"
+	serveBannerThenEcho := func(c net.Conn) {
+		if _, err := io.WriteString(c, banner); err != nil {
+			return
+		}
+		_, _ = io.Copy(c, c)
+	}
+	rejected := listenWire(t, serveBannerThenEcho)
+	accepted := listenWire(t, serveBannerThenEcho)
 	a, b := rejected.listener.Addr().String(), accepted.listener.Addr().String()
 	exit := httpWire(t, b, "", "")
 	entry := socksWire(t, exit.listener.Addr().String())
 	c := privateAdaptiveCatalogue(t, map[string]map[string]any{"entry": entry.node("socks", "entry"), "exit": exit.node("http", "exit")})
 	path := []string{"entry", "exit"}
-	p := checkPlanProgram(t, []routeCheck{{Method: "tcp", Target: a}, {Method: "tcp", Target: b}}, []string{}, []routeCheckExpr{{Any: []routeCheckExpr{checkPlanLeaf("l0"), checkPlanLeaf("l1")}}})
+	p := checkPlanProgram(t, []routeCheck{{Method: "ssh_banner", Target: a}, {Method: "ssh_banner", Target: b}}, []string{}, []routeCheckExpr{{Any: []routeCheckExpr{checkPlanLeaf("l0"), checkPlanLeaf("l1")}}})
 	lease := privatePoolLease(t)
 	h, err := newPrivateAdaptiveHubWithPrograms(c, privateAdaptiveMetadata(t, [][]string{path}, "INTERNAL", []string{"TCP", "IPV4"}), map[string]*routeCheckProgram{"inside": p}, strings.Repeat("a", 64), "WIFI", 5, lease)
 	if err != nil {
@@ -292,8 +300,19 @@ func TestCheckPlanV2AdaptiveTwoHopAlternativesNeverReachTargetDirectly(t *testin
 	cleanupPrivatePool(t, h.pool)
 	t.Cleanup(h.Close)
 	receipt, err := h.prepareProbe(context.Background(), "inside", path)
-	if err != nil || receipt == nil || receipt.proof.checkPlan.Outcome != checkTrue || receipt.proof.checkPlan.Leaves[0].Outcome != checkFalse || receipt.proof.checkPlan.Leaves[1].Outcome != checkTrue || rejected.calls.Load() != 0 || accepted.calls.Load() == 0 || entry.calls.Load() < 2 || exit.calls.Load() < 2 {
-		t.Fatal("alternatives escaped pinned two-hop path or lost real outcomes", err)
+	proofPresent := receipt != nil && receipt.proof != nil
+	planPresent := proofPresent && receipt.proof.checkPlan != nil
+	outcome, first, second := "missing", "missing", "missing"
+	if planPresent {
+		outcome = receipt.proof.checkPlan.Outcome
+		if len(receipt.proof.checkPlan.Leaves) == 2 {
+			first, second = receipt.proof.checkPlan.Leaves[0].Outcome, receipt.proof.checkPlan.Leaves[1].Outcome
+		}
+	}
+	rejectedCalls, acceptedCalls, entryCalls, exitCalls := rejected.calls.Load(), accepted.calls.Load(), entry.calls.Load(), exit.calls.Load()
+	if err != nil || !planPresent || outcome != checkTrue || first != checkFalse || second != checkTrue || rejectedCalls != 0 || acceptedCalls == 0 || entryCalls < 2 || exitCalls < 2 {
+		t.Fatalf("chain evidence: error=%t receipt=%t proof=%t plan=%t outcome=%s first=%s second=%s rejected=%d accepted=%d entry=%d exit=%d",
+			err != nil, receipt != nil, proofPresent, planPresent, outcome, first, second, rejectedCalls, acceptedCalls, entryCalls, exitCalls)
 	}
 	if conn, err := h.dialTCP("inside", context.Background(), "tcp", M.ParseSocksaddr(b)); conn != nil || err != errPrivatePath {
 		t.Fatal("probe selected without commit")
@@ -301,11 +320,21 @@ func TestCheckPlanV2AdaptiveTwoHopAlternativesNeverReachTargetDirectly(t *testin
 	if !h.commit(receipt, 1000) || h.commit(receipt, 1000) {
 		t.Fatal("receipt was not one-use")
 	}
-	conn, err := h.dialTCP("inside", context.Background(), "tcp", M.ParseSocksaddr(b))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, err := h.dialTCP("inside", ctx, "tcp", M.ParseSocksaddr(b))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("selected chain did not acquire an owned connection")
 	}
 	defer conn.Close()
+	deadline, _ := ctx.Deadline()
+	_ = conn.SetDeadline(deadline)
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	readBanner := make([]byte, len(banner))
+	if _, err := io.ReadFull(conn, readBanner); err != nil || string(readBanner) != banner {
+		t.Fatalf("selected banner evidence: readFailed=%t matched=%t", err != nil, string(readBanner) == banner)
+	}
 	privateAdaptiveEcho(t, conn, "profile-any-through-two-real-proxies")
 	if rejected.calls.Load() != 0 {
 		t.Fatal("failed first alternative fell back directly")
