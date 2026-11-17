@@ -4,10 +4,10 @@ root=Path(__file__).resolve().parent.parent
 mode=sys.argv[1]
 if mode=="jvm":
     paths=list((root/"core/decision/build/test-results/test").glob("TEST-*.xml"))
-    minimum=15
+    minimum=18
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=464
+    minimum=470
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -841,3 +841,36 @@ if mode in DURABLE_BUDGET_REQUIRED:
 if mode == "jvm":
     from coverage_evidence import ADAPTIVE_BUDGET_CLASSES, verify_classes
     verify_classes(root/"core/decision/build/reports/jacoco/test/jacocoTestReport.xml", ADAPTIVE_BUDGET_CLASSES)
+
+
+OWNER_TRANSITION_REQUIRED = {'jvm': [('io.syn443.decision.RouteHealthOwnerChangeTest',
+          'ownerChangeRetractsOnlyPositiveEvidenceWithoutResettingFailureFences'),
+         ('io.syn443.decision.RouteHealthOwnerChangeTest',
+          'repeatedOwnerChangesPreserveOriginalCooldownAndHalfOpenDebt'),
+         ('io.syn443.decision.RouteHealthOwnerChangeTest',
+          'foreignContextRollbackAndBoundsNeverEraseCompatibleHistory')],
+ 'emulator': [('io.syn443.android.AdaptiveOwnerTransitionTest',
+               'nativeEpochChangeRetractsReadinessAndUsesRecoveryBeforeRoutineCadence'),
+              ('io.syn443.android.AdaptiveOwnerTransitionTest',
+               'sameEpochScopeChangeCannotReuseSelectionReceiptOrLatency'),
+              ('io.syn443.android.AdaptiveOwnerTransitionTest',
+               'oldNativeWorkerRetainsBarrierUntilTypedCurrentIdleReport'),
+              ('io.syn443.android.AdaptiveOwnerTransitionTest',
+               'foreignAndMalformedReportsCannotReleaseAnOwnerTransition'),
+              ('io.syn443.android.AdaptiveOwnerTransitionTest',
+               'ownerTransitionTimeoutRetiresWithoutDispatchingAReplacement'),
+              ('io.syn443.android.AdaptiveOwnerTransitionTest',
+               'ownerChangeKeepsCompatibleNegativeCooldownAndHalfOpenDebt')]}
+if mode in OWNER_TRANSITION_REQUIRED:
+    required = set(OWNER_TRANSITION_REQUIRED[mode])
+    assert len(required) == len(OWNER_TRANSITION_REQUIRED[mode]) == (3 if mode == "jvm" else 6), "Duplicate native owner transition requirement"
+    assert required <= set(identities), "Missing exact native owner readiness and compatible health outcomes"
+    for classname in {classname for classname, _ in required}:
+        folder = "core/decision/src/test/kotlin/io/syn443/decision" if mode == "jvm" else "app/src/androidTest/kotlin/io/syn443/android"
+        source = (root / folder / (classname.rsplit(".", 1)[1] + ".kt")).read_text(encoding="utf-8")
+        methods = re.findall(r"@Test\s+fun\s+(\w+)", source)
+        expected = {name for owner, name in required if owner == classname}
+        assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "Native owner transition source inventory drift"
+if mode == "jvm":
+    from coverage_evidence import OWNER_HEALTH_CLASSES, verify_classes
+    verify_classes(root/"core/decision/build/reports/jacoco/test/jacocoTestReport.xml", OWNER_HEALTH_CLASSES)

@@ -151,6 +151,16 @@ object RouteSnapshot {
         searches=rows.filter {it.type=="syn443-adaptive"}.mapNotNull {row->states[row.tag]?.let {row.id to it}}.toMap()
     }
 
+    /** Native ownership revocation is not a failed route measurement. Retract
+     * only these adaptive rows; ordinary/NetBird evidence and the Java owner
+     * remain unchanged. Compatible negative cooldown lives in its own memory. */
+    @Synchronized internal fun adaptiveOwnerChanged(scope:RouteScope,tags:Set<String>) {
+        if(scope!=live || tags.size>16)return
+        val ids=rows.filter {it.type=="syn443-adaptive" && it.tag in tags}.map {it.id}.toSet()
+        observations=observations-ids;codes=codes-ids;timings=timings-ids;receipts=receipts-ids
+        measuredPaths=measuredPaths-ids;checkPlans=checkPlans-ids
+    }
+
     /** Called only after the bound native adaptive owner reports a real result. */
     @Synchronized internal fun adaptiveDiagnostic(scope:RouteScope,tag:String,value:JSONObject?,expected:String):JSONObject? {
         if(scope!=live)return null

@@ -44,6 +44,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private var policyScope=""
     private var nativeEpoch=0L
     private var nativeScope=""
+    private var observedNativeScope=""
+    private var drainingSince:Long?=null
     private var nativeRunning=false
     private var nativeReady=false
     private var pending:Pending?=null
@@ -93,7 +95,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         previousPolicyScope=if(sameEngine)policyScope else ""
         if(!sameEngine) {nativeEpoch=0;retireOwner=false}
         context=next;routeScope=scope;mode=networkMode;policyRevision=revision;policyScope=next.dependencyHash
-        memory=RouteHealthMemory(next);pending=null;pendingAdmission=null;nativeReady=false;nativeScope=""
+        memory=RouteHealthMemory(next);pending=null;pendingAdmission=null;nativeReady=false;nativeScope="";observedNativeScope="";drainingSince=null
         groupCursor=0;cpuYields.clear()
         groups.values.forEach {it.frontier=null;it.current=null;it.measuredAt=0;it.nextAt=0;it.improvement="";it.improvementPath=null;it.improvementCount=0;it.recheckFailed=false;it.failure=null;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false}
         groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
@@ -106,7 +108,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     /** Diagnostics only: never calls admission, changes selection or mints evidence. */
     private fun publishSearch() {
         val scope=routeScope ?: return
-        val waiting=retireOwner || !nativeReady || nativeScope.isEmpty()
+        val waiting=retireOwner || !nativeReady || nativeScope.isEmpty() || drainingSince!=null
         RouteSnapshot.adaptiveSearch(scope,order.associate {id->wire.groupTags().getValue(id) to
             if(waiting)AdaptiveSearchState.WAITING_CONTEXT else groups.getValue(id).search})
     }
@@ -161,18 +163,42 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     fun report(raw:JSONObject,now:Long,dispatch:(String)->Unit) {
         try { reportCurrent(raw,now,dispatch) } finally {publishSearch()}
     }
+    /** A native scope change revokes selected paths even when Android's route
+     * scope did not change. Negative evidence and admission debt stay owned.
+     * An old pending command remains a tombstone until a current idle report
+     * proves the actual native probe-worker has exited; configure is not ACK. */
+    private fun nativeOwnerChanged(now:Long) {
+        drainingSince=pending?.startedAt ?: drainingSince ?: now
+        pendingAdmission=null
+        groups.values.forEach {
+            it.frontier=null;it.current=null;it.measuredAt=0;it.latency=0;it.nextAt=now;it.exploreAt=0
+            it.improvement="";it.improvementPath=null;it.improvementCount=0;it.recheckFailed=false;it.failure=null
+            it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false
+            it.search=AdaptiveSearchState.WAITING_CONTEXT
+        }
+        RouteSnapshot.adaptiveOwnerChanged(checkNotNull(routeScope),wire.groupTags().values.toSet())
+        if(!checkNotNull(memory).revokeVerified(checkNotNull(context),now))retireOwner=true
+    }
     private fun reportCurrent(raw:JSONObject,now:Long,dispatch:(String)->Unit) {
         if(retireOwner || context==null)return
         if(!advanceClock(now) || raw.toString().length>32768)return
-        val epoch=raw.optLong("nativeEpoch",0);val scope=raw.optString("scope")
-        if(epoch<1 || epoch<nativeEpoch || !scope.matches(Regex("[a-f0-9]{64}")))return
+        val epoch=safeInteger(raw,"nativeEpoch") ?: return
+        val scope=raw.opt("scope") as? String ?: return
+        if(epoch<nativeEpoch || !scope.matches(Regex("[a-f0-9]{64}")))return
         val reportedPolicy=raw.optString("policyScope")
         if(reportedPolicy!=policyScope && reportedPolicy!=previousPolicyScope)return
-        if(epoch!=nativeEpoch || nativeScope.isNotEmpty() && scope!=nativeScope)
-            groups.values.forEach {it.frontier=null;it.failure=null;it.recheckFailed=false;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.search=AdaptiveSearchState.WAITING_CONTEXT}
-        nativeEpoch=epoch;nativeRunning=raw.optBoolean("running")
+        if(nativeEpoch>0 && observedNativeScope.isNotEmpty() && (epoch!=nativeEpoch || scope!=observedNativeScope))nativeOwnerChanged(now)
+        nativeEpoch=epoch;observedNativeScope=scope
+        if(retireOwner)return
+        if(drainingSince?.let {now-it>35_000}==true) {retireOwner=true;return}
+        // JSONObject.optBoolean also accepts strings and defaults missing data
+        // to false. Neither proves completion of the retained native worker.
+        val running=raw.opt("running") as? Boolean
+        val ready=raw.opt("ready") as? Boolean
+        if(running==null || ready==null) {nativeRunning=true;nativeReady=false;nativeScope="";return}
+        nativeRunning=running
         if(nativeRunning && raw.optLong("workAgeMs",0)>35_000) {retireOwner=true;return}
-        if(raw.optString("policyScope")!=policyScope || !raw.optBoolean("ready")) {
+        if(reportedPolicy!=policyScope || !ready) {
             nativeReady=false;nativeScope=""
             groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
             if(now-lastCommandAt>=1000)send(JSONObject().put("command","configure").put("schemaVersion",1)
@@ -180,6 +206,12 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             return
         }
         nativeReady=true;nativeScope=scope
+        if(drainingSince!=null) {
+            if(nativeRunning)return
+            // snapshot.running is the real busy owner, cleared only after
+            // workerDone closes following cleanup and admission release.
+            pending=null;drainingSince=null
+        }
         groups.values.filter {it.search==AdaptiveSearchState.WAITING_CONTEXT}.forEach {it.search=AdaptiveSearchState.SEARCH_INCOMPLETE}
         recheckHints(raw,now)
         val work=pending ?: return
@@ -293,7 +325,9 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private fun tickCurrent(now:Long,unmetered:Boolean,allowExplore:Boolean,isCurrent:()->Boolean,
         handoff:(JSONObject,Long)->Boolean) {
         val current= context ?: return
-        if(retireOwner || !advanceClock(now) || !nativeReady || nativeScope.isEmpty() || nativeRunning || pending!=null || now-lastCommandAt<1000)return
+        if(retireOwner || !advanceClock(now))return
+        if(drainingSince?.let {now-it>35_000}==true) {retireOwner=true;return}
+        if(!nativeReady || nativeScope.isEmpty() || nativeRunning || drainingSince!=null || pending!=null || now-lastCommandAt<1000)return
         pendingAdmission?.let {
             if(now-it.startedAt<=12_000)return
             // A timed-out reservation cannot dispatch later. The storage owner

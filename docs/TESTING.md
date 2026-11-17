@@ -394,3 +394,19 @@ Four budget/checkpoint classes join the independent 90% decision coverage gate;
 existing identity, policy, RouteGraph, ordinary/race and lifecycle gates remain.
 These are required source tests until exact-head Actions executes them. They
 do not establish a common application-wide energy governor or battery results.
+
+## Native adaptive owner transition candidate
+
+The [recovery design](native-owner-recovery.md) adds three required JVM health
+memory roots and six required Android coordinator/projection roots. The expected
+aggregate is519 JVM and470 unique outcomes per API29/35/37; the source-bound
+decision minimum becomes18. Existing516/464 outcomes and all prior required
+names remain. RouteHealthMemory joins the independent90% coverage gate.
+
+The tests must show immediate readiness retraction and recovery scheduling,
+preserved negative cooldown/half-open debt and no new start while the actual old
+worker is still busy. Missing/string Boolean reports, foreign/stale authority,
+old receipts, repeated transitions and the original35-second retirement fence
+are negative/boundary cases. Timeout and configure are not worker completion.
+Synthetic reports do not establish a physical native scope transition, managed
+route rollout, the original crash root cause, cellular or battery acceptance.

@@ -36,6 +36,9 @@ ADAPTIVE_BUDGET_CLASSES = {
 }
 
 
+OWNER_HEALTH_CLASSES = {'io.syn443.decision.RouteHealthMemory'}
+
+
 def verify_classes(path, required):
     found = set()
     for row in ET.parse(path).getroot().iter('class'):
