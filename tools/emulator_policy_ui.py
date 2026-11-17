@@ -160,7 +160,40 @@ def _anr_focus(windows):
     return (value,int(match[1]),match[2]) if match else None
 
 
-def correlated_anr_owner(before,after,events,processes,started,finished):
+_EVIDENCE_STAGES=frozenset(('input','hardware','clock','focus','events','process_start','process','owner','complete'))
+_EVIDENCE_REASONS=frozenset(('not_observed','unavailable','oversized','malformed','missing','ambiguous','changed',
+                           'stale_or_future','identity_mismatch','unmapped_owner','timeout','transport_error',
+                           'not_emulator','known_owner'))
+_EVIDENCE_COUNTS=('focus_before','focus_after','recent_anr','process_start','active_anr','matching_process')
+
+
+def _owner_evidence(evidence,stage,reason,counts=None,correlated=False):
+    """Owned, fixed diagnostic data only. Never navigation/recovery authority."""
+    if type(evidence) is not dict:return
+    stage=stage if stage in _EVIDENCE_STAGES else 'input'
+    reason=reason if reason in _EVIDENCE_REASONS else 'unavailable'
+    source=counts if type(counts) is dict else {}
+    bounded={key:min(2,max(0,source.get(key))) if type(source.get(key)) is int else None for key in _EVIDENCE_COUNTS}
+    evidence.clear()
+    evidence.update({'stage':stage,'reason':reason,'trust':'correlated' if correlated is True else 'unverified','counts':bounded})
+
+
+def launch_status(raw):
+    """Classify bytes already returned by am start -W, without echoing them."""
+    if not isinstance(raw,bytes):return {'kind':'unavailable'}
+    if len(raw)>16_384:return {'kind':'oversized'}
+    try:text=raw.decode('utf-8',errors='strict')
+    except UnicodeError:return {'kind':'malformed'}
+    statuses=re.findall(r'(?m)^Status:[ \t]*([^\r\n]*)\r?$',text)
+    errors=re.findall(r'(?m)^(?:Error(?: type [0-9]+)?:|Exception occurred while executing)',text)
+    if len(statuses)>1 or statuses and errors:return {'kind':'ambiguous'}
+    if errors:return {'kind':'error'}
+    if not statuses:return {'kind':'unrecognized'}
+    value=statuses[0].strip()
+    return {'kind':value if value in ('ok','timeout') else 'unrecognized'}
+
+
+def correlated_anr_owner(before,after,events,processes,started,finished,*,evidence=None):
     """Return fixed categories only, never a title, process, PID, UID or reason.
 
     am_anr's first field is a user ID, NOT a UID. Bind its PID/process to
@@ -170,47 +203,62 @@ def correlated_anr_owner(before,after,events,processes,started,finished):
     closed. This diagnostic never authorizes a UI action or recovery.
     """
     unknown={'category':'unknown','correlated':False}
+    counts={key:None for key in _EVIDENCE_COUNTS}
+    def stop(stage,reason):
+        _owner_evidence(evidence,stage,reason,counts)
+        return unknown
+    for raw in (before,after,events,processes):
+        if not isinstance(raw,bytes):return stop('input','unavailable')
+        if len(raw)>1_048_576:return stop('input','oversized')
+    counts['focus_before']=min(2,len(re.findall(rb'(?m)^\s*mCurrentFocus=([^\r\n]+)',before)))
+    counts['focus_after']=min(2,len(re.findall(rb'(?m)^\s*mCurrentFocus=([^\r\n]+)',after)))
     focus=_anr_focus(before)
-    if focus is None or focus!=_anr_focus(after):return unknown
-    if any(not isinstance(raw,bytes) or len(raw)>1_048_576 for raw in (events,processes)):return unknown
-    if type(started) is not int or type(finished) is not int or not 0<=finished-started<=10:return unknown
+    if counts['focus_before']>1 or counts['focus_after']>1:return stop('focus','ambiguous')
+    if counts['focus_before']==0 or counts['focus_after']==0:return stop('focus','missing')
+    if focus is None or _anr_focus(after) is None:return stop('focus','malformed')
+    if focus!=_anr_focus(after):return stop('focus','changed')
+    if type(started) is not int or type(finished) is not int or not 0<=finished-started<=10:return stop('clock','malformed')
     # Device wall time has second precision; allow its current second, not
     # another clock's time. A recent event must be at most two minutes old.
     oldest=(finished-120)*1_000_000;newest=(finished+1)*1_000_000
     parsed=[]
     for line in events.splitlines():
-        if len(line)>16_384:return unknown
+        if len(line)>16_384:return stop('events','oversized')
         if not re.search(rb'\bam_(?:anr|proc_start)\s*:',line):continue
         match=re.fullmatch(rb'([0-9]{9,12})\.([0-9]{3,6})\s+[0-9]+\s+[0-9]+\s+I\s+(am_anr|am_proc_start)\s*:\s*\[([^\r\n]*)\]',line.strip())
-        if match is None:return unknown
+        if match is None:return stop('events','malformed')
         stamp=int(match[1])*1_000_000+int(match[2].ljust(6,b'0'))
         fields=match[4].split(b',',4)
-        if len(fields)!=5 or not all(re.fullmatch(rb'[0-9]{1,10}',field) for field in fields[:2]):return unknown
+        if len(fields)!=5 or not all(re.fullmatch(rb'[0-9]{1,10}',field) for field in fields[:2]):return stop('events','malformed')
         user,pid=map(int,fields[:2])
-        if user>9999 or not 0<pid<=2_147_483_647:return unknown
+        if user>9999 or not 0<pid<=2_147_483_647:return stop('events','malformed')
         if match[3]==b'am_anr':
-            if not re.fullmatch(rb'[A-Za-z0-9_.:]{1,160}',fields[2]) or not re.fullmatch(rb'[0-9]{1,10}',fields[3]):return unknown
+            if not re.fullmatch(rb'[A-Za-z0-9_.:]{1,160}',fields[2]) or not re.fullmatch(rb'[0-9]{1,10}',fields[3]):return stop('events','malformed')
             parsed.append((stamp,'anr',user,pid,fields[2],None))
         else:
-            if not re.fullmatch(rb'[0-9]{1,10}',fields[2]) or not re.fullmatch(rb'[A-Za-z0-9_.:]{1,160}',fields[3]):return unknown
+            if not re.fullmatch(rb'[0-9]{1,10}',fields[2]) or not re.fullmatch(rb'[A-Za-z0-9_.:]{1,160}',fields[3]):return stop('events','malformed')
             uid=int(fields[2])
-            if uid>2_147_483_647 or uid//100_000!=user:return unknown
+            if uid>2_147_483_647 or uid//100_000!=user:return stop('process_start','identity_mismatch')
             parsed.append((stamp,'start',user,pid,fields[3],uid))
-        if len(parsed)>256:return unknown
+        if len(parsed)>256:return stop('events','oversized')
     recent=[row for row in parsed if row[1]=='anr' and oldest<=row[0]<newest]
-    if len(recent)!=1:return unknown
+    counts['recent_anr']=min(2,len(recent))
+    if len(recent)!=1:return stop('events','ambiguous' if len(recent)>1 else 'stale_or_future' if any(row[1]=='anr' for row in parsed) else 'missing')
     event=recent[0]
-    if (event[2],event[4])!=focus[1:]:return unknown
+    if (event[2],event[4])!=focus[1:]:return stop('focus','identity_mismatch')
     starts=[row for row in parsed if row[1]=='start' and row[3]==event[3]]
-    if len(starts)!=1:return unknown
+    counts['process_start']=min(2,len(starts))
+    if len(starts)!=1:return stop('process_start','ambiguous' if len(starts)>1 else 'missing')
     source=starts[0]
-    if source[0]>=event[0] or source[2:5]!=event[2:5]:return unknown
+    if source[0]>=event[0] or source[2:5]!=event[2:5]:return stop('process_start','identity_mismatch')
     # Dump format from ProcessList/ProcessRecord/ProcessErrorStateRecord. A
     # package prefix, a previous process or an isolated UID is not ownership.
-    if processes.count(b'ACTIVITY MANAGER RUNNING PROCESSES (dumpsys activity processes)')!=1:return unknown
+    if processes.count(b'ACTIVITY MANAGER RUNNING PROCESSES (dumpsys activity processes)')!=1:return stop('process','missing')
     headers=list(re.finditer(rb'(?m)^\s*\*(?:APP|PERS)\* UID ([0-9]{1,10}) ProcessRecord\{[0-9a-f]+ ([0-9]{1,10}):([A-Za-z0-9_.:]{1,160})/([A-Za-z0-9]{1,32})\}\s*$',processes))
-    if not headers or len(headers)!=len(re.findall(rb'(?m)^\s*\*(?:APP|PERS)\* UID ',processes)):return unknown
-    if len(re.findall(rb'\bmNotResponding=true\b',processes))!=1:return unknown
+    if not headers:return stop('process','missing')
+    if len(headers)!=len(re.findall(rb'(?m)^\s*\*(?:APP|PERS)\* UID ',processes)):return stop('process','malformed')
+    counts['active_anr']=min(2,len(re.findall(rb'\bmNotResponding=true\b',processes)))
+    if len(re.findall(rb'\bmNotResponding=true\b',processes))!=1:return stop('process','ambiguous' if counts['active_anr']>1 else 'missing')
     candidates=[]
     for index,header in enumerate(headers):
         block=processes[header.end():headers[index+1].start() if index+1<len(headers) else len(processes)]
@@ -224,7 +272,8 @@ def correlated_anr_owner(before,after,events,processes,started,finished):
         pids=re.findall(rb'(?m)^\s*pid=([0-9]{1,10})(?: starting=(?:true|false))?\s*$',block)
         if identities!=[(str(user).encode(),str(uid).encode())] or pids!=[str(pid).encode()]:continue
         if (user,pid,name,uid)==(event[2],event[3],event[4],source[5]):candidates.append(name)
-    if len(candidates)!=1:return unknown
+    counts['matching_process']=min(2,len(candidates))
+    if len(candidates)!=1:return stop('process','identity_mismatch' if len(candidates)==0 else 'ambiguous')
     categories={
         b'com.android.settings':'settings',b'com.android.systemui':'system_ui',
         b'com.android.launcher3':'launcher',b'com.google.android.apps.nexuslauncher':'launcher',
@@ -233,34 +282,57 @@ def correlated_anr_owner(before,after,events,processes,started,finished):
         b'io.syn443.android':'syn443_app',b'io.syn443.android:controller':'syn443_controller',b'io.syn443.android:engine':'syn443_engine',
     }
     category=categories.get(candidates[0])
-    return {'category':category,'correlated':True} if category is not None else unknown
+    if category is None:return stop('owner','unmapped_owner')
+    _owner_evidence(evidence,'complete','known_owner',counts,True)
+    return {'category':category,'correlated':True}
 
 
-def anr_owner_diagnostic():
+def anr_owner_diagnostic(*,evidence=None):
     """Read-only, disposable-emulator failure diagnostic with an eight-second budget."""
     unknown={'category':'unknown','correlated':False}
+    stage='hardware'
+    _owner_evidence(evidence,'input','not_observed')
     deadline=time.monotonic()+8
     def observe(*args):
         remaining=deadline-time.monotonic()
         if remaining<=0:raise subprocess.TimeoutExpired('bounded ANR owner observation',8)
         raw=adb(*args,timeout=min(2,remaining))
-        if not isinstance(raw,bytes) or len(raw)>1_048_576:raise ValueError('Unusable diagnostic observation')
+        if not isinstance(raw,bytes):raise ValueError('unavailable')
+        if len(raw)>1_048_576:raise ValueError('oversized')
         return raw
     try:
-        if observe('shell','getprop','ro.hardware').strip() not in (b'ranchu',b'goldfish'):return unknown
+        if observe('shell','getprop','ro.hardware').strip() not in (b'ranchu',b'goldfish'):
+            _owner_evidence(evidence,stage,'not_emulator');return unknown
+        stage='clock'
         started=observe('shell','date','+%s').strip()
-        if not re.fullmatch(rb'[0-9]{9,12}',started):return unknown
+        if not re.fullmatch(rb'[0-9]{9,12}',started):
+            _owner_evidence(evidence,stage,'malformed');return unknown
+        stage='focus'
         before=observe('shell','dumpsys','window','displays')
-        if _anr_focus(before) is None:return unknown
+        if _anr_focus(before) is None:
+            count=min(2,len(re.findall(rb'(?m)^\s*mCurrentFocus=([^\r\n]+)',before)))
+            _owner_evidence(evidence,stage,'ambiguous' if count>1 else 'malformed' if count else 'missing',{'focus_before':count});return unknown
         # All command arguments are constants. Neither titles nor log fields
         # are interpolated into a shell command, package filter or file path.
+        stage='events'
         events=observe('shell','logcat','-d','-b','events','-v','epoch','-t','256','am_anr:I','am_proc_start:I',"'*:S'")
+        stage='process'
         processes=observe('shell','dumpsys','activity','-a','processes')
+        stage='focus'
         after=observe('shell','dumpsys','window','displays')
+        stage='clock'
         finished=observe('shell','date','+%s').strip()
-        if not re.fullmatch(rb'[0-9]{9,12}',finished):return unknown
-        return correlated_anr_owner(before,after,events,processes,int(started),int(finished))
-    except (OSError,subprocess.SubprocessError,ValueError,UnicodeError):
+        if not re.fullmatch(rb'[0-9]{9,12}',finished):
+            _owner_evidence(evidence,stage,'malformed');return unknown
+        return correlated_anr_owner(before,after,events,processes,int(started),int(finished),evidence=evidence)
+    except subprocess.TimeoutExpired:
+        _owner_evidence(evidence,stage,'timeout')
+        return unknown
+    except (OSError,subprocess.SubprocessError):
+        _owner_evidence(evidence,stage,'transport_error')
+        return unknown
+    except (ValueError,UnicodeError) as error:
+        _owner_evidence(evidence,stage,str(error) if str(error) in ('unavailable','oversized') else 'malformed')
         return unknown
 
 
@@ -282,7 +354,7 @@ def open_policy():
         component=settings_component(adb(*args,'query-activities','--brief','-a','android.settings.VPN_SETTINGS','-p','com.android.settings'))
     assert component is not None,'Platform did not resolve an owned VPN Settings component'
     launch=('shell','am','start','-S','-W','-n',shlex.quote(component),'-f','0x10008000')
-    adb(*launch)
+    launch_observations=[launch_status(adb(*launch))]
     end=time.monotonic()+20
     root=None
     relaunched=False
@@ -305,7 +377,7 @@ def open_policy():
             if last_settings_anr:
                 relaunched=True
                 print('Owned Settings ANR: restarting the VPN settings activity once',flush=True)
-                adb(*launch)
+                launch_observations.append(launch_status(adb(*launch)))
                 end=time.monotonic()+20
                 continue
         time.sleep(1)
@@ -315,8 +387,10 @@ def open_policy():
     resources=sorted({n.get('resource-id','') for n in nodes if n.get('package') in ('android','com.android.settings','com.android.systemui')})[:32]
     owned=[{'id':n.get('resource-id',''),'bounds':n.get('bounds','')} for n in nodes if n.get('package')=='com.android.settings' and n.get('text')=='SYN443']
     gears=[{'bounds':n.get('bounds',''),'description':('expected' if n.get('content-desc')=='Settings for SYN443' else 'present' if n.get('content-desc') else 'empty')} for n in nodes if n.get('package')=='com.android.settings' and n.get('resource-id','').endswith('/settings_button')]
-    owner=anr_owner_diagnostic() if any(n.get('package')=='android' and n.get('resource-id')=='android:id/aerr_close' for n in nodes) else {'category':'unknown','correlated':False}
-    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears,'focusedSettingsANR':last_settings_anr,'focusSnapshot':last_focus_snapshot,'anrOwner':owner}),flush=True)
+    owner_evidence={}
+    _owner_evidence(owner_evidence,'input','not_observed')
+    owner=anr_owner_diagnostic(evidence=owner_evidence) if any(n.get('package')=='android' and n.get('resource-id')=='android:id/aerr_close' for n in nodes) else {'category':'unknown','correlated':False}
+    print('Owned VPN Settings navigation unavailable: '+repr({'packages':packages,'resources':resources,'owned':owned,'gears':gears,'focusedSettingsANR':last_settings_anr,'focusSnapshot':last_focus_snapshot,'anrOwner':owner,'launchStatus':launch_observations,'anrEvidence':owner_evidence}),flush=True)
     raise AssertionError('Owned VPN settings entry unavailable')
 
 
