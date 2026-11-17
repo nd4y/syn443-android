@@ -139,9 +139,10 @@
         "docs/xhttp-wire-matrix.md",
         "tools/check_native_protocol_evidence.py",
         "tools/test_native_protocol_evidence.py",
-        "native/bridge/vless_ssh_wire_test.go"
+        "native/bridge/vless_ssh_wire_test.go",
+        "native/bridge/proxy_wire_test.go"
       ],
-      "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests. Source-stage closed VLESS eight-transport and XHTTP five-by-four authority matrix requires30 exact ordered outcomes and bridge package completion independently in ordinary/race streams; exact-head Actions pending.",
+      "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests. Source-stage closed VLESS eight-transport and XHTTP five-by-four authority matrix plus an independent hard-deadline fixture require31 exact ordered outcomes (30 protocol and one fixture) and bridge package completion independently in ordinary/race streams; exact-head Actions pending.",
       "remainingScope": "Complete capabilities/version/SBOM/release/update and physical acceptance."
     },
     {

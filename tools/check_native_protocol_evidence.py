@@ -7,6 +7,7 @@ import sys
 BRIDGE = 'io.syn443/bridge'
 POSITIVE_ROOT = 'TestRegisteredVLESSTLSTransportsActualPayloadAndDetour'
 NEGATIVE_ROOT = 'TestRegisteredXHTTPAuthorityFailuresCannotReachTargetDirectly'
+FIXTURE_ROOT = 'TestPayloadWireClosesDeadlineIgnoringConnOnContextExpiry'
 POSITIVE_TRANSPORTS = ('tls', 'ws', 'grpc', 'xhttp-h2', 'xhttp-h3', 'xhttp-packet-up', 'xhttp-auto', 'xhttp-stream-up')
 XHTTP_TRANSPORTS = ('xhttp-h2', 'xhttp-h3', 'xhttp-packet-up', 'xhttp-auto', 'xhttp-stream-up')
 FAILURES = ('uuid', 'certificate', 'server-name', 'refused')
@@ -14,7 +15,7 @@ MAX_BYTES = 64 * 1024 * 1024
 
 
 def required_cases():
-    return frozenset({POSITIVE_ROOT, NEGATIVE_ROOT} |
+    return frozenset({POSITIVE_ROOT, NEGATIVE_ROOT, FIXTURE_ROOT} |
                      {POSITIVE_ROOT + '/' + transport for transport in POSITIVE_TRANSPORTS} |
                      {NEGATIVE_ROOT + '/' + transport + '/' + failure
                       for transport in XHTTP_TRANSPORTS for failure in FAILURES})
@@ -105,7 +106,7 @@ def _literal_loop(tokens, variable, expected):
     return end + 1, _closing(tokens, end + 1)
 
 
-def source_bindings(source):
+def source_bindings(source, helper_source):
     tokens = _tokens(source)
     for root in (POSITIVE_ROOT, NEGATIVE_ROOT):
         body = _function(tokens, root)
@@ -122,8 +123,9 @@ def source_bindings(source):
         assert bounds[0] < run < bounds[1], 'Protocol subtest escaped its literal table'
         call = ['t', '.', 'Run', '('] + arguments + [',', 'func', '(', 't', '*', 'testing', '.', 'T', ')', '{']
         assert body[run:run + len(call)] == call, 'Protocol subtest name binding drift'
+    _function(_tokens(helper_source), FIXTURE_ROOT)
     required = required_cases()
-    assert len(required) == 30
+    assert len(required) == 31
     return required
 
 
@@ -139,8 +141,8 @@ def _invalid_constant(_value):
     raise AssertionError('Nonfinite native protocol JSON')
 
 
-def verify(lines, source):
-    required = source_bindings(source)
+def verify(lines, source, helper_source):
+    required = source_bindings(source, helper_source)
     states, completed, started, size = {}, False, False, 0
     for line in lines:
         assert isinstance(line, str), 'Invalid native protocol event input'
@@ -158,7 +160,7 @@ def verify(lines, source):
         for key in ('Package', 'ImportPath', 'Test'):
             assert key not in row or isinstance(row[key], str) and row[key], 'Invalid native protocol metadata'
         assert package is not None or imported is not None, 'Missing native protocol package'
-        target = test is not None and any(test == root or test.startswith(root + '/') for root in (POSITIVE_ROOT, NEGATIVE_ROOT))
+        target = test is not None and any(test == root or test.startswith(root + '/') for root in (POSITIVE_ROOT, NEGATIVE_ROOT, FIXTURE_ROOT))
         if target:
             assert test in required and package == BRIDGE and imported in (None, BRIDGE), 'Foreign or unbound protocol outcome'
         if package != BRIDGE and imported != BRIDGE:
@@ -208,9 +210,11 @@ def main():
     assert path.is_file() and 0 < path.stat().st_size <= MAX_BYTES, 'Missing or unbounded native protocol evidence'
     source = Path(__file__).resolve().parent.parent / 'native/bridge/vless_ssh_wire_test.go'
     assert source.is_file() and 0 < source.stat().st_size <= 262144, 'Missing protocol source'
+    helper_source = source.with_name('proxy_wire_test.go')
+    assert helper_source.is_file() and 0 < helper_source.stat().st_size <= 262144, 'Missing protocol fixture source'
     with path.open(encoding='utf-8') as stream:
-        count = verify(stream, source.read_text(encoding='utf-8'))
-    print(f'Native protocol wire matrix: {count} actual ordered passes and one bridge completion')
+        count = verify(stream, source.read_text(encoding='utf-8'), helper_source.read_text(encoding='utf-8'))
+    print(f'Native protocol wire matrix and deadline fixture: {count} actual ordered passes and one bridge completion')
 
 
 if __name__ == '__main__':
