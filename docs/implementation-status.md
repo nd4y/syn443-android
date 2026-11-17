@@ -1,5 +1,23 @@
 # Implementation and acceptance snapshot
 
+The [offline support archive candidate](offline-support-bundle.md) adds private
+encrypted collection, a component/hash preview, explicit Android document
+export and guarded CLI collection/status/cancel/export. It excludes config
+decryption, identity files and native stacks, and marks these sources missing.
+Source, full Actions, resulting-main and Xperia acceptance remain separate;
+remote consent/upload/server audit remain open.
+
+Continuity/evidence source7744876 passed all eight jobs in
+[Actions44141188869](https://github.com/nd4y/syn443-android/actions/runs/44141188869),
+with independent522JVM/476unique outcomes per API29/35/37 and retained native,
+coverage, contract and artifact checks. Protected mainc63f3d9 passed its own
+[Actions44151360340](https://github.com/nd4y/syn443-android/actions/runs/44151360340)
+and has the exact same source tree. This does not establish phone acceptance
+or erase the earlier recovery failures. The separate diagnostic-only PR98
+closed unmerged: the original controller-death case passed three bounded
+API29 trials, while one full trial failed later preparation stages. Its cause
+remains unverified.
+
 The [negative path-history candidate](negative-path-continuity.md) preserves only
 compatible cooldown and half-open debt across validation/metered changes on the
 same observed OS path in one live service. Every positive route proof is still

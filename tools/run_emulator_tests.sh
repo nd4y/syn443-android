@@ -18,9 +18,20 @@ restore_instrumentation_display() {
   fi
 }
 
+publish_support_bundle_report() {
+  local source="$RUNNER_TEMP/syn443-support-protocol-result.xml"
+  local target='app/build/outputs/androidTest-results/external/TEST-support-bundle.xml'
+  if [ -f "$source" ]; then
+    mkdir -p app/build/outputs/androidTest-results/external
+    if [ -e "$target" ]; then cmp -s -- "$source" "$target"
+    else cp -- "$source" "$target"; fi
+  fi
+}
+
 collect_diagnostics() {
   result=$?
   trap - EXIT
+  publish_support_bundle_report || true
   restore_instrumentation_display || true
   python3 tools/print_emulator_reports.py || true
   printf '\n=== Disposable runner memory/disk ===\n'
@@ -46,6 +57,9 @@ adb -e shell cmd uimode night no
 test -f app/build/outputs/apk/debug/app-debug.apk
 test -f app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb -e install -r app/build/outputs/apk/debug/app-debug.apk
+# Exercise the new passive Provider/CLI path before ordinary status or login
+# can initialize the fresh app. This never runs on a physical device.
+python3 tools/run_support_bundle_smoke.py
 # Permission changes happen before the instrumentation process exists.
 adb -e shell appops set io.syn443.android ACTIVATE_VPN allow
 if [ "$(adb -e shell getprop ro.build.version.sdk | tr -d '\r')" -ge 33 ]; then
@@ -85,6 +99,7 @@ python3 tools/run_vpn_fatal.py || result=1
 python3 tools/run_vpn_competing.py || result=1
 python3 tools/run_policy_activation.py || result=1
 python3 tools/run_enrolled_vpn.py || result=1
+publish_support_bundle_report || result=1
 python3 tools/check_test_evidence.py emulator || result=1
 exit "$result"
 

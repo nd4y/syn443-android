@@ -1,5 +1,16 @@
 # Testing and release gates
 
+[Offline support archive](offline-support-bundle.md) adds38exact Android roots
+across archive/projection/owner/source/UI/passive-cache classes and one actual
+fresh-emulator Provider/CLI case. The per-API floor is515 before the separate
+report-view candidate is composed. Existing roots and coverage stay required.
+The actual protocol case runs before ordinary status/login initialization,
+checks collect/export/cancel and retained identity/VPN file absence and native
+owner absence, and scans its synthetic ZIP without publishing it. Ten new
+Python roots cover CLI limits, ZIP/manifest validation and lost-ACK behavior.
+The gate rejects any missing new outcome or source inventory drift. Compilation
+and execution remain Actions-only; physical collection/export is separate.
+
 [Owned VPN Settings evidence](vpn-settings-evidence.md) adds six synthetic
 helper cases to the existing documents job. It preserves the actual Always-on
 and lockdown scenario, owner checks, timeouts and recovery authority; an unknown
