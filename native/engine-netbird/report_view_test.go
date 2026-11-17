@@ -454,9 +454,8 @@ func TestReportViewBlockedSnapshotAndCancelledWorkerRetainAdmission(t *testing.T
 			runtimePeer.outbound = foreign
 			runtimePeer.Unlock()
 		})
-		var returned diagnosticReport
-		if !decodeReport(raw, &returned) || returned.State != "stale" {
-			t.Fatal("old epoch did not return unknown stale result")
+		if raw != `{"state":"stale","results":[]}` {
+			t.Fatal("legacy stale acknowledgement changed")
 		}
 		old := reportRead(t, o)
 		if old.State != "cancelled" || !old.Stale || !old.MetadataUnknown || !old.Started.Equal(captured) || old.Finished.IsZero() || p.probeCalls.Load() != 0 {

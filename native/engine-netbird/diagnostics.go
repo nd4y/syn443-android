@@ -200,7 +200,9 @@ func startDiagnostics(afterSnapshot func(bool)) string {
 			o.job.Finished = time.Now()
 		}
 		o.diagMu.Unlock()
-		return unavailableDiagnosticReport(o, "stale")
+		// Preserve the legacy ephemeral acknowledgement. Cached/readback state
+		// still uses the complete bounded diagnostic projection above.
+		return `{"state":"stale","results":[]}`
 	}
 	if snapshotError != nil || late {
 		o.job.State = "cancelled"
