@@ -64,7 +64,8 @@ class AdminOperationVersionTest {
         fun reply(raw:String,status:Int=200,headers:Map<String,List<String>> = emptyMap(),at:Long=oauth.wall)=
             Reply(status,mapOf("content-type" to listOf("application/json"),"date" to listOf(AdminAuthFixture.date(at)))+headers,raw.toByteArray(Charsets.UTF_8))
         fun claims(call:Call)=Identity.objectJSON(Policy.utf8(Policy.decode64(call.headers.getValue("DPoP").split('.')[1])))
-        fun proposal()=AdminLayerControl.proposal("""{"draftId":"synthetic-draft","draftRevision":1,"targetKind":"device","targetId":"synthetic-device","mode":"wifi","approvalUntilMs":${oauth.wall+600_000},"bundles":[{"device":"synthetic-device","baseRevision":1,"baseHash":"${"a".repeat(64)}","layers":[{"id":"synthetic-device","kind":"device","priority":0,"revision":1,"changes":[],"permissions":[]}]}]}""")
+        // Portable proposals retain the required template even for a device-only wire case.
+        fun proposal()=AdminLayerControl.proposal("""{"draftId":"synthetic-draft","draftRevision":1,"targetKind":"device","targetId":"synthetic-device","mode":"wifi","approvalUntilMs":${oauth.wall+600_000},"bundles":[{"device":"synthetic-device","baseRevision":1,"baseHash":"${"a".repeat(64)}","layers":[{"id":"synthetic-template","kind":"template","priority":0,"revision":1,"changes":[],"permissions":[]},{"id":"synthetic-device","kind":"device","priority":0,"revision":1,"changes":[],"permissions":[]}]}]}""")
     }
     private fun verify(f:Fixture,call:Fixture.Call,session:AdminSession) {
         assertEquals("POST",call.method);assertEquals(f.oauth.metadata.apiOrigin+AdminControl.PATH,call.url)

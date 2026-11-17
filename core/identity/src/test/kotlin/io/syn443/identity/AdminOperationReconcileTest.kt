@@ -18,7 +18,8 @@ class AdminOperationReconcileTest {
         val owner=Identity.hash("synthetic-owner".toByteArray())
         val origin="https://reconcile.example.invalid"
         val device="synthetic-device"
-        fun proposal(blob:Int=0)=AdminLayerControl.proposal("""{"draftId":"draft-a","draftRevision":1,"targetKind":"device","targetId":"$device","mode":"wifi","approvalUntilMs":${now+3_600_000},"bundles":[{"device":"$device","baseRevision":2,"baseHash":"${"a".repeat(64)}","layers":[{"id":"$device","kind":"device","priority":0,"revision":1,"changes":[{"path":"/blob","operation":"set","value":"${"x".repeat(blob)}"}],"permissions":[]}]}]}""")
+        // Portable proposals retain the required template even for a device-only wire case.
+        fun proposal(blob:Int=0)=AdminLayerControl.proposal("""{"draftId":"draft-a","draftRevision":1,"targetKind":"device","targetId":"$device","mode":"wifi","approvalUntilMs":${now+3_600_000},"bundles":[{"device":"$device","baseRevision":2,"baseHash":"${"a".repeat(64)}","layers":[{"id":"synthetic-template","kind":"template","priority":0,"revision":1,"changes":[],"permissions":[]},{"id":"$device","kind":"device","priority":0,"revision":1,"changes":[{"path":"/blob","operation":"set","value":"${"x".repeat(blob)}"}],"permissions":[]}]}]}""")
         fun saved():AdminLayerDraft {
             val p=proposal()
             val raw="""{"id":"${p.draftId}","revision":1,"proposal":${p.wireJson()},"savedAtMs":$now}"""

@@ -62,7 +62,8 @@ class AdminOperationProtocolTest {
             return client.exchangeCallback(AdminBootstrap.CALLBACK+"?"+Identity.form(linkedMapOf(
                 "code" to "synthetic-code","state" to pending.state,"iss" to oauth.metadata.issuer)),pending,7,issuer,IdentityScope())
         }
-        fun proposal(blob:Int=0)=AdminLayerControl.proposal("""{"draftId":"synthetic-draft","draftRevision":1,"targetKind":"device","targetId":"$device","mode":"wifi","approvalUntilMs":${oauth.wall+600_000},"bundles":[{"device":"$device","baseRevision":1,"baseHash":"${"a".repeat(64)}","layers":[{"id":"$device","kind":"device","priority":0,"revision":1,"changes":[{"path":"/blob","operation":"set","value":"${"x".repeat(blob)}"}],"permissions":[]}]}]}""")
+        // Portable proposals retain the required template even for a device-only wire case.
+        fun proposal(blob:Int=0)=AdminLayerControl.proposal("""{"draftId":"synthetic-draft","draftRevision":1,"targetKind":"device","targetId":"$device","mode":"wifi","approvalUntilMs":${oauth.wall+600_000},"bundles":[{"device":"$device","baseRevision":1,"baseHash":"${"a".repeat(64)}","layers":[{"id":"synthetic-template","kind":"template","priority":0,"revision":1,"changes":[],"permissions":[]},{"id":"$device","kind":"device","priority":0,"revision":1,"changes":[{"path":"/blob","operation":"set","value":"${"x".repeat(blob)}"}],"permissions":[]}]}]}""")
         fun original(version:Int=2,id:String=Identity.random(),blob:Int=0)=AdminLayerControl.saveDraft(0,proposal(blob),id,version)
         fun request(session:AdminSession,original:AdminLayerRequest=original(),intent:AdminOperationIntent=AdminOperationIntent.LOOKUP)=
             AdminOperationReconcile.request(original,client.layerActor(session),oauth.metadata.apiOrigin,Identity.random(),intent)
