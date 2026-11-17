@@ -157,7 +157,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         })
         for mode, count, floor, folder in [
             ('identity', 57, 249, 'core/identity/src/test/kotlin/io/syn443/identity'),
-            ('emulator', 65, 427, 'app/src/androidTest/kotlin/io/syn443/android'),
+            ('emulator', 65, 437, 'app/src/androidTest/kotlin/io/syn443/android'),
         ]:
             self.assertEqual(count, len(required[mode]))
             self.assertEqual(expected[mode], set(required[mode]))
@@ -207,7 +207,7 @@ class CoverageEvidenceTest(unittest.TestCase):
                 'AdminOperationReconcileTest': 18, 'AdminOperationProtocolTest': 7, 'AdminOperationHttpTest': 3,
                 'AdminOperationVersionTest': 6, 'AdminOperationGoConformanceTest': 6, 'AdminEditorAuthorityTest': 6,
                 'BoundedHttpCancellationRaceTest': 3}),
-            ('emulator', 29, 427, 'app/src/androidTest/kotlin/io/syn443/android', {
+            ('emulator', 29, 437, 'app/src/androidTest/kotlin/io/syn443/android', {
                 'AdminPublishDispatchDeadlineTest': 3, 'AdminOperationCoordinatorTest': 10, 'AdminOperationUiTest': 5,
                 'AdminOperationWireTest': 3, 'AdminOperationRouteTest': 3, 'AdminEditorOwnerMigrationTest': 5}),
         ]:
@@ -224,3 +224,25 @@ class CoverageEvidenceTest(unittest.TestCase):
             self.assertFalse(set(required[mode]) & set(old_editor[mode]))
             self.assertFalse(set(required[mode]) & set(old_comparison[mode]))
             self.assertRegex(gate_source, rf'(?:if|elif) mode=="{mode}":\n(?:    [^\n]*\n)*?    minimum={floor}\n')
+
+    def test_adaptive_search_roots_match_complete_source_and_keep_additive_floor(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / 'tools/check_test_evidence.py').read_text(encoding='utf-8')
+        tree = ast.parse(source)
+        declarations = [node for node in tree.body if isinstance(node, ast.Assign) and
+                        any(isinstance(target, ast.Name) and target.id == 'ADAPTIVE_SEARCH_REQUIRED'
+                            for target in node.targets)]
+        self.assertEqual(1, len(declarations))
+        required = ast.literal_eval(declarations[0].value)
+        expected = set()
+        for name, count in [('ManagedAdaptiveSearchStatusTest', 6), ('RouteSearchStatusTest', 4)]:
+            path = root / 'app/src/androidTest/kotlin/io/syn443/android' / (name + '.kt')
+            methods = re.findall(r'@Test\s+fun\s+(\w+)', path.read_text(encoding='utf-8'))
+            self.assertEqual(count, len(methods))
+            self.assertEqual(count, len(set(methods)))
+            expected.update(('io.syn443.android.' + name, method) for method in methods)
+        self.assertEqual(10, len(required))
+        self.assertEqual(10, len(set(required)))
+        self.assertEqual(expected, set(required))
+        self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=437\n')
+        self.assertRegex(source, r'elif mode=="identity":\n(?:    [^\n]*\n)*?    minimum=249\n')

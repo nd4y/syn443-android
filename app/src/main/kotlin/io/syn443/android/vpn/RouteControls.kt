@@ -33,6 +33,15 @@ import org.json.JSONObject
                 "unavailable"->"Движок или сеть недоступны"
                 else->"Маршрут ещё не проверен"
             },Modifier.testTag("route-${i+1}-state"))
+            row.optJSONObject("search")?.let {search->
+                Text(when(search.optString("state")) {
+                    "VERIFIED"->"Выбранный маршрут подтверждён свежей проверкой"
+                    "SEARCHING"->"Поиск маршрута продолжается"
+                    "BUDGET_WAIT"->"Поиск временно приостановлен и продолжится автоматически"
+                    "WAITING_CONTEXT"->"Поиск ожидает подключения к сети и VPN"
+                    else->"Поиск ещё не завершён"
+                },Modifier.testTag("route-${i+1}-search"))
+            }
             if(!row.getBoolean("configured"))Text("Профиль проверки не назначен; доступность не подтверждена")
             if(row.getBoolean("required"))Text("Обязательный маршрут")
             when(row.optString("selectionState")) {

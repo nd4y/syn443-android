@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=427
+    minimum=437
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -711,3 +711,18 @@ ADMIN_OPERATION_RECONCILE_REQUIRED = {
 }
 if mode in ADMIN_OPERATION_RECONCILE_REQUIRED:
     assert set(ADMIN_OPERATION_RECONCILE_REQUIRED[mode]) <= set(identities), "Missing exact operation outcome, deadline, stable editor ownership or explicit presentation outcomes"
+
+ADAPTIVE_SEARCH_REQUIRED = [
+    ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'onlyFreshSelectedAcknowledgementChangesSearchingToVerified'),
+    ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'minuteBudgetWaitRetainsContinuationWithoutInventingNoCandidateVerdict'),
+    ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'cpuYieldAndExhaustedMetadataDoNotHideAnIndependentlyVerifiedGroup'),
+    ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'nativeEpochScopeAndPolicyRebindCannotBorrowAnOldVerifiedProjection'),
+    ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'expiredLeaseAndBackwardClockRetireStatusWithoutErasingAdmissions'),
+    ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'sixteenGroupProjectionIsClosedBoundedAndFailuresStayGroupLocal'),
+    ('io.syn443.android.RouteSearchStatusTest', 'verifiedProjectionJoinsExactExistingTtlScopeReadinessAndFutureSampleGuards'),
+    ('io.syn443.android.RouteSearchStatusTest', 'diagnosticProjectionCannotAuthorizeRequiredReadinessOrActivation'),
+    ('io.syn443.android.RouteSearchStatusTest', 'copiedSixteenGroupProjectionRejectsOverflowForeignScopeAndClearsOnInvalidate'),
+    ('io.syn443.android.RouteSearchStatusTest', 'finiteSearchLabelsNeverClaimNoRoutesAndRecompositionDispatchesNothing'),
+]
+if mode=="emulator":
+    assert set(ADAPTIVE_SEARCH_REQUIRED) <= set(identities), "Missing exact bounded adaptive search diagnostic outcomes"

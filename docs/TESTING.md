@@ -1,5 +1,12 @@
 # Testing and release gates
 
+[Managed route search status](route-search-status.md) source adds ten exact
+Android outcomes (six coordinator and four snapshot/presentation cases). The
+pending per-API29/35/37 floor is437; identity remains249. Existing required
+outcomes, coverage thresholds and privacy gates remain unchanged. These are
+source-stage requirements, not acceptance of this unversioned M4 slice or
+the separate version90 delivery. Historical candidate counts below are retained.
+
 [Operation outcome reconciliation](operation-reconciliation-android.md) source
 adds49 exact identity JVM roots across seven test classes and29 exact Android
 roots. The required floors are249 identity and427 unique passing actual outcomes on each API29/35/37

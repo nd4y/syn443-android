@@ -26,7 +26,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private data class Group(var frontier:RouteFrontier?=null,var current:PlannedPath?=null,
         var measuredAt:Long=0,var latency:Long=0,var nextAt:Long=0,var exploreAt:Long=0,
         var improvement:String="",var improvementPath:PlannedPath?=null,var improvementCount:Int=0,var recheckFailed:Boolean=false,
-        var failure:CurrentFailure?=null,var selectionToken:Long=0,var hintSequence:Long=0,var urgentRecheck:Boolean=false,var forceCheck:Boolean=false)
+        var failure:CurrentFailure?=null,var selectionToken:Long=0,var hintSequence:Long=0,var urgentRecheck:Boolean=false,var forceCheck:Boolean=false,
+        var search:AdaptiveSearchState=AdaptiveSearchState.WAITING_CONTEXT)
     private data class Pending(val request:String,val group:String,val path:PlannedPath,val attempt:Long,val startedAt:Long,
         val nativeEpoch:Long,val nativeScope:String,var action:String="probe",var latency:Long=0,var receipt:String="",var retries:Int=0,
         var recovery:CurrentFailure?=null)
@@ -62,12 +63,12 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     /** Pure lease renewal labels the same live execution; it is not a native
      * lease acknowledgement, receipt or permission to revive an expired box. */
     fun bind(scope:RouteScope,networkMode:NetworkMode,binding:AdaptivePolicyBinding,now:Long) {
-        if(!advanceClock(now))return
-        if(now>=binding.leaseDeadlineElapsed) {retireOwner=true;return}
+        if(!advanceClock(now)) {publishSearch();return}
+        if(now>=binding.leaseDeadlineElapsed) {retireOwner=true;publishSearch();return}
         val previous=boundPolicy
         if(previous!=null && routeScope?.engine==scope.engine &&
             (previous.boot!=binding.boot || now>=previous.leaseDeadlineElapsed || binding.revision<policyRevision)) {
-            retireOwner=true;return
+            retireOwner=true;publishSearch();return
         }
         if(previous!=null && routeScope==scope && mode==networkMode &&
             binding.revision>=policyRevision && binding.contentHash==previous.contentHash &&
@@ -90,6 +91,19 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         memory=RouteHealthMemory(next);pending=null;nativeReady=false;nativeScope=""
         groupCursor=0;cpuYields.clear()
         groups.values.forEach {it.frontier=null;it.current=null;it.measuredAt=0;it.nextAt=0;it.improvement="";it.improvementPath=null;it.improvementCount=0;it.recheckFailed=false;it.failure=null;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false}
+        groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
+        publishSearch()
+    }
+    private fun markSearch(id:String,state:AdaptiveSearchState) {
+        val group=groups.getValue(id)
+        if(group.search!=AdaptiveSearchState.VERIFIED || lastNow-group.measuredAt !in 0..120_000)group.search=state
+    }
+    /** Diagnostics only: never calls admission, changes selection or mints evidence. */
+    private fun publishSearch() {
+        val scope=routeScope ?: return
+        val waiting=retireOwner || !nativeReady || nativeScope.isEmpty()
+        RouteSnapshot.adaptiveSearch(scope,order.associate {id->wire.groupTags().getValue(id) to
+            if(waiting)AdaptiveSearchState.WAITING_CONTEXT else groups.getValue(id).search})
     }
     fun controlFrame():String {check(policyScope.isNotEmpty());return JSONObject().put("schemaVersion",1).put("scope",policyScope).put("mode",mode.name).toString()}
     private fun send(command:JSONObject,now:Long,dispatch:(String)->Unit) {
@@ -140,6 +154,9 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         }
     }
     fun report(raw:JSONObject,now:Long,dispatch:(String)->Unit) {
+        try { reportCurrent(raw,now,dispatch) } finally {publishSearch()}
+    }
+    private fun reportCurrent(raw:JSONObject,now:Long,dispatch:(String)->Unit) {
         if(retireOwner || context==null)return
         if(!advanceClock(now) || raw.toString().length>32768)return
         val epoch=raw.optLong("nativeEpoch",0);val scope=raw.optString("scope")
@@ -147,16 +164,18 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val reportedPolicy=raw.optString("policyScope")
         if(reportedPolicy!=policyScope && reportedPolicy!=previousPolicyScope)return
         if(epoch!=nativeEpoch || nativeScope.isNotEmpty() && scope!=nativeScope)
-            groups.values.forEach {it.frontier=null;it.failure=null;it.recheckFailed=false;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false}
+            groups.values.forEach {it.frontier=null;it.failure=null;it.recheckFailed=false;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.search=AdaptiveSearchState.WAITING_CONTEXT}
         nativeEpoch=epoch;nativeRunning=raw.optBoolean("running")
         if(nativeRunning && raw.optLong("workAgeMs",0)>35_000) {retireOwner=true;return}
         if(raw.optString("policyScope")!=policyScope || !raw.optBoolean("ready")) {
             nativeReady=false;nativeScope=""
+            groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
             if(now-lastCommandAt>=1000)send(JSONObject().put("command","configure").put("schemaVersion",1)
                 .put("nativeEpoch",epoch).put("scope",policyScope).put("mode",mode.name),now,dispatch)
             return
         }
         nativeReady=true;nativeScope=scope
+        groups.values.filter {it.search==AdaptiveSearchState.WAITING_CONTEXT}.forEach {it.search=AdaptiveSearchState.SEARCH_INCOMPLETE}
         recheckHints(raw,now)
         val work=pending ?: return
         if(now-work.startedAt>35_000) {retireOwner=true;return}
@@ -215,6 +234,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             if(changed || group.exploreAt==0L)group.exploreAt=now+300_000
             group.improvement="";group.improvementPath=null;group.improvementCount=0;group.recheckFailed=false;group.failure=null
             memory?.record(checkNotNull(context),key(work.group,work.path),work.attempt,now,ProbeVerdict.VERIFIED)
+            group.search=AdaptiveSearchState.VERIFIED
             RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),true,"ok",work.latency,work.path.hops)
         } else if(work.action=="probe" && code in setOf("probe_unavailable","exit_mismatch","check_failed")) {
             val checkedAt=if(code=="check_failed") {
@@ -236,19 +256,29 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 if(code=="check_failed") {group.improvement="";group.improvementPath=null;group.improvementCount=0}
             } else if(group.current==null) {group.failure=null;group.recheckFailed=false}
             group.nextAt=now+5000
-            if(group.current==null || group.current?.id==work.path.id)
+            if(group.current==null || group.current?.id==work.path.id) {
+                group.search=AdaptiveSearchState.SEARCH_INCOMPLETE
                 RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),false,code,null,emptyList())
+            }
         } else if(work.action=="discard" && code=="discarded") {
             // A second independent fresh measurement is needed before a latency switch.
             group.nextAt=if(group.improvement==work.path.id)now+5000 else minOf(now+maintenanceCadence,group.measuredAt+maintenanceCadence)
         } else if(code !in setOf("commit_rejected","discarded"))return
         pending=null
+        markSearch(work.group,AdaptiveSearchState.SEARCH_INCOMPLETE)
     }
     private fun key(group:String,path:PlannedPath)=PathHealthKey(path.id,checkNotNull(wire.graph.groupInfo(group)).intent,group)
     fun tick(now:Long,unmetered:Boolean,allowExplore:Boolean,dispatch:(String)->Unit) {
+        try {tickCurrent(now,unmetered,allowExplore,dispatch)} finally {publishSearch()}
+    }
+    private fun tickCurrent(now:Long,unmetered:Boolean,allowExplore:Boolean,dispatch:(String)->Unit) {
         val current= context ?: return
         if(retireOwner || !advanceClock(now) || !nativeReady || nativeScope.isEmpty() || nativeRunning || pending!=null || now-lastCommandAt<1000)return
-        if(!budget.canStart(now,routine=false)) {if(budget.invalidated())retireOwner=true;return}
+        if(!budget.canStart(now,routine=false)) {
+            if(budget.invalidated())retireOwner=true
+            order.forEach {markSearch(it,AdaptiveSearchState.BUDGET_WAIT)}
+            return
+        }
         val rotated=order.drop(groupCursor)+order.take(groupCursor)
         val due=rotated.filter {id->val g=groups.getValue(id)
             val recovery=g.current==null || g.recheckFailed || g.urgentRecheck
@@ -263,6 +293,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val groupID=round.firstOrNull {id->val g=groups.getValue(id);g.current==null || g.recheckFailed || g.urgentRecheck}
             ?: round.first()
         val group=groups.getValue(groupID)
+        markSearch(groupID,AdaptiveSearchState.SEARCH_INCOMPLETE)
         // A bounded CPU quantum must yield even when it cannot emit/dispatch
         // a candidate. Only rotating on I/O can starve other due groups.
         groupCursor=(order.indexOf(groupID)+1)%order.size
@@ -301,10 +332,11 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         attempt++
         if(health.readiness==PathReadiness.REVALIDATE && health.retryAtMs!=null && !checkNotNull(memory).beginRetry(current,key(groupID,candidate),attempt,now))return
         val request=UUID.randomUUID().toString()
-        if(!budget.start(now,routine))return
+        if(!budget.start(now,routine)) {markSearch(groupID,AdaptiveSearchState.BUDGET_WAIT);return}
         cpuYields.remove(groupID)
         group.forceCheck=false
         pending=Pending(request,groupID,candidate,attempt,now,nativeEpoch,nativeScope)
+        markSearch(groupID,AdaptiveSearchState.SEARCHING)
         if(explore)group.exploreAt=now+300_000
         send(frame("start").put("request",request).put("group",groupID).put("hops",JSONArray(candidate.hops)),now,dispatch)
     }

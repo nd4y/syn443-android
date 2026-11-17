@@ -1204,7 +1204,13 @@
       "id": "ALG-23",
       "text": "Выходы поиска различаются: usable route found, degraded usable route, all currently relevant candidates failed, search incomplete/budget limited, waiting network/credentials/policy. Надпись «доступных маршрутов нет» не выводится лишь потому, что истёк бюджет одного шага. При незавершённом поиске остаётся возможность продолжения.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/route-search-status.md",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveSearchStatusTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSearchStatusTest.kt"
+      ],
+      "implementationScope": "Source-stage bounded read-only managed TCP group search projection distinguishes waiting context, searching, budget wait, incomplete and existing fresh selected-route evidence. It cannot authorize activation or claim no usable route after a CPU/budget/frontier yield.",
+      "remainingScope": "Exact-head Actions and physical acceptance remain pending. Explicit complete relevant-candidate failure proof, degraded-route confidence/counters, all four modes and wider routing/energy-governor integration remain open. Requirement status is unchanged."
     },
     {
       "id": "ALG-24",
