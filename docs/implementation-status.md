@@ -4,22 +4,35 @@ Snapshot: 2026-11-17. Specification0.9 contains292 requirements and98 acceptance
 scenarios. Those numbers describe scope, not completed work or test counts.
 This document supersedes repository-wide readiness claims in historical stage notes.
 
-The [operation-reconciliation source candidate](operation-reconciliation-android.md)
+The version91 [managed route search status candidate](route-search-status.md)
+adds bounded per-group progress without changing route selection or readiness
+authority. Ten new exact Android roots raise the pending per-API floor to437;
+its Actions, resulting-main and device acceptance remain open. The full
+autonomous-routing requirement is not closed by this diagnostic projection.
+
+The [operation-reconciliation source](operation-reconciliation-android.md)
 adds body-bound historical receipts, explicit lookup and confirmed atomic
 absence sealing, original publication deadlines and stable encrypted editor
 ownership. Forty-nine exact JVM roots across seven test classes and29 exact
-Android roots raise pending floors to249 identity and427 per API29/35/37. All seven new operation core types
+Android roots raised floors to249 identity and427 per API29/35/37. All seven new operation core types
 join the unchanged90% independent class-coverage gate. Actual Go conformance
 requires a same-run owned temporary corpus, not a packaged or uploaded fixture.
-This source is pending Actions, coverage, integration and live acceptance.
+Exact c2a549b9a4ad2609bc69bab3caf54af29899a8e7 passed all8 jobs in
+[Actions44012133076](https://github.com/nd4y/syn443-android/actions/runs/44012133076):
+498 JVM/337 identity cases,427 outcomes on each API29/35/37 and53 native roots
+in ordinary/race runs. All104 required coverage classes meet90%. Protected
+integration2ca75cab has resulting-main CI44018639542 pending; delivery and real
+native administrator acceptance remain separate.
 
 The third candidate CI ran334 identity cases:333 passed and one existing
 socket-cancellation assertion failed (`TRANSPORT` observed, `CANCELLED`
 required). Earlier26 fixture failures were fixed with valid strict templates,
 without relaxing validation or tests. A one-line Scope-priority correction
 and three bounded real-loopback cancellation/transport/worker-retirement
-regressions are source-ready for the next CI. They do not close that failed
-attempt or add an exception to the unchanged coverage requirement.
+regressions passed in the accepted c2 source above. A later three-case Android
+fixture failure used the old descriptor-owner binding before reaching its
+deadline assertions; its test-only correction also passed that source run.
+Those earlier attempts remain failures, with no coverage exception.
 
 The currently installed accepted checkpoint is v89 /
 `0.9.61-admin-compare`, with68 scoped physical USB/Wi-Fi outcomes. Its

@@ -4,7 +4,7 @@
 Android outcomes (six coordinator and four snapshot/presentation cases). The
 pending per-API29/35/37 floor is437; identity remains249. Existing required
 outcomes, coverage thresholds and privacy gates remain unchanged. These are
-source-stage requirements, not acceptance of this unversioned M4 slice or
+source-stage requirements, not acceptance of this version91 M4 slice or
 the separate version90 delivery. Historical candidate counts below are retained.
 
 [Operation outcome reconciliation](operation-reconciliation-android.md) source

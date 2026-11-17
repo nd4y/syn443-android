@@ -43,8 +43,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 90
-        versionName = "0.9.62-admin-reconcile"
+        versionCode = 91
+        versionName = "0.9.63-route-search-status"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
         manifestPlaceholders["enrollmentLinkHost"] = enrollmentLinkHost
         buildConfigField("String", "ENROLLMENT_LINK_HOST", "\"$enrollmentLinkHost\"")

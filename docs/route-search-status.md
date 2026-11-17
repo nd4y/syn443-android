@@ -42,6 +42,7 @@ and four snapshot/presentation cases. They cover selected acknowledgement,
 budget continuation, CPU/exhaustion uncertainty,16 groups, independent failure,
 scope/lease/clock retirement, exact TTL boundaries and side-effect-free UI.
 The per-API floor is437; identity remains249. Source preparation is not executed
-CI, physical Wi-Fi/LTE, battery or full autonomous-routing acceptance. Version90
-delivery and its earlier evidence remain separate; this slice has no version
-bump or device changes.
+CI, physical Wi-Fi/LTE, battery or full autonomous-routing acceptance. This
+candidate is version91 / `0.9.63-route-search-status`; version90 delivery and
+its earlier evidence remain separate. No device changes are part of source
+preparation.
