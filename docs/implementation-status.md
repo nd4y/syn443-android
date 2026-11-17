@@ -1,5 +1,12 @@
 # Implementation and acceptance snapshot
 
+The [negative path-history candidate](negative-path-continuity.md) preserves only
+compatible cooldown and half-open debt across validation/metered changes on the
+same observed OS path in one live service. Every positive route proof is still
+retracted. The opaque service token, exact policy/boot/lease fences and bounded
+owned copy do not implement persistent BAD-08 history or physical network identity.
+Its source, Actions, main and physical acceptance are separate.
+
 The [native-owner recovery candidate](native-owner-recovery.md) retracts stale
 adaptive readiness and makes groups recovery-due after an accepted native
 epoch/scope change. It retains compatible negative evidence and shared start

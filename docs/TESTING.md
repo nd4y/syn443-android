@@ -410,3 +410,15 @@ old receipts, repeated transitions and the original35-second retirement fence
 are negative/boundary cases. Timeout and configure are not worker completion.
 Synthetic reports do not establish a physical native scope transition, managed
 route rollout, the original crash root cause, cellular or battery acceptance.
+
+## Compatible negative history candidate
+
+The [continuity design](negative-path-continuity.md) adds three JVM roots and six
+Android roots. Expected totals become522 JVM and476 outcomes per API29/35/37,
+with218 affected Android outcomes and a source-bound decision minimum21. The
+existing RouteHealthMemory90% and all prior coverage/native gates remain.
+The new roots must preserve absolute cooldown and half-open deadlines through
+repeated compatible metadata changes, deny incompatible/expired/old-context
+carry, require fresh native selection and retain shared start debt. Physical
+token tests use synthetic observations, never real network identifiers. No
+source fixture closes managed rollout, LTE, persistence or battery acceptance.

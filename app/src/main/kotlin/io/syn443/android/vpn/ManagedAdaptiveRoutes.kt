@@ -55,6 +55,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private val cpuYields=HashSet<String>()
     private var policyRevision=0L
     private var boundPolicy:AdaptivePolicyBinding?=null
+    private var boundPhysicalPathToken:PhysicalPathToken?=null
     private var previousPolicyScope=""
     private var retireOwner=false
     private var lastCommandAt=Long.MIN_VALUE/2
@@ -64,12 +65,18 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     fun bind(scope:RouteScope,networkMode:NetworkMode,revision:Long) {
         require(revision>0)
         if(boundPolicy==null && routeScope==scope && mode==networkMode && policyRevision==revision)return
-        boundPolicy=null
+        boundPolicy=null;boundPhysicalPathToken=null
         reset(scope,networkMode,revision,null)
     }
     /** Pure lease renewal labels the same live execution; it is not a native
      * lease acknowledgement, receipt or permission to revive an expired box. */
     fun bind(scope:RouteScope,networkMode:NetworkMode,binding:AdaptivePolicyBinding,now:Long) {
+        bind(scope,networkMode,binding,now,null)
+    }
+    /** The opaque token proves only continuity of the observed OS path inside
+     * this live service. It carries no selection, route or network authority. */
+    fun bind(scope:RouteScope,networkMode:NetworkMode,binding:AdaptivePolicyBinding,now:Long,
+        physicalPathToken:PhysicalPathToken?) {
         if(!advanceClock(now)) {publishSearch();return}
         if(now>=binding.leaseDeadlineElapsed) {retireOwner=true;publishSearch();return}
         val previous=boundPolicy
@@ -78,28 +85,55 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             retireOwner=true;publishSearch();return
         }
         if(previous!=null && routeScope==scope && mode==networkMode &&
+            physicalPathToken===boundPhysicalPathToken &&
             binding.revision>=policyRevision && binding.contentHash==previous.contentHash &&
             binding.semanticAuthority==previous.semanticAuthority) {
             boundPolicy=binding;policyRevision=binding.revision
             return
         }
-        boundPolicy=binding
-        reset(scope,networkMode,binding.revision,binding.semanticAuthority)
+        val oldScope=routeScope
+        val compatibleFailures=previous!=null && oldScope!=null && physicalPathToken!=null &&
+            physicalPathToken===boundPhysicalPathToken && mode==networkMode &&
+            oldScope.intent==scope.intent && oldScope.activation==scope.activation &&
+            oldScope.config==scope.config && oldScope.engine==scope.engine &&
+            binding.boot==previous.boot && binding.revision>=policyRevision &&
+            binding.contentHash==previous.contentHash && binding.semanticAuthority==previous.semanticAuthority &&
+            now<previous.leaseDeadlineElapsed && now<binding.leaseDeadlineElapsed
+        if(compatibleFailures && oldScope!=null && scope.network<oldScope.network) {
+            // A delayed metadata bind must not replace current cooldown with
+            // either an older context or a fresh empty history.
+            publishSearch();return
+        }
+        val preserveFailures=compatibleFailures && oldScope!=null && scope.network>oldScope.network
+        if(reset(scope,networkMode,binding.revision,binding.semanticAuthority,preserveFailures)) {
+            boundPolicy=binding;boundPhysicalPathToken=physicalPathToken
+        }
     }
-    private fun reset(scope:RouteScope,networkMode:NetworkMode,revision:Long,authority:String?) {
+    private fun reset(scope:RouteScope,networkMode:NetworkMode,revision:Long,authority:String?,preserveFailures:Boolean=false):Boolean {
         val semantic=authority?.let {"|$it"} ?: ""
         val next=Context(scope.network,scope.activation,"r-$revision",Policy.ADAPTIVE_ALGORITHM,
             scope.intent,Policy.hash("${scope.intent}|${scope.network}|${scope.activation}|${scope.engine}|${scope.config}|${wire.hash}|$networkMode|$revision$semantic"))
         require(Decision.validContext(next))
+        val nextMemory=if(preserveFailures) {
+            val carried=memory?.forkFailureFences(checkNotNull(context),next,lastNow)
+            if(carried==null) {
+                // Failure to transfer an eligible fence must not silently
+                // create an empty history. Keep the old owner retired.
+                retireOwner=true;RouteSnapshot.adaptiveOwnerChanged(scope,wire.groupTags().values.toSet());publishSearch();return false
+            }
+            carried
+        } else RouteHealthMemory(next)
         val sameEngine=routeScope?.engine==scope.engine
         previousPolicyScope=if(sameEngine)policyScope else ""
         if(!sameEngine) {nativeEpoch=0;retireOwner=false}
         context=next;routeScope=scope;mode=networkMode;policyRevision=revision;policyScope=next.dependencyHash
-        memory=RouteHealthMemory(next);pending=null;pendingAdmission=null;nativeReady=false;nativeScope="";observedNativeScope="";drainingSince=null
+        memory=nextMemory;pending=null;pendingAdmission=null;nativeReady=false;nativeScope="";observedNativeScope="";drainingSince=null
         groupCursor=0;cpuYields.clear()
         groups.values.forEach {it.frontier=null;it.current=null;it.measuredAt=0;it.nextAt=0;it.improvement="";it.improvementPath=null;it.improvementCount=0;it.recheckFailed=false;it.failure=null;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false}
         groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
+        RouteSnapshot.adaptiveOwnerChanged(scope,wire.groupTags().values.toSet())
         publishSearch()
+        return true
     }
     private fun markSearch(id:String,state:AdaptiveSearchState) {
         val group=groups.getValue(id)

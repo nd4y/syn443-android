@@ -55,6 +55,20 @@ class RouteHealthMemory(private var context: Context) {
         return true
     }
 
+    /** The caller establishes compatibility. Copy failure fences, never positive evidence or old attempts. */
+    @Synchronized
+    fun forkFailureFences(current: Context, next: Context, nowMs: Long): RouteHealthMemory? {
+        if (current != context || !Decision.validContext(next) || !advanceClock(nowMs)) return null
+        val fork = RouteHealthMemory(next)
+        fork.clock = nowMs
+        for ((key, entry) in table) {
+            if (entry.failures > 0 || entry.requiresChange) {
+                fork.table[key] = entry.copy(attempt = 0, trial = entry.trial?.copy(attempt = 0))
+            }
+        }
+        return fork
+    }
+
     /** One half-open probe at a time. A late completion cannot open the fence. */
     @Synchronized
     fun beginRetry(current: Context, key: PathHealthKey, attempt: Long, nowMs: Long): Boolean {

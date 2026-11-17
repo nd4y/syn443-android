@@ -890,10 +890,11 @@
       "text": "При смене сети увеличивается networkEpoch, отменяются старые задания и создаётся актуальный контекст пути. Сервис не должен держать два конкурирующих цикла подключения. Результаты со старым epoch не могут переводить текущую сеть в Online или менять селектор. Полный токен задачи также включает intentGeneration, activationGeneration и immutable config/algorithm/engine generations; одного networkEpoch для защиты от гонок недостаточно. Смена epoch не обнуляет общие retry budgets и защиту от колебаний сети по REC-02.",
       "status": "partial",
       "evidence": [
-        "docs/native-owner-recovery.md"
+        "docs/native-owner-recovery.md",
+        "docs/negative-path-continuity.md"
       ],
-      "implementationScope": "Existing context/intent/activation/config/engine fences remain. The new native-owner recovery source candidate retracts selected-path readiness on accepted native epoch/scope changes even when Java RouteScope is unchanged; current typed idle must prove actual worker completion before replacing pending work.",
-      "remainingScope": "The complete four-mode autonomous transition and fault matrix, real activated managed-chain scope changes, cellular and long-running physical acceptance remain open. Source-level protocol reproduction is not an original crash RCA."
+      "implementationScope": "The native-owner recovery source candidate retracts stale positive readiness and waits for actual worker idle. The following negative-path candidate uses one live-service opaque token to retain only compatible failure debt across validation/metered epoch changes; every full rebind still needs fresh native selection and keeps shared admission debt.",
+      "remainingScope": "The complete four-mode autonomous transition/fault matrix, real activated managed-chain metadata changes, cellular and long-running physical acceptance remain open. Source protocol fixtures do not establish a historical crash RCA."
     },
     {
       "id": "AUTO-03",
@@ -1244,8 +1245,11 @@
       "text": "Локальное хранилище хранит health records отдельно для профиля, ребра и целой цепочки. Ключ включает resource/profile ID и spec/secret version, ordered path hash, физический сетевой контекст/режим, traffic class, protocol/IP family, probe profile и версии движка. Сырые секреты не входят в cache key.",
       "status": "partial",
       "evidence": [
-        "docs/route-frontier.md"
-      ]
+        "docs/route-frontier.md",
+        "docs/negative-path-continuity.md"
+      ],
+      "implementationScope": "The bounded graph/path RAM health primitive owns records within a runtime context. The new negative-path candidate forks only failure/configuration fences when observed path token, intent/activation/engine/config/mode, policy content/semantic authority, boot/revision and both leases match; no positive evidence or raw path data is imported.",
+      "remainingScope": "Full normative resource/profile/secret-version, edge and ordered-chain keys, selective invalidation, physical network identity and persistent history remain open. An opaque live-service OS-observation token is a narrow compatibility hint."
     },
     {
       "id": "BAD-02",
@@ -1270,10 +1274,11 @@
       "evidence": [
         "docs/route-frontier.md",
         "docs/route-lifecycle.md#reserve-probe-cooldown",
-        "docs/native-owner-recovery.md"
+        "docs/native-owner-recovery.md",
+        "docs/negative-path-continuity.md"
       ],
-      "implementationScope": "The accepted bounded RAM health primitive supports one half-open retry with fixed cooldown and configuration fences. The new source candidate removes only positive entries on a same-context native owner change; failure ordinals, original retry/half-open deadlines and negative replay fences remain intact.",
-      "remainingScope": "Complete profile/edge/chain context keys, selective profile/secret invalidation and persistent BAD-08 history remain open. This candidate transfers no evidence between physical networks, Java contexts, processes or boots."
+      "implementationScope": "The bounded RAM primitive retains one half-open retry and fixed cooldown/configuration fences. The negative-path candidate preserves original absolute retry/trial deadlines and failure ordinals across repeated compatible metadata rebinds; old-context attempts cannot settle the owned copy and an eligible failed fork retires instead of creating empty history.",
+      "remainingScope": "Complete persistent profile/edge/chain quarantine and selective credentials/profile invalidation remain open. Source/Actions/main/scoped phone regression are separate from real managed-route cooldown and four-mode acceptance."
     },
     {
       "id": "BAD-05",
@@ -3382,6 +3387,6 @@
     "inventory": "docs/implementation-status.md",
     "androidSource": "cdf2df59929ed3609fc481ad3e98694da7daf4e1",
     "controlPlaneSource": "f7f610ba9bf9bd55066d0df2bc772048312bf39f",
-    "scope": "Accepted bounded check-profile and durable-adaptive sources remain distinct from whole-product and managed-device rollout. Android cdf source Actions44084709221 confirms516 JVM/464 per API29/35/37/native504 each ordinary-race, with separate budget7+18 and prior profile gates. Protected PR94 main889d1bf awaits its new Actions44094180350; phone remains a separate private acceptance gate. CP64 source/main evidence is separate. App94 native-owner recovery source requires its own Actions/main/phone proof. Full common scheduling, native administrator SSO, actual managed profiles and excluded physical gates remain open."
+    "scope": "Accepted bounded check-profile and durable-adaptive sources remain distinct from whole-product and managed-device rollout. Android cdf source Actions44084709221 confirms516 JVM/464 per API29/35/37/native504 each ordinary-race, with separate budget7+18 and prior profile gates. Protected PR94 main889d1bf awaits its new Actions44094180350; phone remains a separate private acceptance gate. CP64 source/main evidence is separate. App94 native-owner recovery source requires its own Actions/main/phone proof. Full common scheduling, native administrator SSO, actual managed profiles and excluded physical gates remain open. The following app95 negative-path source candidate requires separate Actions/main/phone evidence and does not implement persistent BAD08 or verified physical network identity."
   }
 }
