@@ -143,6 +143,9 @@ class BoundedHttp:AutoCloseable {
         } catch(e:CancellationException) {throw DeliveryException(DeliveryFailure.CANCELLED)
         } catch(e:InterruptedException) {Thread.currentThread().interrupt();throw DeliveryException(DeliveryFailure.CANCELLED)
         } catch(e:ExecutionException) {
+            // Closing the owned socket may finish the worker before cancel()
+            // reaches Future.cancel. Explicit cancellation still owns the result.
+            scope.active()
             throw when(val cause=e.cause) {
                 is DeliveryException->cause
                 is java.net.UnknownHostException->DeliveryException(DeliveryFailure.DNS)

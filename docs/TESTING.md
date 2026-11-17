@@ -1,13 +1,23 @@
 # Testing and release gates
 
 [Operation outcome reconciliation](operation-reconciliation-android.md) source
-adds46 exact identity JVM roots and29 exact Android roots. The required floors
-are246 identity and427 unique passing actual outcomes on each API29/35/37
+adds49 exact identity JVM roots across seven test classes and29 exact Android
+roots. The required floors are249 identity and427 unique passing actual outcomes on each API29/35/37
 emulator. Seven operation request/receipt/queue/enum/codec classes retain the
 same independent90% per-class requirement; source-name and class-presence
 self-tests reject drift rather than dropping an existing outcome. No new
 execution, coverage, native administrative SSO or publication acceptance is
 claimed before exact-head Actions and the separate live checks.
+
+The third candidate CI executed334 identity cases:333 passed and one existing
+`BoundedHttpTest` case failed with `TRANSPORT` instead of expected `CANCELLED`.
+The prior26 fixture failures were corrected with valid complete templates;
+no validator, assertion or threshold was relaxed. The source correction gives
+an already-cancelled Scope priority over a socket exception arriving before
+`Future.cancel`. Three new real loopback socket race cases cover that ordering,
+ordinary uncancelled transport failure and retained permits until actual worker
+retirement. These three added outcomes and the49-root candidate require the
+next CI; the failed attempt is not converted into acceptance.
 
 The six Go-conformance JVM roots require the actual pinned Go producer in the
 same Actions invocation. Its owned `RUNNER_TEMP` corpus contains eight exact

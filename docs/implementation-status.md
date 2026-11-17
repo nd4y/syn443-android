@@ -7,11 +7,19 @@ This document supersedes repository-wide readiness claims in historical stage no
 The [operation-reconciliation source candidate](operation-reconciliation-android.md)
 adds body-bound historical receipts, explicit lookup and confirmed atomic
 absence sealing, original publication deadlines and stable encrypted editor
-ownership. Forty-six exact JVM roots and29 exact Android roots raise pending
-floors to246 identity and427 per API29/35/37. All seven new operation core types
+ownership. Forty-nine exact JVM roots across seven test classes and29 exact
+Android roots raise pending floors to249 identity and427 per API29/35/37. All seven new operation core types
 join the unchanged90% independent class-coverage gate. Actual Go conformance
 requires a same-run owned temporary corpus, not a packaged or uploaded fixture.
 This source is pending Actions, coverage, integration and live acceptance.
+
+The third candidate CI ran334 identity cases:333 passed and one existing
+socket-cancellation assertion failed (`TRANSPORT` observed, `CANCELLED`
+required). Earlier26 fixture failures were fixed with valid strict templates,
+without relaxing validation or tests. A one-line Scope-priority correction
+and three bounded real-loopback cancellation/transport/worker-retirement
+regressions are source-ready for the next CI. They do not close that failed
+attempt or add an exception to the unchanged coverage requirement.
 
 The currently installed accepted checkpoint is v89 /
 `0.9.61-admin-compare`, with68 scoped physical USB/Wi-Fi outcomes. Its

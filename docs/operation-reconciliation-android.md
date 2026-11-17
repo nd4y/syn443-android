@@ -65,13 +65,27 @@ new-create rules. This is not a device-key or VPN-identity migration.
 
 ## Mandatory source evidence
 
-The exact root registry adds46 identity JVM outcomes:18 reconciliation codec,
+The exact root registry adds49 identity JVM outcomes:18 reconciliation codec,
 seven authenticated protocol, three real loopback TLS, six version negotiation,
-six actual Go conformance and six stable-authority cases. It adds29 Android
+six actual Go conformance, six stable-authority and three socket-cancellation
+race cases across seven test classes. It adds29 Android
 outcomes: three dispatch-deadline, ten encrypted coordinator, five UI, three
 wire, three actual-route/fake-bridge and five encrypted owner-migration cases.
-The required floors rise from200/398 to246 identity and427 on each
+The required floors rise from200/398 to249 identity and427 on each
 API29/35/37. No old required root, skip/failure rejection or API is removed.
+
+The third candidate CI actually ran334 identity cases, with333 passing and one
+existing `BoundedHttpTest` cancellation race returning `TRANSPORT` where
+`CANCELLED` was required. Earlier26 fixture failures were corrected by supplying
+valid complete templates without weakening validation or assertions. The
+source fix checks Scope cancellation before mapping an `ExecutionException`
+cause, so a socket failure cannot overtake an explicit cancel while the cancel
+thread has not yet reached `Future.cancel`. The three new actual loopback
+socket tests require that ordering, preserve ordinary uncancelled transport
+classification and keep both permits/queue limits until real workers retire.
+The49-root candidate and this correction remain pending next CI; the existing
+failure is retained as failure evidence. No new production coverage type or
+coverage exception is introduced.
 
 Seven new production types join the same90% per-class gate:
 `AdminOperationRequest`, `AdminOperationJob`, `AdminOperationReceipt`,

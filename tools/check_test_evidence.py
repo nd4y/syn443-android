@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=23
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=246
+    minimum=249
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -673,6 +673,9 @@ ADMIN_OPERATION_RECONCILE_REQUIRED = {
         ('io.syn443.identity.AdminEditorAuthorityTest', 'editorDigestDefaultsAreCompatibleButMalformedStableOrLegacyValuesFailClosed'),
         ('io.syn443.identity.AdminEditorAuthorityTest', 'freshVerifiedAccountsRemainSeparateEvenWhenTheyShareStableServiceAuthority'),
         ('io.syn443.identity.AdminEditorAuthorityTest', 'stableEditorValuesCannotAuthorizeCancelledRemovedOrLoggedOutCredentials'),
+        ('io.syn443.identity.BoundedHttpCancellationRaceTest', 'cancelledSocketFailureCannotOvertakeExplicitCancelBeforeFutureCancellation'),
+        ('io.syn443.identity.BoundedHttpCancellationRaceTest', 'uncancelledSocketResetKeepsTransportClassificationAndDoesNotInventCancellation'),
+        ('io.syn443.identity.BoundedHttpCancellationRaceTest', 'cancelledButUnretiredSocketWorkersRetainBothPermitsAndQueuedCapacity'),
     ],
     'emulator': [
         ('io.syn443.android.AdminPublishDispatchDeadlineTest', 'currentReviewDispatchesOnlyAfterActualEncryptedPendingAndRetainsOrdinaryOwner'),

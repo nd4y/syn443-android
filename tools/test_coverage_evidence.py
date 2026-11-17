@@ -156,7 +156,7 @@ class CoverageEvidenceTest(unittest.TestCase):
             ('io.syn443.android.AdminLoginBrowserTest', 'fixedMaximumAuthenticationAgeRejectsMissingChangedAndDuplicateBrowserParameters'),
         })
         for mode, count, floor, folder in [
-            ('identity', 57, 246, 'core/identity/src/test/kotlin/io/syn443/identity'),
+            ('identity', 57, 249, 'core/identity/src/test/kotlin/io/syn443/identity'),
             ('emulator', 65, 427, 'app/src/androidTest/kotlin/io/syn443/android'),
         ]:
             self.assertEqual(count, len(required[mode]))
@@ -203,9 +203,10 @@ class CoverageEvidenceTest(unittest.TestCase):
         old_editor = declaration('ADMIN_LAYER_EDITOR_REQUIRED')
         old_comparison = declaration('ADMIN_LAYER_COMPARISON_REQUIRED')
         for mode, count, floor, folder, classes in [
-            ('identity', 46, 246, 'core/identity/src/test/kotlin/io/syn443/identity', {
+            ('identity', 49, 249, 'core/identity/src/test/kotlin/io/syn443/identity', {
                 'AdminOperationReconcileTest': 18, 'AdminOperationProtocolTest': 7, 'AdminOperationHttpTest': 3,
-                'AdminOperationVersionTest': 6, 'AdminOperationGoConformanceTest': 6, 'AdminEditorAuthorityTest': 6}),
+                'AdminOperationVersionTest': 6, 'AdminOperationGoConformanceTest': 6, 'AdminEditorAuthorityTest': 6,
+                'BoundedHttpCancellationRaceTest': 3}),
             ('emulator', 29, 427, 'app/src/androidTest/kotlin/io/syn443/android', {
                 'AdminPublishDispatchDeadlineTest': 3, 'AdminOperationCoordinatorTest': 10, 'AdminOperationUiTest': 5,
                 'AdminOperationWireTest': 3, 'AdminOperationRouteTest': 3, 'AdminEditorOwnerMigrationTest': 5}),
