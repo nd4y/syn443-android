@@ -15,6 +15,12 @@ exit. Markers never replace JUnit outcomes. Paging test scrolls temporarily
 advance frames, preserve the8second pending window and restore clock mode on
 failure. Earlier canceled runs remain failed acceptance attempts.
 
+[Owned VPN Settings evidence](vpn-settings-evidence.md) adds six synthetic
+helper cases to the existing documents job. It preserves the actual Always-on
+and lockdown scenario, owner checks, timeouts and recovery authority; an unknown
+ANR stays a failure. Finite correlation diagnostics and launch classification
+add no transport. This is evidence collection, not an ANR recovery fix.
+
 [Recovery fault evidence](process-recovery-evidence.md) adds eight synthetic
 Python helper/driver cases in the existing documents job. The original process
 fault commands,110s recovery deadline, all assertions and PASS predicates are
