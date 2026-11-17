@@ -1,10 +1,21 @@
 # Implementation and acceptance snapshot
 
+The [native-owner recovery candidate](native-owner-recovery.md) retracts stale
+adaptive readiness and makes groups recovery-due after an accepted native
+epoch/scope change. It retains compatible negative evidence and shared start
+debt, and waits for typed current-owner idle before replacing pending work.
+Source-level protocol evidence is distinct from physical reproduction and the
+historical crash RCA. Its own Actions, main and phone gates remain open.
+
 The [durable adaptive admission candidate](durable-adaptive-budget.md) adds an
 owned counter checkpoint and asynchronous storage before dispatch. Process,
 service, network and force changes cannot erase its debt. Conservative reboot
 restoration uses BOOT_COUNT and relative ages, with no wall-clock forgiveness.
-Its source, Actions and phone acceptance remain separate. This is one adaptive
+Its source cdf2df59929ed3609fc481ad3e98694da7daf4e1 passed all eight jobs in
+[Actions 44084709221](https://github.com/nd4y/syn443-android/actions/runs/44084709221).
+Independent raw evidence confirms516 JVM,464 unique outcomes per API29/35/37,
+seven checkpoint and18 Android budget roots, and the retained native ordinary/race
+and coverage gates. Protected-main and phone acceptance remain separate. This is one adaptive
 start ledger, not the full common socket/byte/CPU governor or ARC-06 completion.
 
 The [bounded check-profile v2 component](route-check-profiles-v2.md) adds source

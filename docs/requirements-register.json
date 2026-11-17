@@ -888,8 +888,12 @@
     {
       "id": "AUTO-02",
       "text": "При смене сети увеличивается networkEpoch, отменяются старые задания и создаётся актуальный контекст пути. Сервис не должен держать два конкурирующих цикла подключения. Результаты со старым epoch не могут переводить текущую сеть в Online или менять селектор. Полный токен задачи также включает intentGeneration, activationGeneration и immutable config/algorithm/engine generations; одного networkEpoch для защиты от гонок недостаточно. Смена epoch не обнуляет общие retry budgets и защиту от колебаний сети по REC-02.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/native-owner-recovery.md"
+      ],
+      "implementationScope": "Existing context/intent/activation/config/engine fences remain. The new native-owner recovery source candidate retracts selected-path readiness on accepted native epoch/scope changes even when Java RouteScope is unchanged; current typed idle must prove actual worker completion before replacing pending work.",
+      "remainingScope": "The complete four-mode autonomous transition and fault matrix, real activated managed-chain scope changes, cellular and long-running physical acceptance remain open. Source-level protocol reproduction is not an original crash RCA."
     },
     {
       "id": "AUTO-03",
@@ -970,11 +974,12 @@
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/non-lte-acceptance-20261115.md",
         "docs/chat-acceptance-20261115.md",
-        "docs/non-lte-acceptance-20261116.md"
+        "docs/non-lte-acceptance-20261116.md",
+        "docs/native-owner-recovery.md"
       ],
       "text": "Пока desiredOn=true и нет запрета/необходимого действия пользователя по ENG-01/02, единый reconcile loop повторно приводит фактическое состояние к разрешённому желаемому. DNS timeout/EOF/TLS failure и недоступный узел вызывают классификацию и восстановление, а не окончательный Off; валидация TLS не ослабляется. Reference retry policy v1: base=1секунда, factor=2, cap=60секунд, jitter multiplier в пределах0.8-1.2 с итоговым clamp1-60секунд; floor для досрочной попытки по новому usable network=5секунд между такими попытками, с общим admission limit. Параметры версионируются внутри локальных hard limits. Повторы используют бюджеты AUTO-07/ARC-06; номер попытки, причина, следующий допуск и история тяжёлых запусков переживают рестарт контроллера. При NoNetwork активные сетевые попытки не выполняются: ожидание callback ОС, без polling/wakelock storm. При новой пригодной Network разрешена своевременная попытка с актуальным контекстом и общим rate limit; повторные смены epoch не обнуляют backoff, cooldown и rolling budget. Задержка сбрасывается только после устойчивого успеха (reference policy v1: не менее30секунд и трёх свежих успешных required checks), а не по созданию процесса или одному callback. Исчерпание краткосрочного бюджета откладывает следующую допустимую попытку, не стирая намерение; Doze и ограничения ОС могут отложить её дольше60секунд. Невалидная схема/подпись, истёкшее право или отсутствие разрешения ждут изменения входных условий/действия пользователя без бесполезного частого retry. Повтор транспорта не означает повтор активации отвергнутого bundle вопреки ARC-04.",
-      "implementationScope": "Earlier reconcile/recovery contributions remain. The dated v82 checkpoint adds two actual six-second Wi-Fi loss/return cycles and separately confirmed restored Online/TUN/HTTPS state under a Direct policy.",
-      "remainingScope": " Full normative clauses and excluded physical/operational gates remain required."
+      "implementationScope": "Durable desired intent and bounded physical restart recovery retain their dated USB/Wi-Fi evidence. The new source candidate makes adaptive groups recovery-due after native owner invalidation, preserving shared start debt and compatible negative history; a draining timeout requests retirement without releasing the worker barrier.",
+      "remainingScope": "Full cross-subsystem reconciliation/reference-policy conformance, managed route activation and the excluded LTE/Doze/battery/endurance checks remain separate. New candidate Actions/main/phone acceptance is required."
     },
     {
       "id": "REC-03",
@@ -1264,8 +1269,11 @@
       "status": "partial",
       "evidence": [
         "docs/route-frontier.md",
-        "docs/route-lifecycle.md#reserve-probe-cooldown"
-      ]
+        "docs/route-lifecycle.md#reserve-probe-cooldown",
+        "docs/native-owner-recovery.md"
+      ],
+      "implementationScope": "The accepted bounded RAM health primitive supports one half-open retry with fixed cooldown and configuration fences. The new source candidate removes only positive entries on a same-context native owner change; failure ordinals, original retry/half-open deadlines and negative replay fences remain intact.",
+      "remainingScope": "Complete profile/edge/chain context keys, selective profile/secret invalidation and persistent BAD-08 history remain open. This candidate transfers no evidence between physical networks, Java contexts, processes or boots."
     },
     {
       "id": "BAD-05",
@@ -3372,8 +3380,8 @@
   "evidenceSnapshot": {
     "date": "2026-11-17",
     "inventory": "docs/implementation-status.md",
-    "androidSource": "5d5fc52577b4a9ac87bcec650b352515ff68d276",
+    "androidSource": "cdf2df59929ed3609fc481ad3e98694da7daf4e1",
     "controlPlaneSource": "f7f610ba9bf9bd55066d0df2bc772048312bf39f",
-    "scope": "Accepted bounded check-profile sources are distinct from whole-product and managed-device rollout. Android source Actions 44062289165 confirms 509 JVM outcomes, 446 per API 29/35/37 and 504 native outcomes in each ordinary/race stream; protected main 01002b9 passed replacement scheduled Actions 44071449067 after a cancelled push. CP64 source and protected main have separate accepted evidence. The following app93 durable-adaptive source candidate requires its own new Actions/main/phone acceptance; full common scheduling, native administrator SSO, actual managed profiles and excluded physical gates remain open."
+    "scope": "Accepted bounded check-profile and durable-adaptive sources remain distinct from whole-product and managed-device rollout. Android cdf source Actions44084709221 confirms516 JVM/464 per API29/35/37/native504 each ordinary-race, with separate budget7+18 and prior profile gates. Protected PR94 main889d1bf awaits its new Actions44094180350; phone remains a separate private acceptance gate. CP64 source/main evidence is separate. App94 native-owner recovery source requires its own Actions/main/phone proof. Full common scheduling, native administrator SSO, actual managed profiles and excluded physical gates remain open."
   }
 }

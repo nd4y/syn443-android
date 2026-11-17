@@ -47,6 +47,14 @@ class RouteHealthMemory(private var context: Context) {
         return true
     }
 
+    /** A changed native owner revokes positive evidence without forgiving compatible failure fences. */
+    @Synchronized
+    fun revokeVerified(current: Context, nowMs: Long): Boolean {
+        if (current != context || !advanceClock(nowMs)) return false
+        table.entries.removeAll { (_, entry) -> entry.failures == 0 && !entry.requiresChange }
+        return true
+    }
+
     /** One half-open probe at a time. A late completion cannot open the fence. */
     @Synchronized
     fun beginRetry(current: Context, key: PathHealthKey, attempt: Long, nowMs: Long): Boolean {
