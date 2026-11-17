@@ -41,8 +41,11 @@ Ten exact Android roots are mandatory in Actions: six coordinator simulations
 and four snapshot/presentation cases. They cover selected acknowledgement,
 budget continuation, CPU/exhaustion uncertainty,16 groups, independent failure,
 scope/lease/clock retirement, exact TTL boundaries and side-effect-free UI.
-The per-API floor is437; identity remains249. Source preparation is not executed
-CI, physical Wi-Fi/LTE, battery or full autonomous-routing acceptance. This
+The per-API floor is437; identity remains249. All ten cases passed in
+[Actions44019011044](https://github.com/nd4y/syn443-android/actions/runs/44019011044)
+on exact bdbb7f4ffbed2d0f00265e52ba99a5e62206ed7a, within437 actual outcomes
+per API29/35/37 and all8 mandatory jobs. This source result does not establish
+managed-chain physical behavior, LTE, battery or full autonomous routing. This
 candidate is version91 / `0.9.63-route-search-status`; version90 delivery and
 its earlier evidence remain separate. No device changes are part of source
 preparation.

@@ -231,6 +231,8 @@ func payloadWire(t *testing.T, proxy adapter.Outbound, address string) error {
 		return err
 	}
 	defer conn.Close()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 	// Some registered modules deliberately emit their handshake on first write.
 	if _, err = io.WriteString(conn, "syn443-wire"); err != nil {
@@ -243,6 +245,120 @@ func payloadWire(t *testing.T, proxy adapter.Outbound, address string) error {
 	}
 	return err
 }
+
+type payloadDeadlineIgnoringConn struct {
+	net.Conn
+	ctx           context.Context
+	readStarted   chan struct{}
+	closeObserved chan error
+	readOnce      sync.Once
+	closeOnce     sync.Once
+}
+
+func (c *payloadDeadlineIgnoringConn) Read(buffer []byte) (int, error) {
+	c.readOnce.Do(func() { close(c.readStarted) })
+	return c.Conn.Read(buffer)
+}
+
+func (c *payloadDeadlineIgnoringConn) Close() error {
+	c.closeOnce.Do(func() { c.closeObserved <- c.ctx.Err() })
+	return c.Conn.Close()
+}
+
+func (*payloadDeadlineIgnoringConn) SetDeadline(time.Time) error      { return nil }
+func (*payloadDeadlineIgnoringConn) SetReadDeadline(time.Time) error  { return nil }
+func (*payloadDeadlineIgnoringConn) SetWriteDeadline(time.Time) error { return nil }
+
+type payloadDeadlineIgnoringOutbound struct {
+	adapter.Outbound
+	conn          net.Conn
+	dialed        chan context.Context
+	readStarted   chan struct{}
+	closeObserved chan error
+}
+
+func (p *payloadDeadlineIgnoringOutbound) DialContext(ctx context.Context, network string, _ M.Socksaddr) (net.Conn, error) {
+	if network != "tcp" {
+		return nil, errors.New("unexpected fixture network")
+	}
+	select {
+	case p.dialed <- ctx:
+		return &payloadDeadlineIgnoringConn{Conn: p.conn, ctx: ctx, readStarted: p.readStarted, closeObserved: p.closeObserved}, nil
+	default:
+		return nil, errors.New("duplicate fixture dial")
+	}
+}
+
+func TestPayloadWireClosesDeadlineIgnoringConnOnContextExpiry(t *testing.T) {
+	client, peer := net.Pipe()
+	proxy := &payloadDeadlineIgnoringOutbound{conn: client, dialed: make(chan context.Context, 1), readStarted: make(chan struct{}), closeObserved: make(chan error, 1)}
+	result, drained := make(chan error, 1), make(chan error, 1)
+	payloadDone, drainDone := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() {
+		// Force both raw ends closed only during cleanup, never as passing evidence.
+		_ = client.Close()
+		_ = peer.Close()
+		for name, done := range map[string]<-chan struct{}{"payload": payloadDone, "drain": drainDone} {
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Error(name + " fixture worker did not terminate after raw pipe cleanup")
+			}
+		}
+	})
+	watchdog := time.NewTimer(5 * time.Second)
+	defer watchdog.Stop()
+	go func() {
+		defer close(drainDone)
+		payload := make([]byte, len("syn443-wire"))
+		_, err := io.ReadFull(peer, payload)
+		if err == nil && string(payload) != "syn443-wire" {
+			err = errors.New("fixture did not receive the synthetic payload")
+		}
+		drained <- err
+		// The peer stays open without replying, so the client's Read needs Close.
+	}()
+	go func() {
+		defer close(payloadDone)
+		result <- payloadWire(t, proxy, "127.0.0.1:1")
+	}()
+	var ctx context.Context
+	select {
+	case ctx = <-proxy.dialed:
+	case <-watchdog.C:
+		t.Fatal("payload fixture did not dial before the watchdog")
+	}
+	select {
+	case err := <-drained:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-watchdog.C:
+		t.Fatal("payload fixture did not finish its synthetic write")
+	}
+	select {
+	case <-proxy.readStarted:
+	case <-watchdog.C:
+		t.Fatal("payload fixture did not enter the deadline-ignoring Read")
+	}
+	select {
+	case reason := <-proxy.closeObserved:
+		if !errors.Is(reason, context.DeadlineExceeded) {
+			t.Fatal("payload connection closed before its context expired")
+		}
+	case <-watchdog.C:
+		t.Fatal("context expiry did not close the deadline-ignoring connection")
+	}
+	select {
+	case err := <-result:
+		if err == nil || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			t.Fatal("deadline-ignoring payload did not fail after context expiry")
+		}
+	case <-watchdog.C:
+		t.Fatal("payload remained blocked after its connection closed")
+	}
+}
+
 func TestRegisteredHTTPAndSOCKSActualWireAndDetour(t *testing.T) {
 	for _, kind := range []string{"http", "socks", "http-over-socks"} {
 		t.Run(kind, func(t *testing.T) {

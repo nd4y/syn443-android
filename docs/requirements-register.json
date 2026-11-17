@@ -135,9 +135,14 @@
       "text": "CI проверяет совместимость engine-api, ядра оркестрации и адаптеров по матрице версий. Неподдерживаемая комбинация не публикуется. Замена NetBird или proxy engine обязательно проверяет их аварийную VLESS-цепочку, DNS, handover и завершение транспорта.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/xhttp-wire-matrix.md",
+        "tools/check_native_protocol_evidence.py",
+        "tools/test_native_protocol_evidence.py",
+        "native/bridge/vless_ssh_wire_test.go",
+        "native/bridge/proxy_wire_test.go"
       ],
-      "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests.",
+      "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests. Source-stage closed VLESS eight-transport and XHTTP five-by-four authority matrix plus an independent hard-deadline fixture require31 exact ordered outcomes (30 protocol and one fixture) and bridge package completion independently in ordinary/race streams; exact-head Actions pending.",
       "remainingScope": "Complete capabilities/version/SBOM/release/update and physical acceptance."
     },
     {
@@ -1203,14 +1208,14 @@
     {
       "id": "ALG-23",
       "text": "Выходы поиска различаются: usable route found, degraded usable route, all currently relevant candidates failed, search incomplete/budget limited, waiting network/credentials/policy. Надпись «доступных маршрутов нет» не выводится лишь потому, что истёк бюджет одного шага. При незавершённом поиске остаётся возможность продолжения.",
-      "status": "planned",
+      "status": "partial",
       "evidence": [
         "docs/route-search-status.md",
         "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveSearchStatusTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/RouteSearchStatusTest.kt"
       ],
-      "implementationScope": "Source-stage bounded read-only managed TCP group search projection distinguishes waiting context, searching, budget wait, incomplete and existing fresh selected-route evidence. It cannot authorize activation or claim no usable route after a CPU/budget/frontier yield.",
-      "remainingScope": "Exact-head Actions and physical acceptance remain pending. Explicit complete relevant-candidate failure proof, degraded-route confidence/counters, all four modes and wider routing/energy-governor integration remain open. Requirement status is unchanged."
+      "implementationScope": "Bounded read-only managed TCP group search projection distinguishes waiting context, searching, budget wait, incomplete and existing fresh selected-route evidence. Its ten exact Android cases passed source bdbb7f4 Actions44019011044 within437 outcomes per API29/35/37. It cannot authorize activation or claim no usable route after a CPU/budget/frontier yield.",
+      "remainingScope": "Resulting-main and physical acceptance are separate gates. Explicit complete relevant-candidate failure proof, degraded-route confidence/counters, all four modes and wider routing/energy-governor integration remain open; this partial contribution does not complete the requirement."
     },
     {
       "id": "ALG-24",

@@ -101,6 +101,16 @@ func vlessWire(t *testing.T, transport string) (map[string]any, *box.Box) {
 		options = map[string]any{"type": "xhttp", "mode": "packet-up", "path": "/fixture", "sc_min_posts_interval_ms": 0}
 		in["tls"].(map[string]any)["alpn"] = []string{"h2"}
 		out["tls"].(map[string]any)["alpn"] = []string{"h2"}
+	case "xhttp-auto":
+		// The pinned client resolves auto to packet-up for ordinary TLS.
+		// Keep synthetic upload pacing deterministic, as in the packet-up case.
+		options = map[string]any{"type": "xhttp", "mode": "auto", "path": "/fixture", "sc_min_posts_interval_ms": 0}
+		in["tls"].(map[string]any)["alpn"] = []string{"h2"}
+		out["tls"].(map[string]any)["alpn"] = []string{"h2"}
+	case "xhttp-stream-up":
+		options = map[string]any{"type": "xhttp", "mode": "stream-up", "path": "/fixture"}
+		in["tls"].(map[string]any)["alpn"] = []string{"h2"}
+		out["tls"].(map[string]any)["alpn"] = []string{"h2"}
 	default:
 		t.Fatal("unknown fixture transport")
 	}
@@ -112,7 +122,7 @@ func vlessWire(t *testing.T, transport string) (map[string]any, *box.Box) {
 	return out, server
 }
 func TestRegisteredVLESSTLSTransportsActualPayloadAndDetour(t *testing.T) {
-	for _, transport := range []string{"tls", "ws", "grpc", "xhttp-h2", "xhttp-h3", "xhttp-packet-up"} {
+	for _, transport := range []string{"tls", "ws", "grpc", "xhttp-h2", "xhttp-h3", "xhttp-packet-up", "xhttp-auto", "xhttp-stream-up"} {
 		t.Run(transport, func(t *testing.T) {
 			target := listenWire(t, func(c net.Conn) { _, _ = io.Copy(c, c) })
 			node, _ := vlessWire(t, transport)
@@ -138,6 +148,40 @@ func TestRegisteredVLESSTLSTransportsActualPayloadAndDetour(t *testing.T) {
 				t.Fatal("XHTTP bypassed actual SOCKS entry")
 			}
 		})
+	}
+}
+func TestRegisteredXHTTPAuthorityFailuresCannotReachTargetDirectly(t *testing.T) {
+	for _, transport := range []string{"xhttp-h2", "xhttp-h3", "xhttp-packet-up", "xhttp-auto", "xhttp-stream-up"} {
+		for _, failure := range []string{"uuid", "certificate", "server-name", "refused"} {
+			t.Run(transport+"/"+failure, func(t *testing.T) {
+				target := listenWire(t, func(c net.Conn) { _, _ = io.Copy(c, c) })
+				node, server := vlessWire(t, transport)
+				switch failure {
+				case "uuid":
+					node["uuid"] = wireUUID(t)
+				case "certificate":
+					other, _, _ := wireTLS(t)
+					node["tls"].(map[string]any)["certificate"] = []string{other}
+				case "server-name":
+					node["tls"].(map[string]any)["server_name"] = "wrong.example.invalid"
+				case "refused":
+					if e := server.Close(); e != nil {
+						t.Fatal(e)
+					}
+				}
+				client := wireBox(t, node)
+				proxy, ok := client.Outbound().Outbound("exit")
+				if !ok {
+					t.Fatal("registered XHTTP VLESS missing")
+				}
+				if e := payloadWire(t, proxy, target.listener.Addr().String()); e == nil {
+					t.Fatal("invalid XHTTP VLESS authority succeeded")
+				}
+				if target.calls.Load() != 0 {
+					t.Fatal("failed XHTTP VLESS escaped through direct fallback")
+				}
+			})
+		}
 	}
 }
 func TestRegisteredVLESSBadUUIDAndTLSIdentityCannotDialTargetDirectly(t *testing.T) {

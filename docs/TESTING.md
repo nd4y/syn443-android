@@ -1,11 +1,22 @@
 # Testing and release gates
 
+[VLESS/XHTTP wire evidence](xhttp-wire-matrix.md) adds a source-bound native gate
+to each existing ordinary/race JSON stream: two roots, eight positive transport
+leaves and20 XHTTP authority-failure leaves, plus one independent hard-deadline
+fixture case. All31 ordered outcomes (30 protocol +1 fixture) and one bridge
+package completion are required. Eight validator roots are discovered by the
+existing documents job. The53-path-root, Android/JVM/coverage and privacy gates
+are retained. This source-stage matrix requires exact-head Actions; no local
+execution or physical protocol acceptance is claimed.
+
 [Managed route search status](route-search-status.md) source adds ten exact
 Android outcomes (six coordinator and four snapshot/presentation cases). The
-pending per-API29/35/37 floor is437; identity remains249. Existing required
+per-API29/35/37 floor is437; identity remains249. These ten exact outcomes
+passed Actions44019011044 on sourcebdbb7f4, within437 per API. Existing required
 outcomes, coverage thresholds and privacy gates remain unchanged. These are
-source-stage requirements, not acceptance of this version91 M4 slice or
-the separate version90 delivery. Historical candidate counts below are retained.
+source-stage requirements do not establish version91 device or managed-chain
+acceptance. The separate [v90 delivery](non-lte-acceptance-20261117.md) has its
+own79-case physical receipt. Historical candidate counts below are retained.
 
 [Operation outcome reconciliation](operation-reconciliation-android.md) source
 adds49 exact identity JVM roots across seven test classes and29 exact Android
