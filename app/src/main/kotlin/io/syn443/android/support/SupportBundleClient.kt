@@ -2,6 +2,7 @@ package io.syn443.android.support
 
 import android.content.Context
 import android.net.Uri
+import androidx.core.net.toUri
 import android.util.Base64
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
@@ -18,7 +19,7 @@ internal object SupportBundleClient {
     private val digest = Regex("[a-f0-9]{64}")
     suspend fun call(context: Context, method: String, argument: String? = null): JSONObject = withContext(Dispatchers.IO) {
         require(method in methods)
-        val reply = checkNotNull(context.contentResolver.call(Uri.parse("content://io.syn443.control"), method, argument, null))
+        val reply = checkNotNull(context.contentResolver.call("content://io.syn443.control".toUri(), method, argument, null))
         check(reply.getBoolean("ok")) { "bundle_unavailable" }
         val raw = checkNotNull(reply.getString("json"))
         require(raw.toByteArray(Charsets.UTF_8).size <= 65_536) { "invalid_bundle_reply" }

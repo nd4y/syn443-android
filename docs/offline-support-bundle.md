@@ -110,3 +110,8 @@ The next run44177494225 compiled the app and test sources, then stopped at
 the existing `UseKtx` lint rule for the new document-result URI conversion.
 That call now uses the pinned AndroidX `toUri` extension. The lint rule and
 all test assertions remain; this failed attempt also reached no emulator.
+
+Run44180820226 then exposed the same lint issue in the separate provider
+client. That remaining call also uses `toUri`; the whole new support package
+contains no remaining `Uri.parse` call. This failure stays recorded and does
+not count as Android test acceptance.
