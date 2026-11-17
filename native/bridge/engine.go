@@ -247,6 +247,14 @@ func (e *Runtime) NetBirdIdentityProof() string {
 	return netbird.ManagedRegistrationProof()
 }
 func (e *Runtime) DiagnoseNetBird() bool { return netbird.RequestDiagnostics() }
+
+// Read-only page selection cannot outlive the current runtime's lease.
+func (e *Runtime) NetBirdView(request string) bool {
+	if e == nil || e.platform == nil || e.platform.lease == nil || !e.platform.lease.allowed() {
+		return false
+	}
+	return netbird.RequestView(request)
+}
 func (e *Runtime) UpdateNetwork(name string, index int32) {
 	e.InvalidateAdaptiveContext()
 	e.routes.networkChanged()

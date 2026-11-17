@@ -13,6 +13,9 @@ import java.util.zip.ZipInputStream
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.Description
+import org.junit.runner.notification.Failure
+import org.junit.runner.notification.RunListener
 
 class DiagnosticArchiveTest {
     private fun component(name: Name, bytes: ByteArray = "{}".toByteArray(), state: State = State.AVAILABLE,
@@ -192,5 +195,79 @@ class DiagnosticArchiveTest {
         assertTrue(entries(result).keys.all { it == "manifest.json" || it in expected })
         assertTrue(State.entries.all { it.wire.matches(Regex("[a-z_]+")) })
         assertTrue(Reason.entries.all { it.wire.matches(Regex("[a-z_]+")) })
+    }
+}
+
+/** Test APK diagnostics only. FINISH is a lifecycle event, never PASS evidence. */
+class DiagnosticBundleTestProgress : RunListener() {
+    override fun testStarted(description: Description) = event("START", description)
+    override fun testFinished(description: Description) = event("FINISH", description)
+    override fun testFailure(failure: Failure) = event("FAIL", failure.description)
+    override fun testAssumptionFailure(failure: Failure) = event("FAIL", failure.description)
+    override fun testIgnored(description: Description) = event("FAIL", description)
+
+    private fun event(event: String, description: Description) {
+        val type = description.className ?: return
+        val method = description.methodName ?: return
+        if (method !in methods[type].orEmpty()) return
+        android.util.Log.i("Syn443BundleProgress", "SYN443_BUNDLE_PROGRESS $event $type#$method")
+    }
+
+    companion object {
+        private val methods = mapOf(
+            "io.syn443.android.DiagnosticArchiveTest" to setOf(
+                "storedArchiveHasExactNamesCrcManifestHashesAndOwnedInputBytes",
+                "missingAndErroredComponentsRemainExplicitAndIncomplete",
+                "duplicateAndTooManyComponentsFailBeforeArchiveCreation",
+                "componentByteLimitOmitsWholePayloadWithoutTruncatingJson",
+                "aggregateLimitIsDeterministicAndKeepsOtherComponents",
+                "allAvailableComponentsAreCompleteOnlyWithNoneReasons",
+                "truncatedAndProjectionOnlyComponentsNeverClaimComplete",
+                "namesSizesAndDiagnosticsCannotEscapeOrEchoInputs",
+            ),
+            "io.syn443.android.DiagnosticProjectionTest" to setOf(
+                "knownSnapshotsProjectOnlyFixedPublicFields",
+                "nestedSecretsLabelsTargetsAndFreeTextNeverReachComponents",
+                "incorrectBooleanAndNumericTypesStayUnknownRatherThanFalseOrZero",
+                "eventsKeepOnlyLast64OrderedAllowlistedRecords",
+                "routeAndCheckCollectionsExposeCountsWithoutIdentifiers",
+                "overlayProjectionPreservesTypedConnectionsAndKnownModesOnly",
+                "crashesReprojectOnlyClosedKindsTimesAndStatuses",
+                "unavailableSourcesAndInvalidVersionsRemainExplicitAndBounded",
+            ),
+            "io.syn443.android.SupportBundleControllerTest" to setOf(
+                "encryptedArchiveHasOwnedMetadataAndWholeVerifiedChunkReadback",
+                "cancelledBlockedCollectorRetainsActualSlotAndRejectsLatePublication",
+                "grantAndReadyExpiryAndBackwardsClockNeverFreshenAnOldArtifact",
+                "grantsAreObjectBoundAndRepeatedReadsNeverReplayCollection",
+                "malformedIdsOffsetsAndUnknownJobsNeverReadOrCreateStorage",
+                "corruptedTruncatedAndOversizedCiphertextFailBeforeAnyPlaintextChunk",
+                "recreatedProcessOwnerCannotReuseAKeyGrantOrOldEncryptedArtifact",
+                "foreignFilesAndSymlinkFilesOrDirectoriesArePreservedAndFailClosed",
+                "blockedReadKeepsItsSingleSlotAndCancelledVerifiedBytesCannotPublish",
+                "failedSourcesAtomicWriteFailuresAndOverLimitComponentsNeverAutoRetry",
+            ),
+            "io.syn443.android.SupportBundleSourcesTest" to setOf(
+                "passiveCaptureLeavesItsSourcesUnchangedAndRunsEachSupplierOnce",
+                "changedContextRejectsCapturedHealthChecksAndOverlayWithoutRepeatingWork",
+                "missingOrFailingSourcesBecomePartialWithoutRawExceptionText",
+                "stateFileReadRejectsOversizeDepthUtf8TrailingAndSymlinkWithoutModifyingFiles",
+            ),
+            "io.syn443.android.DiagnosticBundleUiTest" to setOf(
+                "idlePresentationDoesNotCollectOrExportUntilAnExplicitClick",
+                "readyPartialArchiveShowsCompositionSizeAndSeparateExportAction",
+                "busyCollectionCannotOverlapOrExportAndCancellationIsExplicit",
+                "routeCancellationRemainsResponsiveWhilePollingAndRejectsLateReadyReply",
+                "malformedUnknownOrInconsistentManifestNeverEnablesExportOrEchoesValues",
+                "delayedDocumentResultAfterRestorationUsesReviewedArtifactAndCancelledPickerNeverReplaysCollection",
+            ),
+            "io.syn443.android.PassivePolicyDiagnosticTest" to setOf(
+                "historicalExportKeepsRealBatchWithoutInventingActivationOrChangingAuthority",
+                "expiredRetiredAndBackwardHistoryNeverBecomesCurrentOrGetsANewSampleTime",
+            ),
+            "io.syn443.android.SupportBundleClientTest" to setOf(
+                "blockedCancellationAndDocumentWriteFailureRetainExportOwnershipUntilActualExit",
+            ),
+        )
     }
 }

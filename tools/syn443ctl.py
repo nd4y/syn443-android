@@ -20,7 +20,7 @@ URI = "content://io.syn443.control"
 METHODS = {
     "status": "status", "logs": "logs", "routes-status": "routes-status",
     "routes-check": "routes-check", "routes-cancel": "routes-cancel",
-    "netbird-status": "status", "netbird-diagnose": "netbird-diagnose",
+    "netbird-status": "status", "netbird-diagnose": "netbird-diagnose", "netbird-view": "netbird-view",
     "vpn-start": "connect", "vpn-stop": "disconnect", "vpn-resume": "resume",
     "resources": "resources", "engine-exits": "engine-exits", "health-workers": "health-workers",
     "config-plan": "config-plan-file", "config-apply": "config-apply-file",
@@ -29,7 +29,7 @@ METHODS = {
     "support-bundle-read": "bundle-read",
 }
 OPERATIONS = ("capabilities", "status", "logs", "diagnostic-bundle", "routes-status",
-              "routes-check", "routes-cancel", "netbird-status", "netbird-diagnose",
+              "routes-check", "routes-cancel", "netbird-status", "netbird-diagnose", "netbird-view",
               "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply",
               "support-bundle", "support-bundle-collect", "support-bundle-status",
               "support-bundle-cancel", "support-bundle-export")
@@ -92,6 +92,29 @@ class ControlError(Exception):
         self.code, self.exit_status = code, exit_status
 
 
+def view_argument(section, page, request):
+    if section not in ("peers", "diagnostics") or type(page) is not int or not 0 <= page <= 63 or \
+            not isinstance(request, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", request):
+        raise ControlError("invalid_arguments", 2)
+    return json.dumps({"kind": "overlay-view", "section": section, "page": page, "request": request}, separators=(",", ":"))
+
+
+def canonical_view(raw):
+    """Only our canonical, bounded ASCII frame may reach the Android shell."""
+    if not isinstance(raw, str) or len(raw) > 1024:
+        raise ControlError("invalid_arguments", 2)
+    try:
+        value = json.loads(raw, parse_constant=invalid_constant)
+        if not isinstance(value, dict) or set(value) != {"kind", "section", "page", "request"} or value["kind"] != "overlay-view":
+            raise ValueError("shape")
+        canonical = view_argument(value["section"], value["page"], value["request"])
+        if raw != canonical:
+            raise ValueError("noncanonical")
+        return canonical
+    except (ValueError, TypeError, RecursionError) as err:
+        raise ControlError("invalid_arguments", 2) from err
+
+
 class Device:
     def __init__(self, serial, timeout):
         if not re.fullmatch(r"[A-Za-z0-9_.:%\[\]-]{1,128}", serial) or serial.startswith("-"):
@@ -106,9 +129,14 @@ class Device:
             ticket = operation in CONFIG and re.fullmatch(r"(?:none|[0-9a-f]{64}):[0-9a-f]{64}:[0-9a-f]{32}", argument)
             bundle_id = operation in {"support-bundle-status", "support-bundle-cancel", "support-bundle-open"} and re.fullmatch(r"[0-9a-f]{32}", argument)
             bundle_read = operation == "support-bundle-read" and re.fullmatch(r"[0-9a-f]{32}:(?:0|[1-9][0-9]{0,5})", argument) and int(argument.split(":")[1]) <= SUPPORT_MAX
-            if not route and not ticket and not bundle_id and not bundle_read:
+            view = canonical_view(argument) if operation == "netbird-view" else None
+            if not route and not ticket and not bundle_id and not bundle_read and view is None:
                 raise ControlError("invalid_arguments", 2)
-            command.extend(["--arg", argument])
+            # adb shell joins arguments into an Android shell command. Our closed
+            # ASCII view has no apostrophe; single quoting preserves JSON quotes.
+            command.extend(["--arg", "'" + view + "'" if view is not None else argument])
+        elif operation == "netbird-view":
+            raise ControlError("invalid_arguments", 2)
         try:
             result = subprocess.run(command, capture_output=True, timeout=self.timeout, check=False)
         except subprocess.TimeoutExpired as err:
@@ -574,6 +602,8 @@ def main(argv=None):
     parser.add_argument("--timeout", type=int, choices=range(1, 61), default=12, metavar="1..60")
     parser.add_argument("operation", choices=OPERATIONS)
     parser.add_argument("--route")
+    parser.add_argument("--section", choices=("peers", "diagnostics"))
+    parser.add_argument("--page", type=int, choices=range(64))
     parser.add_argument("--file")
     parser.add_argument("--expected-revision")
     parser.add_argument("--expected-candidate")
@@ -592,6 +622,9 @@ def main(argv=None):
             raise ControlError("invalid_arguments", 2)
         if (args.route is not None and args.operation != "routes-check") or (args.follow_seconds and args.operation != "logs"):
             raise ControlError("invalid_arguments", 2)
+        if (args.operation == "netbird-view") != (args.section is not None and args.page is not None) or \
+                (args.operation != "netbird-view" and (args.section is not None or args.page is not None)):
+            raise ControlError("invalid_arguments", 2)
         if (args.file is not None) != (args.operation in CONFIG) or (
             args.operation != "config-apply" and (args.expected_revision is not None or args.expected_candidate is not None)
         ):
@@ -609,6 +642,11 @@ def main(argv=None):
         elif args.operation == "logs" and args.follow_seconds:
             follow(device, args.follow_seconds, 2.0)
             return 0
+        elif args.operation == "netbird-view":
+            # This receipt means queued, not a fresh page or probe result. Read
+            # netbird-status and match its section view.request before using it.
+            request = secrets.token_hex(16)
+            data = device.call("netbird-view", view_argument(args.section, args.page, request))
         elif args.operation in CONFIG:
             payload, candidate = config_input(args.file)
             if args.operation == "config-apply":

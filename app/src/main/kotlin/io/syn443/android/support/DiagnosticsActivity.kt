@@ -43,6 +43,7 @@ internal fun DiagnosticsRoute(
     var pendingExportId by rememberSaveable { mutableStateOf("") }
     var pendingExportHash by rememberSaveable { mutableStateOf("") }
     var pendingExportBytes by rememberSaveable { mutableIntStateOf(0) }
+    var pendingExportDestination by rememberSaveable { mutableStateOf("") }
     val invoke: suspend (String, String?) -> JSONObject = rpc ?: { method, argument -> SupportBundleClient.call(context, method, argument) }
     fun operation(block: suspend () -> Unit) {
         if (busy || pendingExportId.isNotEmpty()) return
@@ -64,13 +65,24 @@ internal fun DiagnosticsRoute(
         }
     }
     val destination = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) pendingExportDestination = uri.toString()
+        else {
+            pendingExportId = ""; pendingExportHash = ""; pendingExportBytes = 0; pendingExportDestination = ""
+        }
+    }
+    // A result can arrive while a restored status read still owns the UI slot.
+    // Keep the reviewed request until export is actually admitted, rather than
+    // clearing it and losing the user's selected document when operation is busy.
+    LaunchedEffect(pendingExportDestination, busy) {
+        if (pendingExportDestination.isEmpty() || pendingExportId.isEmpty() || busy) return@LaunchedEffect
+        val target = Uri.parse(pendingExportDestination)
         val reviewedId = pendingExportId
         val reviewedHash = pendingExportHash
         val reviewedBytes = pendingExportBytes
-        pendingExportId = ""; pendingExportHash = ""; pendingExportBytes = 0
-        if (uri != null && reviewedId.isNotEmpty()) operation {
-            if (exporter != null) exporter(reviewedId, uri, reviewedHash, reviewedBytes)
-            else SupportBundleClient.export(context, reviewedId, uri, reviewedHash, reviewedBytes)
+        pendingExportId = ""; pendingExportHash = ""; pendingExportBytes = 0; pendingExportDestination = ""
+        operation {
+            if (exporter != null) exporter(reviewedId, target, reviewedHash, reviewedBytes)
+            else SupportBundleClient.export(context, reviewedId, target, reviewedHash, reviewedBytes)
             message = "Файл сохранён. В SYN443 не отправлен."
         }
     }
@@ -87,8 +99,8 @@ internal fun DiagnosticsRoute(
                 // Always obtain actual metadata before offering an export.
                 bundleId = id; state = JSONObject().put("state", "collecting").put("id", id)
                 var attempts = 0
-                while (state.optString("state") in setOf("collecting", "busy") && attempts++ < 64) {
-                    delay(500)
+                while (state.optString("state") in setOf("collecting", "busy") && attempts < 64) {
+                    if (attempts++ > 0) delay(500)
                     val next = invoke("bundle-status", id)
                     if (epoch != uiEpoch) return@operation
                     require(next.optString("id") == id)
@@ -122,7 +134,7 @@ internal fun DiagnosticsRoute(
                     pendingExportBytes = state.getInt("bytes")
                     try { destination.launch("syn443-support.zip") }
                     catch (_: Exception) {
-                        pendingExportId = ""; pendingExportHash = ""; pendingExportBytes = 0
+                        pendingExportId = ""; pendingExportHash = ""; pendingExportBytes = 0; pendingExportDestination = ""
                         message = "Не удалось открыть выбор файла"
                     }
                 }

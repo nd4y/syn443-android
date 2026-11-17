@@ -44,7 +44,9 @@ crawl, arbitrary input path, imported archive or extraction is supported.
 
 One owner in `:controller` admits collection to a single worker. Cancellation
 revokes publication and export immediately, while admission stays occupied
-until the actual worker exits. A timer cannot release that slot. Status,
+until the actual worker exits. A timer cannot release that slot. The UI process
+also admits only one actual document export, including after rotation or
+coroutine cancellation while a synchronous provider write still runs. Status,
 cancel and opening an export grant use RAM only. Reading admits one actual
 bounded file/decrypt operation outside the state lock; status and cancellation
 do not wait for it. The job, grant and deadlines are rechecked before returning

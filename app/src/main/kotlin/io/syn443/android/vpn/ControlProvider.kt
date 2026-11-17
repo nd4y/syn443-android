@@ -339,6 +339,17 @@ class ControlProvider : ContentProvider() {
                     require(store.checkpoint().desiredOn)
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
                 }
+                "netbird-view" -> {
+                    val checkpoint = store.checkpoint()
+                    require(checkpoint.desiredOn && LifecycleAccess.ownsReadyEngine(checkpoint.generation))
+                    val view = requireNotNull(OverlayViewRequest.parse(arg))
+                    context.startService(Intent(context, TunnelService::class.java).setAction(method).putExtra("viewRequest", arg))
+                    return Bundle().apply {
+                        putBoolean("ok", true)
+                        putString("json", org.json.JSONObject().put("pending", true).put("section", view.section)
+                            .put("page", view.page).put("request", view.request).toString())
+                    }
+                }
                 "routes-status" -> return Bundle().apply {
                     putBoolean("ok",true)
                     putString("json",RouteSnapshot.view(LifecycleAccess.engineStatus(context,store.read())).toString())

@@ -157,7 +157,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         })
         for mode, count, floor, folder in [
             ('identity', 57, 249, 'core/identity/src/test/kotlin/io/syn443/identity'),
-            ('emulator', 65, 515, 'app/src/androidTest/kotlin/io/syn443/android'),
+            ('emulator', 65, 524, 'app/src/androidTest/kotlin/io/syn443/android'),
         ]:
             self.assertEqual(count, len(required[mode]))
             self.assertEqual(expected[mode], set(required[mode]))
@@ -207,7 +207,7 @@ class CoverageEvidenceTest(unittest.TestCase):
                 'AdminOperationReconcileTest': 18, 'AdminOperationProtocolTest': 7, 'AdminOperationHttpTest': 3,
                 'AdminOperationVersionTest': 6, 'AdminOperationGoConformanceTest': 6, 'AdminEditorAuthorityTest': 6,
                 'BoundedHttpCancellationRaceTest': 3}),
-            ('emulator', 29, 515, 'app/src/androidTest/kotlin/io/syn443/android', {
+            ('emulator', 29, 524, 'app/src/androidTest/kotlin/io/syn443/android', {
                 'AdminPublishDispatchDeadlineTest': 3, 'AdminOperationCoordinatorTest': 10, 'AdminOperationUiTest': 5,
                 'AdminOperationWireTest': 3, 'AdminOperationRouteTest': 3, 'AdminEditorOwnerMigrationTest': 5}),
         ]:
@@ -244,7 +244,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual(10, len(required))
         self.assertEqual(10, len(set(required)))
         self.assertEqual(expected, set(required))
-        self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=515\n')
+        self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=524\n')
         self.assertRegex(source, r'elif mode=="identity":\n(?:    [^\n]*\n)*?    minimum=249\n')
 
     def test_check_plan_roots_are_source_bound_and_every_missing_or_foreign_outcome_fails(self):
@@ -262,7 +262,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         admission = compile(ast.fix_missing_locations(ast.Module(body=guard.body[:3], type_ignores=[])), '<check-plan-admission>', 'exec')
         for mode, floor, folder, classes in [
             ('policy', 31, 'core/policy/src/test/kotlin/io/syn443/policy', {'RouteCheckProfileTest': 8, 'RouteCheckPlanPolicyTest': 3}),
-            ('emulator', 515, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 9}),
+            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 9}),
         ]:
             expected = set()
             for classname, count in classes.items():
@@ -336,7 +336,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         complete = compile(ast.fix_missing_locations(ast.Module(body=guard.body, type_ignores=[])), '<durable-source>', 'exec')
         for mode, floor, folder, classes in [
             ('jvm', 21, 'core/decision/src/test/kotlin/io/syn443/decision', {'io.syn443.decision.AdaptiveProbeCheckpointTest': 7}),
-            ('emulator', 515, 'app/src/androidTest/kotlin/io/syn443/android', {
+            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', {
                 'io.syn443.android.AdaptiveProbeStoreTest': 10, 'io.syn443.android.AdaptiveAdmissionCoordinatorTest': 8}),
         ]:
             originals = {}
@@ -447,7 +447,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         complete = compile(ast.fix_missing_locations(ast.Module(body=guard.body, type_ignores=[])), '<owner-source>', 'exec')
         for mode, floor, folder, owner, count in [
             ('jvm', 21, 'core/decision/src/test/kotlin/io/syn443/decision', 'io.syn443.decision.RouteHealthOwnerChangeTest', 3),
-            ('emulator', 515, 'app/src/androidTest/kotlin/io/syn443/android', 'io.syn443.android.AdaptiveOwnerTransitionTest', 6),
+            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', 'io.syn443.android.AdaptiveOwnerTransitionTest', 6),
         ]:
             path = root / folder / (owner.rsplit('.', 1)[1] + '.kt')
             original = path.read_text(encoding='utf-8')
@@ -537,7 +537,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         complete = compile(ast.fix_missing_locations(ast.Module(body=guard.body, type_ignores=[])), '<continuity-source>', 'exec')
         for mode, floor, folder, owner, count in [
             ('jvm', 21, 'core/decision/src/test/kotlin/io/syn443/decision', 'io.syn443.decision.RouteHealthContinuityTest', 3),
-            ('emulator', 515, 'app/src/androidTest/kotlin/io/syn443/android', 'io.syn443.android.AdaptivePathContinuityTest', 6),
+            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', 'io.syn443.android.AdaptivePathContinuityTest', 6),
         ]:
             path = root / folder / (owner.rsplit('.', 1)[1] + '.kt')
             original = path.read_text(encoding='utf-8')
@@ -599,11 +599,12 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual(2, len(assignments))
         values = {node.targets[0].id: ast.literal_eval(node.value) for node in assignments}
         required = values['SUPPORT_BUNDLE_REQUIRED']
-        self.assertEqual([8,8,10,4,6,2], [len(methods) for methods in required.values()])
+        self.assertEqual([8,8,10,4,6,2,1], [len(methods) for methods in required.values()])
         all_cases = {(owner, name) for owner, methods in required.items() for name in methods}
         all_cases.add(values['SUPPORT_BUNDLE_EXTERNAL_REQUIRED'])
-        self.assertEqual(39, len(all_cases))
-        block = tree.body[-1]
+        self.assertEqual(40, len(all_cases))
+        block, = [node for node in tree.body if isinstance(node, ast.If) and
+                  any(isinstance(child, ast.Name) and child.id == 'SUPPORT_BUNDLE_REQUIRED' for child in ast.walk(node))]
         self.assertIsInstance(block, ast.If)
         complete = compile(ast.Module(body=assignments+[block], type_ignores=[]), '<support-gate>', 'exec')
         scope = {'root':root, 'mode':'emulator', 'identities':list(all_cases), 're':re}
@@ -611,4 +612,49 @@ class CoverageEvidenceTest(unittest.TestCase):
         for missing in all_cases:
             with self.assertRaises(AssertionError):
                 exec(complete, {**scope, 'identities':list(all_cases-{missing})})
-        self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=515\n')
+        self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=524\n')
+
+    def test_netbird_report_roots_require_each_actual_outcome_and_exact_sources(self):
+        root = Path(__file__).resolve().parent.parent
+        source = (root / 'tools/check_test_evidence.py').read_text(encoding='utf-8')
+        tree = ast.parse(source)
+        declaration, = [node for node in tree.body if isinstance(node, ast.Assign) and
+                        any(isinstance(target, ast.Name) and target.id == 'OVERLAY_REPORT_REQUIRED' for target in node.targets)]
+        required = ast.literal_eval(declaration.value)
+        expected = {(owner, name) for owner, names in required.items() for name in names}
+        self.assertEqual(8, len(expected))
+        self.assertEqual({'io.syn443.android.NetBirdReportTest': 5, 'io.syn443.android.NetBirdPagingUiTest': 2,
+                          'io.syn443.android.NetBirdViewBridgeTest': 1}, {owner: len(names) for owner, names in required.items()})
+        guard, = [node for node in tree.body if isinstance(node, ast.If) and node.lineno > declaration.lineno and
+                  any(isinstance(child, ast.Name) and child.id == 'OVERLAY_REPORT_REQUIRED' for child in ast.walk(node))]
+        compiled = compile(ast.fix_missing_locations(ast.Module(body=guard.body, type_ignores=[])), '<overlay-report-source-gate>', 'exec')
+        scope = {'OVERLAY_REPORT_REQUIRED': required, 'mode': 'emulator', 'identities': expected, 'root': root, 're': re}
+        exec(compiled, scope.copy())
+        for missing in expected:
+            with self.assertRaises(AssertionError):
+                exec(compiled, dict(scope, identities=expected - {missing}))
+            with self.assertRaises(AssertionError):
+                exec(compiled, dict(scope, identities=expected - {missing} | {('foreign.' + missing[0], missing[1])}))
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture_root = Path(temporary)
+            folder = Path('app/src/androidTest/kotlin/io/syn443/android')
+            for owner in required:
+                path = folder / (owner.rsplit('.', 1)[1] + '.kt')
+                destination = fixture_root / path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text((root / path).read_text(encoding='utf-8'), encoding='utf-8')
+            scope['root'] = fixture_root
+            exec(compiled, scope.copy())
+            for owner, names in required.items():
+                path = fixture_root / folder / (owner.rsplit('.', 1)[1] + '.kt')
+                original = path.read_text(encoding='utf-8')
+                name = sorted(names)[0]
+                dropped = re.sub(r'@Test\s+(?=fun\s+' + re.escape(name) + r'\b)', '', original, count=1)
+                self.assertNotEqual(original, dropped)
+                for altered in (original.replace(name, 'substitutedReportRoot'), dropped,
+                                original + '\n@Test fun extraReportRoot() {}\n'):
+                    path.write_text(altered, encoding='utf-8')
+                    with self.assertRaises(AssertionError):
+                        exec(compiled, scope.copy())
+                path.write_text(original, encoding='utf-8')
+        self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=524\n')

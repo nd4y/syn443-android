@@ -141,6 +141,7 @@ class DiagnosticBundleUiTest {
         val exportCount = AtomicInteger()
         val statusCount = AtomicInteger()
         val finishExport = CompletableDeferred<Unit>()
+        val restoreStatus = CompletableDeferred<Unit>()
         val registry = object : ActivityResultRegistry() {
             override fun <I, O> onLaunch(requestCode: Int, contract: ActivityResultContract<I, O>,
                 input: I, options: ActivityOptionsCompat?) {
@@ -164,7 +165,7 @@ class DiagnosticBundleUiTest {
                             "bundle-collect" -> { assertNull(argument); reviewed }
                             "bundle-status" -> {
                                 assertEquals(reviewedId, argument)
-                                statusCount.incrementAndGet()
+                                if (statusCount.incrementAndGet() == 2) restoreStatus.await()
                                 latest
                             }
                             else -> error("unexpected synthetic command")
@@ -179,6 +180,7 @@ class DiagnosticBundleUiTest {
         }
         try {
             compose.onNodeWithTag("bundle-collect").performScrollTo().performClick()
+            compose.waitUntil(5_000) { statusCount.get() == 1 }
             compose.onNodeWithTag("bundle-state").assertTextEquals("Архив готов")
             compose.onNodeWithTag("bundle-export").performScrollTo().assertIsEnabled().performClick()
             compose.onNodeWithTag("bundle-collect").assertIsNotEnabled()
@@ -186,7 +188,7 @@ class DiagnosticBundleUiTest {
             compose.onNodeWithTag("bundle-cancel").assertIsNotEnabled()
             var firstCode = 0
             compose.runOnIdle {
-                assertEquals(listOf("bundle-collect"), commands)
+                assertEquals(listOf("bundle-collect", "bundle-status"), commands)
                 assertEquals(1, launches.size); assertTrue(exports.isEmpty())
                 firstCode = launches.single()
                 // The recreated route obtains a newer, still-valid preview.
@@ -200,7 +202,7 @@ class DiagnosticBundleUiTest {
                 assertTrue(validBundlePreview(latest))
             }
             restoration.emulateSavedInstanceStateRestore()
-            compose.waitUntil(5_000) { statusCount.get() == 1 }
+            compose.waitUntil(5_000) { statusCount.get() == 2 }
             compose.onNodeWithTag("bundle-collect").assertIsNotEnabled()
             compose.onNodeWithTag("bundle-export").assertIsNotEnabled()
             compose.onNodeWithTag("bundle-cancel").assertIsNotEnabled()
@@ -208,6 +210,10 @@ class DiagnosticBundleUiTest {
             compose.runOnIdle {
                 assertEquals(1, launches.size) // Restoration never launches again.
                 assertTrue(registry.dispatchResult<Uri?>(firstCode, destination))
+                assertEquals(0, exportCount.get())
+                // The result arrived while restored status still owns busy.
+                // It must be queued, then consumed once after real admission.
+                restoreStatus.complete(Unit)
             }
             compose.waitUntil(5_000) { exportCount.get() == 1 }
             compose.onNodeWithTag("bundle-collect").assertIsNotEnabled()
@@ -215,7 +221,7 @@ class DiagnosticBundleUiTest {
             compose.onNodeWithTag("bundle-cancel").assertIsNotEnabled()
             compose.runOnIdle {
                 assertEquals(listOf(Export(reviewedId, destination, reviewedHash, reviewedBytes)), exports)
-                assertEquals(listOf("bundle-collect", "bundle-status"), commands)
+                assertEquals(listOf("bundle-collect", "bundle-status", "bundle-status"), commands)
                 finishExport.complete(Unit)
             }
             compose.waitForIdle()
@@ -234,9 +240,9 @@ class DiagnosticBundleUiTest {
             compose.runOnIdle {
                 assertEquals(1, exports.size)
                 assertEquals(1, exportCount.get())
-                assertEquals(listOf("bundle-collect", "bundle-status"), commands)
+                assertEquals(listOf("bundle-collect", "bundle-status", "bundle-status"), commands)
                 assertEquals(2, launches.size)
             }
-        } finally { finishExport.complete(Unit) }
+        } finally { restoreStatus.complete(Unit); finishExport.complete(Unit) }
     }
 }

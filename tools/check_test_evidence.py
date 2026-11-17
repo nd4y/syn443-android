@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=21
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=515
+    minimum=524
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -901,7 +901,6 @@ if mode in PATH_CONTINUITY_REQUIRED:
         expected = {name for owner, name in required if owner == classname}
         assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "Negative path continuity source inventory drift"
 
-
 SUPPORT_BUNDLE_REQUIRED = {'io.syn443.android.DiagnosticArchiveTest': ['storedArchiveHasExactNamesCrcManifestHashesAndOwnedInputBytes',
                                              'missingAndErroredComponentsRemainExplicitAndIncomplete',
                                              'duplicateAndTooManyComponentsFailBeforeArchiveCreation',
@@ -939,12 +938,13 @@ SUPPORT_BUNDLE_REQUIRED = {'io.syn443.android.DiagnosticArchiveTest': ['storedAr
                                               'malformedUnknownOrInconsistentManifestNeverEnablesExportOrEchoesValues',
                                               'delayedDocumentResultAfterRestorationUsesReviewedArtifactAndCancelledPickerNeverReplaysCollection'],
  'io.syn443.android.PassivePolicyDiagnosticTest': ['historicalExportKeepsRealBatchWithoutInventingActivationOrChangingAuthority',
-                                                   'expiredRetiredAndBackwardHistoryNeverBecomesCurrentOrGetsANewSampleTime']}
+                                                   'expiredRetiredAndBackwardHistoryNeverBecomesCurrentOrGetsANewSampleTime'],
+ 'io.syn443.android.SupportBundleClientTest': ['blockedCancellationAndDocumentWriteFailureRetainExportOwnershipUntilActualExit']}
 SUPPORT_BUNDLE_EXTERNAL_REQUIRED = ('io.syn443.android.SupportBundleProtocolTest', 'freshProviderCollectExportAndCancelNeverInitializesVpnOrIdentity')
 if mode == "emulator":
     required = {(owner, name) for owner, names in SUPPORT_BUNDLE_REQUIRED.items() for name in names}
     required.add(SUPPORT_BUNDLE_EXTERNAL_REQUIRED)
-    assert len(required) == 39, "Duplicate support bundle requirement"
+    assert len(required) == 40, "Duplicate support bundle requirement"
     assert required <= set(identities), "Missing exact offline support archive outcomes"
     for owner, expected in SUPPORT_BUNDLE_REQUIRED.items():
         path = root / "app/src/androidTest/kotlin/io/syn443/android" / (owner.rsplit(".", 1)[1] + ".kt")
@@ -958,3 +958,28 @@ if mode == "emulator":
             fields = {entry.arg: entry.value.value for entry in node.keywords if entry.arg in {"classname", "name"} and isinstance(entry.value, ast.Constant)}
             if set(fields) == {"classname", "name"}: declarations.append((fields["classname"], fields["name"]))
     assert declarations == [SUPPORT_BUNDLE_EXTERNAL_REQUIRED], "Support archive external source inventory drift"
+
+
+OVERLAY_REPORT_REQUIRED = {
+    'io.syn443.android.NetBirdReportTest': {
+        'unknownConnectionFieldsNeverBecomeDisconnectedZeroPeersOrVless',
+        'knownAndLegacySnapshotsRetainExplicitConnectionAndProxyLabels',
+        'pagedPeerCountsDistinguishDisplayedRetainedAndOmittedRows',
+        'completedPartialCancelledAndUnknownCoverageNeverClaimAllChecked',
+        'malformedPagesFieldsUtf8AndOverLimitPayloadsFailBounded',
+    },
+    'io.syn443.android.NetBirdPagingUiTest': {
+        'onlyCurrentViewResponseCompletesPendingPageWithoutExtraCommands',
+        'peerAndDiagnosticPagingControlsRespectBoundsAndOutstandingRequests',
+    },
+    'io.syn443.android.NetBirdViewBridgeTest': {
+        'nativeViewBridgeExistsAndInactiveQueryStartsNoEngineOrProbe',
+    },
+}
+if mode == "emulator":
+    required = {(owner, name) for owner, names in OVERLAY_REPORT_REQUIRED.items() for name in names}
+    assert len(required) == 8 and required <= set(identities), "Missing exact NetBird report outcomes"
+    for classname, expected in OVERLAY_REPORT_REQUIRED.items():
+        source = (root / "app/src/androidTest/kotlin/io/syn443/android" / (classname.rsplit(".", 1)[1] + ".kt")).read_text(encoding="utf-8")
+        methods = re.findall(r"@Test\s+fun\s+(\w+)", source)
+        assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "NetBird report source inventory drift"

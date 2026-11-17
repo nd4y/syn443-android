@@ -215,45 +215,7 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
                 Button(onClick = { command("policy-refresh") }) { Text("Проверить обновление политики") }
             }
             val overlay = status.optJSONObject("netbird")
-            if (overlay?.optBoolean("active") == true) {
-                val peerState = overlay.optJSONObject("peer_state") ?: JSONObject()
-                val age = overlay.optLong("snapshotAgeMs", Long.MAX_VALUE)
-                val sampledAge = runCatching { System.currentTimeMillis() - java.time.Instant.parse(peerState.getString("sampled_at")).toEpochMilli() }.getOrDefault(Long.MAX_VALUE)
-                Text("NetBird: ${overlay.optString("phase", "Unknown")}", Modifier.testTag("netbird-status"))
-                Text(if (overlay.optString("mode") == "direct") "Подключение напрямую; relay используется как резерв" else
-                    "Через VLESS: ${peerState.optString("selected_proxy", "ожидание")}")
-                Text("Cloud: ${peerState.optBoolean("management_connected")}; signal: ${peerState.optBoolean("signal_connected")}")
-                if (age > 25_000 || sampledAge !in 0..25_000) Text("Статус NetBird устарел или ещё не получен")
-                if (overlay.optString("reason").isNotEmpty()) Text("NetBird: ${overlay.optString("reason")}")
-                if (overlay.optString("last_failure").isNotEmpty()) Text("Ошибка NetBird: ${overlay.optString("last_failure")}")
-                val peers = peerState.optJSONArray("peers")
-                Text("Пиры: ${peers?.length() ?: 0}. Наличие пира не подтверждает доступность приложения.")
-                if (peers != null) for (i in 0 until minOf(peers.length(), 128)) {
-                    val peer = peers.getJSONObject(i)
-                    Text("${peer.optString("fqdn")} ${peer.optString("ip")}: ${peer.optString("state")}, " +
-                        if (peer.optBoolean("relayed")) "relay" else "direct/ожидание")
-                }
-                Button(onClick = { command("netbird-diagnose") }, enabled = peerState.optBoolean("active")) { Text("Проверить пиры NetBird") }
-                val diagnostics = overlay.optJSONObject("diagnostics")
-                if (diagnostics != null) {
-                    val diagnosticState = when (diagnostics.optString("state")) {
-                        "preparing" -> "Получение списка пиров"
-                        "no_peers" -> "Нет пиров для проверки. После подключения список может ещё обновляться."
-                        "running" -> "Выполняется"
-                        "completed" -> "Завершена"
-                        "cancelled" -> "Отменена"
-                        "unavailable" -> "Недоступна"
-                        else -> "Нет данных"
-                    }
-                    Text("Проверка пиров: $diagnosticState")
-                    if (diagnostics.optBoolean("stale")) Text("Результат проверки относится к предыдущей сети")
-                    val results = diagnostics.optJSONArray("results")
-                    if (results != null) for (i in 0 until minOf(results.length(), 128)) {
-                        val result = results.getJSONObject(i)
-                        Text("${result.optString("fqdn")}: ${result.optString("state")}, ${result.optLong("rtt_ms")} мс")
-                    }
-                }
-            }
+            if (overlay != null) NetBirdControls(overlay) { method, arg -> command(method, arg) }
             RouteControls(status){method,arg->command(method,arg)}
             Button(onClick = {
                 resourcesBusy = true

@@ -1,15 +1,31 @@
 # Testing and release gates
 
-[Offline support archive](offline-support-bundle.md) adds38exact Android roots
+[Offline support archive](offline-support-bundle.md) adds39exact Android roots
 across archive/projection/owner/source/UI/passive-cache classes and one actual
-fresh-emulator Provider/CLI case. The per-API floor is515 before the separate
-report-view candidate is composed. Existing roots and coverage stay required.
+fresh-emulator Provider/CLI case. The composed per-API floor is524, including the eight
+NetBird report outcomes below. Existing roots and coverage stay required.
 The actual protocol case runs before ordinary status/login initialization,
 checks collect/export/cancel and retained identity/VPN file absence and native
 owner absence, and scans its synthetic ZIP without publishing it. Ten new
 Python roots cover CLI limits, ZIP/manifest validation and lost-ACK behavior.
 The gate rejects any missing new outcome or source inventory drift. Compilation
 and execution remain Actions-only; physical collection/export is separate.
+
+[Bounded NetBird report views](netbird-report-views.md) add eight exact Android
+outcomes: five model, two paging UI and one actual packaged gomobile/local
+command case. Its report-only stage required484 unique outcomes; this
+composition requires524 per API29/35/37. All prior mandatory
+roots and coverage thresholds remain. Native streams must each contain eight
+source-bound module and two bridge report roots plus both package completions,
+in addition to the retained path/XHTTP/check-plan gates. The diagnostic-cache
+fixtures gain valid owned peer/count data without changing their assertions.
+These are source requirements, pending exact Actions and separate phone checks.
+The packaged view test uses the actual public Runtime constructor without
+starting it. The emulator instrumentation host has a20minute deadline and
+prints only the eight allowlisted new test identities and fixed JNI phases on
+exit. Markers never replace JUnit outcomes. Paging test scrolls temporarily
+advance frames, preserve the8second pending window and restore clock mode on
+failure. Earlier canceled runs remain failed acceptance attempts.
 
 [Owned VPN Settings evidence](vpn-settings-evidence.md) adds six synthetic
 helper cases to the existing documents job. It preserves the actual Always-on

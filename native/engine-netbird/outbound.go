@@ -36,8 +36,11 @@ type Outbound struct {
 	manager    adapter.OutboundManager
 	diagMu     sync.Mutex
 	job        DiagnosticJob
+	diagBusy   bool // retained until the actual snapshot/probe worker returns
 	diagCancel context.CancelFunc
 	diagEpoch  uint64
+	viewMu     sync.Mutex
+	views      reportSelections
 	// Local hard limit; tests may shorten it. Not a remotely configurable option.
 	diagnosticSnapshotTimeout time.Duration
 	notifyPending             atomic.Bool

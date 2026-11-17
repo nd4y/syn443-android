@@ -12,6 +12,7 @@ through ADB shell. It does not open a management port.
 | `diagnostic-bundle` | Redacted state, activation-check freshness, events, route totals and process counters; no peer names, profiles, config or credentials |
 | `routes-status`, `routes-check`, `routes-cancel` | Current results, request checks, or cancel; add `--route route-2` to check just one route |
 | `netbird-status`, `netbird-diagnose` | Overlay status or request diagnostics |
+| `netbird-view --section peers --page 1` | Select a read-only peer page; `--section diagnostics` selects result pages, page0..63 |
 | `vpn-start`, `vpn-stop`, `vpn-resume` | Submit a command to the durable VPN intent controller |
 | `config-plan`, `config-apply` | Validate and optionally write an unmanaged local config while the VPN is fully Off |
 
@@ -35,6 +36,7 @@ expose fault injection, login credentials, raw configuration export or
 managed policy overrides. Release opt-in, managed configuration editing,
 mode commands, route job IDs and server audit require separate work. Keep
 device output private.
+
 ## Offline archive candidate
 
 The existing `diagnostic-bundle` JSON operation remains. The candidate adds
@@ -46,3 +48,12 @@ never overwrites an existing path. Job IDs support polling and cancellation;
 short binary grants are not printed. See [scope and protocol](offline-support-bundle.md).
 The existing DEBUG shell UID restriction is unchanged; release opt-in remains
 a separate requirement. No archive is uploaded automatically.
+
+NetBird view selection returns `pending`, section, requested page and a fresh
+request ID. This is only command submission. A subsequent `netbird-status`
+must contain that ID in the corresponding section's `view.request` before its
+page can be treated as the response. The actual page may be clamped when the
+roster shrinks. The CLI does not start diagnostics or poll automatically.
+Reports show at most16 rows per section and retain at most1024; explicit
+omitted/unknown/partial coverage prevents a truncated roster from looking like
+a completed check of every peer. See [report bounds](netbird-report-views.md).

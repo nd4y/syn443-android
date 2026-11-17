@@ -5,12 +5,14 @@ import android.net.Uri
 import android.util.Base64
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /** UI calls stay off the main thread. Binary grants are never displayed or persisted. */
 internal object SupportBundleClient {
+    private val actualExport = AtomicBoolean()
     private val methods = setOf("bundle-collect", "bundle-status", "bundle-cancel", "bundle-open", "bundle-read")
     private val id = Regex("[a-f0-9]{32}")
     private val digest = Regex("[a-f0-9]{64}")
@@ -23,7 +25,14 @@ internal object SupportBundleClient {
         JSONObject(raw)
     }
 
-    suspend fun export(context: Context, bundleId: String, target: Uri, reviewedHash: String, reviewedBytes: Int) = withContext(Dispatchers.IO) {
+    // The structured block owns its actual I/O until it exits. Screen rotation
+    // or coroutine cancellation cannot refund a still-blocked document write.
+    internal suspend fun <T> withExportLease(block: suspend () -> T): T {
+        check(actualExport.compareAndSet(false, true)) { "bundle_export_busy" }
+        try { return block() } finally { actualExport.set(false) }
+    }
+
+    suspend fun export(context: Context, bundleId: String, target: Uri, reviewedHash: String, reviewedBytes: Int) = withExportLease { withContext(Dispatchers.IO) {
         require(id.matches(bundleId) && target.scheme == "content") { "invalid_bundle_export" }
         require(digest.matches(reviewedHash) && reviewedBytes in 1..524_288)
         val status = call(context, "bundle-status", bundleId)
@@ -61,7 +70,7 @@ internal object SupportBundleClient {
                 stream.flush()
             }
         } finally { bytes.fill(0) }
-    }
+    } }
 
     private fun number(value: JSONObject, key: String): Int = when (val number = value.opt(key)) {
         is Int -> number
