@@ -1,11 +1,26 @@
 # Implementation and acceptance snapshot
 
+The [durable adaptive admission candidate](durable-adaptive-budget.md) adds an
+owned counter checkpoint and asynchronous storage before dispatch. Process,
+service, network and force changes cannot erase its debt. Conservative reboot
+restoration uses BOOT_COUNT and relative ages, with no wall-clock forgiveness.
+Its source, Actions and phone acceptance remain separate. This is one adaptive
+start ledger, not the full common socket/byte/CPU governor or ARC-06 completion.
+
 The [bounded check-profile v2 component](route-check-profiles-v2.md) adds source
 support for all/any/quorum and sequential stages while preserving legacy checks,
 mandatory transport/exit gates and local proof/resource limits. Its Actions,
 integration and physical regression gates must be recorded separately. Normal
 enrollment still advertises the previous capability set; this source component
 does not activate a managed profile or close the full CHK-04 / AC58 requirement.
+
+Its exact Android source 5d5fc52577b4a9ac87bcec650b352515ff68d276 passed all eight
+jobs in [Actions 44062289165](https://github.com/nd4y/syn443-android/actions/runs/44062289165).
+Independent raw evidence confirms 509 JVM tests, 446 outcomes on each Android
+API 29/35/37, and 504 native bridge outcomes in each ordinary/race stream. The
+104 identity and four new policy classes meet the independent 90% coverage gate.
+Protected integration and physical acceptance are recorded separately; these
+source results do not activate an advanced capability on a real device.
 
 Snapshot: 2026-11-17. Specification0.9 contains292 requirements and98 acceptance
 scenarios. Those numbers describe scope, not completed work or test counts.
@@ -97,7 +112,7 @@ remain separate. Main shortcut visibility still uses the existing web grant;
 explicit separate-account login is available in initially collapsed account
 settings without promoting that device session into an admin role.
 
-Current v87 / `0.9.59-admin-discovery` is source-pending. It adds
+The historical v87 / `0.9.59-admin-discovery` candidate introduced
 [anonymous fixed-origin descriptor transport](admin-service-discovery.md),
 [installed-root and exact ordinary-projection Store refresh](admin-service-discovery-store.md)
 and explicit login fallback before administrative-key reservation. Eight new

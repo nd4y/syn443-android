@@ -189,11 +189,15 @@ class EngineHostService : Service() {
                 if(frame?.optString("kind")=="adaptive") {
                     val runtime=engine ?: return@post
                     val command=frame.optString("commandJson")
-                    if(command.length in 1..4096) {
-                        val accepted=runCatching {runtime.adaptiveCommand(command)}.getOrDefault(false)
-                        if(accepted && runCatching {org.json.JSONObject(command).optString("command")=="start"}.getOrDefault(false))
-                            adaptivePollUntil=SystemClock.elapsedRealtime()+31_000
+                    if(command.length !in 1..4096)return@post
+                    val parsed=runCatching {org.json.JSONObject(command)}.getOrNull() ?: return@post
+                    val start=parsed.opt("command") as? String=="start"
+                    if(start && !AdaptiveHandoff.allowed(frame,SystemClock.elapsedRealtime())) {
+                        AdaptiveHandoff.rejection(parsed)?.let {rejected->runCatching {callback?.routeState(session,rejected)}}
+                        return@post
                     }
+                    val accepted=runCatching {runtime.adaptiveCommand(command)}.getOrDefault(false)
+                    if(accepted && start)adaptivePollUntil=SystemClock.elapsedRealtime()+31_000
                     publishAdaptive(session,runtime)
                     return@post
                 }

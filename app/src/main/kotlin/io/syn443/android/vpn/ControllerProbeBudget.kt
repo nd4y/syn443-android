@@ -1,10 +1,14 @@
 package io.syn443.android.vpn
 
-import io.syn443.decision.AdaptiveProbeBudget
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
 
-/** RAM ownership for the process containing TunnelService. Native/service
- * recreation cannot replenish adaptive start admission. This is not durable
- * across controller-process death and does not gate other probe subsystems. */
+/** The controller process owns one lazy actor. Obtaining it performs no file or
+ * settings I/O on Main/Binder. Other probe subsystems are outside this budget. */
 internal object ControllerProbeBudget {
-    val adaptive=AdaptiveProbeBudget()
+    @Volatile private var admission:AdaptiveStartAdmission?=null
+    fun get(context:Context):AdaptiveStartAdmission=admission ?: synchronized(this) {
+        admission ?: DurableAdaptiveProbeBudget(context,Handler(Looper.getMainLooper())).also {admission=it}
+    }
 }

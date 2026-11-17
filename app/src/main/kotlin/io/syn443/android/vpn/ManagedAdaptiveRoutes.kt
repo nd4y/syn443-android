@@ -21,7 +21,7 @@ import java.util.UUID
 /** Handler-confined policy coordinator. A plan/score never authorizes packets;
  * only the actual native worker's one-use receipt can commit a path. */
 internal class ManagedAdaptiveRoutes private constructor(private val wire:AdaptiveRuntime,private val priorityTag:String,
-    private val budget:AdaptiveProbeBudget) {
+    private val budget:AdaptiveStartAdmission) {
     private data class CurrentFailure(val path:PlannedPath,val attempt:Long,val completedAt:Long,val nativeEpoch:Long,val nativeScope:String)
     private data class Group(var frontier:RouteFrontier?=null,var current:PlannedPath?=null,
         var measuredAt:Long=0,var latency:Long=0,var nextAt:Long=0,var exploreAt:Long=0,
@@ -31,6 +31,10 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private data class Pending(val request:String,val group:String,val path:PlannedPath,val attempt:Long,val startedAt:Long,
         val nativeEpoch:Long,val nativeScope:String,var action:String="probe",var latency:Long=0,var receipt:String="",var retries:Int=0,
          var recovery:CurrentFailure?=null,var checkPlan:JSONObject?=null)
+    private data class PendingAdmission(val request:String,val group:String,val path:PlannedPath,val attempt:Long,
+        val startedAt:Long,val context:Context,val scope:RouteScope?,val mode:NetworkMode,
+        val nativeEpoch:Long,val nativeScope:String,val leaseDeadlineElapsed:Long?,val explore:Boolean,
+        val isCurrent:()->Boolean,val handoff:(JSONObject,Long)->Boolean)
     private val groups=wire.graph.groupIDs().associateWith {Group()}
     private val order=groups.keys.sortedWith(compareBy<String>({wire.groupTags()[it]!=priorityTag},{it}))
     private var context:Context?=null
@@ -43,6 +47,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private var nativeRunning=false
     private var nativeReady=false
     private var pending:Pending?=null
+    private var pendingAdmission:PendingAdmission?=null
     private var attempt=0L
     private var groupCursor=0
     private val cpuYields=HashSet<String>()
@@ -88,7 +93,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         previousPolicyScope=if(sameEngine)policyScope else ""
         if(!sameEngine) {nativeEpoch=0;retireOwner=false}
         context=next;routeScope=scope;mode=networkMode;policyRevision=revision;policyScope=next.dependencyHash
-        memory=RouteHealthMemory(next);pending=null;nativeReady=false;nativeScope=""
+        memory=RouteHealthMemory(next);pending=null;pendingAdmission=null;nativeReady=false;nativeScope=""
         groupCursor=0;cpuYields.clear()
         groups.values.forEach {it.frontier=null;it.current=null;it.measuredAt=0;it.nextAt=0;it.improvement="";it.improvementPath=null;it.improvementCount=0;it.recheckFailed=false;it.failure=null;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false}
         groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
@@ -271,11 +276,31 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     }
     private fun key(group:String,path:PlannedPath)=PathHealthKey(path.id,checkNotNull(wire.graph.groupInfo(group)).intent,group)
     fun tick(now:Long,unmetered:Boolean,allowExplore:Boolean,dispatch:(String)->Unit) {
-        try {tickCurrent(now,unmetered,allowExplore,dispatch)} finally {publishSearch()}
+        tickGuarded(now,unmetered,allowExplore,{true},dispatch)
     }
-    private fun tickCurrent(now:Long,unmetered:Boolean,allowExplore:Boolean,dispatch:(String)->Unit) {
+    fun tickGuarded(now:Long,unmetered:Boolean,allowExplore:Boolean,isCurrent:()->Boolean,dispatch:(String)->Unit) {
+        // Existing virtual fixtures retain their two-field Unit dispatcher.
+        try {tickCurrent(now,unmetered,allowExplore,isCurrent) {command,_->
+            dispatch(JSONObject().put("kind","adaptive").put("commandJson",command.toString()).toString());true
+        }} finally {publishSearch()}
+    }
+    fun tickBudgeted(now:Long,unmetered:Boolean,allowExplore:Boolean,isCurrent:()->Boolean,
+        handoff:(String,Long)->Boolean) {
+        try {tickCurrent(now,unmetered,allowExplore,isCurrent) {command,latest->
+            handoff(AdaptiveHandoff.frame(command,latest),latest)
+        }} finally {publishSearch()}
+    }
+    private fun tickCurrent(now:Long,unmetered:Boolean,allowExplore:Boolean,isCurrent:()->Boolean,
+        handoff:(JSONObject,Long)->Boolean) {
         val current= context ?: return
         if(retireOwner || !advanceClock(now) || !nativeReady || nativeScope.isEmpty() || nativeRunning || pending!=null || now-lastCommandAt<1000)return
+        pendingAdmission?.let {
+            if(now-it.startedAt<=12_000)return
+            // A timed-out reservation cannot dispatch later. The storage owner
+            // still retains its real busy slot until its I/O actually exits.
+            pendingAdmission=null
+        }
+        if(!runCatching {isCurrent()}.getOrDefault(false))return
         if(!budget.canStart(now,routine=false)) {
             if(budget.invalidated())retireOwner=true
             order.forEach {markSearch(it,AdaptiveSearchState.BUDGET_WAIT)}
@@ -332,28 +357,89 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val health=checkNotNull(memory).view(current,key(groupID,candidate),now)
         if(health.readiness in setOf(PathReadiness.QUARANTINED,PathReadiness.HALF_OPEN,PathReadiness.CONFIG_CHANGE_REQUIRED)) {group.nextAt=now+1000;return}
         attempt++
-        if(health.readiness==PathReadiness.REVALIDATE && health.retryAtMs!=null && !checkNotNull(memory).beginRetry(current,key(groupID,candidate),attempt,now))return
         val request=UUID.randomUUID().toString()
-        if(!budget.start(now,routine)) {markSearch(groupID,AdaptiveSearchState.BUDGET_WAIT);return}
-        cpuYields.remove(groupID)
+        val admission=PendingAdmission(request,groupID,candidate,attempt,now,current,routeScope,mode,nativeEpoch,nativeScope,
+            boundPolicy?.leaseDeadlineElapsed,explore,isCurrent,handoff)
+        pendingAdmission=admission
+        markSearch(groupID,AdaptiveSearchState.BUDGET_WAIT)
+        val queued=try {budget.request(now,routine) {result->
+            try {admitted(admission,result)} finally {publishSearch()}
+        }} catch(_:Exception) {false}
+        if(!queued && pendingAdmission===admission)pendingAdmission=null
+    }
+    private fun admissionTime(work:PendingAdmission,result:AdaptiveStartAdmission.Result,after:Long):Long? {
+        val now=try {budget.currentTimeMs()}catch(_:Exception) {return null}
+        if(now !in after..Decision.MAX_TIME || now<work.startedAt || now-work.startedAt>12_000 || now>result.latestStartMs ||
+            result.latestStartMs-now>AdaptiveProbeBudget.MAX_HANDOFF_MS || !advanceClock(now))return null
+        if(boundPolicy?.let {now>=it.leaseDeadlineElapsed}==true) {retireOwner=true;return null}
+        if(work.leaseDeadlineElapsed?.let {now>=it}==true)return null
+        return now
+    }
+    private fun admitted(work:PendingAdmission,result:AdaptiveStartAdmission.Result) {
+        if(pendingAdmission!==work)return
+        pendingAdmission=null
+        if(!result.allowed || retireOwner || context!=work.context || routeScope!=work.scope || mode!=work.mode ||
+            !nativeReady || nativeRunning || nativeEpoch!=work.nativeEpoch || nativeScope!=work.nativeScope || pending!=null) return
+        // Refresh current authority before taking half-open ownership or
+        // creating native pending state, not only in the final Unit dispatch.
+        if(!runCatching {work.isCurrent()}.getOrDefault(false))return
+        // Policy guards may read or suspend. A pre-guard timestamp cannot
+        // authorize a later effect after the original handoff/lease expired.
+        val now=admissionTime(work,result,result.observedAtMs) ?: return
+        val group=groups.getValue(work.group)
+        val health=checkNotNull(memory).view(work.context,key(work.group,work.path),now)
+        if(health.readiness in setOf(PathReadiness.QUARANTINED,PathReadiness.HALF_OPEN,PathReadiness.CONFIG_CHANGE_REQUIRED))return
+        val command=frame("start").put("request",work.request).put("group",work.group).put("hops",JSONArray(work.path.hops))
+        val next=Pending(work.request,work.group,work.path,work.attempt,work.startedAt,work.nativeEpoch,work.nativeScope)
+        val latest=minOf(result.latestStartMs,work.startedAt+11_999,work.leaseDeadlineElapsed?.minus(1) ?: Decision.MAX_TIME)
+        val at=admissionTime(work,result,now) ?: return
+        if(at>latest)return
+        // Take retry ownership only after durable admission and local fences.
+        if(health.readiness==PathReadiness.REVALIDATE && health.retryAtMs!=null &&
+            !checkNotNull(memory).beginRetry(work.context,key(work.group,work.path),work.attempt,at))return
+        pending=next
+        val handedOff=try {work.handoff(command,latest)}catch(_:Exception) {false}
+        if(!handedOff) {
+            if(pending===next)pending=null
+            group.nextAt=at+5_000
+            markSearch(work.group,AdaptiveSearchState.BUDGET_WAIT)
+            return
+        }
+        cpuYields.remove(work.group)
         group.forceCheck=false
-        pending=Pending(request,groupID,candidate,attempt,now,nativeEpoch,nativeScope)
-        markSearch(groupID,AdaptiveSearchState.SEARCHING)
-        if(explore)group.exploreAt=now+300_000
-        send(frame("start").put("request",request).put("group",groupID).put("hops",JSONArray(candidate.hops)),now,dispatch)
+        lastCommandAt=at
+        markSearch(work.group,AdaptiveSearchState.SEARCHING)
+        if(work.explore)group.exploreAt=at+300_000
+    }
+    /** A closed host rejection proves only that this start was not passed to
+     * JNI. It never supplies a route measurement, selection or bad-proxy fact. */
+    fun rejectAdmission(rejection:AdaptiveHandoff.Rejection,now:Long) {
+        try {
+            val work=pending ?: return
+            if(work.action!="probe" || rejection.request!=work.request || rejection.nativeEpoch!=work.nativeEpoch ||
+                rejection.scope!=work.nativeScope || nativeEpoch!=work.nativeEpoch || nativeScope!=work.nativeScope ||
+                now<work.startedAt || !advanceClock(now))return
+            pending=null
+            groups.getValue(work.group).nextAt=now+5_000
+            markSearch(work.group,AdaptiveSearchState.BUDGET_WAIT)
+            // An already acquired retry keeps its existing bounded 15s fence;
+            // local cancellation must not erase its cooldown or invent failure.
+        } finally {publishSearch()}
     }
     fun force() {groups.values.forEach {it.nextAt=0;it.forceCheck=it.current!=null}}
     fun requiresRetirement()=retireOwner
     override fun toString()="ManagedAdaptiveRoutes([redacted])"
     companion object {
         private val checkedFailures=setOf("dial_failed","check_timeout","tls_failed","ssh_banner_mismatch","request_failed","response_failed","exit_evidence_invalid","http_response_mismatch")
-        fun read(raw:String?,budget:AdaptiveProbeBudget=AdaptiveProbeBudget()):ManagedAdaptiveRoutes? {
+        fun read(raw:String?,budget:AdaptiveProbeBudget=AdaptiveProbeBudget()):ManagedAdaptiveRoutes? =
+            read(raw) {ImmediateAdaptiveStartAdmission(budget)}
+        fun read(raw:String?,admission:()->AdaptiveStartAdmission):ManagedAdaptiveRoutes? {
             if(raw==null)return null
             val root=Decision.json.parseToJsonElement(raw).jsonObject
             val adaptive=root["adaptive_routes"] ?: return null
             val wire=AdaptiveRuntime.decode(checkNotNull(protectedAdaptiveWire(raw)))
             val tag=runCatching {JSONObject(raw).getJSONObject("route").getString("final")}.getOrDefault("")
-            return ManagedAdaptiveRoutes(wire,tag,budget)
+            return ManagedAdaptiveRoutes(wire,tag,admission())
         }
     }
 }

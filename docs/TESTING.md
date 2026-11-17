@@ -369,3 +369,28 @@ The new capability remains unadvertised by normal enrollment until coordinated
 rollout. Source, CI, protected-main, installed-APK and real managed-profile gates
 are distinct. No composition fixture closes parallel/conditional/fallback plans,
 physical managed chains, LTE, battery, natural Doze or endurance acceptance.
+
+Exact Android source 5d5fc52577b4a9ac87bcec650b352515ff68d276 passed all eight
+jobs in [Actions 44062289165](https://github.com/nd4y/syn443-android/actions/runs/44062289165).
+Raw acceptance confirms 509 JVM outcomes (337 identity and 42 policy), 446 unique
+outcomes per Android API 29/35/37 and 504 bridge tests in each ordinary/race
+stream, including all 128 new profile outcomes and retained 53/31 gates. All
+104 identity and four policy classes meet 90%. This is a source checkpoint;
+its resulting-main and phone gates remain independent evidence.
+
+## Durable adaptive admission candidate
+
+The [counter-store design](durable-adaptive-budget.md) retains the existing hard
+limits and adds seven exact JVM checkpoint roots and ten exact Android store
+roots. They cover real isolated AtomicFile/sync/readback failures, ownership,
+process/boot restoration, delayed delivery and an actual still-busy worker.
+Eight asynchronous coordinator cases separately exercise stale context,
+authority, lease and native ownership before any command or half-open retry is
+created, plus strict host handoff and rejection framing. The per-API floor is
+464 unique outcomes; the seven new checkpoint JVM roots raise the decision
+floor from 8 to 15. The expected aggregate JVM count is 516. Exact required
+names and complete source inventories are enforced, not inferred from a total.
+Four budget/checkpoint classes join the independent 90% decision coverage gate;
+existing identity, policy, RouteGraph, ordinary/race and lifecycle gates remain.
+These are required source tests until exact-head Actions executes them. They
+do not establish a common application-wide energy governor or battery results.

@@ -100,14 +100,29 @@ class TunnelService : VpnService() {
     private fun adaptiveTick(force:Boolean=false) {
         val routes=adaptiveRoutes ?: return
         val scope=routeScope() ?: return
+        val session=token ?: return
         val policy=adaptivePolicy() ?: return
         val mode=adaptiveMode() ?: return
         routes.bind(scope,mode,policy,SystemClock.elapsedRealtime())
         if(force)routes.force()
         val power=getSystemService(android.os.PowerManager::class.java)
         val battery=getSystemService(android.os.BatteryManager::class.java).getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        routes.tick(SystemClock.elapsedRealtime(),probeContext?.network?.metered==false,!power.isPowerSaveMode && battery in 25..100) {command->
-            token?.let {session->runCatching {host?.checkRoutes(session,command)}}
+        val current={
+            runCatching {
+                !destroyed && !retiring && ready && adaptiveRoutes===routes && token==session &&
+                    routeScope()==scope && adaptiveMode()==mode && Recovery.current(store.checkpoint(),scope.intent) &&
+                    (adaptivePolicy()?.let {fresh->fresh.boot==policy.boot && fresh.contentHash==policy.contentHash &&
+                        fresh.semanticAuthority==policy.semanticAuthority && fresh.revision>=policy.revision}==true)
+            }.getOrDefault(false)
+        }
+        routes.tickBudgeted(SystemClock.elapsedRealtime(),probeContext?.network?.metered==false,
+            !power.isPowerSaveMode && battery in 25..100,current) {command,latest->
+            // Storage admission can finish after this callback's service,
+            // policy, network or native owner has been replaced. Never borrow
+            // a later token to dispatch an old coordinator's command.
+            val runtime=host
+            if(current() && SystemClock.elapsedRealtime() in 0L..latest && runtime!=null)
+                runCatching {runtime.checkRoutes(session,command)}.isSuccess else false
         }
         if(routes.requiresRetirement())retire(true)
     }
@@ -435,7 +450,7 @@ class TunnelService : VpnService() {
             stableSince = 0; successes = 0; lastProbe = 0
             boundGeneration = cp.generation
             LoginController.get(this).overlayStarting(checkNotNull(token),runningConfigHash)
-            adaptiveRoutes=ManagedAdaptiveRoutes.read(raw,ControllerProbeBudget.adaptive)
+            adaptiveRoutes=ManagedAdaptiveRoutes.read(raw) {ControllerProbeBudget.get(this)}
             val routeSelection = adaptiveRoutes?.let {routes->
                 val policy=checkNotNull(adaptivePolicy())
                 routes.bind(checkNotNull(routeScope()),checkNotNull(adaptiveMode()),policy,SystemClock.elapsedRealtime())
@@ -490,7 +505,20 @@ class TunnelService : VpnService() {
         override fun routeState(session:String,raw:String) {handler.post {
             if(session!=token || retiring || !ready || !Recovery.current(store.checkpoint(),boundGeneration))return@post
             val scope=routeScope() ?: return@post
-            val adaptive=runCatching {org.json.JSONObject(raw).optJSONObject("adaptive")}.getOrNull()
+            val parsed=runCatching {org.json.JSONObject(raw)}.getOrNull()
+            val rejected=parsed?.let {AdaptiveHandoff.parseRejection(it)}
+            if(rejected!=null) {
+                val policy=adaptivePolicy() ?: return@post
+                val mode=adaptiveMode() ?: return@post
+                RouteSnapshot.owner(scope)
+                adaptiveRoutes?.let {routes->
+                    routes.bind(scope,mode,policy,SystemClock.elapsedRealtime())
+                    routes.rejectAdmission(rejected,SystemClock.elapsedRealtime())
+                    adaptiveTick()
+                }
+                return@post
+            }
+            val adaptive=parsed?.optJSONObject("adaptive")
             if(adaptive!=null) {
                 val policy=adaptivePolicy() ?: return@post
                 val mode=adaptiveMode() ?: return@post
