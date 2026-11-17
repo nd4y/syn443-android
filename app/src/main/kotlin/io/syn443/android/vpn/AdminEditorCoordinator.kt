@@ -12,9 +12,9 @@ import java.util.Collections
  * conservative: cancellation/unknown replies never make them safe to replace. */
 internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorStore,
     private val boot:()->Int,private val elapsed:()->Long) {
-    enum class Kind { OPEN, SAVE_LOCAL, SAVE_DRAFT, PREVIEW, PUBLISH, POLL, RETRY_EXACT, COMPARE, REBASE, CLOSE }
+    enum class Kind { OPEN, SAVE_LOCAL, SAVE_DRAFT, PREVIEW, PUBLISH, POLL, RETRY_EXACT, CHECK_OUTCOME, SEAL_PENDING, COMPARE, REBASE, CLOSE }
     class Command(val kind:Kind,val device:String="",val binding:String="",val localRevision:Long=0,
-        pages:List<String> = emptyList(),val reviewBinding:String="",val reviewDeadline:Long=0,val comparisonBinding:String="") {
+        pages:List<String> = emptyList(),val reviewBinding:String="",val reviewDeadline:Long=0,val comparisonBinding:String="",val operationBinding:String="") {
         val pages:List<String> = Collections.unmodifiableList(ArrayList(pages))
         override fun toString()="AdminEditorCommand([redacted])"
     }
@@ -27,6 +27,8 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
     interface Access {
         fun ownership():AdminLayerOwnership
         fun action(request:AdminLayerRequest):AdminLayerReply
+        fun configurationRequestVersion():Int=1
+        fun reconcile(request:AdminOperationRequest):AdminOperationReceipt=throw AdminException(AdminFailure.TRANSPORT)
         fun reviewDeadline(preview:AdminLayerPreview):Long
         fun check()
     }
@@ -54,6 +56,8 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
     private var reviewDocument=""
     private var recipients=emptyList<String>()
     private var diffs=emptyList<String>()
+    private var operationOutcome=""
+    private var sealBinding=""
     private class ComparisonCache(val comparison:AdminLayerComparison?,val diff:AdminLayerDiff?,val current:AdminLayerInventory,val currentFacts:String,val baseRevision:Long,
         val saved:Long,val localRevision:Long,val document:String,val proposalHash:String,val service:String,val actor:String,val origin:String,
         val boot:Int,val sessionUntil:Long,val binding:String,val readOnly:Boolean,val review:String="",val reviewDeadline:Long=0)
@@ -67,7 +71,8 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
     private fun fail(code:String):Nothing=throw Failure(code)
     private fun clearReview() {preview=null;reviewBinding="";reviewDeadline=0;reviewBoot=-1;reviewDocument="";recipients=emptyList();diffs=emptyList()}
     private fun clearComparison() {comparisonCache=null;preparedDiff=null}
-    private fun clearRam() {record=null;base=null;head=null;savedRevision=null;dirty=true;publishedRevision=0;activeOperation=null;clearReview();clearComparison();ownedService="";ownedActor="";ownedOrigin="";ownedBoot=-1;ownedSessionUntil=-1;lastElapsed=-1}
+    private fun clearOutcome() {operationOutcome="";sealBinding=""}
+    private fun clearRam() {record=null;base=null;head=null;savedRevision=null;dirty=true;publishedRevision=0;activeOperation=null;clearReview();clearComparison();clearOutcome();ownedService="";ownedActor="";ownedOrigin="";ownedBoot=-1;ownedSessionUntil=-1;lastElapsed=-1}
     private fun admitted(access:Access):AdminLayerOwnership {
         access.check();val owned=access.ownership();access.check()
         val now=elapsed()
@@ -76,13 +81,18 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
         if(ownedService.isNotEmpty() && (owned.serviceHash!=ownedService || owned.actor!=ownedActor || owned.apiOrigin!=ownedOrigin || owned.bootCount!=ownedBoot)) {
             clearRam();fail("REAUTHENTICATE")
         }
-        if(ownedSessionUntil>=0 && ownedSessionUntil!=owned.sessionUntilElapsedMs){clearReview();clearComparison();activeOperation=null}
+        if(ownedSessionUntil>=0 && ownedSessionUntil!=owned.sessionUntilElapsedMs){clearReview();clearComparison();clearOutcome();activeOperation=null}
         ownedSessionUntil=owned.sessionUntilElapsedMs
         ownedService=owned.serviceHash;ownedActor=owned.actor;ownedOrigin=owned.apiOrigin;ownedBoot=owned.bootCount;lastElapsed=now
         return owned
     }
     private fun remote(request:AdminLayerRequest,access:Access):AdminLayerReply {
         admitted(access);val reply=access.action(request);admitted(access);return reply
+    }
+    private fun mutationVersion(access:Access):Int {
+        admitted(access);val version=access.configurationRequestVersion();admitted(access)
+        if(version !in 1..2)fail("INVALID_REPLY")
+        return version
     }
     private fun text():String {
         val bytes=record?.proposal ?:return ""
@@ -134,7 +144,7 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
         clearReview();clearComparison();activeOperation=null;publishedRevision=0
         val owned=admitted(access)
         record=null;base=null;head=null;savedRevision=null;dirty=true
-        val recovered=try {store.recoverOwned(owned.serviceHash,owned.actor)}catch(e:AdminEditorStorageException) {
+        val recovered=try {store.recoverOwned(owned.serviceHash,owned.actor,owned.legacyServiceHash)}catch(e:AdminEditorStorageException) {
             // A foreign owner is opaque. Only explicit create below may ask the
             // Store to consume a closed tombstone; active records remain intact.
             if(e.reason!=AdminEditorStorageFailure.OWNER_MISMATCH)throw e
@@ -185,6 +195,7 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
         return result
     }
     private fun pending(request:AdminLayerRequest,access:Access) {
+        clearOutcome()
         comparisonCache=null
         if(request.action!=AdminLayerAction.PREVIEW)preparedDiff=null
         val r=checkNotNull(record);val body=request.bodyBytes();val replay=AdminLayerControl.replayContext(request,ownedActor,ownedOrigin)
@@ -210,6 +221,59 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
     private fun resolve(proposal:String,access:Access) {
         val r=checkNotNull(record);val p=r.pending ?:fail("UNAVAILABLE");val bytes=proposal.toByteArray(Charsets.UTF_8)
         try {admitted(access);record=store.resolve(r,p.requestId,p.bodySha256,bytes);admitted(access);activeOperation=null}finally {bytes.fill(0)}
+    }
+    private fun operationBinding():String {
+        val r=record ?:return "";val p=r.pending ?:return ""
+        return Identity.hash(("syn443.admin-editor.operation.v1\u0000"+documentBinding()+"\u0000"+p.action+"\u0000"+p.requestId+"\u0000"+
+            p.bodySha256+"\u0000"+ownedService+"\u0000"+ownedActor+"\u0000"+ownedOrigin+"\u0000"+ownedBoot+"\u0000"+ownedSessionUntil).toByteArray(Charsets.UTF_8))
+    }
+    private fun readCurrentAfterAcknowledgement(access:Access) {
+        clearReview();clearComparison();activeOperation=null;sealBinding="";dirty=true;savedRevision=null;base=null;head=null
+        val r=checkNotNull(record)
+        head=currentInventory(r.owner.deviceId,access);loadSavedRevision(access)
+        val candidate=proposal();val original=capturedBase(candidate,access)
+        phase=if(head?.let {it.revision!=original.revision || it.hash!=original.hash}==true)AdminEditorPhase.CONFLICT else AdminEditorPhase.LOCAL_DIRTY
+        error=if(phase==AdminEditorPhase.CONFLICT)"CONFIGURATION_CONFLICT" else "REVIEW_REQUIRED"
+    }
+    private fun checkOutcome(command:Command,seal:Boolean,access:Access) {
+        val captured=checkNotNull(record);val p=captured.pending ?:fail("UNAVAILABLE")
+        admitted(access)
+        val binding=operationBinding()
+        if(command.operationBinding!=binding || binding.isEmpty())fail("CONFLICT")
+        if(seal && (sealBinding!=binding || operationOutcome!="UNKNOWN"))fail("OUTCOME_CHECK_REQUIRED")
+        sameStoredRecord(captured,access)
+        val restored=restore(access)
+        val request=AdminOperationReconcile.request(restored,ownedActor,ownedOrigin,Identity.random(),
+            if(seal)AdminOperationIntent.SEAL_IF_ABSENT else AdminOperationIntent.LOOKUP)
+        if(seal && request.originalVersion!=2)fail("OUTCOME_CHECK_REQUIRED")
+        clearReview();clearComparison();sealBinding=""
+        val reply=access.reconcile(request);val owned=admitted(access)
+        sameStoredRecord(captured,access)
+        if(record!=captured || operationBinding()!=binding || reply.requestId!=p.requestId || reply.bodyHash!=p.bodySha256)fail("CONFLICT")
+        // Every historical poll from this point keeps the replay-only context,
+        // even when this process still remembers the original fresh request.
+        activeOperation=request.original
+        operationOutcome=reply.outcome.name
+        when(reply.outcome) {
+            AdminOperationOutcome.UNKNOWN->{
+                phase=AdminEditorPhase.UNCERTAIN;error="OUTCOME_UNKNOWN"
+                if(request.originalVersion==2)sealBinding=binding
+            }
+            AdminOperationOutcome.NO_EFFECT->{resolve(text(),access);readCurrentAfterAcknowledgement(access)}
+            AdminOperationOutcome.RECORDED_RESULT_UNAVAILABLE->{phase=AdminEditorPhase.UNCERTAIN;error="RESULT_UNAVAILABLE"}
+            AdminOperationOutcome.RECORDED->{
+                val job=reply.job
+                when {
+                    job==null->{resolve(text(),access);readCurrentAfterAcknowledgement(access)}
+                    job.state==AdminOperationJobState.LEGACY_APPLIED->{phase=AdminEditorPhase.UNCERTAIN;error="RESULT_UNAVAILABLE"}
+                    job.state in setOf(AdminOperationJobState.QUEUED,AdminOperationJobState.RUNNING)->{phase=AdminEditorPhase.UNCERTAIN;error="BUSY"}
+                    else->{val historical=AdminOperationReconcile.historicalJob(request,reply,owned.time) ?:fail("INVALID_REPLY")
+                        admitted(access);sameStoredRecord(captured,access);result(historical,access)
+                        if(phase!=AdminEditorPhase.PUBLISHED){dirty=true;savedRevision=null}
+                    }
+                }
+            }
+        }
     }
     private fun result(reply:AdminLayerReply,access:Access) {
         when(reply) {
@@ -243,7 +307,7 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
                 "rejected","expired","cancelled"->{
                     resolve(text(),access);clearReview();clearComparison()
                     phase=if(reply.error=="configuration_conflict")AdminEditorPhase.CONFLICT else AdminEditorPhase.LOCAL_DIRTY
-                    error=when(reply.error){"configuration_conflict"->"CONFIGURATION_CONFLICT";"configuration_denied"->"ACCESS_DENIED";""->"REVIEW_REQUIRED";else->"INVALID_REPLY"}
+                    error=when(reply.error){"configuration_conflict"->"CONFIGURATION_CONFLICT";"configuration_denied"->"ACCESS_DENIED";"deadline_or_retry_limit"->"REVIEW_EXPIRED";""->"REVIEW_REQUIRED";else->"INVALID_REPLY"}
                 }
                 else->fail("INVALID_REPLY")
             }
@@ -415,7 +479,8 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
             admitted(access)
             if(command.kind==Kind.OPEN)open(command,access) else {
                 val r=selected(command)
-                if(command.kind !in setOf(Kind.POLL,Kind.RETRY_EXACT) && r.pending!=null)fail("PENDING")
+                if(command.kind !in setOf(Kind.POLL,Kind.RETRY_EXACT,Kind.CHECK_OUTCOME,Kind.SEAL_PENDING) && r.pending!=null)fail("PENDING")
+                if(command.kind !in setOf(Kind.CHECK_OUTCOME,Kind.SEAL_PENDING))clearOutcome()
                 when(command.kind) {
                     Kind.OPEN->Unit
                     Kind.SAVE_LOCAL->{
@@ -424,22 +489,28 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
                         try {require(bytes.size<=AdminEditorStore.MAX_TEXT);clearReview();clearComparison();record=store.edit(r,bytes);admitted(access)}finally {bytes.fill(0)}
                         dirty=true;phase=AdminEditorPhase.LOCAL_DIRTY
                     }
-                    Kind.SAVE_DRAFT->{clearReview();clearComparison();val candidate=prepared(access,true);val request=AdminLayerControl.saveDraft(checkNotNull(savedRevision),candidate,Identity.random());pending(request,access);result(remote(request,access),access)}
+                    Kind.SAVE_DRAFT->{clearReview();clearComparison();val candidate=prepared(access,true);val version=mutationVersion(access);val request=AdminLayerControl.saveDraft(checkNotNull(savedRevision),candidate,Identity.random(),version);pending(request,access);result(remote(request,access),access)}
                     Kind.PREVIEW->{
                         clearReview();clearComparison();val candidate=prepared(access,false)
                         val captured=capturedBase(candidate,access)
                         preparedDiff=PreparedDiff(AdminLayerComparison.diffPreparedDeviceDraft(captured,candidate),proposalHash(),captured,checkNotNull(savedRevision))
-                        val request=AdminLayerControl.preview(candidate,ownedActor,ownedOrigin,Identity.random());pending(request,access);result(remote(request,access),access)
+                        val version=mutationVersion(access)
+                        val request=AdminLayerControl.preview(candidate,ownedActor,ownedOrigin,Identity.random(),version);pending(request,access);result(remote(request,access),access)
                     }
                     Kind.PUBLISH->{
-                        val checked=preview ?:fail("REVIEW_EXPIRED");val owned=admitted(access)
+                        val checked=preview ?:fail("REVIEW_EXPIRED");admitted(access)
                         if(phase!=AdminEditorPhase.REVIEW || command.reviewBinding!=reviewBinding || command.reviewDeadline!=reviewDeadline || reviewDocument!=documentBinding() ||
                             boot()!=reviewBoot || elapsed()>=reviewDeadline || elapsed()<lastElapsed)fail("REVIEW_EXPIRED")
-                        val request=AdminLayerControl.publish(checked,owned.actor,owned.apiOrigin,Identity.random(),owned.time)
+                        val version=mutationVersion(access);val owned=admitted(access)
+                        if(preview!==checked || phase!=AdminEditorPhase.REVIEW || command.reviewBinding!=reviewBinding || command.reviewDeadline!=reviewDeadline ||
+                            reviewDocument!=documentBinding() || boot()!=reviewBoot || elapsed()>=reviewDeadline || elapsed()<lastElapsed)fail("REVIEW_EXPIRED")
+                        val request=AdminLayerControl.publish(checked,owned.actor,owned.apiOrigin,Identity.random(),owned.time,version)
                         clearReview();pending(request,access);result(remote(request,access),access)
                     }
                     Kind.POLL->{val operation=restore(access);if(operation.action !in setOf(AdminLayerAction.PREVIEW,AdminLayerAction.PUBLISH))fail("NO_JOB");result(remote(AdminLayerControl.poll(operation,Identity.random()),access),access)}
                     Kind.RETRY_EXACT->{val operation=restore(access);clearReview();result(remote(operation,access),access)}
+                    Kind.CHECK_OUTCOME->checkOutcome(command,false,access)
+                    Kind.SEAL_PENDING->checkOutcome(command,true,access)
                     Kind.COMPARE->fail("COMPARISON_REQUIRED")
                     Kind.REBASE->rebase(command,access)
                     Kind.CLOSE->{clearReview();record=store.close(r);admitted(access);clearRam();phase=AdminEditorPhase.INVENTORY}
@@ -455,7 +526,7 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
                 else->"INVALID_PROPOSAL"
             }
             error=code
-            if(code in setOf("REAUTHENTICATE","SESSION_EXPIRED","CANCELLED")){activeOperation=null;clearComparison()}
+            if(code in setOf("REAUTHENTICATE","SESSION_EXPIRED","CANCELLED")){activeOperation=null;clearComparison();clearOutcome()}
             if(e is AdminEditorStorageException && e.reason==AdminEditorStorageFailure.OWNER_MISMATCH)clearRam()
             phase=when {
                 code in setOf("REAUTHENTICATE","SESSION_EXPIRED","CANCELLED")->AdminEditorPhase.NEEDS_REAUTH
@@ -490,6 +561,8 @@ internal class AdminEditorCoordinator(private val storeFactory:()->AdminEditorSt
             readOnly=phase in setOf(AdminEditorPhase.PUBLISHED,AdminEditorPhase.LIMITED,AdminEditorPhase.UNAVAILABLE),
             unassigned=head?.revision==0L,documentBinding=documentBinding(),pages=if(current!=null && showBody)pages(body) else emptyList(),parents=parents,
             reviewBinding=reviewBinding,reviewDeadlineElapsed=reviewDeadline,recipients=recipients,diffSummaries=diffs,error=error,
-            comparisonBinding=if(showBody)comparisonCache?.binding?:"" else "")
+            comparisonBinding=if(showBody)comparisonCache?.binding?:"" else "",
+            operationBinding=if(showBody)operationBinding() else "",operationOutcome=if(showBody)operationOutcome else "",
+            canSeal=showBody && sealBinding.isNotEmpty() && sealBinding==operationBinding() && operationOutcome=="UNKNOWN" && phase==AdminEditorPhase.UNCERTAIN)
     }
 }

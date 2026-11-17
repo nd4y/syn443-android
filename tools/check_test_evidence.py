@@ -7,7 +7,7 @@ if mode=="jvm":
     minimum=8
 elif mode=="emulator":
     paths=list((root/"app/build/outputs/androidTest-results").rglob("TEST-*.xml"))
-    minimum=398
+    minimum=427
 elif mode=="host":
     paths=list((root/"core/host-lifecycle/build/test-results/test").glob("TEST-*.xml"))
     minimum=11
@@ -25,7 +25,7 @@ elif mode=="health":
     minimum=23
 elif mode=="identity":
     paths=list((root/"core/identity/build/test-results/test").glob("TEST-*.xml"))
-    minimum=200
+    minimum=246
     from coverage_evidence import IDENTITY_CLASSES, verify_classes
     verify_classes(root/"core/identity/build/reports/jacoco/test/jacocoTestReport.xml", IDENTITY_CLASSES)
 else: raise SystemExit("unknown evidence type")
@@ -623,3 +623,88 @@ ADMIN_LAYER_COMPARISON_REQUIRED = {
 }
 if mode in ADMIN_LAYER_COMPARISON_REQUIRED:
     assert set(ADMIN_LAYER_COMPARISON_REQUIRED[mode]) <= set(identities), "Missing layered comparison, explicit local rebase or original preview lifetime outcomes"
+
+# Operation receipts are body-bound historical observations, never renewed authority.
+ADMIN_OPERATION_RECONCILE_REQUIRED = {
+    'identity': [
+        ('io.syn443.identity.AdminOperationReconcileTest', 'explicitMutationVersionTwoKeepsEveryDefaultVersionOneByteAndReadBuilderUnchanged'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'versionTwoRestoreAndWrapperPreserveExactBodyContextIdAndReplayOnlyOwnership'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'reconciliationOnlyAcceptsClosedGoStyleOrderingWithoutRelaxingDurableRestoreOrRawHashes'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'versionTwoNeverPromotesReadActionsPollsOrChangedPersistedVersionOneBodies'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'requestCopiesBothBodiesKeepsOnlyFixedRouteAndRejectsForeignExistingScopeOrNoncanonicalActor'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'draftSaveAndDiscardRecordedReceiptsBindExactEffectReferencesWithoutReturningProposal'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'jobReceiptsPreserveOpaqueCurrentAndLegacyStatesAndActualFiniteWorkerErrors'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'versionOneAbsenceRemainsUnknownAndOnlyVersionTwoMayReportAtomicNoEffect'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'prunedResultsKeepRecordedReferencesAndCannotSupplyAJobOrNoEffectShortcut'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'closedReplyRejectsForeignActorActionRequestBodyHashTargetAndEffectSubstitution'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'outcomeAndJobShapesCannotInventReferencesOrHideMissingRecordedJobs'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'receiptIntegersAndObservationBoundsAreExactWithoutRenewingHistoricalSessionTime'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'duplicateCaseUnknownNullMalformedUnicodeAndUnsafeResultNumbersFailClosed'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'htmlEscapedResultExpansionHasScopedFrameRawAndMinimalRepresentationBounds'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'reconciliationFrameOneMiBAndExistingLayerHalfMiBCapsRemainIndependent'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'exactOriginal262KiBBoundProducesBoundedCanonicalOuterBodyWithoutChangingVersion'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'resultTreesKeepObjectArrayAndDepthBoundsBeforeReturningOpaqueRawValues'),
+        ('io.syn443.identity.AdminOperationReconcileTest', 'retainedSignedPreviewResultNeverMintsAFreshPreviewOrPublicationAfterReconciliation'),
+        ('io.syn443.identity.AdminOperationProtocolTest', 'reconciliationSignsOnlyFixedUriTokenOuterBytesAndExactOwnedOriginal'),
+        ('io.syn443.identity.AdminOperationProtocolTest', 'fullOriginalUsesScopedCanonicalProofBoundsWithoutChangingOrdinaryIdentityLimits'),
+        ('io.syn443.identity.AdminOperationProtocolTest', 'httpDenialsAndNonceChallengesNeverRetryDispatchOrManufactureAnOperationReceipt'),
+        ('io.syn443.identity.AdminOperationProtocolTest', 'changedSignedSourceRootAndAccountDuringSigningOrReplyCannotPublishAReceiptOrClock'),
+        ('io.syn443.identity.AdminOperationProtocolTest', 'bootClockAndCancellationFenceSigningDispatchAndCompletedReplies'),
+        ('io.syn443.identity.AdminOperationProtocolTest', 'malformedForeignAndUnboundRepliesNeverMintNoEffectOrAdvanceAcceptedTime'),
+        ('io.syn443.identity.AdminOperationProtocolTest', 'largeEscapedJobRemainsMetadataAndCannotRenewPreviewActivationOrOrdinaryTransportLimits'),
+        ('io.syn443.identity.AdminOperationHttpTest', 'fixedReconcileTlsUsesCapturedRouteAndExactScopedRequestAndReplyBounds'),
+        ('io.syn443.identity.AdminOperationHttpTest', 'reconcileTlsRejectsOversizeOriginAndAmbiguousFramingWithoutFallbackDispatch'),
+        ('io.syn443.identity.AdminOperationHttpTest', 'cancelledOrInvalidatedTlsReadsRetainActualWorkerOwnershipUntilExit'),
+        ('io.syn443.identity.AdminOperationVersionTest', 'protocolVersionReadUsesOnlyCurrentSignedControlOriginAndVerifiableOneShotProof'),
+        ('io.syn443.identity.AdminOperationVersionTest', 'closedVersionReplyRejectsNumbersShapeUtf8AndHeadersWithoutPublishingRejectedClock'),
+        ('io.syn443.identity.AdminOperationVersionTest', 'onlyExplicitOldUnsupportedRoutesReturnOneWithoutAuthorityOrClockPromotion'),
+        ('io.syn443.identity.AdminOperationVersionTest', 'deniedMfaQuotaTransientMalformedAndNonceRepliesNeverFallbackOrRetry'),
+        ('io.syn443.identity.AdminOperationVersionTest', 'sourceRootAccountBootClockAndCancellationFenceBothSidesOfSingleDispatch'),
+        ('io.syn443.identity.AdminOperationVersionTest', 'eachNewMutationReadsAgainWithoutCachingOrRewritingAnyStoredVersionOneOperation'),
+        ('io.syn443.identity.AdminOperationGoConformanceTest', 'generatedGoCorpusIsRequiredBoundedOwnedAndPinnedToAcceptedSource'),
+        ('io.syn443.identity.AdminOperationGoConformanceTest', 'allEightGoOriginalsRetainExactBytesHashesVersionsAndDerivedJobIds'),
+        ('io.syn443.identity.AdminOperationGoConformanceTest', 'bothGoReconcileFramesCarryOnlyTheSameOwnedOriginalBytes'),
+        ('io.syn443.identity.AdminOperationGoConformanceTest', 'allThirtySixActualGoOutcomesParseWithoutManufacturingLegacyAbsenceOrEffects'),
+        ('io.syn443.identity.AdminOperationGoConformanceTest', 'actualGoPreviewSignaturesVerifyAgainstOnlyTheirEphemeralPublicSpki'),
+        ('io.syn443.identity.AdminOperationGoConformanceTest', 'retainedGoPreviewAndPublicationMetadataCannotPromoteRestoredAuthority'),
+        ('io.syn443.identity.AdminEditorAuthorityTest', 'signedLeaseAndFloorUpdatesKeepEditorOwnerWhileInvalidatingOldLiveSessions'),
+        ('io.syn443.identity.AdminEditorAuthorityTest', 'stableEditorAuthorityBindsServiceAnchorOrdinaryProjectionAndCompleteAdminTuple'),
+        ('io.syn443.identity.AdminEditorAuthorityTest', 'editorAuthorityDoesNotAlterTheExistingFullDiscoveryOrOauthAuthorityFormula'),
+        ('io.syn443.identity.AdminEditorAuthorityTest', 'editorDigestDefaultsAreCompatibleButMalformedStableOrLegacyValuesFailClosed'),
+        ('io.syn443.identity.AdminEditorAuthorityTest', 'freshVerifiedAccountsRemainSeparateEvenWhenTheyShareStableServiceAuthority'),
+        ('io.syn443.identity.AdminEditorAuthorityTest', 'stableEditorValuesCannotAuthorizeCancelledRemovedOrLoggedOutCredentials'),
+    ],
+    'emulator': [
+        ('io.syn443.android.AdminPublishDispatchDeadlineTest', 'currentReviewDispatchesOnlyAfterActualEncryptedPendingAndRetainsOrdinaryOwner'),
+        ('io.syn443.android.AdminPublishDispatchDeadlineTest', 'originalReviewExpiryAtAdmissionAndBootChangeCannotDispatchFreshPublication'),
+        ('io.syn443.android.AdminPublishDispatchDeadlineTest', 'reviewDeadlineAfterActualJournalCommitKeepsExactPendingAndRejectsLateHttpWithoutPolling'),
+        ('io.syn443.android.AdminOperationCoordinatorTest', 'unknownVersionTwoKeepsExactEncryptedDebtAndOnlyMatchingLookupArmsExplicitSeal'),
+        ('io.syn443.android.AdminOperationCoordinatorTest', 'explicitVersionTwoNoEffectClearsOnlyMatchingDebtThenReadsCurrentHeadAndCompleteDraftState'),
+        ('io.syn443.android.AdminOperationCoordinatorTest', 'versionOneUnknownNeverAdvertisesOrSendsSealAndCannotAcceptNoEffect'),
+        ('io.syn443.android.AdminOperationCoordinatorTest', 'recordedDraftAcknowledgementPreservesLocalTextAndRequiresFreshHeadDraftReadbackIncludingConflict'),
+        ('io.syn443.android.AdminOperationCoordinatorTest', 'recordedQueuedAndRunningRemainExactPendingWithoutAutomaticPollRetryOrPreview'),
+        ('io.syn443.android.AdminOperationCoordinatorTest', 'historicalReadyAndLaterPollCannotMintReviewAndRequireExplicitNewPreviewBeforePublish'),
+        ('io.syn443.android.AdminOperationCoordinatorTest', 'recordedPublishedAcknowledgesOnlyDesiredHeadWithoutAnotherMutationOrVpnActivation'),
+        ('io.syn443.android.AdminOperationCoordinatorTest', 'unavailableLegacyAndRejectedHistoricalResultsNeverTurnUnknownPayloadIntoFreshGrant'),
+        ('io.syn443.android.AdminOperationCoordinatorTest', 'cancellationRootBootLeaseAndConcurrentStoreReplacementFenceReceiptsBeforeAndAfterRpc'),
+        ('io.syn443.android.AdminOperationCoordinatorTest', 'freshSavePreviewPublishProbeVersionButHistoricalRetryPollAndReconcileKeepOriginalVersionBytes'),
+        ('io.syn443.android.AdminOperationUiTest', 'explicitLookupPrecedesSeparateBoundSealConfirmationWithoutPublishing'),
+        ('io.syn443.android.AdminOperationUiTest', 'changedPendingOrDocumentAndBusyOrWithdrawnSealCannotDispatchStaleDialog'),
+        ('io.syn443.android.AdminOperationUiTest', 'lookupAndNoEffectPresentationRetainUnacknowledgedTextWithoutAutoSave'),
+        ('io.syn443.android.AdminOperationUiTest', 'unavailableRecordedResultAndUnknownErrorStayFiniteWithExplicitWebFallback'),
+        ('io.syn443.android.AdminOperationUiTest', 'recompositionAndBackNeverAutomaticallyLookupSealRetryOrCreatePublication'),
+        ('io.syn443.android.AdminOperationWireTest', 'closedOperationFrameRoundTripsAllOutcomesExactPendingBindingAndOwnedText'),
+        ('io.syn443.android.AdminOperationWireTest', 'operationFieldsRejectMissingUnknownDuplicateNoncanonicalAndInvalidSealRelationships'),
+        ('io.syn443.android.AdminOperationWireTest', 'operationFrameKeepsHardUtf8LimitAndRejectsMainBinderBeforeParsing'),
+        ('io.syn443.android.AdminOperationRouteTest', 'routeLookupThenConfirmedSealCarriesExactPendingDocumentAndCasWithoutPublication'),
+        ('io.syn443.android.AdminOperationRouteTest', 'busyLookupStopAndRapidResumeDropLateSealPermissionWithoutAutomaticReplay'),
+        ('io.syn443.android.AdminOperationRouteTest', 'failedLookupRetainsLocalTextAndWebFallbackWhileReauthenticationClearsOnlyUiRam'),
+        ('io.syn443.android.AdminEditorOwnerMigrationTest', 'exactCurrentLegacyMigrationPreservesPendingBytesCasAndExistingAesKey'),
+        ('io.syn443.android.AdminEditorOwnerMigrationTest', 'stableRecoveryAndClosedTombstonesStayReadOnlyUntilAnExplicitNewCreate'),
+        ('io.syn443.android.AdminEditorOwnerMigrationTest', 'unknownPastFloorsForeignActorsAndMissingCurrentProofNeverRebindOrExposePending'),
+        ('io.syn443.android.AdminEditorOwnerMigrationTest', 'concurrentRecoveryMigratesOnceAndOldSnapshotsCannotResolveTheNewOwner'),
+        ('io.syn443.android.AdminEditorOwnerMigrationTest', 'migrationRejectsWrongThreadsCounterExhaustionCorruptionAndLostAesWithoutReset'),
+    ],
+}
+if mode in ADMIN_OPERATION_RECONCILE_REQUIRED:
+    assert set(ADMIN_OPERATION_RECONCILE_REQUIRED[mode]) <= set(identities), "Missing exact operation outcome, deadline, stable editor ownership or explicit presentation outcomes"

@@ -275,16 +275,27 @@ internal class AdminEditorStore private constructor(context:Context,private val 
      * Discover only the exact verified account's active editor after restart.
      * Pristine storage and that account's closed tombstone return null. Account
      * mismatch is denied before revealing closed, draft, device or pending state.
-     * This is a read, with only the existing known AtomicFile backup recovery;
-     * it never creates/replaces a record or key and grants no HTTP authority.
+     * Stable-owner matches are reads. An explicit current legacy binding may
+     * migrate only that active owner's hash/CAS; it recreates neither envelope
+     * nor AES key and grants no HTTP authority or historical-floor fallback.
      */
-    fun recoverOwned(serviceHash:String,actor:String):AdminEditorRecord? {
-        worker();checked {require(hash43(serviceHash) && hash43(actor))}
+    fun recoverOwned(serviceHash:String,actor:String,legacyServiceHash:String=""):AdminEditorRecord? {
+        worker();checked {require(hash43(serviceHash) && hash43(actor) && (legacyServiceHash.isEmpty() || hash43(legacyServiceHash)))}
         return synchronized(lock) {
             val record=readLocked() ?: return@synchronized null
-            if(record.owner.serviceHash!=serviceHash || record.owner.actor!=actor)
+            if(record.owner.actor!=actor)
                 throw AdminEditorStorageException(AdminEditorStorageFailure.OWNER_MISMATCH)
-            if(record.closed)null else record
+            if(record.owner.serviceHash==serviceHash)return@synchronized if(record.closed)null else record
+            // Only the caller's exact CURRENT verified discovery binding may
+            // identify an active v1 owner. Unknown past floors remain opaque.
+            if(record.closed || legacyServiceHash.isEmpty() || record.owner.serviceHash!=legacyServiceHash)
+                throw AdminEditorStorageException(AdminEditorStorageFailure.OWNER_MISMATCH)
+            if(record.revision==MAX_REVISION)throw AdminEditorStorageException(AdminEditorStorageFailure.INVALID)
+            val proposal=record.proposal
+            try {
+                val owner=record.owner.copy(serviceHash=serviceHash)
+                writeLocked(AdminEditorRecord(record.revision+1,owner,proposal,record.pending),false)
+            }finally {proposal.fill(0)}
         }
     }
     fun edit(expected:AdminEditorRecord,proposal:ByteArray):AdminEditorRecord {

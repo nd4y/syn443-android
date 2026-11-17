@@ -38,6 +38,9 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
     var leaveConfirmation by remember(model.device,model.documentBinding) {mutableStateOf(false)}
     var leaveTarget by remember(model.device,model.documentBinding) {mutableStateOf("BACK")}
     var closeConfirmation by remember(model.device,model.documentBinding) {mutableStateOf(false)}
+    var sealConfirmation by remember(model.device,model.documentBinding,model.operationBinding) {mutableStateOf<String?>(null)}
+    var sealSubmitted by remember(model.device,model.documentBinding,model.operationBinding) {mutableStateOf(false)}
+    LaunchedEffect(model.operationBinding,model.canSeal,model.busy) {if(model.canSeal && !model.busy)sealSubmitted=false}
     val activeBusy=editorBusy(model)
     val editable=editorEditable(model) && !activeBusy && pages.isNotEmpty()
     fun proceed(target:String) {when(target){"WEB"->latestActions.web();"LOGIN"->latestActions.login();else->latestActions.back()}}
@@ -118,6 +121,11 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
         }
         if(model.phase==AdminEditorPhase.UNCERTAIN) {
             item {Text("Ответ предыдущей операции неизвестен. Повтор использует только её прежние тело и ID; новая публикация не создаётся.",Modifier.testTag("editor-uncertain"))}
+            if(model.operationBinding.isNotEmpty())item {Button(onClick={if(!editorBusy(latestModel))latestActions.checkOutcome()},
+                enabled=!activeBusy,modifier=Modifier.fillMaxWidth().testTag("editor-check-outcome")) {Text("Узнать результат на сервере")}}
+            if(model.canSeal)item {OutlinedButton(onClick={val current=latestModel
+                if(current.canSeal && !editorBusy(current) && !sealSubmitted)sealConfirmation=current.operationBinding},
+                enabled=!activeBusy && !sealSubmitted,modifier=Modifier.fillMaxWidth().testTag("editor-seal-pending")) {Text("Зафиксировать отсутствие операции")}}
             item {Button(onClick={actions.poll()},enabled=!activeBusy,modifier=Modifier.fillMaxWidth().testTag("editor-poll")) {Text("Проверить предыдущую операцию")}}
             item {OutlinedButton(onClick={actions.retryExact()},enabled=!activeBusy,modifier=Modifier.fillMaxWidth().testTag("editor-retry-exact")) {Text("Повторить ту же операцию")}}
         }
@@ -143,6 +151,19 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
         title={Text("Закрыть локальную копию?")},text={Text("Локальный ввод будет удалён. Серверный черновик и опубликованная конфигурация сохранятся. После этого можно открыть редактор другого устройства.")},
         confirmButton={TextButton(onClick={closeConfirmation=false;latestActions.close()},modifier=Modifier.testTag("editor-close-confirm")) {Text("Закрыть копию")}},
         dismissButton={TextButton(onClick={closeConfirmation=false}) {Text("Продолжить работу")}})
+    sealConfirmation?.let {captured->
+        val valid=model.phase==AdminEditorPhase.UNCERTAIN && model.canSeal && model.operationBinding==captured && !activeBusy && !sealSubmitted
+        AlertDialog(onDismissRequest={sealConfirmation=null},modifier=Modifier.testTag("editor-seal-dialog"),
+            title={Text("Зафиксировать отсутствие операции?")},
+            text={Text("Сервер проверит прежний запрос и запретит его запоздалое выполнение, если он ещё не зарегистрирован. Локальная копия сохранится. Уже зарегистрированная операция будет проверена без новой публикации.")},
+            confirmButton={Button(onClick={val current=latestModel
+                sealConfirmation=null
+                if(current.phase==AdminEditorPhase.UNCERTAIN && current.canSeal && current.operationBinding==captured && !editorBusy(current) && !sealSubmitted) {
+                    sealSubmitted=true;latestActions.sealPending(captured)
+                }
+            },enabled=valid,modifier=Modifier.testTag("editor-seal-confirm")) {Text("Проверить и зафиксировать")}},
+            dismissButton={TextButton(onClick={sealConfirmation=null},modifier=Modifier.testTag("editor-seal-cancel")) {Text("Отмена")}})
+    }
     confirmation?.let {captured->
         val current=model
         val currentTime=elapsed()

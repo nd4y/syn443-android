@@ -4,9 +4,11 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Verified current service metadata. No public construction, copying, serialization or device identity projection. */
 class AdminDiscovery internal constructor(metadata:AdminBootstrap,val binding:String,
-    internal val issuedAtSeconds:Long,internal val notBeforeSeconds:Long,internal val expiresSeconds:Long) {
+    internal val issuedAtSeconds:Long,internal val notBeforeSeconds:Long,internal val expiresSeconds:Long,
+    internal val editorBinding:String=binding) {
+    init {require(AdminIdentity.digest(binding) && AdminIdentity.digest(editorBinding))}
     val metadata:AdminBootstrap=metadata.copy()
-    internal fun identity()=AdminIdentity(metadata,binding)
+    internal fun identity()=AdminIdentity(metadata,binding,editorBinding)
     internal fun same(other:AdminDiscovery)=binding==other.binding && metadata==other.metadata &&
         issuedAtSeconds==other.issuedAtSeconds && notBeforeSeconds==other.notBeforeSeconds && expiresSeconds==other.expiresSeconds
     internal fun covers(window:TimeWindow) {

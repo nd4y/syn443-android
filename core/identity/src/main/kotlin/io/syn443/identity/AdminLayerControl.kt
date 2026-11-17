@@ -103,9 +103,10 @@ object AdminLayerControl {
     // or permission path is independently capped at512 bytes by the server.
     internal fun effectiveFieldPath(value:String)=value.also {require(it.length in 2..1040 && path.matches(it))}
     private fun observed(value:Long,time:TimeWindow) {require(value in 1..MAX && value<=Math.addExact(time.upperMs,30_000))}
-    private fun request(action:AdminLayerAction,requestId:String,payload:String,expect:AdminLayerExpected):AdminLayerRequest {
+    private fun request(action:AdminLayerAction,requestId:String,payload:String,expect:AdminLayerExpected,version:Int=1):AdminLayerRequest {
         require(requestPattern.matches(requestId))
-        val raw=objectBytes("version" to "1","action" to quote(action.wire),"requestId" to quote(requestId),"payload" to payload)
+        require(version==1 || version==2 && action in setOf(AdminLayerAction.DRAFT_PUT,AdminLayerAction.DRAFT_DISCARD,AdminLayerAction.PREVIEW,AdminLayerAction.PUBLISH))
+        val raw=objectBytes("version" to version.toString(),"action" to quote(action.wire),"requestId" to quote(requestId),"payload" to payload)
         val bytes=raw.toByteArray(Charsets.UTF_8);require(bytes.size<=REQUEST_LIMIT)
         return AdminLayerRequest(action,requestId,bytes,expect)
     }
@@ -121,21 +122,21 @@ object AdminLayerControl {
         identifier(draftId);target(kind,targetId)
         request(AdminLayerAction.DRAFT_GET,requestId,objectBytes("id" to quote(draftId)),AdminLayerExpected(id=draftId,kind=kind,target=targetId))
     }
-    fun saveDraft(expectedRevision:Long,proposal:AdminLayerProposal,requestId:String)=checked {
+    fun saveDraft(expectedRevision:Long,proposal:AdminLayerProposal,requestId:String,version:Int=1)=checked {
         require(expectedRevision in 0 until MAX && proposal.draftRevision==expectedRevision+1)
         val draft=objectBytes("id" to quote(proposal.draftId),"revision" to expectedRevision.toString(),"proposal" to proposal.wireJson(),"savedAtMs" to "0")
-        request(AdminLayerAction.DRAFT_PUT,requestId,objectBytes("draft" to draft),AdminLayerExpected(id=proposal.draftId,revision=expectedRevision+1,kind=proposal.targetKind,target=proposal.targetId,proposal=proposal))
+        request(AdminLayerAction.DRAFT_PUT,requestId,objectBytes("draft" to draft),AdminLayerExpected(id=proposal.draftId,revision=expectedRevision+1,kind=proposal.targetKind,target=proposal.targetId,proposal=proposal),version)
     }
-    fun discardDraft(draft:AdminLayerDraft,requestId:String)=checked {
+    fun discardDraft(draft:AdminLayerDraft,requestId:String,version:Int=1)=checked {
         request(AdminLayerAction.DRAFT_DISCARD,requestId,objectBytes("id" to quote(draft.id),"revision" to draft.revision.toString(),
             "targetKind" to quote(draft.proposal.targetKind),"targetId" to quote(draft.proposal.targetId)),
-            AdminLayerExpected(id=draft.id,revision=draft.revision,kind=draft.proposal.targetKind,target=draft.proposal.targetId))
+            AdminLayerExpected(id=draft.id,revision=draft.revision,kind=draft.proposal.targetKind,target=draft.proposal.targetId),version)
     }
-    fun preview(proposal:AdminLayerProposal,actor:String,origin:String,requestId:String)=checked {
+    fun preview(proposal:AdminLayerProposal,actor:String,origin:String,requestId:String,version:Int=1)=checked {
         digest(actor);Identity.controlOrigin(origin);require(requestPattern.matches(requestId))
         val job=Identity.hash((actor+"\u0000"+requestId).toByteArray(Charsets.UTF_8))
         request(AdminLayerAction.PREVIEW,requestId,objectBytes("proposal" to proposal.wireJson()),
-            AdminLayerExpected(proposal=proposal,actor=actor,origin=origin,jobId=job,jobKind=AdminLayerAction.PREVIEW,initialRequestId=requestId))
+            AdminLayerExpected(proposal=proposal,actor=actor,origin=origin,jobId=job,jobKind=AdminLayerAction.PREVIEW,initialRequestId=requestId),version)
     }
     fun poll(job:AdminLayerJob,requestId:String)=checked {
         request(AdminLayerAction.REQUEST_GET,requestId,objectBytes("id" to quote(job.id)),job.context)
@@ -154,12 +155,12 @@ object AdminLayerControl {
         require(e.jobId==Identity.hash((e.actor+"\u0000"+e.initialRequestId).toByteArray(Charsets.UTF_8)))
         request(AdminLayerAction.REQUEST_GET,newRequestId,objectBytes("id" to quote(e.jobId)),e)
     }
-    fun publish(preview:AdminLayerPreview,actor:String,origin:String,requestId:String,time:TimeWindow)=checked {
+    fun publish(preview:AdminLayerPreview,actor:String,origin:String,requestId:String,time:TimeWindow,version:Int=1)=checked {
         require(!preview.replayOnly && digest(actor)==preview.context.actor && origin==preview.context.origin && preview.expiresAtMs>time.upperMs)
         Identity.controlOrigin(origin);require(requestPattern.matches(requestId))
         request(AdminLayerAction.PUBLISH,requestId,objectBytes("previewId" to quote(preview.previewId),"ticket" to quote(preview.ticket)),
             AdminLayerExpected(proposal=preview.context.proposal,actor=actor,origin=origin,
-                jobId=Identity.hash((actor+"\u0000"+requestId).toByteArray(Charsets.UTF_8)),jobKind=AdminLayerAction.PUBLISH,initialRequestId=requestId,preview=preview))
+                jobId=Identity.hash((actor+"\u0000"+requestId).toByteArray(Charsets.UTF_8)),jobKind=AdminLayerAction.PUBLISH,initialRequestId=requestId,preview=preview),version)
     }
     private val replayFields=setOf("schemaVersion","action","requestId","bodyHash","actor","origin","id","revision","hash","kind","target",
         "proposalHash","jobId","jobKind","initialRequestId","previewId","previewDraftHash","previewIssuedAtMs","previewExpiresAtMs","ticketHash")
@@ -190,9 +191,10 @@ object AdminLayerControl {
         val c=AdminLayerJson.parse(utf8(context,8192)).jsonObject;shape(c,replayFields)
         require(number(c,"schemaVersion")==1L && text(c.getValue("actor"))==actualActor && text(c.getValue("origin"))==actualOrigin)
         val raw=utf8(exactBody,REQUEST_LIMIT);val body=AdminLayerJson.document(raw);val root=body.root.jsonObject
-        shape(root,setOf("version","requestId","action","payload"));require(number(root,"version")==1L)
+        shape(root,setOf("version","requestId","action","payload"));val version=number(root,"version",1,2).toInt()
         val requestId=text(root.getValue("requestId"));require(requestPattern.matches(requestId) && requestId==text(c.getValue("requestId")))
         val action=AdminLayerAction.entries.single {it.wire==text(root.getValue("action"))};require(action.wire==text(c.getValue("action")))
+        require(version==1 || action in setOf(AdminLayerAction.DRAFT_PUT,AdminLayerAction.DRAFT_DISCARD,AdminLayerAction.PREVIEW,AdminLayerAction.PUBLISH))
         require(digest(text(c.getValue("bodyHash")))==Identity.hash(exactBody))
         val payload=root.getValue("payload").jsonObject
         val proposalHash=text(c.getValue("proposalHash"))
@@ -238,13 +240,13 @@ object AdminLayerControl {
             AdminLayerAction.HISTORY->history(idValue,revision,hashValue,requestId)
             AdminLayerAction.DRAFT_LIST->listDrafts(kind,targetValue,requestId)
             AdminLayerAction.DRAFT_GET->getDraft(idValue,kind,targetValue,requestId)
-            AdminLayerAction.DRAFT_PUT->saveDraft(revision-1,checkNotNull(proposal),requestId)
+            AdminLayerAction.DRAFT_PUT->saveDraft(revision-1,checkNotNull(proposal),requestId,version)
             AdminLayerAction.DRAFT_DISCARD->{identifier(idValue);target(kind,targetValue);require(revision in 1..MAX && proposal==null)
                 request(action,requestId,objectBytes("id" to quote(idValue),"revision" to revision.toString(),"targetKind" to quote(kind),"targetId" to quote(targetValue)),
-                    AdminLayerExpected(id=idValue,revision=revision,kind=kind,target=targetValue))}
-            AdminLayerAction.PREVIEW->preview(checkNotNull(proposal),actualActor,actualOrigin,requestId)
+                    AdminLayerExpected(id=idValue,revision=revision,kind=kind,target=targetValue),version)}
+            AdminLayerAction.PREVIEW->preview(checkNotNull(proposal),actualActor,actualOrigin,requestId,version)
             AdminLayerAction.REQUEST_GET->request(action,requestId,objectBytes("id" to quote(jobId)),expected)
-            AdminLayerAction.PUBLISH->request(action,requestId,objectBytes("previewId" to quote(previewId),"ticket" to quote(text(payload.getValue("ticket")))),expected)
+            AdminLayerAction.PUBLISH->request(action,requestId,objectBytes("previewId" to quote(previewId),"ticket" to quote(text(payload.getValue("ticket")))),expected,version)
         }
         require(reconstructed.bodyBytes().contentEquals(exactBody))
         // Reject extraneous or changed context too; replayOnly is intentionally
@@ -373,14 +375,19 @@ object AdminLayerControl {
             else->job(root,doc,raw,expected,time)
         }
     }
-    private fun job(root:JsonObject,doc:AdminLayerJson.Document,wire:String,context:AdminLayerExpected,time:TimeWindow):AdminLayerJob {
+    internal fun historicalJob(original:AdminLayerRequest,raw:String,time:TimeWindow):AdminLayerJob=checked {
+        require(original.action in setOf(AdminLayerAction.PREVIEW,AdminLayerAction.PUBLISH) && original.expected.replayOnly)
+        val doc=AdminLayerJson.reconciliationDocument(raw)
+        job(doc.root.jsonObject,doc,raw,original.expected,time,historical=true)
+    }
+    private fun job(root:JsonObject,doc:AdminLayerJson.Document,wire:String,context:AdminLayerExpected,time:TimeWindow,historical:Boolean=false):AdminLayerJob {
         shape(root,setOf("id","state"),setOf("error","result"));require(text(root.getValue("id"))==context.jobId)
         val state=text(root.getValue("state"));require(state in setOf("queued","running","ready","published","rejected","expired","cancelled"))
-        val error=root["error"]?.let(::text)?:"";require(error in setOf("","configuration_denied","configuration_conflict"))
-        val result=root["result"]
+        val error=root["error"]?.let(::text)?:"";require(error in if(historical)setOf("","configuration_denied","configuration_conflict","deadline_or_retry_limit") else setOf("","configuration_denied","configuration_conflict"))
+        val result=root["result"]?.takeUnless {historical && it==JsonNull}
         var preview:AdminLayerPreview?=null;val heads=ArrayList<AdminLayerPublishedHead>()
         if(state in setOf("ready","published")) {
-            require(error.isEmpty() && result is JsonObject && doc.raw(result).toByteArray(Charsets.UTF_8).size<=100_000)
+            require(error.isEmpty() && result is JsonObject && doc.raw(result).toByteArray(Charsets.UTF_8).size<=(if(historical)600_000 else 100_000))
             val proposal=checkNotNull(context.proposal);val p=proposal.document.root.jsonObject
             val bundles=p.getValue("bundles").jsonArray.associate {val b=it.jsonObject;text(b.getValue("device")) to b}
             if(state=="ready") {

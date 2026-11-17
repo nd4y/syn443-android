@@ -1822,7 +1822,11 @@
       "id": "EDIT-10",
       "text": "Пока панель недоступна, разрешённый локальный эксперимент может работать в границах действующей политики и lease; очередь публикации хранит черновик. При восстановлении сети администратор видит итоговый diff и актуальные права до публикации. Неактуальное административное право или lease не продлевается офлайн-черновиком.",
       "status": "planned",
-      "evidence": []
+      "evidence": [
+        "docs/operation-reconciliation-android.md"
+      ],
+      "implementationScope": "Source-pending operation lookup and explicit confirmed absence sealing retain exact encrypted pending bytes, version, body hash and local CAS. Current authenticated receipts distinguish UNKNOWN, NO_EFFECT and recorded metadata without inventing a new preview, publication or lease. Stable aV2 editor ownership survives signed lease/floor updates; migration accepts only the exact currently verified legacy binding and leaves unknown historical owners opaque. The new46 JVM and29 Android roots require Actions before acceptance.",
+      "remainingScope": "Full offline experiment, reconnection diff, current rights and operational acceptance remain open. Generic transport, malformed replies, unsupported legacy absence and uncertain outcomes retain pending state; live administrator SSO/MFA, publication and reconciliation still require separate acceptance."
     },
     {
       "id": "EDIT-11",
@@ -1930,10 +1934,11 @@
         "docs/mobile-admin-control-api.md",
         "docs/admin-service-discovery.md",
         "docs/admin-service-discovery-store.md",
-        "docs/mobile-layered-editor-contract.md"
+        "docs/mobile-layered-editor-contract.md",
+        "docs/operation-reconciliation-android.md"
       ],
-      "implementationScope": "v88 source-pending mutations use exact owned UTF-8 bodies and fresh DPoP bound to the current signed administrator API origin, actor and access session. Fixed maximum authentication age and finite reauthentication challenges retire only the separate admin owner. Four new fresh-authentication JVM and three existing Android controller/browser outcomes accompany layer/store/coordinator/UI tests; Actions/live acceptance remains pending.",
-      "remainingScope": "Live Keycloak authentication, server MFA/ACL/capability acceptance and the full mutation scope remain required. RAM credentials require new administrative login after controller death; the encrypted editor retains pending operation bytes without retaining authority."
+      "implementationScope": "The operation-reconciliation source extends exact owned mutation bytes with a fixed authenticated current-origin lookup/seal route, DPoP outer request hash and receipt actor/action/body/target binding. Separate live discovery/session/root/BOOT guards remain strict; stable encrypted editor aV2 ownership is not administrative authority. Original review deadlines and current pending CAS fence actual dispatch. The46 new JVM and29 Android roots and seven unchanged90% core-class gates remain source-pending.",
+      "remainingScope": "Live Keycloak authentication, server MFA/ACL/capability acceptance, real publication/reconciliation and the full mutation scope remain required. The installed v89 checkpoint has68 scoped physical outcomes without real native-admin SSO or publication acceptance. RAM credentials require new administrative login after controller death; encrypted pending bytes never restore expired authority or unknown historical owner bindings."
     },
     {
       "id": "MOB-05",
