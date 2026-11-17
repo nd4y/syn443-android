@@ -88,6 +88,11 @@ Unrelated and retired responses receive three frames before their negative
 assertions, so a delayed erroneous clear cannot hide behind the first frame.
 The explicit8.1second timeout and command-count checks remain. This is a
 test-clock propagation correction, not evidence of a production paging bug.
+The first helper revision in run44161867003 incorrectly queried synchronized
+semantics inside a main-clock callback, which runs on the UI thread. The
+framework rejected that helper on all APIs. Queries now run on the test thread
+between at most16 individual frames, preserving the same256ms bound. The
+failed helper run remains a failed acceptance attempt.
 
 Exact source Actions must retain all prior JVM, Android, native ordinary/race,
 coverage, contract, ABI, artifact and privacy gates and execute the new bounded
