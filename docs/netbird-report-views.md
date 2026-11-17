@@ -61,6 +61,24 @@ cannot claim full coverage without coverage metadata.
 
 ## Acceptance boundary
 
+The first full report run44135415802 reached instrumentation but all three
+emulator jobs hit their one-hour job limit without JUnit reports. Its log does
+not identify the last started test, so the location of the hang remains unknown.
+The new paging tests now advance frames during real scroll actions and restore
+their original clock mode even on failure. Their pending-request, command-count
+and8.1second timeout assertions remain. A scroll may not consume an entire
+8second pending interval.
+
+The packaged JNI test constructs an unstarted, direct-only runtime through the
+public seven-argument API. The generated Runtime has no public zero-argument
+constructor. The test never calls Start, uses an owned null-device descriptor,
+requires all three view calls to return false and all Protector calls to stay
+zero, and closes the runtime and descriptor. The eight new cases emit only
+allowlisted test lifecycle identities and fixed JNI phases. A20minute host
+instrumentation deadline fails the harness before external scenarios; it does
+not claim that interruption stops JNI. Disposable-emulator cleanup follows.
+These markers are diagnostics and cannot satisfy any passing-outcome gate.
+
 Exact source Actions must retain all prior JVM, Android, native ordinary/race,
 coverage, contract, ABI, artifact and privacy gates and execute the new bounded
 projection, parser, ownership and UI cases. Source CI, protected merge/main CI,

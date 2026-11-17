@@ -20,13 +20,32 @@ import org.junit.Test
 class NetBirdPagingUiTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun onlyCurrentViewResponseCompletesPendingPageWithoutExtraCommands() {
+    private fun withRestoredClock(block: () -> Unit) {
+        val original = compose.mainClock.autoAdvance
+        try { block() } finally { compose.mainClock.autoAdvance = original }
+    }
+
+    private fun SemanticsNodeInteraction.scrollWithAdvancingClock(): SemanticsNodeInteraction {
+        val original = compose.mainClock.autoAdvance
+        val before = compose.mainClock.currentTime
+        try {
+            // Scroll semantics can await animation frames. Advance only while
+            // scrolling, then restore the caller's clock mode before clicks.
+            compose.mainClock.autoAdvance = true
+            val result = performScrollTo()
+            assertTrue("Scrolling must not exhaust an 8s pending interval",
+                compose.mainClock.currentTime - before < 8_000)
+            return result
+        } finally { compose.mainClock.autoAdvance = original }
+    }
+
+    @Test fun onlyCurrentViewResponseCompletesPendingPageWithoutExtraCommands() = withRestoredClock {
         val value = mutableStateOf(NetBirdReportFixture.overlay())
         val commands = mutableListOf<Pair<String, String?>>()
         compose.setContent { MaterialTheme(colorScheme = darkColorScheme()) {
             Column(Modifier.verticalScroll(rememberScrollState())) { NetBirdControls(value.value) { method, arg -> commands += method to arg } }
         } }
-        compose.onNodeWithTag("netbird-peers-next").performScrollTo().performClick()
+        compose.onNodeWithTag("netbird-peers-next").scrollWithAdvancingClock().performClick()
         compose.onNodeWithTag("netbird-peers-next").assertIsNotEnabled()
         lateinit var request: String
         compose.runOnIdle {
@@ -48,7 +67,7 @@ class NetBirdPagingUiTest {
         }
         compose.onNodeWithTag("netbird-peers-pending").assertDoesNotExist()
         compose.runOnIdle { value.value = NetBirdReportFixture.overlay() }
-        compose.onNodeWithTag("netbird-peers-next").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("netbird-peers-next").scrollWithAdvancingClock().assertIsEnabled()
         compose.mainClock.autoAdvance = false
         compose.onNodeWithTag("netbird-peers-next").performClick()
         compose.mainClock.advanceTimeByFrame()
@@ -95,10 +114,9 @@ class NetBirdPagingUiTest {
         compose.mainClock.advanceTimeByFrame()
         compose.onNodeWithTag("netbird-peers-pending").assertDoesNotExist()
         compose.runOnIdle { assertEquals(3, commands.size) }
-        compose.mainClock.autoAdvance = true
     }
 
-    @Test fun peerAndDiagnosticPagingControlsRespectBoundsAndOutstandingRequests() {
+    @Test fun peerAndDiagnosticPagingControlsRespectBoundsAndOutstandingRequests() = withRestoredClock {
         val value = mutableStateOf(NetBirdReportFixture.overlay(total = 1024))
         val commands = mutableListOf<Pair<String, String?>>()
         compose.setContent { MaterialTheme(colorScheme = darkColorScheme()) {
@@ -109,9 +127,9 @@ class NetBirdPagingUiTest {
         compose.onNodeWithTag("netbird-peer-16").assertDoesNotExist()
         compose.onNodeWithTag("netbird-result-16").assertDoesNotExist()
         compose.onNodeWithTag("netbird-peers-prev").assertIsNotEnabled()
-        compose.onNodeWithTag("netbird-peers-next").performScrollTo().performClick()
+        compose.onNodeWithTag("netbird-peers-next").scrollWithAdvancingClock().performClick()
         compose.mainClock.advanceTimeByFrame()
-        compose.onNodeWithTag("netbird-diagnostics-next").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("netbird-diagnostics-next").scrollWithAdvancingClock().assertIsEnabled().performClick()
         compose.mainClock.advanceTimeByFrame()
         compose.onNodeWithTag("netbird-peers-next").assertIsNotEnabled()
         compose.onNodeWithTag("netbird-diagnostics-next").assertIsNotEnabled()
@@ -141,9 +159,9 @@ class NetBirdPagingUiTest {
         compose.onNodeWithTag("netbird-diagnostics-prev").assertIsEnabled()
         compose.onNodeWithTag("netbird-peer-0").assertTextContains("synthetic-1008.example.invalid", substring = true)
         compose.onNodeWithTag("netbird-result-0").assertTextContains("synthetic-1008.example.invalid", substring = true)
-        compose.onNodeWithTag("netbird-diagnose").performScrollTo().performClick()
+        compose.onNodeWithTag("netbird-diagnose").scrollWithAdvancingClock().performClick()
         compose.mainClock.advanceTimeByFrame()
-        compose.onNodeWithTag("netbird-refresh").performScrollTo().performClick()
+        compose.onNodeWithTag("netbird-refresh").scrollWithAdvancingClock().performClick()
         compose.mainClock.advanceTimeByFrame()
         compose.runOnIdle {
             assertEquals(listOf("netbird-view", "netbird-view", "netbird-diagnose", "status"), commands.map { it.first })
@@ -153,6 +171,5 @@ class NetBirdPagingUiTest {
         compose.onNodeWithTag("netbird-diagnose").assertIsNotEnabled()
         compose.onNodeWithTag("netbird-connection").assertTextEquals("Cloud: н/д; signal: н/д")
         compose.onNodeWithTag("netbird-transport").assertTextEquals("Способ подключения: неизвестно")
-        compose.mainClock.autoAdvance = true
     }
 }
