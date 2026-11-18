@@ -60,8 +60,8 @@ class DiagnosticBundleUiTest {
             }
         } }
         compose.onNodeWithTag("bundle-state").assertTextEquals("Архив готов")
-        compose.onNodeWithTag("bundle-size").assertTextContains("байт")
-        compose.onNodeWithTag("bundle-completeness").assertTextContains("Часть источников")
+        compose.onNodeWithTag("bundle-size").assertTextEquals("Размер: ${value.getInt("bytes")} байт")
+        compose.onNodeWithTag("bundle-completeness").assertTextEquals("Часть источников недоступна или очищена")
         compose.onNodeWithTag("bundle-component-8").assertExists()
         compose.runOnIdle { assertEquals(0, exports) }
         compose.onNodeWithTag("bundle-export").performScrollTo().assertIsEnabled().performClick()
