@@ -337,7 +337,7 @@ class AnrOwnerDiagnosticTest(unittest.TestCase):
             if args==('shell','getprop','ro.hardware'):return b'ranchu\n'
             if args==('shell','date','+%s'):return b'1700000002\n'
             if args==('shell','dumpsys','window','displays'):return values[0]
-            if args==('shell','logcat','-d','-b','events','-v','epoch','-t','256','am_anr:I','am_proc_start:I',"'*:S'"):return values[2]
+            if args==('shell','logcat','-d','-b','events','-v','epoch','-t','2048','am_anr:I','am_proc_start:I',"'*:S'"):return values[2]
             if args==('shell','dumpsys','activity','-a','processes'):return values[3]
             self.fail('Unexpected diagnostic command')
         return observe

@@ -315,7 +315,11 @@ def anr_owner_diagnostic(*,evidence=None):
         # All command arguments are constants. Neither titles nor log fields
         # are interpolated into a shell command, package filter or file path.
         stage='events'
-        events=observe('shell','logcat','-d','-b','events','-v','epoch','-t','256','am_anr:I','am_proc_start:I',"'*:S'")
+        # logd applies the raw tail before logcat applies the tag filter.
+        # Reboot traffic can crowd out a recent ANR or its process start.
+        # Read a larger bounded tail only on failure. The existing byte,
+        # parsed-row, clock, and eight-second limits still govern evidence.
+        events=observe('shell','logcat','-d','-b','events','-v','epoch','-t','2048','am_anr:I','am_proc_start:I',"'*:S'")
         stage='process'
         processes=observe('shell','dumpsys','activity','-a','processes')
         stage='focus'
