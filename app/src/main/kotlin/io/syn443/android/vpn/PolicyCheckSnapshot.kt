@@ -21,6 +21,14 @@ internal class PolicyCheckSnapshot(private val clock: () -> Long = { android.os.
         ownerCurrent = true
     }
     @Synchronized fun invalidate() { ownerCurrent = false }
+    /** Historical export only. No caller-supplied authority can mark it current. */
+    @Synchronized internal fun passiveSnapshot(): JSONObject {
+        val value = sample?.let(::JSONObject)
+        val age = value?.let { clock() - it.getLong("sampledElapsedMs") }
+        return JSONObject().put("schemaVersion", 1).put("current", JSONObject.NULL)
+            .put("ageMs", age?.takeIf { it >= 0 } ?: JSONObject.NULL)
+            .put("lastBatch", value ?: JSONObject.NULL)
+    }
     @Synchronized fun read(intent: Long, network: Long, activation: Long, active: Boolean): JSONObject {
         val value = sample?.let(::JSONObject)
         val age = value?.let { clock() - it.getLong("sampledElapsedMs") }

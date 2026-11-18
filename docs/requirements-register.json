@@ -1774,14 +1774,22 @@
     {
       "id": "LOG-05",
       "text": "Бандл содержит manifest с хешами/ошибками компонентов, capabilities, redacted effective config, active/desired revisions, health snapshot, ограниченные логи, версии, native stacks с очисткой и результаты назначенных проверок. Приватная идентичность NetBird и ключ устройства исключены. Частичный бандл допустим с complete:false.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/offline-support-bundle.md"
+      ],
+      "implementationScope": "Candidate source for a bounded local archive with closed component projections, explicit omissions and manifest hashes; source CI and physical acceptance remain separate.",
+      "remainingScope": "Redacted effective configuration and complete revision/native-stack sources; full logging/crash channels and operational physical acceptance."
     },
     {
       "id": "LOG-06",
       "text": "Сбор бандла сам по себе не переключает сеть, не меняет конфиг, не перезапускает VPN и не очищает логи. Глубокий сетевой тест запускается отдельным действием. UI показывает состав, размер и факт отправки. Бандл может оставаться чувствительным даже после очистки и хранится в закрытом хранилище.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/offline-support-bundle.md"
+      ],
+      "implementationScope": "Candidate offline collect/preview/explicit document export, separate cancellation and encrypted private storage with bounded object grants; no automatic upload or probes.",
+      "remainingScope": "Source/main CI, physical Android preservation and export checks, full retention/consent/upload/server audit operation."
     },
     {
       "id": "LOG-07",
@@ -2325,9 +2333,10 @@
       "status": "partial",
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/adb-control.md"
+        "docs/adb-control.md",
+        "docs/offline-support-bundle.md"
       ],
-      "implementationScope": "Projected diagnostic snapshot without config, peer identities or free-form fields.",
+      "implementationScope": "Projected diagnostic snapshot without config, peer identities or free-form fields. Candidate source adds an encrypted sanitized local ZIP with strict manifest/projection, guarded chunk transfer and explicit exclusive output.",
       "remainingScope": "Full redaction/retention policy, authorized secret exports, and durable local/server operation audit."
     },
     {

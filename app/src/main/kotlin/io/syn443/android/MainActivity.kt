@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import io.syn443.android.chat.SupportActivity
+import io.syn443.android.support.DiagnosticsActivity
 import io.syn443.android.vpn.LoginControls
 import io.syn443.android.vpn.VpnControls
 import io.syn443.decision.Coordinator
@@ -54,6 +55,10 @@ private fun Home(consentGeneration: Long) {
                 onClick = { context.startActivity(Intent(context, SupportActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) },
                 modifier = Modifier.testTag("support-chat"),
             ) { Text("Чат с администратором") }
+            TextButton(
+                onClick = { context.startActivity(Intent(context, DiagnosticsActivity::class.java)) },
+                modifier = Modifier.testTag("support-diagnostics"),
+            ) { Text("Диагностический архив") }
         }
         if (BuildConfig.DEBUG) {
             var demoOpen by rememberSaveable { mutableStateOf(false) }

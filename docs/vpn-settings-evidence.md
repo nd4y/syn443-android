@@ -27,3 +27,15 @@ cover compatibility, each stop stage, bounds/privacy, existing command/deadline
 limits, fresh failure evidence and unchanged successful owned navigation.
 Exact-source/full-main acceptance is separate. A later passing test does not
 establish the original ANR owner or cause, or physical phone stability.
+
+On the archive candidate's Android 17 run 44254438475, all 477 instrumentation
+cases passed. The inherited Always-on case then stopped at an Android ANR
+dialog with no correlated owner or recent `am_anr` row. SYN443 still reported
+Online. This does not establish which process failed or why the row was absent.
+
+[Android's logcat implementation](https://android.googlesource.com/platform/system/logging/+/refs/heads/main/logcat/logcat.cpp)
+sets the raw logd tail separately from the tags it prints. The failure-only
+query now reads up to 2,048 raw events before filtering for the same two tags.
+The one MiB response cap, 256 parsed event limit, recent-event window, eight
+second deadline, and correlation rules still apply. Unknown dialogs still
+fail the actual Always-on test.

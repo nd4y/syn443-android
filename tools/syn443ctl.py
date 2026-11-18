@@ -3,12 +3,18 @@
 import argparse
 import base64
 import hashlib
+import io
 import json
+import math
+import os
 import re
 import secrets
+import stat
+import struct
 import subprocess
 import sys
 import time
+import zipfile
 
 URI = "content://io.syn443.control"
 METHODS = {
@@ -18,10 +24,15 @@ METHODS = {
     "vpn-start": "connect", "vpn-stop": "disconnect", "vpn-resume": "resume",
     "resources": "resources", "engine-exits": "engine-exits", "health-workers": "health-workers",
     "config-plan": "config-plan-file", "config-apply": "config-apply-file",
+    "support-bundle-collect": "bundle-collect", "support-bundle-status": "bundle-status",
+    "support-bundle-cancel": "bundle-cancel", "support-bundle-open": "bundle-open",
+    "support-bundle-read": "bundle-read",
 }
 OPERATIONS = ("capabilities", "status", "logs", "diagnostic-bundle", "routes-status",
               "routes-check", "routes-cancel", "netbird-status", "netbird-diagnose", "netbird-view",
-              "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply")
+              "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply",
+              "support-bundle", "support-bundle-collect", "support-bundle-status",
+              "support-bundle-cancel", "support-bundle-export")
 CONFIG = {"config-plan", "config-apply"}
 MAX_CONFIG = 262_144
 STAGE = "run-as io.syn443.android sh -c 'umask 077; base64 -d > no_backup/operator-local-config-{}.json'"
@@ -44,10 +55,35 @@ EVENT_CODES = {
     "tls_timeout", "transport_eof", "user_stop", "vpn_permission_required", "vpn_permission_revoked",
 }
 ROUTE_STATES = {"off", "unavailable", "unverified", "checking", "working", "failed", "stale", "incomplete"}
+SUPPORT_OPERATIONS = {"support-bundle", "support-bundle-collect", "support-bundle-status",
+                      "support-bundle-cancel", "support-bundle-export"}
+SUPPORT_FILES = ("versions.json", "capabilities.json", "effective-config.json", "health.json", "events.jsonl",
+                 "checks.json", "overlay.json", "crashes.json", "native-stacks.json")
+SUPPORT_MAX = 524_288
+SUPPORT_MANIFEST_MAX = 16_384
+SUPPORT_CHUNK = 32_768
+SUPPORT_STATES = {"collecting", "ready", "failed", "cancelled", "expired", "not_found"}
+SUPPORT_REASONS = {"none", "unavailable", "unsupported", "over_limit", "invalid_source", "io_error", "projection_only"}
 
 
 def invalid_constant(_):
     raise ValueError("non-finite JSON")
+
+
+def unique_pairs(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON field")
+        value[key] = item
+    return value
+
+
+def finite_float(value):
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("non-finite JSON")
+    return result
 
 
 class ControlError(Exception):
@@ -91,8 +127,10 @@ class Device:
         if argument is not None:
             route = operation == "routes-check" and re.fullmatch(r"route-[1-9][0-9]?", argument)
             ticket = operation in CONFIG and re.fullmatch(r"(?:none|[0-9a-f]{64}):[0-9a-f]{64}:[0-9a-f]{32}", argument)
+            bundle_id = operation in {"support-bundle-status", "support-bundle-cancel", "support-bundle-open"} and re.fullmatch(r"[0-9a-f]{32}", argument)
+            bundle_read = operation == "support-bundle-read" and re.fullmatch(r"[0-9a-f]{32}:(?:0|[1-9][0-9]{0,5})", argument) and int(argument.split(":")[1]) <= SUPPORT_MAX
             view = canonical_view(argument) if operation == "netbird-view" else None
-            if not route and not ticket and view is None:
+            if not route and not ticket and not bundle_id and not bundle_read and view is None:
                 raise ControlError("invalid_arguments", 2)
             # adb shell joins arguments into an Android shell command. Our closed
             # ASCII view has no apostrophe; single quoting preserves JSON quotes.
@@ -107,7 +145,11 @@ class Device:
             raise ControlError("adb_unavailable", 3) from err
         if len(result.stdout) > 262_144 or len(result.stderr) > 32_768:
             raise ControlError("reply_too_large", 5)
-        output = result.stdout.decode(errors="replace")
+        support = operation.startswith("support-bundle-")
+        try:
+            output = result.stdout.decode("utf-8", errors="strict" if support else "replace")
+        except UnicodeDecodeError as err:
+            raise ControlError("invalid_reply", 5) from err
         if result.returncode != 0 or "Result: Bundle[" not in output:
             if "unauthorized caller" in output + result.stderr.decode(errors="replace"):
                 raise ControlError("unauthorized", 4)
@@ -128,7 +170,8 @@ class Device:
         else:
             raise ControlError("invalid_reply", 5)
         try:
-            data = json.loads(raw, parse_constant=invalid_constant)
+            options = {"object_pairs_hook": unique_pairs, "parse_float": finite_float} if support else {}
+            data = json.loads(raw, parse_constant=invalid_constant, **options)
         except (ValueError, RecursionError) as err:
             raise ControlError("invalid_reply", 5) from err
         if not isinstance(data, dict):
@@ -209,6 +252,313 @@ def bundle(device):
     return report
 
 
+def support_invalid():
+    raise ControlError("support_bundle_invalid", 5)
+
+
+def support_int(value, maximum):
+    return type(value) is int and 0 <= value <= maximum
+
+
+def support_hex(value, length):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{" + str(length) + "}", value) is not None
+
+
+def support_json(raw, maximum):
+    try:
+        if not isinstance(raw, bytes) or len(raw) > maximum:
+            support_invalid()
+        return json.loads(raw.decode("utf-8"), object_pairs_hook=unique_pairs,
+                          parse_constant=invalid_constant, parse_float=finite_float)
+    except (ValueError, RecursionError) as err:
+        raise ControlError("support_bundle_invalid", 5) from err
+
+
+def support_manifest(value):
+    if not isinstance(value, dict) or set(value) != {"schemaVersion", "product", "complete", "components"}:
+        support_invalid()
+    if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1 or value["product"] != "SYN443" or type(value["complete"]) is not bool:
+        support_invalid()
+    rows = value["components"]
+    if not isinstance(rows, list) or len(rows) != len(SUPPORT_FILES):
+        support_invalid()
+    seen = set()
+    total = 0
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"name", "state", "reason", "bytes", "sha256"}:
+            support_invalid()
+        name, state, reason = row["name"], row["state"], row["reason"]
+        if not isinstance(name, str) or name not in SUPPORT_FILES or name in seen or not isinstance(state, str) or state not in {"available", "missing", "error", "truncated"} or not isinstance(reason, str) or reason not in SUPPORT_REASONS:
+            support_invalid()
+        seen.add(name)
+        if not support_int(row["bytes"], 65_536):
+            support_invalid()
+        total += row["bytes"]
+        if total > 262_144:
+            support_invalid()
+        if state in {"available", "truncated"}:
+            if not support_hex(row["sha256"], 64):
+                support_invalid()
+        elif row["bytes"] != 0 or row["sha256"] is not None:
+            support_invalid()
+    if value["complete"] != all(row["state"] == "available" and row["reason"] == "none" for row in rows):
+        support_invalid()
+    try:
+        encoded = json.dumps(value, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8")
+    except (ValueError, TypeError, RecursionError) as err:
+        raise ControlError("support_bundle_invalid", 5) from err
+    if len(encoded) > SUPPORT_MANIFEST_MAX:
+        support_invalid()
+    # Return an owned, fully typed manifest rather than an alias from a caller.
+    return support_json(encoded, SUPPORT_MANIFEST_MAX)
+
+
+def support_status(value, bundle_id):
+    if not isinstance(value, dict) or set(value) - {"state", "id", "bytes", "sha256", "manifest"}:
+        support_invalid()
+    state = value.get("state")
+    if not isinstance(state, str) or state not in SUPPORT_STATES:
+        support_invalid()
+    if "id" in value and (not support_hex(value["id"], 32) or value["id"] != bundle_id):
+        support_invalid()
+    if "bytes" in value and not support_int(value["bytes"], SUPPORT_MAX):
+        support_invalid()
+    if "sha256" in value and not support_hex(value["sha256"], 64):
+        support_invalid()
+    manifest = support_manifest(value["manifest"]) if "manifest" in value else None
+    if state == "ready" and (value.get("id") != bundle_id or not {"bytes", "sha256", "manifest"} <= set(value)):
+        support_invalid()
+    return {**value, **({"manifest": manifest} if manifest is not None else {})}
+
+
+class SupportDeadline:
+    """One request sequence, with no retry after any uncertain RPC outcome."""
+    def __init__(self, device, clock=None, sleeper=None):
+        self.device = device
+        self.clock = clock or time.monotonic
+        self.sleep = sleeper or time.sleep
+        self.started = self.last = self.clock()
+        if not math.isfinite(self.started):
+            support_invalid()
+        self.deadline = self.started + 120.0
+
+    def now(self, deadline=None):
+        now = self.clock()
+        if not math.isfinite(now) or now < self.last or now >= min(self.deadline, deadline if deadline is not None else self.deadline):
+            raise ControlError("support_bundle_timeout", 3)
+        self.last = now
+        return now
+
+    def call(self, operation, argument=None, deadline=None):
+        now = self.now(deadline)
+        previous = self.device.timeout
+        self.device.timeout = min(previous, min(self.deadline, deadline if deadline is not None else self.deadline) - now)
+        try:
+            result = self.device.call(operation, argument)
+        finally:
+            self.device.timeout = previous
+        self.now(deadline)
+        return result
+
+
+def support_collect(sequence):
+    value = sequence.call("support-bundle-collect", deadline=sequence.started + 32.0)
+    if not isinstance(value, dict) or set(value) != {"state", "id"} or not isinstance(value.get("state"), str) or value["state"] not in {"collecting", "ready", "busy"} or not support_hex(value.get("id"), 32):
+        support_invalid()
+    return dict(value)
+
+
+def support_wait(sequence, bundle_id):
+    deadline = sequence.started + 32.0
+    for attempt in range(64):
+        value = support_status(sequence.call("support-bundle-status", bundle_id, deadline), bundle_id)
+        if value["state"] == "ready":
+            return value
+        if value["state"] != "collecting":
+            raise ControlError("support_bundle_unavailable", 4)
+        if attempt != 63:
+            sequence.sleep(min(0.5, deadline - sequence.now(deadline)))
+    raise ControlError("support_bundle_timeout", 3)
+
+
+def support_extra(raw):
+    # Ordinary ZIP extras are bounded; ZIP64 is never admitted, even when tiny.
+    if len(raw) > 1024:
+        support_invalid()
+    at = 0
+    while at < len(raw):
+        if len(raw) - at < 4:
+            support_invalid()
+        kind, size = struct.unpack_from("<HH", raw, at)
+        at += 4
+        if kind == 1 or size > len(raw) - at:
+            support_invalid()
+        at += size
+
+
+def support_archive(payload, expected_manifest):
+    """Validate the bounded archive in memory. Never extract or print components."""
+    try:
+        if not isinstance(payload, bytes) or not 22 <= len(payload) <= SUPPORT_MAX:
+            support_invalid()
+        end = len(payload) - 22
+        signature, disk, directory_disk, disk_count, count, size, offset, comment = struct.unpack_from("<4s4H2IH", payload, end)
+        if signature != b"PK\x05\x06" or disk or directory_disk or disk_count != count or not 1 <= count <= 10 or comment or offset + size != end:
+            support_invalid()
+        with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
+            infos = archive.infolist()
+            if len(infos) != count or archive.comment:
+                support_invalid()
+            names, contents = set(), {}
+            position = 0
+            total = 0
+            for info in sorted(infos, key=lambda entry: entry.header_offset):
+                name = info.filename
+                maximum = SUPPORT_MANIFEST_MAX if name == "manifest.json" else 65_536
+                mode = stat.S_IFMT(info.external_attr >> 16)
+                if name not in (*SUPPORT_FILES, "manifest.json") or name in names or name != info.orig_filename or info.header_offset != position or info.compress_type != zipfile.ZIP_STORED or info.flag_bits & ~(0x800 | 8) or info.extract_version >= 45 or info.comment or mode not in (0, stat.S_IFREG) or info.external_attr & 0x10 or not 0 <= info.file_size <= maximum or info.compress_size != info.file_size:
+                    support_invalid()
+                names.add(name)
+                support_extra(info.extra)
+                if position + 30 > offset:
+                    support_invalid()
+                header = struct.unpack_from("<4s5H3I2H", payload, position)
+                magic, version, flags, method, _, _, crc, compressed, plain, name_size, extra_size = header
+                data_start = position + 30 + name_size + extra_size
+                data_end = data_start + info.file_size
+                if magic != b"PK\x03\x04" or version >= 45 or flags != info.flag_bits or method != 0 or data_end > offset or payload[position + 30:position + 30 + name_size] != name.encode("ascii"):
+                    support_invalid()
+                support_extra(payload[position + 30 + name_size:data_start])
+                if flags & 8:
+                    if crc not in (0, info.CRC) or compressed not in (0, info.file_size) or plain not in (0, info.file_size):
+                        support_invalid()
+                    descriptor = data_end + (4 if payload[data_end:data_end + 4] == b"PK\x07\x08" else 0)
+                    if descriptor + 12 > offset or struct.unpack_from("<III", payload, descriptor) != (info.CRC, info.file_size, info.file_size):
+                        support_invalid()
+                    position = descriptor + 12
+                else:
+                    if (crc, compressed, plain) != (info.CRC, info.file_size, info.file_size):
+                        support_invalid()
+                    position = data_end
+                contents[name] = archive.read(info)
+                if len(contents[name]) != info.file_size:
+                    support_invalid()
+                if name != "manifest.json":
+                    total += info.file_size
+                    if total > 262_144:
+                        support_invalid()
+            if position != offset or "manifest.json" not in names:
+                support_invalid()
+            manifest = support_manifest(support_json(contents["manifest.json"], SUPPORT_MANIFEST_MAX))
+            if manifest != support_manifest(expected_manifest):
+                support_invalid()
+            expected = {"manifest.json"}
+            for row in manifest["components"]:
+                if row["state"] in {"available", "truncated"}:
+                    expected.add(row["name"])
+                    body = contents.get(row["name"])
+                    if body is None or len(body) != row["bytes"] or hashlib.sha256(body).hexdigest() != row["sha256"]:
+                        support_invalid()
+            if names != expected:
+                support_invalid()
+            return manifest
+    except (OSError, ValueError, RuntimeError, NotImplementedError, EOFError, struct.error, zipfile.BadZipFile) as err:
+        raise ControlError("support_bundle_invalid", 5) from err
+
+
+def support_write(path, payload, sequence):
+    sequence.now()
+    descriptor, identity = None, None
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags, 0o600)
+        identity = os.fstat(descriptor)
+        if not stat.S_ISREG(identity.st_mode):
+            raise OSError("output is not regular")
+        at = 0
+        while at < len(payload):
+            sequence.now()
+            written = os.write(descriptor, payload[at:])
+            if written <= 0:
+                raise OSError("short output write")
+            at += written
+        os.fsync(descriptor)
+        sequence.now()
+        os.close(descriptor)
+        descriptor = None
+    except (OSError, ValueError, TypeError, ControlError, KeyboardInterrupt) as err:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        # A replaced path is foreign state, even after our own failed write.
+        if identity is not None:
+            try:
+                current = os.lstat(path)
+                if stat.S_ISREG(current.st_mode) and (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
+                    os.unlink(path)
+            except OSError:
+                pass
+        if isinstance(err, (ControlError, KeyboardInterrupt)):
+            raise
+        raise ControlError("support_bundle_output_exists" if isinstance(err, FileExistsError) else "support_bundle_write_failed", 3) from err
+
+
+def support_export(sequence, bundle_id, output, ready=None):
+    ready = support_status(sequence.call("support-bundle-status", bundle_id), bundle_id) if ready is None else ready
+    if ready["state"] != "ready":
+        raise ControlError("support_bundle_unavailable", 4)
+    opened_at = sequence.now()
+    value = sequence.call("support-bundle-open", bundle_id)
+    if not isinstance(value, dict) or set(value) != {"state", "grant", "bytes", "sha256", "expiresInMs", "manifest"} or value.get("state") != "open" or not support_hex(value.get("grant"), 32) or not support_int(value.get("bytes"), SUPPORT_MAX) or not support_hex(value.get("sha256"), 64) or not support_int(value.get("expiresInMs"), 60_000) or value["expiresInMs"] == 0:
+        support_invalid()
+    manifest = support_manifest(value["manifest"])
+    if (value["bytes"], value["sha256"], manifest) != (ready["bytes"], ready["sha256"], ready["manifest"]):
+        support_invalid()
+    deadline = opened_at + value["expiresInMs"] / 1000.0
+    payload = bytearray()
+    for _ in range(max(1, (value["bytes"] + SUPPORT_CHUNK - 1) // SUPPORT_CHUNK)):
+        at = len(payload)
+        part = sequence.call("support-bundle-read", value["grant"] + ":" + str(at), deadline)
+        if not isinstance(part, dict) or set(part) != {"grant", "offset", "data", "nextOffset", "done"} or part["grant"] != value["grant"] or not support_int(part["offset"], SUPPORT_MAX) or part["offset"] != at or not isinstance(part["data"], str) or len(part["data"]) > 43_692 or not support_int(part["nextOffset"], SUPPORT_MAX) or type(part["done"]) is not bool:
+            support_invalid()
+        try:
+            data = base64.b64decode(part["data"], validate=True)
+        except (ValueError, UnicodeError) as err:
+            raise ControlError("support_bundle_invalid", 5) from err
+        if base64.b64encode(data).decode("ascii") != part["data"] or len(data) != min(SUPPORT_CHUNK, value["bytes"] - at) or part["nextOffset"] != at + len(data) or part["done"] != (part["nextOffset"] == value["bytes"]):
+            support_invalid()
+        payload.extend(data)
+    archive = bytes(payload)
+    if len(archive) != value["bytes"] or hashlib.sha256(archive).hexdigest() != value["sha256"]:
+        support_invalid()
+    checked = support_archive(archive, manifest)
+    support_write(output, archive, sequence)
+    return {"bytes": len(archive), "sha256": value["sha256"], "complete": checked["complete"], "exported": True}
+
+
+def support_operation(device, operation, output=None, bundle_id=None, clock=None, sleeper=None):
+    sequence = SupportDeadline(device, clock, sleeper)
+    if operation == "support-bundle-collect":
+        return support_collect(sequence)
+    if operation == "support-bundle-cancel":
+        value = sequence.call("support-bundle-cancel", bundle_id)
+        if not isinstance(value, dict) or set(value) != {"state", "id"} or value.get("state") != "cancelled" or value.get("id") != bundle_id:
+            support_invalid()
+        return dict(value)
+    if operation == "support-bundle-status":
+        value = support_status(sequence.call("support-bundle-status", bundle_id), bundle_id)
+        return {key: value[key] for key in ("state", "id", "bytes", "sha256") if key in value} | ({"complete": value["manifest"]["complete"]} if "manifest" in value else {})
+    if operation == "support-bundle-export":
+        return support_export(sequence, bundle_id, output)
+    collected = support_collect(sequence)
+    if collected["state"] == "busy":
+        raise ControlError("support_bundle_busy", 4)
+    ready = support_wait(sequence, collected["id"])
+    return support_export(sequence, collected["id"], output, ready)
+
+
 def emit(obj):
     print(json.dumps(obj, separators=(",", ":"), ensure_ascii=True, allow_nan=False), flush=True)
 
@@ -257,6 +607,8 @@ def main(argv=None):
     parser.add_argument("--file")
     parser.add_argument("--expected-revision")
     parser.add_argument("--expected-candidate")
+    parser.add_argument("--output")
+    parser.add_argument("--bundle-id")
     parser.add_argument("--follow-seconds", type=int, choices=range(0, 301), default=0, metavar="0..300")
     try:
         args = parser.parse_args(argv)
@@ -264,6 +616,10 @@ def main(argv=None):
         emit({"schemaVersion": 1, "operation": None, "error": err.code})
         return err.exit_status
     try:
+        if (args.output is not None) != (args.operation in {"support-bundle", "support-bundle-export"}) or (
+            (args.bundle_id is not None) != (args.operation in {"support-bundle-status", "support-bundle-cancel", "support-bundle-export"})
+        ) or (args.bundle_id is not None and not support_hex(args.bundle_id, 32)):
+            raise ControlError("invalid_arguments", 2)
         if (args.route is not None and args.operation != "routes-check") or (args.follow_seconds and args.operation != "logs"):
             raise ControlError("invalid_arguments", 2)
         if (args.operation == "netbird-view") != (args.section is not None and args.page is not None) or \
@@ -274,7 +630,9 @@ def main(argv=None):
         ):
             raise ControlError("invalid_arguments", 2)
         device = Device(args.serial, args.timeout)
-        if args.operation == "capabilities":
+        if args.operation in SUPPORT_OPERATIONS:
+            data = support_operation(device, args.operation, args.output, args.bundle_id)
+        elif args.operation == "capabilities":
             state = device.call("status")
             operations = [op for op in OPERATIONS if op not in CONFIG or state.get("localConfigControl") is True]
             data = {"operations": operations, "access": "debug_adb_shell",

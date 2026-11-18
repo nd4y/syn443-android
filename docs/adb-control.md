@@ -37,6 +37,18 @@ managed policy overrides. Release opt-in, managed configuration editing,
 mode commands, route job IDs and server audit require separate work. Keep
 device output private.
 
+## Offline archive candidate
+
+The existing `diagnostic-bundle` JSON operation remains. The candidate adds
+`support-bundle --output FILE`, `support-bundle-collect`,
+`support-bundle-status --bundle-id ID`, `support-bundle-cancel --bundle-id ID`
+and `support-bundle-export --bundle-id ID --output FILE`. Only an explicit
+export creates an output file, after full hash/ZIP/manifest validation, and
+never overwrites an existing path. Job IDs support polling and cancellation;
+short binary grants are not printed. See [scope and protocol](offline-support-bundle.md).
+The existing DEBUG shell UID restriction is unchanged; release opt-in remains
+a separate requirement. No archive is uploaded automatically.
+
 NetBird view selection returns `pending`, section, requested page and a fresh
 request ID. This is only command submission. A subsequent `netbird-status`
 must contain that ID in the corresponding section's `view.request` before its

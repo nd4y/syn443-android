@@ -18,6 +18,16 @@ restore_instrumentation_display() {
   fi
 }
 
+publish_support_bundle_report() {
+  local source="$RUNNER_TEMP/syn443-support-protocol-result.xml"
+  local target='app/build/outputs/androidTest-results/external/TEST-support-bundle.xml'
+  if [ -f "$source" ]; then
+    mkdir -p app/build/outputs/androidTest-results/external
+    if [ -e "$target" ]; then cmp -s -- "$source" "$target"
+    else cp -- "$source" "$target"; fi
+  fi
+}
+
 print_netbird_test_progress() {
   # Only fixed synthetic source identities/phases may reach the public log.
   # These lifecycle markers cannot replace the actual JUnit outcome evidence.
@@ -31,10 +41,28 @@ print_netbird_test_progress() {
     | tail -64 || true
 }
 
+print_bundle_test_progress() {
+  # Fixed synthetic identities only; lifecycle markers are not JUnit PASS evidence.
+  local archive='io\.syn443\.android\.DiagnosticArchiveTest#(storedArchiveHasExactNamesCrcManifestHashesAndOwnedInputBytes|missingAndErroredComponentsRemainExplicitAndIncomplete|duplicateAndTooManyComponentsFailBeforeArchiveCreation|componentByteLimitOmitsWholePayloadWithoutTruncatingJson|aggregateLimitIsDeterministicAndKeepsOtherComponents|allAvailableComponentsAreCompleteOnlyWithNoneReasons|truncatedAndProjectionOnlyComponentsNeverClaimComplete|namesSizesAndDiagnosticsCannotEscapeOrEchoInputs)'
+  local projection='io\.syn443\.android\.DiagnosticProjectionTest#(knownSnapshotsProjectOnlyFixedPublicFields|nestedSecretsLabelsTargetsAndFreeTextNeverReachComponents|incorrectBooleanAndNumericTypesStayUnknownRatherThanFalseOrZero|eventsKeepOnlyLast64OrderedAllowlistedRecords|routeAndCheckCollectionsExposeCountsWithoutIdentifiers|overlayProjectionPreservesTypedConnectionsAndKnownModesOnly|crashesReprojectOnlyClosedKindsTimesAndStatuses|unavailableSourcesAndInvalidVersionsRemainExplicitAndBounded)'
+  local controller='io\.syn443\.android\.SupportBundleControllerTest#(encryptedArchiveHasOwnedMetadataAndWholeVerifiedChunkReadback|cancelledBlockedCollectorRetainsActualSlotAndRejectsLatePublication|grantAndReadyExpiryAndBackwardsClockNeverFreshenAnOldArtifact|grantsAreObjectBoundAndRepeatedReadsNeverReplayCollection|malformedIdsOffsetsAndUnknownJobsNeverReadOrCreateStorage|corruptedTruncatedAndOversizedCiphertextFailBeforeAnyPlaintextChunk|recreatedProcessOwnerCannotReuseAKeyGrantOrOldEncryptedArtifact|foreignFilesAndSymlinkFilesOrDirectoriesArePreservedAndFailClosed|blockedReadKeepsItsSingleSlotAndCancelledVerifiedBytesCannotPublish|failedSourcesAtomicWriteFailuresAndOverLimitComponentsNeverAutoRetry)'
+  local sources='io\.syn443\.android\.SupportBundleSourcesTest#(passiveCaptureLeavesItsSourcesUnchangedAndRunsEachSupplierOnce|changedContextRejectsCapturedHealthChecksAndOverlayWithoutRepeatingWork|missingOrFailingSourcesBecomePartialWithoutRawExceptionText|stateFileReadRejectsOversizeDepthUtf8TrailingAndSymlinkWithoutModifyingFiles)'
+  local ui='io\.syn443\.android\.DiagnosticBundleUiTest#(idlePresentationDoesNotCollectOrExportUntilAnExplicitClick|readyPartialArchiveShowsCompositionSizeAndSeparateExportAction|busyCollectionCannotOverlapOrExportAndCancellationIsExplicit|routeCancellationRemainsResponsiveWhilePollingAndRejectsLateReadyReply|malformedUnknownOrInconsistentManifestNeverEnablesExportOrEchoesValues|delayedDocumentResultAfterRestorationUsesReviewedArtifactAndCancelledPickerNeverReplaysCollection)'
+  local policy='io\.syn443\.android\.PassivePolicyDiagnosticTest#(historicalExportKeepsRealBatchWithoutInventingActivationOrChangingAuthority|expiredRetiredAndBackwardHistoryNeverBecomesCurrentOrGetsANewSampleTime)'
+  local client='io\.syn443\.android\.SupportBundleClientTest#blockedCancellationAndDocumentWriteFailureRetainExportOwnershipUntilActualExit'
+  printf '\n=== Synthetic support bundle test progress (diagnostics only) ===\n'
+  timeout 10s adb -e logcat -d -v raw -s Syn443BundleProgress:I '*:S' \
+    | tr -d '\r' \
+    | grep -E -- "^SYN443_BUNDLE_PROGRESS (START|FINISH|FAIL) ($archive|$projection|$controller|$sources|$ui|$policy|$client)$" \
+    | tail -64 || true
+}
+
 collect_diagnostics() {
   result=$?
   trap - EXIT
+  publish_support_bundle_report || true
   print_netbird_test_progress || true
+  print_bundle_test_progress || true
   restore_instrumentation_display || true
   python3 tools/print_emulator_reports.py || true
   printf '\n=== Disposable runner memory/disk ===\n'
@@ -60,6 +88,9 @@ adb -e shell cmd uimode night no
 test -f app/build/outputs/apk/debug/app-debug.apk
 test -f app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb -e install -r app/build/outputs/apk/debug/app-debug.apk
+# Exercise the new passive Provider/CLI path before ordinary status or login
+# can initialize the fresh app. This never runs on a physical device.
+python3 tools/run_support_bundle_smoke.py
 # Permission changes happen before the instrumentation process exists.
 adb -e shell appops set io.syn443.android ACTIVATE_VPN allow
 if [ "$(adb -e shell getprop ro.build.version.sdk | tr -d '\r')" -ge 33 ]; then
@@ -79,7 +110,7 @@ result=0
 # failed instrumentation run cannot satisfy the mandatory evidence gate anyway.
 # Bound the owning host invocation, without pretending interruption stops JNI.
 # A deadline fails this harness; it never proceeds to the external scenarios.
-if ! timeout --signal=TERM --kill-after=20s 20m ./gradlew :app:connectedDebugAndroidTest --info --stacktrace --max-workers=1 '-Pandroid.testInstrumentationRunnerArguments.listener=io.syn443.android.NetBirdTestProgress' '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8'; then
+if ! timeout --signal=TERM --kill-after=20s 20m ./gradlew :app:connectedDebugAndroidTest --info --stacktrace --max-workers=1 '-Pandroid.testInstrumentationRunnerArguments.listener=io.syn443.android.NetBirdTestProgress,io.syn443.android.DiagnosticBundleTestProgress' '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8'; then
   python3 tools/print_emulator_reports.py || true
   exit 1
 fi
@@ -101,6 +132,7 @@ python3 tools/run_vpn_fatal.py || result=1
 python3 tools/run_vpn_competing.py || result=1
 python3 tools/run_policy_activation.py || result=1
 python3 tools/run_enrolled_vpn.py || result=1
+publish_support_bundle_report || result=1
 python3 tools/check_test_evidence.py emulator || result=1
 exit "$result"
 

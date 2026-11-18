@@ -45,6 +45,20 @@ class ControlProvider : ContentProvider() {
             if(method=="status")putString("json",LifecycleAccess.lockedStatus().toString()) else putString("error","needs_unlock")
         }
         return try {
+            // Passive diagnostics must not initialize login, observe OS intent,
+            // configure routes, or reconcile the VPN as a side effect of collection.
+            if (method in setOf("bundle-collect", "bundle-status", "bundle-cancel", "bundle-open", "bundle-read")) {
+                require(extras == null || extras.isEmpty)
+                val bundles = io.syn443.android.support.SupportBundleController.get(context)
+                val result = when (method) {
+                    "bundle-collect" -> { require(arg == null); bundles.collect() }
+                    "bundle-status" -> bundles.status(requireNotNull(arg))
+                    "bundle-cancel" -> bundles.cancel(requireNotNull(arg))
+                    "bundle-open" -> bundles.open(requireNotNull(arg))
+                    else -> bundles.read(requireNotNull(arg))
+                }
+                return Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
+            }
             initializeUnlocked()
             val store = StateStore.get(context)
             when (method) {

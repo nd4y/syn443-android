@@ -1,8 +1,20 @@
 # Testing and release gates
 
+[Offline support archive](offline-support-bundle.md) adds39exact Android roots
+across archive/projection/owner/source/UI/passive-cache classes and one actual
+fresh-emulator Provider/CLI case. The composed per-API floor is524, including the eight
+NetBird report outcomes below. Existing roots and coverage stay required.
+The actual protocol case runs before ordinary status/login initialization,
+checks collect/export/cancel and retained identity/VPN file absence and native
+owner absence, and scans its synthetic ZIP without publishing it. Ten new
+Python roots cover CLI limits, ZIP/manifest validation and lost-ACK behavior.
+The gate rejects any missing new outcome or source inventory drift. Compilation
+and execution remain Actions-only; physical collection/export is separate.
+
 [Bounded NetBird report views](netbird-report-views.md) add eight exact Android
 outcomes: five model, two paging UI and one actual packaged gomobile/local
-command case. Each API29/35/37 requires484 unique outcomes; all prior mandatory
+command case. Its report-only stage required484 unique outcomes; this
+composition requires524 per API29/35/37. All prior mandatory
 roots and coverage thresholds remain. Native streams must each contain eight
 source-bound module and two bridge report roots plus both package completions,
 in addition to the retained path/XHTTP/check-plan gates. The diagnostic-cache
