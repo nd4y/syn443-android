@@ -14,7 +14,7 @@ COMMANDS = (
     ('shell', 'getprop', 'ro.hardware'),
     ('shell', 'date', '+%s'),
     ('shell', 'dumpsys', 'window', 'displays'),
-    ('shell', 'logcat', '-d', '-b', 'events', '-v', 'epoch', '-t', '256', 'am_anr:I', 'am_proc_start:I', "'*:S'"),
+    ('shell', 'logcat', '-d', '-b', 'events', '-v', 'epoch', '-t', '2048', 'am_anr:I', 'am_proc_start:I', "'*:S'"),
     ('shell', 'dumpsys', 'activity', '-a', 'processes'),
     ('shell', 'dumpsys', 'window', 'displays'),
     ('shell', 'date', '+%s'),
