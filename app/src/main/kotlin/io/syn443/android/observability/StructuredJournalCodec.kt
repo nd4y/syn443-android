@@ -121,8 +121,9 @@ internal object StructuredJournalCodec {
     private fun readRow(value: JSONObject): StructuredEvent {
         keys(value, setOf("sequence", "clock", "correlation", "generations", "detail", "level"))
         val generations = value.getJSONObject("generations")
-        require(generations.keySet().containsAll(setOf("intent", "network")) &&
-            setOf("intent", "network", "activation", "engine").containsAll(generations.keySet()))
+        val allowedGenerations = setOf("intent", "network", "activation", "engine")
+        require(generations.length() in 2..4 && generations.has("intent") && generations.has("network") &&
+            generations.keys().asSequence().all(allowedGenerations::contains))
         val detail = value.getJSONObject("detail")
         val typed = when (string(detail, "kind")) {
             "lifecycle" -> {
@@ -164,7 +165,9 @@ internal object StructuredJournalCodec {
     private fun string(value: JSONObject, name: String): String = (value.opt(name) as? String)?.also {
         require(it.length in 1..64)
     } ?: error("journal_invalid")
-    private fun keys(value: JSONObject, expected: Set<String>) { require(value.keySet() == expected) }
+    private fun keys(value: JSONObject, expected: Set<String>) {
+        require(value.length() == expected.size && value.keys().asSequence().all(expected::contains))
+    }
     private fun correlation(value: EventCorrelation): String {
         val bytes = value.bytes()
         return try { bytes.joinToString("") { "%02x".format(it.toInt() and 255) } } finally { bytes.fill(0) }
