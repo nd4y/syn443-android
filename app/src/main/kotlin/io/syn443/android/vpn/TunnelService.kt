@@ -591,6 +591,14 @@ class TunnelService : VpnService() {
         }
         override fun event(session: String, kind: Int) { handler.post {
             if (session != token || !Recovery.current(store.checkpoint(), boundGeneration)) return@post
+            val observed = when (kind) {
+                EngineHostService.READY -> io.syn443.observability.EngineSignal.READY
+                EngineHostService.FAILED -> io.syn443.observability.EngineSignal.FAILED
+                EngineHostService.INVALID -> io.syn443.observability.EngineSignal.INVALID
+                EngineHostService.LEASE_RESTART -> io.syn443.observability.EngineSignal.LEASE_RESTART
+                else -> null // Never persist periodic PULSE or an unknown signal.
+            }
+            observed?.let { store.observedEngine(it, epoch, boundGeneration) }
             when (kind) {
                 EngineHostService.READY -> {
                     val transition = fence.started(checkNotNull(hostToken), SystemClock.uptimeMillis())

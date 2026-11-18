@@ -24,12 +24,14 @@ internal object SupportBundleSources {
             checks = { PolicyChecks.snapshotForDiagnostics() },
             exits = { EngineExitDiagnostics.snapshot(context) },
             versionName = BuildConfig.VERSION_NAME, versionCode = BuildConfig.VERSION_CODE, sdk = Build.VERSION.SDK_INT,
+            journal = { io.syn443.android.observability.LocalDiagnosticJournal.passive(context) },
         )
     }
 
     internal fun capture(
         state: () -> JSONObject?, overlay: () -> JSONObject?, checks: (JSONObject) -> JSONObject?, exits: () -> JSONObject?,
         versionName: String, versionCode: Int, sdk: Int,
+        journal: () -> DiagnosticArchive.Component? = { null },
     ): List<DiagnosticArchive.Component> {
         val before = runCatching { state() }.getOrNull()
         val source = before ?: JSONObject()
@@ -37,10 +39,18 @@ internal object SupportBundleSources {
             source, runCatching { overlay() }.getOrNull(), runCatching { checks(source) }.getOrNull(),
             runCatching { exits() }.getOrNull(), versionName, versionCode, sdk,
         )
+        val suppliedHistory = try { journal() } catch (_: Exception) {
+            DiagnosticArchive.Component(DiagnosticArchive.Name.EVENTS, null, DiagnosticArchive.State.ERROR, DiagnosticArchive.Reason.IO_ERROR)
+        }
+        val history = suppliedHistory?.let {
+            if (it.name == DiagnosticArchive.Name.EVENTS) it else DiagnosticArchive.Component(
+                DiagnosticArchive.Name.EVENTS, null, DiagnosticArchive.State.ERROR, DiagnosticArchive.Reason.INVALID_SOURCE)
+        }
         val after = runCatching { state() }.getOrNull()
         val stable = before != null && after != null && sameContext(before, after)
         return result.map { part ->
             when {
+                part.name == DiagnosticArchive.Name.EVENTS && history != null -> history
                 before == null && part.name in setOf(DiagnosticArchive.Name.HEALTH, DiagnosticArchive.Name.EVENTS) ->
                     part.copy(bytes = null, state = DiagnosticArchive.State.MISSING, reason = DiagnosticArchive.Reason.UNAVAILABLE)
                 !stable && part.name in setOf(DiagnosticArchive.Name.HEALTH, DiagnosticArchive.Name.CHECKS, DiagnosticArchive.Name.OVERLAY) ->

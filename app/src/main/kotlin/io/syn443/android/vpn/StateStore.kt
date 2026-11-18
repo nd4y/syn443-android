@@ -18,7 +18,7 @@ import javax.crypto.spec.GCMParameterSpec
 /** All entry points execute in :controller. AtomicFile is never written by the UI/native host. */
 internal data class RouteDecisionStamp(val policyRevision: Long, val algorithm: FailoverAlgorithm)
 
-class StateStore private constructor(context: Context) {
+class StateStore private constructor(private val context: Context) {
     companion object {
         @Volatile private var instance: StateStore? = null
         @Synchronized fun get(context: Context): StateStore {
@@ -73,6 +73,7 @@ class StateStore private constructor(context: Context) {
             if (cp.generation != generation) return false
             if ((phase == "Off" && cp.desiredOn) || (phase != "Off" && !cp.desiredOn)) return false
         }
+        var recorded: JSONObject? = null
         update { value ->
             value.put("phase", phase).put("reason", code).put("networkEpoch", epoch)
             val events = value.optJSONArray("events") ?: JSONArray()
@@ -85,10 +86,27 @@ class StateStore private constructor(context: Context) {
                 event.put("policyRevision", decision.policyRevision).put("algorithmRevision", decision.algorithm.revision)
             }
             events.put(event)
+            recorded = event
             while (events.length() > 64) events.remove(0)
             value.put("events", events)
         }
+        // The existing intent write must succeed first. Journal admission is
+        // bounded memory work only and its failure cannot alter VPN control.
+        try {
+            val row = checkNotNull(recorded)
+            val stamp = decision?.takeIf { code == "managed_route_recheck" }?.let {
+                io.syn443.observability.DecisionStamp(it.policyRevision, if (it.algorithm == FailoverAlgorithm.CONFIRMED) 2 else 1)
+            }
+            io.syn443.android.observability.LocalDiagnosticJournal.lifecycle(context, directory, phase, code, epoch,
+                row.getLong("intentGeneration"), row.getLong("at"), row.getLong("elapsed"), stamp)
+        } catch (_: Exception) { /* Diagnostics never changes a committed lifecycle decision. */ }
         return true
+    }
+    internal fun observedEngine(signal: io.syn443.observability.EngineSignal, epoch: Long, generation: Long) {
+        try {
+            io.syn443.android.observability.LocalDiagnosticJournal.engine(context, directory, signal, epoch, generation,
+                System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime())
+        } catch (_: Exception) { /* The caller already fenced the actual engine session. */ }
     }
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
