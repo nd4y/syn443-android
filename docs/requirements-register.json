@@ -1744,10 +1744,11 @@
       "text": "Локальный кольцевой журнал ограничен, первоначально64MiB/7суток; debug/trace окно - до15минут с автосбросом. Администратор может запросить расширение в пределах policy, но увеличение объёма либо чувствительности сбора требует отдельного локального подтверждения с категориями, сроком и получателем. Разрешение собрать очищенный бандл не является разрешением загрузить его или включить raw capture.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "docs/structured-local-events.md"
       ],
-      "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
-      "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
+      "implementationScope": "Candidate adds an encrypted controller journal limited to 64 MiB and seven days of readable same-boot history, with bounded writer cleanup and passive export.",
+      "remainingScope": "Exact CI and Android device evidence, debug/trace window, administrator retention policy and local consent."
     },
     {
       "id": "LOG-03",
@@ -1756,10 +1757,11 @@
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/managed-overlay.md#startup-failure-diagnosis",
-        "native/engine-netbird/startup_trace_test.go"
+        "native/engine-netbird/startup_trace_test.go",
+        "docs/structured-local-events.md"
       ],
-      "implementationScope": "Bounded redacted lifecycle/exit/resource evidence and debug shell/own-UID commands.",
-      "remainingScope": "Full channels/retention/bundle/export/CLI/release opt-in/server audit."
+      "implementationScope": "Candidate accepts typed fields for lifecycle and engine events only, validates them again on read and reports missing or partial history during export.",
+      "remainingScope": "Other log sources, redacted native traces, supported transfer and server audit."
     },
     {
       "id": "LOG-04",

@@ -983,3 +983,54 @@ if mode == "emulator":
         source = (root / "app/src/androidTest/kotlin/io/syn443/android" / (classname.rsplit(".", 1)[1] + ".kt")).read_text(encoding="utf-8")
         methods = re.findall(r"@Test\s+fun\s+(\w+)", source)
         assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "NetBird report source inventory drift"
+
+JOURNAL_REQUIRED = {
+    "observability": {
+        "io.syn443.observability.StructuredEventTest": (
+            "knownLifecycleInputsProduceClosedChannelsAndGenerationStamps",
+            "unknownPhasesAndSecretBearingCodesCannotBeRetained",
+            "correlationStorageAndReturnedBytesHaveNoMutableAliases",
+            "eventClockSequenceAndGenerationBoundsAreChecked",
+            "finiteEngineSignalsRemainDistinctAndPulseIsNotAnEvent",
+            "managedDecisionFieldsRequireExactCodeAndPairedKnownRevision",
+        ),
+        "io.syn443.observability.JournalRetentionTest": (
+            "sameBootExpiryUsesElapsedAndHonoursExactSevenDayBoundary",
+            "rebootNeverComparesElapsedAcrossDifferentBootsWithNewEpoch",
+            "rollbackFutureAndMissingFloorPreserveWitnessesAndDenyReadOrAppend",
+            "capacityEvictsOldestOwnedSegmentsIncludingPendingWholeFrameAndSlot",
+            "invalidDuplicateUnorderedAndOverflowMetadataProducesNoDeletionPlan",
+            "retentionPlansAreOwnedAndRepeatedPlanningCannotExtendOriginalAge",
+        ),
+    },
+    "emulator": {
+        "io.syn443.android.StructuredJournalCodecTest": (
+            "typedLifecycleAndEngineFramesRoundTripWithoutMutableOrFreeTextAliases",
+            "malformedDuplicateUnknownDeepAndSecretBearingFramesNeverExport",
+            "exactFrameRowNumericAndWholeFrameBoundariesRemainClosed",
+        ),
+        "io.syn443.android.JournalWriterTest": (
+            "blockedWriterBoundsQueueAndRetainsActualOwnershipUntilExit",
+            "writerFailureOrRejectedDispatchLatchesWithoutRetryOrProducerFailure",
+            "batchingPreservesOriginalTimesCorrelationSequenceAndMinimumWriteSpacing",
+        ),
+        "io.syn443.android.JournalCipherStoreTest": (
+            "passiveSnapshotIsEncryptedOnDiskReadOnlyAndWorksAcrossStoreRecreation",
+            "expiredFloorSurvivesFailedReplacementAndRejectsRollbackAfterRecreation",
+            "passiveReadOverlappingNewCommittedFloorCannotPublishOldHistory",
+            "renamedOrDamagedCiphertextAndForeignEntriesFailClosedWithoutCleanup",
+            "readBudgetReportsPartialAndNewBootNeverReexportsPreviousEpoch",
+            "archiveUsesStructuredHistoryWithoutReadingOrRewritingItAgain",
+        ),
+    },
+}
+if mode in JOURNAL_REQUIRED:
+    inventory = JOURNAL_REQUIRED[mode]
+    actual = {(owner, name) for owner, methods in inventory.items() for name in methods}
+    assert len(actual) == 12 and len(identities) >= minimum + len(actual)
+    assert actual <= set(identities), "Missing exact structured journal outcomes"
+    prefix = root / ("app/src/androidTest/kotlin" if mode == "emulator" else "core/observability/src/test/kotlin")
+    for classname, expected in inventory.items():
+        path = prefix / (classname.replace(".", "/") + ".kt")
+        methods = re.findall(r"@Test\s+fun\s+(\w+)", path.read_text(encoding="utf-8"))
+        assert len(methods) == len(set(methods)) == len(expected) and set(methods) == set(expected), "Structured journal test source inventory drift"
