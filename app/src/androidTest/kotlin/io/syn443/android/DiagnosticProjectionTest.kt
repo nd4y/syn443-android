@@ -181,9 +181,14 @@ class DiagnosticProjectionTest {
             input.getJSONObject("peer_state").put("connection_unknown", marker).put("metadata_unknown", marker)
             input.getJSONObject("diagnostics").put("metadata_unknown", marker)
             val output = json(project(overlay = input), Name.OVERLAY)
-            assertFalse(output.getJSONObject("peer_state").has("management_connected"))
-            assertFalse(output.getJSONObject("peer_state").has("signal_connected"))
-            assertFalse(output.getJSONObject("peer_state").has("counts"))
+            if (marker == true) {
+                val peer = output.getJSONObject("peer_state")
+                assertEquals(setOf("connection_unknown", "metadata_unknown"), peer.keys().asSequence().toSet())
+                assertTrue(peer.getBoolean("connection_unknown"))
+                assertTrue(peer.getBoolean("metadata_unknown"))
+            } else {
+                assertFalse(output.has("peer_state"))
+            }
             assertFalse(output.getJSONObject("diagnostics").has("counts"))
         }
     }
