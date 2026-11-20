@@ -980,6 +980,9 @@ OVERLAY_REPORT_REQUIRED = {
     },
 }
 if mode == "emulator":
+    proxy_chain = "io.syn443.android.PackagedProxyChainTest"
+    assert {(proxy_chain, "packagedHttpEntryCarriesVlessToBannerTarget"),
+            (proxy_chain, "refusedHttpEntryNeverFallsBackToVlessOrTarget")} <= set(identities), "Missing packaged proxy chain outcomes"
     required = {(owner, name) for owner, names in OVERLAY_REPORT_REQUIRED.items() for name in names}
     assert len(required) == 8 and required <= set(identities), "Missing exact NetBird report outcomes"
     for classname, expected in OVERLAY_REPORT_REQUIRED.items():

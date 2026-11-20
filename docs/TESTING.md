@@ -469,3 +469,15 @@ repeated compatible metadata changes, deny incompatible/expired/old-context
 carry, require fresh native selection and retain shared start debt. Physical
 token tests use synthetic observations, never real network identifiers. No
 source fixture closes managed rollout, LTE, persistence or battery acceptance.
+
+### Packaged HTTP and VLESS chain
+
+`PackagedProxyChainTest` calls the production JNI runtime from Android
+instrumentation. Three loopback TCP listeners stand in for an HTTP CONNECT
+entry, a VLESS exit and a server-first SSH banner. Each validates its part of
+the exchange. A second case refuses CONNECT and checks that neither downstream
+listener received a connection. Both cases must appear in each emulator report.
+They also run independently on an enrolled phone with VPN off. They require no
+provider credentials, VPN permission, configuration import or enrollment change.
+The fixture covers the packaged dialer and diagnostics, without opening a TUN
+or qualifying an external provider or XHTTP/TLS deployment.
