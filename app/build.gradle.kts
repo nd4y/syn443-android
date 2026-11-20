@@ -38,7 +38,11 @@ require(enrollmentLinkHost.length <= 253 && enrollmentLinkHost.matches(Regex("(?
 }
 android {
     namespace = "io.syn443.android"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 1
+        }
+    }
     defaultConfig {
         applicationId = "io.syn443.android"
         minSdk = 29
