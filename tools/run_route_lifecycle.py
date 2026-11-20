@@ -10,7 +10,7 @@ import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
-from run_vpn_process_faults import ROOT, PACKAGE, URI, Server, Proxy, adb, call, pid, await_condition, vpn_stopped
+from run_vpn_process_faults import ROOT, PACKAGE, URI, Server, Proxy, ControlUnavailable, adb, call, pid, await_condition, vpn_stopped
 from emulator_policy_ui import open_policy, toggle, unlock_test_pin
 from emulator_boot import reboot_preserved
 from syn443ctl import ControlError, Device
@@ -80,6 +80,29 @@ def locked_boot_boundary():
     assert snapshot['engineActive'] is False, 'Locked status must explicitly report no active engine'
     assert snapshot['desiredOn'] is None and not snapshot['desiredOnKnown'], 'Credential intent disclosed before first unlock'
     return True
+
+
+def off_after_reboot(before):
+    # Sample the native process even when the provider is still starting.
+    try:
+        native = pid(':engine', timeout=5)
+    except ControlUnavailable as error:
+        raise AssertionError('Multiple native engines after reboot with VPN Off') from error
+    assert not native, 'Native engine started after reboot with VPN Off'
+    try:
+        state = call('status', timeout=5)
+    except subprocess.TimeoutExpired:
+        return False
+    assert state.get('engineActive') is not True, 'Active engine after reboot with VPN Off'
+    if state.get('phase') == 'NeedsUnlock' and state.get('desiredOnKnown') is False:
+        assert state.get('desiredOn') is None, 'Locked status exposed an intent'
+        return False
+    assert state['desiredOn'] is False, 'VPN Off intent changed during reboot'
+    assert state['generation'] == before['generation'], 'VPN intent generation changed during reboot'
+    assert state['configRevision'] == before['configRevision'], 'Configuration changed during reboot'
+    assert state.get('heavyWallMs', []) == before.get('heavyWallMs', []), 'Restart budget changed during reboot'
+    assert state['phase'] == 'Off', 'Unexpected VPN phase after reboot with VPN Off'
+    return state.get('engineStateKnown') is True and state.get('engineActive') is False
 
 
 def direct_boot_diagnostics():
@@ -210,9 +233,11 @@ def main():
         print(case.get('name')+': passed',flush=True)
 
         case=new_case('rebootWithOffIntentCannotStartOrSpendBudget')
-        stop();before=call('status');reboot();time.sleep(5);after=call('status')
-        assert not after['desiredOn'] and not pid(':engine') and after['generation']==before['generation']
-        assert after.get('heavyWallMs',[])==before.get('heavyWallMs',[]) and after['configRevision']==before['configRevision']
+        stop()
+        before = call('status')
+        reboot()
+        observe_until = time.monotonic() + 5
+        await_condition(lambda: off_after_reboot(before) and time.monotonic() >= observe_until, 30)
         print(case.get('name')+': passed',flush=True)
 
         case=new_case('actualAlwaysOnLockdownRespectsNewerStop')

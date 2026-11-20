@@ -27,3 +27,17 @@ This closes an evidence gap. It is not a production recovery fix, a proven
 transport RCA, physical phone acceptance, LTE, natural Doze, battery or endurance
 evidence. Exact changed-source CI and protected resulting-main checks remain
 separate acceptance stages.
+
+### Reboot with VPN off
+
+In the Android 15 emulator, the fixture rebooted and verified its package
+and UID. Five seconds later its single status query returned no provider
+response. The test stopped before it could establish the post-boot VPN
+state. [Original main run](https://github.com/nd4y/syn443-android/actions/runs/44795232689)
+
+The test now samples the native PID during the original five-second
+observation window. It allows up to 30 seconds for the controller to report
+an explicit Off state. A locked user, missing reply or unknown engine state
+keeps the observation pending. An observed native PID, active engine,
+changed intent, generation, configuration or restart budget fails the test
+immediately. The test sends the reboot once. Subsequent polls only read state.
