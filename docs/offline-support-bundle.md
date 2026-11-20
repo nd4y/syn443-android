@@ -21,9 +21,11 @@ The manifest does not hash itself. Metadata contains the full ZIP hash.
 
 Only closed, typed scalar projections and counts may be collected. Labels,
 targets, peer identities/IPs/FQDNs, URLs, subscription capabilities, raw crash
-text, device/NetBird keys and identity files are excluded. Effective config
-and native stacks are explicitly unavailable in this stage; no config is
-decrypted for collection. `complete:false` also distinguishes projected,
+text, device/NetBird keys and identity files are excluded. For the running engine, effective-config.json reports outbound counts by protocol,
+DNS server and route rule counts after defaults, and whether adaptive routing is configured.
+The controller publishes the projection when the matching engine signals readiness.
+Stopping or replacing the engine invalidates it. A stopped VPN has no running config
+to report. Collection uses the in-memory projection. Native stacks remain unavailable. `complete:false` also distinguishes projected,
 missing, errored or truncated sources. Unknown fields cannot become false or
 zero. Old cached checks keep their original time and unknown currentness.
 

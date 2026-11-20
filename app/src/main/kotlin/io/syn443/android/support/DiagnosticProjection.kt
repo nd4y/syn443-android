@@ -40,9 +40,9 @@ object DiagnosticProjection {
             json(DiagnosticArchive.Name.VERSIONS, document().put("versionName", versionName).put("versionCode", versionCode).put("sdk", sdk))
         else missing(DiagnosticArchive.Name.VERSIONS, DiagnosticArchive.Reason.INVALID_SOURCE, DiagnosticArchive.State.ERROR)
         val capabilities = json(DiagnosticArchive.Name.CAPABILITIES, document().put("collection", "offline_allowlist_projection")
-            .put("maxEvents", MAX_ROWS).put("effectiveConfig", "unsupported").put("nativeStacks", "unsupported"))
+            .put("maxEvents", MAX_ROWS).put("effectiveConfig", "ready_engine_projection").put("nativeStacks", "unsupported"))
         return listOf(versions, capabilities,
-            missing(DiagnosticArchive.Name.EFFECTIVE_CONFIG, DiagnosticArchive.Reason.UNSUPPORTED),
+            missing(DiagnosticArchive.Name.EFFECTIVE_CONFIG),
             json(DiagnosticArchive.Name.HEALTH, health(state)), events(state),
             checks?.let { json(DiagnosticArchive.Name.CHECKS, checkProjection(it)) } ?: missing(DiagnosticArchive.Name.CHECKS),
             overlay?.let { json(DiagnosticArchive.Name.OVERLAY, overlayProjection(it)) } ?: missing(DiagnosticArchive.Name.OVERLAY),

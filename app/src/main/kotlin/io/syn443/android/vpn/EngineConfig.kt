@@ -1,5 +1,6 @@
 package io.syn443.android.vpn
 
+import io.syn443.android.support.EffectiveConfig
 import android.net.InetAddresses
 import io.syn443.decision.AdaptiveRuntime
 import io.syn443.decision.Decision
@@ -320,12 +321,14 @@ object EngineConfig {
             }else require(!item.has("managed") && !item.has("managed_namespace"))
         }
     }
-    fun render(raw: String?, stateRoot: java.io.File): String = renderInternal(raw,stateRoot,null)
-    internal fun renderManaged(raw:String,stateRoot:java.io.File,material:OverlayRuntimeMaterial):String {
+    fun render(raw: String?, stateRoot: java.io.File): String = renderInternal(raw,stateRoot,null,null)
+    internal fun renderObserved(raw: String?, stateRoot: java.io.File, observe: ((EffectiveConfig) -> Unit)?): String =
+        renderInternal(raw, stateRoot, null, observe)
+    internal fun renderManaged(raw:String,stateRoot:java.io.File,material:OverlayRuntimeMaterial, observe: ((EffectiveConfig) -> Unit)? = null):String {
         require(io.syn443.policy.Policy.hash(raw)==material.configHash);material.requireCurrent()
-        return renderInternal(raw,stateRoot,material).also{material.requireCurrent()}
+        return renderInternal(raw,stateRoot,material,observe).also{material.requireCurrent()}
     }
-    private fun renderInternal(raw:String?,stateRoot:java.io.File,material:OverlayRuntimeMaterial?):String {
+    private fun renderInternal(raw:String?,stateRoot:java.io.File,material:OverlayRuntimeMaterial?, observe: ((EffectiveConfig) -> Unit)?):String {
         val value = if (raw == null) JSONObject("""{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}""") else JSONObject(raw).also { validate(raw) }
         // Native adaptive construction extracts its immutable approved checks
         // together with adaptive_routes before parsing ordinary SDK options.
@@ -366,6 +369,9 @@ object EngineConfig {
         for (i in 0 until rules.length()) combined.put(rules.get(i))
         route.put("rules", combined).put("auto_detect_interface", true)
         value.put("route", route)
-        return value.toString().also { if (adaptive) require(utf8Bytes(it) <= 524288) { "invalid_adaptive_engine_config" } }
+        return value.toString().also {
+            if (adaptive) require(utf8Bytes(it) <= 524288) { "invalid_adaptive_engine_config" }
+            observe?.invoke(EffectiveConfig.fromRendered(value))
+        }
     }
 }

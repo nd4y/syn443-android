@@ -1,5 +1,8 @@
 package io.syn443.android.vpn
 
+import io.syn443.android.support.EffectiveConfig
+import io.syn443.android.support.ReadyConfig
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -438,7 +441,8 @@ class TunnelService : VpnService() {
             val raw = try { store.config() } catch (_: Exception) {
                 blackhole(); phase("BlockedByPolicy", "policy_lease_time_or_scope_invalid", cp.generation); return
             }
-            val rendered = policies.render(raw, noBackupFilesDir)
+            var summary: EffectiveConfig? = null
+            val rendered = policies.render(raw, noBackupFilesDir) { summary = it }
             runningConfigHash = raw?.let { Policy.hash(it) }.orEmpty()
             runningHasSetup=policies.overlayHasSetup(runningConfigHash)
             runningOverlayMode=policies.overlayLaunchMode(runningConfigHash)
@@ -467,6 +471,7 @@ class TunnelService : VpnService() {
                 routes.bind(checkNotNull(routeScope()),checkNotNull(adaptiveMode()),policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
                 routes.controlFrame()
             } ?: if (pendingLeaseDeadline > 0) RouteSnapshot.nativeSelectionPlan(runningConfigHash) else ""
+            startingConfig = summary?.let { ReadyConfig(cp.generation, it) }
             pendingConfig = PendingConfig(rendered, routeSelection)
             startAt = SystemClock.uptimeMillis(); lastPulse = startAt
             val reservation = fence.reserveStart(startAt)
@@ -484,6 +489,7 @@ class TunnelService : VpnService() {
     }
     private class PendingConfig(val engine: String, val routeSelection: String)
     private var pendingConfig: PendingConfig? = null
+    private var startingConfig: ReadyConfig? = null
     private var pendingLeaseDeadline = 0L
     private var appliedLeaseDeadline = -1L
     private val platform = object : IPlatform.Stub() {
@@ -604,6 +610,7 @@ class TunnelService : VpnService() {
                     val transition = fence.started(checkNotNull(hostToken), SystemClock.uptimeMillis())
                     if (transition.snapshot.phase == HostFence.Phase.RUNNING) {
                         ready = true; lastPulse = SystemClock.uptimeMillis()
+                        ReadyConfig.publish(startingConfig)
                         if (epoch != startNetworkEpoch && network != null) {
                             val properties = connectivity.getLinkProperties(checkNotNull(network))
                             val name = properties?.interfaceName
@@ -686,6 +693,8 @@ class TunnelService : VpnService() {
         }
     }.getOrDefault(false)
     private fun retire(heavy: Boolean) {
+        startingConfig = null
+        ReadyConfig.publish(null)
         PolicyChecks.invalidate()
         policyJob?.cancel()
         healthJob?.cancel(); healthJob = null
@@ -1028,6 +1037,8 @@ class TunnelService : VpnService() {
         }
     }
     override fun onDestroy() {
+        startingConfig = null
+        ReadyConfig.publish(null)
         LifecycleAccess.detach(this)
         LoginController.get(this).cancelOptionalNetworkWork()
         destroyed = true; token = null; ready = false

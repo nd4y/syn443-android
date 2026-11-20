@@ -216,7 +216,7 @@ class DiagnosticProjectionTest {
         for (name in listOf(Name.EFFECTIVE_CONFIG, Name.NATIVE_STACKS, Name.CHECKS, Name.OVERLAY, Name.CRASHES, Name.EVENTS)) {
             val item = items.single { it.name == name }
             assertEquals(State.MISSING, item.state); assertNull(item.bytes)
-            assertEquals(if (name in setOf(Name.EFFECTIVE_CONFIG, Name.NATIVE_STACKS)) Reason.UNSUPPORTED else Reason.UNAVAILABLE, item.reason)
+            assertEquals(if (name == Name.NATIVE_STACKS) Reason.UNSUPPORTED else Reason.UNAVAILABLE, item.reason)
         }
         val health = json(items, Name.HEALTH)
         assertEquals("unknown", health.getString("phase")); assertFalse(health.has("desiredOn")); assertFalse(health.has("generation"))
