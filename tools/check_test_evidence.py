@@ -980,15 +980,19 @@ OVERLAY_REPORT_REQUIRED = {
     },
 }
 if mode == "emulator":
-    proxy_chain = "io.syn443.android.PackagedProxyChainTest"
-    assert {(proxy_chain, "packagedHttpEntryCarriesVlessToBannerTarget"),
-            (proxy_chain, "refusedHttpEntryNeverFallsBackToVlessOrTarget")} <= set(identities), "Missing packaged proxy chain outcomes"
     required = {(owner, name) for owner, names in OVERLAY_REPORT_REQUIRED.items() for name in names}
     assert len(required) == 8 and required <= set(identities), "Missing exact NetBird report outcomes"
     for classname, expected in OVERLAY_REPORT_REQUIRED.items():
         source = (root / "app/src/androidTest/kotlin/io/syn443/android" / (classname.rsplit(".", 1)[1] + ".kt")).read_text(encoding="utf-8")
         methods = re.findall(r"@Test\s+fun\s+(\w+)", source)
         assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "NetBird report source inventory drift"
+
+PACKAGED_CHAIN_REQUIRED = {
+    ("io.syn443.android.PackagedProxyChainTest", "packagedHttpEntryCarriesVlessToBannerTarget"),
+    ("io.syn443.android.PackagedProxyChainTest", "refusedHttpEntryNeverFallsBackToVlessOrTarget"),
+}
+if mode == "emulator":
+    assert PACKAGED_CHAIN_REQUIRED <= set(identities), "Missing packaged proxy chain outcomes"
 
 JOURNAL_REQUIRED = {
     "observability": {

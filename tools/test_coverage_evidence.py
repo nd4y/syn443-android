@@ -614,6 +614,25 @@ class CoverageEvidenceTest(unittest.TestCase):
                 exec(complete, {**scope, 'identities':list(all_cases-{missing})})
         self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=524\n')
 
+    def test_packaged_proxy_chain_requires_both_android_outcomes(self):
+        root = Path(__file__).resolve().parent.parent
+        tree = ast.parse((root / 'tools/check_test_evidence.py').read_text(encoding='utf-8'))
+        name = 'PACKAGED_CHAIN_REQUIRED'
+        declaration, = [node for node in tree.body if isinstance(node, ast.Assign) and
+                        any(isinstance(t, ast.Name) and t.id == name for t in node.targets)]
+        block, = [node for node in tree.body if isinstance(node, ast.If) and
+                  any(isinstance(t, ast.Name) and t.id == name for t in ast.walk(node))]
+        cases = ast.literal_eval(declaration.value)
+        cases_from_source = re.findall(r'@Test\s+fun\s+(\w+)', (root /
+            'app/src/androidTest/kotlin/io/syn443/android/PackagedProxyChainTest.kt').read_text(encoding='utf-8'))
+        self.assertEqual(cases, {('io.syn443.android.PackagedProxyChainTest', method) for method in cases_from_source})
+        self.assertEqual(len(cases), 2)
+        gate = compile(ast.Module(body=[declaration, block], type_ignores=[]), '<packaged-chain>', 'exec')
+        exec(gate, {'mode':'emulator', 'identities':cases})
+        for case in cases:
+            with self.assertRaises(AssertionError):
+                exec(gate, {'mode':'emulator', 'identities':cases - {case} | {('other', case[1])}})
+
     def test_netbird_report_roots_require_each_actual_outcome_and_exact_sources(self):
         root = Path(__file__).resolve().parent.parent
         source = (root / 'tools/check_test_evidence.py').read_text(encoding='utf-8')
