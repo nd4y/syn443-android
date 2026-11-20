@@ -34,7 +34,8 @@ The raw intent file is read without recovery or writes, capped at256KiB and
 RouteSnapshot.view, whose read path can retire pending work. Context changes
 between capture fences produce an explicit partial result without another
 attempt. OS exit metadata is passive; API29 remains unsupported. Missing
-sources never become successful empty observations.
+sources appear as unavailable. An empty NetBird or check projection is omitted;
+a measured empty peer/check list or an explicit inactive flag is retained.
 
 Components are at most64KiB each and256KiB in total; manifest at most16KiB;
 the ZIP at most512KiB. STORED entries have fixed names, CRCs and a fixed DOS

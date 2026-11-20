@@ -211,6 +211,29 @@ class DiagnosticProjectionTest {
         }
     }
 
+
+    @Test fun emptyOrUnknownCheckAndOverlaySourcesAreMissingWhileMeasuredZeroIsAvailable() {
+        val noBatch = JSONObject().put("lastBatch", JSONObject.NULL).put("ageMs", JSONObject.NULL)
+        val noOverlay = JSONObject().put("phase", "Unknown")
+        for ((probe, network) in listOf(
+            noBatch to noOverlay,
+            JSONObject().put("lastBatch", JSONObject().put("privateTarget", "synthetic")) to
+                JSONObject().put("peer_state", JSONObject()).put("diagnostics", JSONObject()),
+        )) {
+            val items = project(checks = probe, overlay = network)
+            for (name in listOf(Name.CHECKS, Name.OVERLAY)) {
+                val part = items.single { it.name == name }
+                assertEquals(State.MISSING, part.state)
+                assertEquals(Reason.UNAVAILABLE, part.reason)
+                assertNull(part.bytes)
+            }
+        }
+        val observed = project(checks = JSONObject().put("lastBatch", JSONObject().put("checks", JSONArray())),
+            overlay = JSONObject().put("active", false))
+        assertEquals(0, json(observed, Name.CHECKS).getJSONObject("lastBatch").getJSONObject("counts").getInt("reported"))
+        assertFalse(json(observed, Name.OVERLAY).getBoolean("active"))
+    }
+
     @Test fun unavailableSourcesAndInvalidVersionsRemainExplicitAndBounded() {
         val items = project(JSONObject(), null, null, null)
         for (name in listOf(Name.EFFECTIVE_CONFIG, Name.NATIVE_STACKS, Name.CHECKS, Name.OVERLAY, Name.CRASHES, Name.EVENTS)) {

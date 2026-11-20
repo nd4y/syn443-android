@@ -916,7 +916,8 @@ SUPPORT_BUNDLE_REQUIRED = {'io.syn443.android.DiagnosticArchiveTest': ['storedAr
                                                 'routeAndCheckCollectionsExposeCountsWithoutIdentifiers',
                                                 'overlayProjectionPreservesTypedConnectionsAndKnownModesOnly',
                                                 'crashesReprojectOnlyClosedKindsTimesAndStatuses',
-                                                'unavailableSourcesAndInvalidVersionsRemainExplicitAndBounded'],
+                                                'unavailableSourcesAndInvalidVersionsRemainExplicitAndBounded',
+                                              'emptyOrUnknownCheckAndOverlaySourcesAreMissingWhileMeasuredZeroIsAvailable'],
  'io.syn443.android.SupportBundleControllerTest': ['encryptedArchiveHasOwnedMetadataAndWholeVerifiedChunkReadback',
                                                    'cancelledBlockedCollectorRetainsActualSlotAndRejectsLatePublication',
                                                    'grantAndReadyExpiryAndBackwardsClockNeverFreshenAnOldArtifact',
@@ -946,7 +947,7 @@ SUPPORT_BUNDLE_EXTERNAL_REQUIRED = ('io.syn443.android.SupportBundleProtocolTest
 if mode == "emulator":
     required = {(owner, name) for owner, names in SUPPORT_BUNDLE_REQUIRED.items() for name in names}
     required.add(SUPPORT_BUNDLE_EXTERNAL_REQUIRED)
-    assert len(required) == 42, "Duplicate support bundle requirement"
+    assert len(required) == 43, "Duplicate support bundle requirement"
     assert required <= set(identities), "Missing exact offline support archive outcomes"
     for owner, expected in SUPPORT_BUNDLE_REQUIRED.items():
         path = root / "app/src/androidTest/kotlin/io/syn443/android" / (owner.rsplit(".", 1)[1] + ".kt")
