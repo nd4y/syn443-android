@@ -1,7 +1,8 @@
+import subprocess
 import unittest
 from unittest.mock import patch
-from run_route_lifecycle import direct_boot_diagnostics, locked_boot_boundary, resume_blocked, completed_route_batch
-from run_vpn_process_faults import vpn_stopped
+from run_route_lifecycle import direct_boot_diagnostics, locked_boot_boundary, off_after_reboot, resume_blocked, completed_route_batch
+from run_vpn_process_faults import ControlUnavailable, await_condition, vpn_stopped
 
 
 class ForegroundResumeBoundaryTest(unittest.TestCase):
@@ -25,6 +26,40 @@ class ForegroundResumeBoundaryTest(unittest.TestCase):
     def test_config_generation_or_desired_intent_cannot_drift_during_wait(self):
         for changes in [{'configRevision':'other'},{'generation':8},{'desiredOn':False}]:
             with self.subTest(changes=changes),self.assertRaises(AssertionError):self.check(changes)
+
+
+class RebootWithOffIntentTest(unittest.TestCase):
+    before = {'generation': 4, 'configRevision': 'fixture', 'heavyWallMs': [123]}
+    off = {**before, 'phase': 'Off', 'desiredOn': False, 'engineStateKnown': True, 'engineActive': False}
+
+    def test_missing_provider_locked_user_and_unknown_engine_wait_for_explicit_off(self):
+        locked = {'phase': 'NeedsUnlock', 'desiredOnKnown': False, 'desiredOn': None, 'engineActive': False}
+        replies = [ControlUnavailable('starting'), subprocess.TimeoutExpired('status', 5),
+                   locked, {**self.off, 'engineActive': None, 'engineStateKnown': False}, self.off]
+        with (patch('run_route_lifecycle.pid', return_value='') as pid,
+              patch('run_route_lifecycle.call', side_effect=replies) as call,
+              patch('run_vpn_process_faults.time.sleep')):
+            await_condition(lambda: off_after_reboot(self.before), 5)
+            self.assertEqual(len(replies), pid.call_count)
+            self.assertEqual(len(replies), call.call_count)
+            self.assertTrue(all(args.args == ('status',) for args in call.call_args_list))
+
+    def test_observed_native_process_fails_before_any_provider_query(self):
+        for result in ('123', ControlUnavailable('multiple native PIDs')):
+            with (self.subTest(result=result), patch('run_route_lifecycle.pid', side_effect=[result]),
+                  patch('run_route_lifecycle.call') as call):
+                with self.assertRaises(AssertionError):
+                    off_after_reboot(self.before)
+                call.assert_not_called()
+
+    def test_unsafe_or_changed_checkpoint_is_an_immediate_failure(self):
+        for change in ({'desiredOn': True}, {'generation': 5}, {'configRevision': 'changed'},
+                       {'heavyWallMs': []}, {'engineActive': True}, {'phase': 'Online'},
+                       {'desiredOnKnown': False, 'phase': 'NeedsUnlock', 'desiredOn': True}):
+            with (self.subTest(change=change), patch('run_route_lifecycle.pid', return_value=''),
+                  patch('run_route_lifecycle.call', return_value={**self.off, **change}),
+                  self.assertRaises(AssertionError)):
+                off_after_reboot(self.before)
 
 
 class SettledStopTest(unittest.TestCase):
