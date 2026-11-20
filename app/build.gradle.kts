@@ -38,13 +38,17 @@ require(enrollmentLinkHost.length <= 253 && enrollmentLinkHost.matches(Regex("(?
 }
 android {
     namespace = "io.syn443.android"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 1
+        }
+    }
     defaultConfig {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 98
-        versionName = "0.9.70-local-journal"
+        versionCode = 99
+        versionName = "0.9.71-effective-config"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
         manifestPlaceholders["enrollmentLinkHost"] = enrollmentLinkHost
         buildConfigField("String", "ENROLLMENT_LINK_HOST", "\"$enrollmentLinkHost\"")
@@ -68,7 +72,8 @@ dependencies {
     implementation(project(":core:recovery"))
     implementation(files(rootProject.file("native/build/engine.aar")))
     implementation(project(":core:decision"))
-    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    val composeBom = platform("androidx.compose:compose-bom:2026.11.01")
+    implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.browser:browser:1.10.0")
     implementation("com.google.zxing:core:3.5.4")
@@ -77,7 +82,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")
     implementation("androidx.media3:media3-transformer:1.11.1")
     implementation("androidx.media3:media3-effect:1.11.1")
-    androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")

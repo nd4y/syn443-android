@@ -32,7 +32,9 @@ internal object SupportBundleSources {
         state: () -> JSONObject?, overlay: () -> JSONObject?, checks: (JSONObject) -> JSONObject?, exits: () -> JSONObject?,
         versionName: String, versionCode: Int, sdk: Int,
         journal: () -> DiagnosticArchive.Component? = { null },
+        readyConfig: () -> ReadyConfig? = { ReadyConfig.current },
     ): List<DiagnosticArchive.Component> {
+        val readyBefore = readyConfig()
         val before = runCatching { state() }.getOrNull()
         val source = before ?: JSONObject()
         val result = DiagnosticProjection.project(
@@ -47,9 +49,17 @@ internal object SupportBundleSources {
                 DiagnosticArchive.Name.EVENTS, null, DiagnosticArchive.State.ERROR, DiagnosticArchive.Reason.INVALID_SOURCE)
         }
         val after = runCatching { state() }.getOrNull()
+        val readyAfter = readyConfig()
         val stable = before != null && after != null && sameContext(before, after)
         return result.map { part ->
             when {
+                part.name == DiagnosticArchive.Name.EFFECTIVE_CONFIG && readyBefore != null -> {
+                    val generation = source.opt("generation")
+                    if (stable && readyAfter === readyBefore && (generation is Int || generation is Long) &&
+                        (generation as Number).toLong() == readyBefore.generation &&
+                        source.opt("desiredOn") == true && source.opt("engineActive") == true) readyBefore.summary.component()
+                    else part.copy(state = DiagnosticArchive.State.ERROR, reason = DiagnosticArchive.Reason.INVALID_SOURCE)
+                }
                 part.name == DiagnosticArchive.Name.EVENTS && history != null -> history
                 before == null && part.name in setOf(DiagnosticArchive.Name.HEALTH, DiagnosticArchive.Name.EVENTS) ->
                     part.copy(bytes = null, state = DiagnosticArchive.State.MISSING, reason = DiagnosticArchive.Reason.UNAVAILABLE)

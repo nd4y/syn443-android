@@ -97,7 +97,7 @@ jobs:
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
           cmdline-tools-version: '15859902'
-          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
+          packages: 'platform-tools platforms;android-37.1 build-tools;36.0.0'
       - name: Install synthetic media fixture generator
         run: |
           bash -n tools/prepare_media_tools.sh
@@ -250,7 +250,7 @@ jobs:
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
           cmdline-tools-version: '15859902'
-          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
+          packages: 'platform-tools platforms;android-37.1 build-tools;36.0.0'
       - run: bash tools/prepare_android_tools.sh
       - name: Generate media fixture for instrumentation APK
         run: |

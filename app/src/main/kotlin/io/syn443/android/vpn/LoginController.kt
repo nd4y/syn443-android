@@ -1,5 +1,7 @@
 package io.syn443.android.vpn
 
+import io.syn443.android.support.EffectiveConfig
+
 import android.content.Context
 import android.os.SystemClock
 import android.provider.Settings
@@ -804,15 +806,15 @@ class LoginController private constructor(private val context:android.app.Applic
         synchronized(commands){current(s);assignedRuntime.publish(prepared)}
         policyChanged()
     }
-    internal fun renderAssigned(raw:String,stateRoot:File):String {
+    internal fun renderAssigned(raw:String,stateRoot:File, observe: ((EffectiveConfig) -> Unit)? = null):String {
         val material=overlayMaterials[io.syn443.policy.Policy.hash(raw)]
         if(material==null) {
             val outbounds=JSONObject(raw).getJSONArray("outbounds")
             if((0 until outbounds.length()).any{outbounds.getJSONObject(it).optString("type")=="netbird"})throw OverlayLaunchPending()
-            return EngineConfig.render(raw,stateRoot)
+            return EngineConfig.renderObserved(raw,stateRoot,observe)
         }
         if(!material.available())throw OverlayLaunchPending()
-        return try{EngineConfig.renderManaged(raw,stateRoot,material)}catch(_:IllegalStateException){throw OverlayLaunchPending()}
+        return try{EngineConfig.renderManaged(raw,stateRoot,material,observe)}catch(_:IllegalStateException){throw OverlayLaunchPending()}
     }
     internal fun overlayHasSetup(hash:String)=overlayMaterials[hash]?.launchMode=="enrolling"
     internal fun overlayLaunchMode(hash:String)=overlayMaterials[hash]?.takeIf{it.available()}?.launchMode.orEmpty()

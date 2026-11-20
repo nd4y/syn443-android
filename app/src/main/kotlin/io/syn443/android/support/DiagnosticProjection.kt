@@ -40,15 +40,20 @@ object DiagnosticProjection {
             json(DiagnosticArchive.Name.VERSIONS, document().put("versionName", versionName).put("versionCode", versionCode).put("sdk", sdk))
         else missing(DiagnosticArchive.Name.VERSIONS, DiagnosticArchive.Reason.INVALID_SOURCE, DiagnosticArchive.State.ERROR)
         val capabilities = json(DiagnosticArchive.Name.CAPABILITIES, document().put("collection", "offline_allowlist_projection")
-            .put("maxEvents", MAX_ROWS).put("effectiveConfig", "unsupported").put("nativeStacks", "unsupported"))
+            .put("maxEvents", MAX_ROWS).put("effectiveConfig", "ready_engine_projection").put("nativeStacks", "unsupported"))
         return listOf(versions, capabilities,
-            missing(DiagnosticArchive.Name.EFFECTIVE_CONFIG, DiagnosticArchive.Reason.UNSUPPORTED),
+            missing(DiagnosticArchive.Name.EFFECTIVE_CONFIG),
             json(DiagnosticArchive.Name.HEALTH, health(state)), events(state),
-            checks?.let { json(DiagnosticArchive.Name.CHECKS, checkProjection(it)) } ?: missing(DiagnosticArchive.Name.CHECKS),
-            overlay?.let { json(DiagnosticArchive.Name.OVERLAY, overlayProjection(it)) } ?: missing(DiagnosticArchive.Name.OVERLAY),
+            observation(DiagnosticArchive.Name.CHECKS, checks?.let(::checkProjection)),
+            observation(DiagnosticArchive.Name.OVERLAY, overlay?.let(::overlayProjection)),
             exits?.let { json(DiagnosticArchive.Name.CRASHES, crashes(it)) } ?: missing(DiagnosticArchive.Name.CRASHES),
             missing(DiagnosticArchive.Name.NATIVE_STACKS, DiagnosticArchive.Reason.UNSUPPORTED))
     }
+
+    // The schema marker alone carries no observation. Explicit false values
+    // and measured empty collections are evidence and remain available.
+    private fun observation(name: DiagnosticArchive.Name, value: JSONObject?): DiagnosticArchive.Component =
+        if (value != null && value.length() > 1) json(name, value) else missing(name)
 
     private fun document() = JSONObject().put("schemaVersion", 1)
     private fun integer(value: Any?): Long? = when (value) {
@@ -102,7 +107,7 @@ object DiagnosticProjection {
             val safe = JSONObject()
             numbers(batch, safe, "sampledElapsedMs", "intentGeneration", "networkEpoch", "activationGeneration")
             counts(batch.opt("checks"), "outcome", outcomes)?.let { safe.put("counts", it) }
-            value.put("lastBatch", safe)
+            if (safe.length() > 0) value.put("lastBatch", safe)
         }
     }
     private fun overlayProjection(source: JSONObject): JSONObject = document().also { value ->
@@ -117,7 +122,7 @@ object DiagnosticProjection {
             booleans(peers, safe, "connection_unknown", "metadata_unknown")
             if (!peers.has("metadata_unknown") || peers.opt("metadata_unknown") == false)
                 counts(peers.opt("peers"), "state", peerStates)?.let { safe.put("counts", it) }
-            value.put("peer_state", safe)
+            if (safe.length() > 0) value.put("peer_state", safe)
         }
         (source.opt("diagnostics") as? JSONObject)?.let { diagnostics ->
             val safe = JSONObject()
@@ -125,7 +130,7 @@ object DiagnosticProjection {
             known(diagnostics, "state", diagnosticStates)?.let { safe.put("state", it) }
             if (!diagnostics.has("metadata_unknown") || diagnostics.opt("metadata_unknown") == false)
                 counts(diagnostics.opt("results"), "state", resultStates)?.let { safe.put("counts", it) }
-            value.put("diagnostics", safe)
+            if (safe.length() > 0) value.put("diagnostics", safe)
         }
     }
     private fun crashes(source: JSONObject): JSONObject = document().also { value ->

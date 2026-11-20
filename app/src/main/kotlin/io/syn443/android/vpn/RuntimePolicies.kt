@@ -1,5 +1,7 @@
 package io.syn443.android.vpn
 
+import io.syn443.android.support.EffectiveConfig
+
 import android.content.Context
 import android.os.SystemClock
 import android.provider.Settings
@@ -45,7 +47,8 @@ internal class RuntimePolicies(private val context:Context,
         return io.syn443.policy.Policy.internetChecks(true,allowed(raw,d),hash,synthetic)
     }
     fun leaseDeadline(hash:String):Long = if(login.ownsPolicy())login.assignedRead {login.assignedRuntime.leaseDeadline(it,hash)} else legacy.leaseDeadline(hash)
-    fun render(raw:String?,root:java.io.File):String = if(login.ownsPolicy())login.renderAssigned(checkNotNull(raw),root) else EngineConfig.render(raw,root)
+    fun render(raw: String?, root: java.io.File, observe: (EffectiveConfig) -> Unit): String =
+        if (login.ownsPolicy()) login.renderAssigned(checkNotNull(raw), root, observe) else EngineConfig.renderObserved(raw, root, observe)
     fun overlayHasSetup(hash:String)=login.ownsPolicy() && login.overlayHasSetup(hash)
     fun overlayLaunchMode(hash:String)=if(login.ownsPolicy())login.overlayLaunchMode(hash) else ""
     fun overlayNeedsRotation(hash:String)=login.ownsPolicy() && login.overlayNeedsRotation(hash)

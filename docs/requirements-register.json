@@ -1781,7 +1781,7 @@
         "docs/offline-support-bundle.md"
       ],
       "implementationScope": "Candidate source for a bounded local archive with closed component projections, explicit omissions and manifest hashes; source CI and physical acceptance remain separate.",
-      "remainingScope": "Redacted effective configuration and complete revision/native-stack sources; full logging/crash channels and operational physical acceptance."
+      "remainingScope": "The ready-engine projection covers protocol, DNS and route counts. Detailed effective settings, full revision and native-stack sources, other logging channels and end-to-end acceptance remain open."
     },
     {
       "id": "LOG-06",

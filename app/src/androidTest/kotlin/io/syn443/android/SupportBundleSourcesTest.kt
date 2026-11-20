@@ -1,5 +1,8 @@
 package io.syn443.android
 
+import io.syn443.android.support.EffectiveConfig
+import io.syn443.android.support.ReadyConfig
+import io.syn443.android.vpn.EngineConfig
 import io.syn443.android.support.DiagnosticArchive
 import io.syn443.android.support.SupportBundleSources
 import java.io.File
@@ -52,6 +55,48 @@ class SupportBundleSourcesTest {
         val archive = DiagnosticArchive.create(parts)
         assertFalse(archive.manifest.getBoolean("complete"))
         assertFalse(archive.manifest.toString().contains("synthetic private marker"))
+    }
+
+
+    private fun configPart(state: JSONObject = state(), snapshot: () -> ReadyConfig?) =
+        SupportBundleSources.capture({ state }, { null }, { null }, { null }, "0.9.71", 99, 35,
+            readyConfig = snapshot).single { it.name == DiagnosticArchive.Name.EFFECTIVE_CONFIG }
+
+    @Test fun readyEngineExportsOnlyAllowlistedCountsAndRenderedDefaults() {
+        val raw = """{"outbounds":[{"type":"http","tag":"synthetic-tag","server":"proxy.example.invalid","server_port":443,"username":"synthetic-user","password":"synthetic-secret"}]}"""
+        var ready: ReadyConfig? = null
+        EngineConfig.renderObserved(raw, File(".")) { ready = ReadyConfig(7, it) }
+        val part = configPart { ready }
+        assertEquals(DiagnosticArchive.Reason.PROJECTION_ONLY, part.reason)
+        val text = checkNotNull(part.bytes).toString(Charsets.UTF_8)
+        val value = JSONObject(text)
+        assertEquals(setOf("schemaVersion", "outboundTypes", "routeRuleCount", "dnsServerCount", "adaptiveRouting"),
+            value.keys().asSequence().toSet())
+        assertEquals(1, value.getJSONObject("outboundTypes").getInt("http"))
+        assertEquals(1, value.getInt("routeRuleCount"))
+        assertEquals(1, value.getInt("dnsServerCount"))
+        assertFalse(value.getBoolean("adaptiveRouting"))
+        for (privateValue in listOf("synthetic", "proxy.example.invalid", "physical-dns", "hijack-dns")) assertFalse(text.contains(privateValue))
+    }
+
+    @Test fun missingStoppedChangedGenerationAndReplacedEngineOmitConfigBytes() {
+        val sanitized = EffectiveConfig.fromRendered(JSONObject("""{"outbounds":[{"type":"private-unrecognized-value"}]}"""))
+        val ready = ReadyConfig(7, sanitized)
+        val exported = JSONObject(checkNotNull(configPart { ready }.bytes).toString(Charsets.UTF_8))
+        assertEquals(setOf("unknown"), exported.getJSONObject("outboundTypes").keys().asSequence().toSet())
+        assertFalse(exported.has("dnsServerCount"))
+        assertEquals(DiagnosticArchive.State.MISSING, configPart { null }.state)
+        for (invalid in listOf(state().put("generation", 8), state().put("generation", "7"),
+            state().put("engineActive", false), state().put("desiredOn", false))) {
+            val rejected = configPart(invalid) { ready }
+            assertEquals(DiagnosticArchive.Reason.INVALID_SOURCE, rejected.reason)
+            assertNull(rejected.bytes)
+        }
+        var reads = 0
+        val replaced = configPart { if (reads++ == 0) ready else ReadyConfig(7, sanitized) }
+        assertEquals(DiagnosticArchive.State.ERROR, replaced.state)
+        assertNull(replaced.bytes)
+        assertEquals(2, reads)
     }
 
     @Test fun stateFileReadRejectsOversizeDepthUtf8TrailingAndSymlinkWithoutModifyingFiles() {
