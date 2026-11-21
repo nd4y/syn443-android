@@ -26,14 +26,14 @@ class ManagedAdaptiveRoutesFairnessTest {
     private fun canonical(value: JSONObject) = canonical(Json.parseToJsonElement(value.toString()))
     private fun b64(raw: String) = Base64.getUrlEncoder().withoutPadding().encodeToString(raw.toByteArray())
 
-    internal fun config(choices: Int = 500, groupCount: Int = 1, publicExit: Boolean = false, blockedFirst: Boolean = false): String {
+    internal fun config(choices: Int = 500, groupCount: Int = 1, publicExit: Boolean = false, blockedFirst: Boolean = false, sparse: Boolean = false): String {
         val ids = (0 until choices).map { "hop-%03d".format(it) }
         val catalogue = JSONObject(); val hops = JSONArray()
         val features = JSONArray().put("TCP").put("IPV4")
         val exit = if (publicExit) "RU" else "INTERNAL"
         ids.forEachIndexed { index, id ->
             catalogue.put(id, JSONObject().put("type", "http").put("tag", id).put("server", "192.0.2.1").put("server_port", 2000+index))
-            val modes = JSONArray().put(if (blockedFirst && index < choices-1) "CELLULAR" else "WIFI")
+            val modes = JSONArray().put(if ((blockedFirst || sparse) && index < choices-1) "CELLULAR" else "WIFI")
             hops.put(JSONObject().put("id", id).put("entryModes", modes).put("exitClass", exit).put("features", features))
         }
         val templates = JSONArray()
@@ -298,6 +298,21 @@ class ManagedAdaptiveRoutesFairnessTest {
             assertTrue("500 attempts bypassed the rolling hourly cap", h.starts.last().first>=3*3_600_000L)
             assertFalse(h.controller.requiresRetirement())
         }
+        }
+    }
+
+    @Test fun sparseRecoveryFindsTheLastEligibleHopWithoutForceOrExtraNetworkProbes() {
+        Harness(config(choices=193,sparse=true)).use { h ->
+            h.ready(1000)
+            // Three empty 64-position pages. Repeated status ticks are safe while waiting.
+            for (now in listOf(1000L,1500L,2000L,3000L,4000L,7000L))assertNull(h.tick(now))
+            assertTrue(h.starts.isEmpty())
+            val start=checkNotNull(h.tick(8000))
+            assertEquals("hop-192",start.getJSONArray("hops").getString(0))
+            assertFalse(h.view().getBoolean("requiredReady"))
+            h.selected(start,8000)
+            assertEquals(1,h.starts.size)
+            assertTrue(h.view().getBoolean("requiredReady"))
         }
     }
 

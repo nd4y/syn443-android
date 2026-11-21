@@ -24,6 +24,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private val budget:AdaptiveStartAdmission) {
     private data class CurrentFailure(val path:PlannedPath,val attempt:Long,val completedAt:Long,val nativeEpoch:Long,val nativeScope:String)
     private data class Group(var frontier:RouteFrontier?=null,var current:PlannedPath?=null,
+        var emptyPages:Int=0,var onlyFenced:Boolean=true,var firstRetryAt:Long?=null,
         var measuredAt:Long=0,var latency:Long=0,var nextAt:Long=0,var exploreAt:Long=0,
         var improvement:String="",var improvementPath:PlannedPath?=null,var improvementCount:Int=0,var recheckFailed:Boolean=false,
         var failure:CurrentFailure?=null,var selectionToken:Long=0,var hintSequence:Long=0,var urgentRecheck:Boolean=false,var forceCheck:Boolean=false,
@@ -409,8 +410,12 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val recheck=group.current?.takeIf {!explore && !group.recheckFailed && (group.forceCheck || group.urgentRecheck || now-group.measuredAt>=maintenanceCadence)}
         val retryImprovement=group.improvementPath?.takeIf {!group.urgentRecheck && !group.forceCheck}
         var candidate=retryImprovement?.takeIf {now-group.measuredAt<=120_000} ?: recheck
+        var exhausted=false
         if(candidate==null) {
-            if(group.frontier==null)group.frontier=wire.graph.frontier(groupID,current,mode,emptyList(),now,600_000)
+            if(group.frontier==null) {
+                group.frontier=wire.graph.frontier(groupID,current,mode,emptyList(),now,600_000)
+                group.emptyPages=0;group.onlyFenced=true;group.firstRetryAt=null
+            }
             var frontier=checkNotNull(group.frontier)
             var batch=frontier.next(current,now,1,64)
             if(batch.invalidated) {
@@ -429,12 +434,30 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 // ordinary64-slot CPU quantum and at most one I/O attempt.
                 batch=frontier.next(current,now,1,64)
             }
-            if(batch.exhausted)group.frontier=null
+            exhausted=batch.exhausted
+            if(exhausted)group.frontier=null
             candidate=batch.paths.firstOrNull()
-            if(candidate==null) {group.nextAt=now+if(group.current==null)60_000 else 300_000;return}
+            if(candidate==null) {
+                if(!exhausted && group.current==null) {
+                    // There are unvisited signed positions. Yield one bounded CPU
+                    // page and back off while no eligible path has been found.
+                    val delay=1000L shl group.emptyPages
+                    group.emptyPages=(group.emptyPages+1).coerceAtMost(4)
+                    group.nextAt=now+delay
+                } else {
+                    group.nextAt=afterScan(group,now)
+                }
+                return
+            }
+            group.emptyPages=0
         }
         val health=checkNotNull(memory).view(current,key(groupID,candidate),now)
-        if(health.readiness in setOf(PathReadiness.QUARANTINED,PathReadiness.HALF_OPEN,PathReadiness.CONFIG_CHANGE_REQUIRED)) {group.nextAt=now+1000;return}
+        if(health.readiness in setOf(PathReadiness.QUARANTINED,PathReadiness.HALF_OPEN,PathReadiness.CONFIG_CHANGE_REQUIRED)) {
+            health.retryAtMs?.let {retry->group.firstRetryAt=minOf(group.firstRetryAt ?: retry,retry)}
+            group.nextAt=if(exhausted && group.current==null && group.onlyFenced)afterScan(group,now) else now+1000
+            return
+        }
+        group.onlyFenced=false
         attempt++
         val request=UUID.randomUUID().toString()
         val admission=PendingAdmission(request,groupID,candidate,attempt,now,current,routeScope,mode,nativeEpoch,nativeScope,
@@ -445,6 +468,11 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             try {admitted(admission,result)} finally {publishSearch()}
         }} catch(_:Exception) {false}
         if(!queued && pendingAdmission===admission)pendingAdmission=null
+    }
+    private fun afterScan(group:Group,now:Long):Long {
+        if(group.current!=null)return now+300_000
+        val retry=group.firstRetryAt
+        return if(group.onlyFenced && retry!=null)maxOf(now+1000,retry) else now+60_000
     }
     private fun admissionTime(work:PendingAdmission,result:AdaptiveStartAdmission.Result,after:Long):Long? {
         val now=try {budget.currentTimeMs()}catch(_:Exception) {return null}
