@@ -85,7 +85,7 @@ if mode=="emulator":
         "validCameraResultOnlyEnablesLocalInvitationReview",
         "canceledScannerKeepsPasteAndImageAvailable",
     )} <= set(identities), "Missing in-app invitation scanner outcomes"
-    assert ("InvitationCameraPermission", "systemDenialReturnsToEnrollmentWithImageAndPaste") in identities
+    assert ("io.syn443.android.InvitationCameraPermission", "systemDenialReturnsToEnrollmentWithImageAndPaste") in identities
     assert {("io.syn443.android.NetBirdProfileStateTest", name) for name in (
         "runningProfileEvidenceRequiresAReadyCurrentOwnerAndSuppressesRetiredRows",
         "profileWithoutNetBirdHasOneExplanationAndConfiguredModuleKeepsItsControls",
