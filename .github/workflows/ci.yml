@@ -12,8 +12,8 @@ env:
   SYN443_ENROLLMENT_LINK_HOST: ${{ github.event_name == 'workflow_dispatch' && vars.SYN443_PUBLIC_ENROLLMENT_LINK_HOST || '' }}
   SYN443_INSTALLATION_PROFILE: ${{ github.event_name == 'workflow_dispatch' && secrets.SYN443_PUBLIC_INSTALLATION_PROFILE || '' }}
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   public-data:
     runs-on: ubuntu-24.04
