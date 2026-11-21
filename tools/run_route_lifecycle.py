@@ -218,15 +218,39 @@ def main():
 
         case=new_case('rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles')
         prepare();before=call('status')
+        adb('shell','input','keyevent','KEYCODE_HOME')
         answer=adb('shell','locksettings','set-pin','2468');assert b'set to' in answer.lower();pin_set=True
         reboot()
         try:await_condition(locked_boot_boundary,60)
         except Exception:
             print('Direct boot boundary: '+json.dumps(direct_boot_diagnostics()),flush=True)
             raise
+        progress_before_unlock=servers[0].progress
         unlock_test_pin()
-        await_condition(lambda:call('status').get('osPolicy',{}).get('unlocked') is True,30)
-        await_condition(lambda:call('status').get('phase')=='Online',150)
+        # Reading the debug app's persisted test state does not initialize its
+        # provider. Wait for an actual HTTP response and a fresh service-owned
+        # Online event before deliberately making the first unlocked status call.
+        online_sequence=0
+        def booted_service_online():
+            nonlocal online_sequence
+            if servers[0].progress<=progress_before_unlock or not pid(':engine'):return False
+            try:
+                durable=json.loads(adb('shell','run-as',PACKAGE,'cat','no_backup/vpn-intent.json'))
+            except (subprocess.CalledProcessError, json.JSONDecodeError):
+                return False
+            online_sequence=max((event['sequence'] for event in durable.get('events',[])
+                                 if event.get('phase')=='Online' and event.get('intentGeneration')==before['generation']),default=0)
+            return durable['generation']==before['generation'] and durable.get('phase')=='Online' and online_sequence>before['eventSequence']
+        await_condition(booted_service_online,150)
+        case=new_case('firstUnlockedStatusPreservesTheAlreadyRecoveredVpnPhase')
+        def first_read():
+            state=call('status')
+            assert state.get('osPolicy',{}).get('unlocked') is True
+            assert state['phase']=='Online' and state['engineActive'] is True
+            assert not any(event['sequence']>online_sequence and event.get('code')=='controller_recreated'
+                           for event in state.get('events',[]))
+            return True
+        await_condition(first_read,30)
         after=call('status');assert after['configRevision']==before['configRevision'] and after['generation']==before['generation']
         assert set(before.get('heavyWallMs',[])).issubset(after.get('heavyWallMs',[]))
         adb('shell','locksettings','clear','--old','2468');pin_set=False

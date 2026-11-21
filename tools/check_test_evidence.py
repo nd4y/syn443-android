@@ -87,6 +87,7 @@ if mode=="emulator":
         ("io.syn443.android.ChatAttachmentNoticeTest", "composerExplainsLocalStorageFailureAndClearsItForRetry"),
     }
     assert required_storage_outcomes <= set(identities), "Missing attachment storage recovery outcomes"
+    assert ("io.syn443.android.RouteLifecycleTest", "firstUnlockedStatusPreservesTheAlreadyRecoveredVpnPhase") in identities, "Missing post-boot provider ownership evidence"
     history_cases = {
         "equalTimestampInboxPagesReachEveryConversationAndReturnToFirst",
         "deepMessagesNavigateBothDirectionsWithoutPollingOrSkippingHistory",

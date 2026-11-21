@@ -22,7 +22,7 @@ class ControlProvider : ContentProvider() {
         check(LifecycleAccess.unlocked(checkNotNull(context)))
         val store = StateStore.get(checkNotNull(context))
         OsIntentGate.observe(checkNotNull(context), store)
-        if (store.checkpoint().desiredOn) store.event(if (store.read().optBoolean("resumeRequired")) "NeedsAction" else "Recovering", if (store.read().optBoolean("resumeRequired")) "explicit_resume_required" else "controller_recreated", store.read().optLong("networkEpoch"))
+        LifecycleAccess.recordControllerStartup(store)
         LoginController.get(checkNotNull(context)).recover()
         runCatching {RouteSnapshot.configure(store.config(),store.read().optString("configRevision"))}
         initialized=true

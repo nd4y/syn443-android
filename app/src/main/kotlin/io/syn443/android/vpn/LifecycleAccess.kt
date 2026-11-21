@@ -11,8 +11,22 @@ object LifecycleAccess {
         .put("desiredOn",JSONObject.NULL).put("desiredOnKnown",false).put("generation",JSONObject.NULL)
         .put("engineActive",false).put("osPolicy",JSONObject().put("unlocked",false).put("known",false))
     @Volatile private var service:java.lang.ref.WeakReference<TunnelService>?=null
-    fun attach(value:TunnelService){service=java.lang.ref.WeakReference(value)}
-    fun detach(value:TunnelService){if(service?.get()===value)service=null}
+    @Synchronized fun attach(value:TunnelService){service=java.lang.ref.WeakReference(value)}
+    @Synchronized fun detach(value:TunnelService){if(service?.get()===value)service=null}
+    @Synchronized internal fun recordControllerStartup(store: StateStore) {
+        val state = store.read()
+        val intent = store.checkpoint(state)
+        if (!intent.desiredOn) return
+        val needsResume = state.optBoolean("resumeRequired")
+        // BOOT_COMPLETED may have restored the service before the first UI or
+        // shell request. That service owns its current phase, even during startup.
+        if (!needsResume && service?.get() != null) return
+        store.event(
+            if (needsResume) "NeedsAction" else "Recovering",
+            if (needsResume) "explicit_resume_required" else "controller_recreated",
+            state.optLong("networkEpoch"), generation = intent.generation,
+        )
+    }
     internal fun ownsReadyEngine(generation: Long): Boolean = service?.get()?.ownsReadyEngine(generation) == true
 
     fun engineStatus(status:JSONObject,engineReady:Boolean,processPresent:Boolean?):JSONObject {
