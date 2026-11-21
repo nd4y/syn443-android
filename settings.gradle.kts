@@ -12,6 +12,9 @@ dependencyResolutionManagement {
                 for (module in listOf("mockwebserver3", "mockwebserver3-jvm", "okhttp", "okhttp-android", "okhttp-jvm", "okhttp-tls")) {
                     includeVersion("com.squareup.okhttp3", module, "5.5.1")
                 }
+                for (module in listOf("okio", "okio-jvm")) {
+                    includeVersion("com.squareup.okio", module, "3.18.1")
+                }
             }
         }
         mavenCentral()
