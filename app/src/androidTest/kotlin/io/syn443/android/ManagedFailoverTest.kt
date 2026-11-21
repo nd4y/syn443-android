@@ -30,6 +30,22 @@ class ManagedFailoverTest {
     @Test fun conservativeRevisionRequiresThirdCurrentRouteBatch() =
         assertSelection(FailoverAlgorithm.CONFIRMED)
 
+    @Test fun failoverMembersMustMatchSelectorHTTPMethodAndStatus() {
+        val engine = JSONObject(config)
+        val rows = engine.getJSONArray("route_checks")
+        for (i in 0 until rows.length()) {
+            val check = rows.getJSONObject(i).getJSONArray("checks").getJSONObject(0)
+            check.put("method", "https_status").put("target", "https://service.example.invalid/")
+                .put("http_method", "HEAD").put("expected_status", 200)
+        }
+        EngineConfig.validate(engine.toString())
+        val member = rows.getJSONObject(1).getJSONArray("checks").getJSONObject(0)
+        member.put("http_method", "GET")
+        assertTrue(runCatching { EngineConfig.validate(engine.toString()) }.isFailure)
+        member.put("http_method", "HEAD").put("expected_status", 302)
+        assertTrue(runCatching { EngineConfig.validate(engine.toString()) }.isFailure)
+    }
+
     @Test fun internalSelectorAcceptsExplicitDestinationsAndRejectsScopeWidening() {
         fun settings(): JSONObject = JSONObject(config)
         fun rule(value: JSONObject): JSONObject = value.getJSONObject("route").getJSONArray("rules").getJSONObject(0)

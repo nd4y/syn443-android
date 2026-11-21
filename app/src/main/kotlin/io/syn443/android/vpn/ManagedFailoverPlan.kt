@@ -85,9 +85,11 @@ internal data class ManagedFailoverPlan(val selector:String,val intent:ExitClass
             val probes=rows(config.getJSONArray("route_checks")).associateBy {it.getString("outbound")}
             val groupProbe=probes.getValue(selector)
             require(groupProbe.optBoolean("required"))
-            fun checks(row:JSONObject)=rows(row.getJSONArray("checks")).map {it.getString("method") to it.getString("target")}
+            fun checks(row:JSONObject)=rows(row.getJSONArray("checks")).map {
+                io.syn443.policy.Canonical.encode(io.syn443.policy.Canonical.parse(it.toString()))
+            }
             val expected=checks(groupProbe)
-            require(expected.none { (method, _) -> method == "https_exit_ip" || method == "https_exit_country" })
+            require(rows(groupProbe.getJSONArray("checks")).none { it.getString("method") in setOf("https_exit_ip","https_exit_country") })
             for(member in members) {
                 val check=probes.getValue(member)
                 require(!check.optBoolean("required") && checks(check)==expected)

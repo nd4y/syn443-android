@@ -24,7 +24,7 @@ class RouteCheckProfile private constructor(
 
     companion object {
         private val identifier = Regex("[a-z][a-z0-9._-]{0,63}")
-        private val methods = setOf("tcp", "tls", "https_204", "ssh_banner", "https_exit_ip", "https_exit_country")
+        private val methods = setOf("tcp", "tls", "https_204", "ssh_banner", "https_exit_ip", "https_exit_country", "https_status")
         private val mandatory = setOf("tls", "https_exit_ip", "https_exit_country")
         private fun obj(value: JsonElement, keys: Set<String>): JsonObject =
             (value as? JsonObject).also { require(it != null && it.keys == keys) }!!
@@ -64,12 +64,13 @@ class RouteCheckProfile private constructor(
             val keys = setOf("method", "target") + when (method) {
                 "https_exit_ip" -> setOf("expected_ip")
                 "https_exit_country" -> setOf("expected_exit_class")
+                "https_status" -> setOf("http_method", "expected_status")
                 else -> emptySet()
             }
             require(raw.keys == keys)
             val target = text(raw["target"])
             require(target.length in 1..2048 && target.all { it.code in 33..126 } && '\\' !in target && '#' !in target)
-            val secure = method in setOf("tls", "https_204", "https_exit_ip", "https_exit_country")
+            val secure = method in setOf("tls", "https_204", "https_exit_ip", "https_exit_country", "https_status")
             val uri = URI(if (secure) target else "tcp://$target")
             require(uri.host != null && host(uri.host) && uri.userInfo == null && uri.rawFragment == null && !uri.rawAuthority.endsWith(":"))
             val authority = uri.rawAuthority
@@ -79,10 +80,17 @@ class RouteCheckProfile private constructor(
             require(if (secure) uri.scheme == "https" && (uri.port == -1 || uri.port in 1..65535)
                 else uri.port in 1..65535 && uri.rawPath.isNullOrEmpty() && uri.rawQuery == null)
             if (method == "https_exit_ip") require(ip(text(raw["expected_ip"])))
+            if (method == "https_status") {
+                require(text(raw["http_method"]) in setOf("GET", "HEAD"))
+                integer(raw["expected_status"], 200L..599L)
+            }
             val exit = if (method == "https_exit_country") text(raw["expected_exit_class"]) else ""
             if (method == "https_exit_country") require(exit in setOf("RU", "NON_RU") &&
                 (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/") && uri.rawQuery == null)
             return Leaf("", method, exit, Canonical.encode(raw))
+        }
+        internal fun validateHTTPSStatus(check: JsonElement) {
+            require(primitive(check).method == "https_status")
         }
         fun decode(raw: String): RouteCheckProfile = try { decodeValue(raw) }
             catch (_: Exception) { throw IllegalArgumentException("invalid_check_profile") }
@@ -161,6 +169,7 @@ object RouteCheckProfiles {
                 profiles++; methods.addAll(profile.methods())
             } else for (check in row["checks"] as? JsonArray ?: JsonArray(emptyList())) {
                 val method = ((check as? JsonObject)?.get("method") as? JsonPrimitive)?.takeIf { it.isString }?.content
+                if (method == "https_status") RouteCheckProfile.validateHTTPSStatus(check)
                 if (method != null) methods.add(method)
             }
         }

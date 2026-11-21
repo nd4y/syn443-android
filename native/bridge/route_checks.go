@@ -30,6 +30,8 @@ type routeCheck struct {
 	Target            string `json:"target"`
 	ExpectedIP        string `json:"expected_ip,omitempty"`
 	ExpectedExitClass string `json:"expected_exit_class,omitempty"`
+	HTTPMethod        string `json:"http_method,omitempty"`
+	ExpectedStatus    int    `json:"expected_status,omitempty"`
 }
 type routePlan struct {
 	ID       string             `json:"id"`
@@ -301,6 +303,13 @@ func validRouteCheck(c routeCheck) bool {
 	if len(c.Target) < 1 || len(c.Target) > 2048 {
 		return false
 	}
+	if c.Method == "https_status" {
+		if (c.HTTPMethod != http.MethodGet && c.HTTPMethod != http.MethodHead) || c.ExpectedStatus < 200 || c.ExpectedStatus > 599 {
+			return false
+		}
+	} else if c.HTTPMethod != "" || c.ExpectedStatus != 0 {
+		return false
+	}
 	if c.Method == "https_exit_ip" {
 		if _, ok := routeExitIP(c.ExpectedIP); !ok {
 			return false
@@ -318,7 +327,7 @@ func validRouteCheck(c routeCheck) bool {
 	case "tcp", "ssh_banner":
 		host, port, err := net.SplitHostPort(c.Target)
 		return err == nil && host != "" && validRoutePort(port) && !strings.ContainsAny(host, " /\\\r\n\t")
-	case "tls", "https_204", "https_exit_ip":
+	case "tls", "https_204", "https_exit_ip", "https_status":
 		u, err := url.Parse(c.Target)
 		return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Fragment == "" && (u.Port() == "" || validRoutePort(u.Port()))
 	}
@@ -643,7 +652,7 @@ func probeRouteWithDetail(parent context.Context, dial routeDial, c routeCheck, 
 	defer cancel()
 	target := c.Target
 	var u *url.URL
-	if c.Method == "tls" || c.Method == "https_204" || c.Method == "https_exit_ip" || c.Method == "https_exit_country" {
+	if c.Method == "tls" || c.Method == "https_204" || c.Method == "https_exit_ip" || c.Method == "https_exit_country" || c.Method == "https_status" {
 		u, _ = url.Parse(target)
 		port := u.Port()
 		if port == "" {
@@ -719,12 +728,16 @@ func probeRouteWithDetail(parent context.Context, dial routeDial, c routeCheck, 
 	if c.Method == "tls" {
 		return "ok", true
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Target, nil)
+	method := http.MethodGet
+	if c.Method == "https_status" {
+		method = c.HTTPMethod
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.Target, nil)
 	if err != nil {
 		return "unsupported", false
 	}
 	req.Header.Set("Connection", "close")
-	if c.Method == "https_exit_ip" || c.Method == "https_exit_country" {
+	if c.Method == "https_exit_ip" || c.Method == "https_exit_country" || c.Method == "https_status" {
 		req.Header.Set("Cache-Control", "no-cache, no-store")
 		req.Header.Set("Accept-Encoding", "identity")
 	}
@@ -733,6 +746,33 @@ func probeRouteWithDetail(parent context.Context, dial routeDial, c routeCheck, 
 	}
 	if c.Method == "https_exit_country" {
 		return probeExitCountryResponse(parent, ctx, secure, req, c.ExpectedExitClass)
+	}
+	if c.Method == "https_status" {
+		// A fresh socket, one request and at most 8 KiB across all response
+		// headers. Never follow Location or drain a GET response body.
+		headers := bufio.NewReader(io.LimitReader(secure, 8192))
+		for interim := 0; interim <= 4; interim++ {
+			response, readErr := http.ReadResponse(headers, req)
+			if parent.Err() != nil {
+				return "cancelled", false
+			}
+			if ctx.Err() != nil {
+				return "check_timeout", true
+			}
+			if readErr != nil {
+				return "response_failed", true
+			}
+			if response.StatusCode >= 100 && response.StatusCode < 200 && response.StatusCode != http.StatusSwitchingProtocols {
+				continue
+			}
+			_ = conn.Close()
+			_ = response.Body.Close()
+			if response.StatusCode == c.ExpectedStatus {
+				return "ok", true
+			}
+			return "http_response_mismatch", true
+		}
+		return "response_failed", true
 	}
 	response, err := http.ReadResponse(bufio.NewReaderSize(io.LimitReader(secure, 8193), 4096), req)
 	if err != nil {

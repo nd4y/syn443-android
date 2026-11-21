@@ -626,7 +626,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         cases_from_source = re.findall(r'@Test\s+fun\s+(\w+)', (root /
             'app/src/androidTest/kotlin/io/syn443/android/PackagedProxyChainTest.kt').read_text(encoding='utf-8'))
         self.assertEqual(cases, {('io.syn443.android.PackagedProxyChainTest', method) for method in cases_from_source})
-        self.assertEqual(len(cases), 3)
+        self.assertEqual(len(cases), 4)
         gate = compile(ast.Module(body=[declaration, block], type_ignores=[]), '<packaged-chain>', 'exec')
         projection = ('io.syn443.android.RouteSnapshotTest', 'currentFailedProbeOnlyShowsKnownCauseForItsStage')
         display = ('io.syn443.android.RouteFailureLabelTest', 'routeScreenExplainsEachFailureAndClearsItAfterRecovery')

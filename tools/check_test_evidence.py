@@ -97,6 +97,7 @@ if mode=="emulator":
         "twoSameScopeBatchesSelectOnlyTheVerifiedConcreteReserve",
         "conservativeRevisionRequiresThirdCurrentRouteBatch",
         "nativeSelectionPlanContainsOnlyConcreteChecksForTheExactConfig",
+        "failoverMembersMustMatchSelectorHTTPMethodAndStatus",
         "meteredMaintenanceKeepsRequiredChecksAndOnlyFullComparisonsCountTowardSwitch",
         "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
         "routineBatchesDeferOnlyCoolingReserveAndKeepRequiredSelector",
@@ -992,6 +993,7 @@ PACKAGED_CHAIN_REQUIRED = {
     ("io.syn443.android.PackagedProxyChainTest", "packagedHttpEntryCarriesVlessToBannerTarget"),
     ("io.syn443.android.PackagedProxyChainTest", "refusedHttpEntryNeverFallsBackToVlessOrTarget"),
     ("io.syn443.android.PackagedProxyChainTest", "refusedTcpConnectionReportsItsCauseWithoutEndpointDetails"),
+    ("io.syn443.android.PackagedProxyChainTest", "packagedHTTPSStatusChecksExactResponseAndRequiresTLS"),
 }
 if mode == "emulator":
     assert PACKAGED_CHAIN_REQUIRED <= set(identities), "Missing packaged proxy chain outcomes"
