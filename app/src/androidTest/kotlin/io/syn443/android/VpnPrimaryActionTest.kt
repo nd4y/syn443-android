@@ -4,16 +4,53 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import io.syn443.android.vpn.VpnPrimaryAction
+import io.syn443.android.vpn.VpnStatusSummary
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
 class VpnPrimaryActionTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun statusRequiresCurrentEngineProofAndKeepsUnrecognizedIntentVisible() {
+        val status = mutableStateOf(JSONObject())
+        val available = mutableStateOf<Boolean?>(null)
+        val policyBlocked = mutableStateOf(false)
+        compose.setContent { MaterialTheme { VpnStatusSummary(status.value, available.value, policyBlocked.value) } }
+        val label = compose.onNodeWithTag("vpn-status")
+        fun expect(phase: String, desired: Boolean?, known: Boolean, active: Boolean, text: String) {
+            compose.runOnIdle {
+                available.value = true
+                status.value = JSONObject().put("phase", phase).put("desiredOn", desired ?: JSONObject.NULL)
+                    .put("engineStateKnown", known).put("engineActive", active)
+            }
+            label.assertTextEquals(text)
+        }
+        val checking = "Проверяем состояние VPN"
+        label.assertTextEquals(checking)
+        expect("Online", true, true, true, "Работает")
+        expect("Online", true, false, true, checking)
+        expect("Degraded", true, false, false, checking)
+        expect("Degraded", true, true, true, "Частично работает")
+        expect("Connecting", true, true, false, "Подключаемся")
+        expect("BlockedByPolicy", true, false, false, "Доступ ограничен политикой")
+        expect("Future", true, true, false, checking)
+        expect("Off", true, true, false, checking)
+        expect("NeedsUnlock", null, false, false, "Нужно разблокировать телефон")
+        expect("Online", false, true, true, "Останавливаем VPN")
+        expect("Off", false, false, false, checking)
+        expect("", false, true, false, "Отключён")
+        compose.runOnIdle { policyBlocked.value = true }
+        label.assertTextEquals("Ожидаем конфигурацию от сервера")
+        compose.runOnIdle { available.value = false }
+        label.assertTextEquals("Состояние VPN временно недоступно")
+    }
 
     @Test fun startRequiresKnownReadyStateAndStopDoesNotRequireReadiness() {
         val intent = mutableStateOf<Boolean?>(null)
