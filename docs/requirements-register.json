@@ -2188,6 +2188,7 @@
         "docs/support-chat.md",
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
+        "app/src/main/kotlin/io/syn443/android/chat/ChatOutbox.kt",
         "docs/implementation-status.md#evidence-index-and-register-semantics"
       ],
       "text": "Отправка использует постоянный clientMessageId и идемпотентную фиксацию. Повтор после потери ответа возвращает то же сообщение; тот же ID с другим содержимым отклоняется. Порядок задаёт серверная последовательность внутри диалога, а не часы телефона. Состояния UI: подготовка, очередь, отправляется, отправлено, прочитано, ошибка; получение сервером не обозначается как прочтение."

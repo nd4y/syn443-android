@@ -13,7 +13,7 @@ object ChatTransfer {
     /** Caller persists the draft before sending. Retry uses the exact same IDs and bytes. */
     suspend fun send(client:ChatClient,store:ChatOutbox,id:String,progress:(String)->Unit):JSONObject {
         val draft=withContext(Dispatchers.IO) {requireNotNull(store.draft(id))}
-        val attachments=JSONArray();val local=draft.getJSONArray("files")
+        val attachments=mutableListOf<String>();val local=draft.getJSONArray("files")
         for(i in 0 until local.length()) {
             val info=local.getJSONObject(i);val request=JSONObject(info.toString()).apply {remove("localId");put("conversation",draft.getString("conversation"))}
             val status=client.objectCall("uploads/begin",request)
@@ -31,13 +31,10 @@ object ChatTransfer {
                 }
                 client.call("uploads/complete",JSONObject().put("upload",upload))
             }
-            attachments.put(upload)
+            attachments.add(upload)
         }
-        val result=client.objectCall("send",JSONObject().put("conversation",draft.getString("conversation")).put("clientId",id).put("text",draft.getString("text")).put("attachments",attachments))
-        withContext(Dispatchers.IO) {
-            store.removeDraft(id)
-            for(i in 0 until local.length())store.removeFile(local.getJSONObject(i).getString("localId"))
-        }
+        val result=client.objectCall("send",JSONObject().put("conversation",draft.getString("conversation")).put("clientId",id).put("text",draft.getString("text")).put("attachments",JSONArray(attachments)))
+        withContext(Dispatchers.IO) {store.acknowledgeSent(id,attachments,result)}
         return result
     }
     suspend fun download(client:ChatClient,attachment:JSONObject,target:File,progress:(String)->Unit) {
