@@ -99,7 +99,7 @@ class RouteFrontierTest {
     }
 
     @Test fun publicCandidateCanBeExploredForBothPublicIntentsButNeverInternal() {
-        val public = RouteHop("public", NetworkMode.entries.toSet(), null, tcp, publicCandidate = true)
+        val public = RouteHop("public", NetworkMode.policyModes.toSet(), null, tcp, publicCandidate = true)
         val nodes = listOf(public, public.copy(id = "no-tcp", features = setOf(PathFeature.UDP, PathFeature.IPV4)),
             public.copy(id = "transit", publicCandidate = false))
         val template = listOf(RouteTemplate("one", listOf(nodes.map { it.id }.toSet())))

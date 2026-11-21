@@ -125,7 +125,7 @@ func newPrivateAdaptiveHubWithPrograms(c *privatePathCatalogue, metadata []byte,
 }
 
 func privateAdaptiveMode(mode string) bool {
-	return mode == "HOME_WIFI" || mode == "WIFI" || mode == "CELLULAR" || mode == "CELLULAR_RESTRICTED"
+	return routegraph.IsRuntimeMode(mode)
 }
 
 func (h *privateAdaptiveHub) makeGroupsLocked() bool {

@@ -95,11 +95,7 @@ class TunnelService : VpnService() {
         val envelope=if(state.journal.phase=="applying")state.journal.candidate else state.journal.active
         return policies.adaptiveBinding(envelope,state)?.takeIf {it.contentHash==runningConfigHash}
     }
-    private fun adaptiveMode():NetworkMode?=when(probeContext?.network?.transport) {
-        PhysicalTransport.WIFI->NetworkMode.WIFI
-        PhysicalTransport.CELLULAR->NetworkMode.CELLULAR
-        else->null
-    }
+    private fun adaptiveMode(): NetworkMode? = probeContext?.network?.transport?.adaptiveNetworkMode()
     private fun adaptiveTick(force:Boolean=false) {
         val routes=adaptiveRoutes ?: return
         val scope=routeScope() ?: return
