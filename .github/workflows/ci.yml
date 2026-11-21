@@ -283,6 +283,22 @@ jobs:
           emulator-boot-timeout: 900
           emulator-options: ${{ env.SYN443_CI_EMULATOR_OPTIONS }}
           script: bash tools/run_emulator_tests.sh
+      - name: Publish sanitized recovery timings
+        id: recovery-scan
+        if: always()
+        run: |
+          python3 tools/recovery_slo.py
+          python3 tools/check_public_data.py public-evidence/recovery
+          bash tools/scan_secrets.sh public-evidence/recovery
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.recovery-scan.outcome == 'success'
+        with:
+          name: android-recovery-${{ matrix.api }}-evidence
+          path: public-evidence/recovery/recovery-slo.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Check both planned proxy recovery samples on a successful emulator
+        run: python3 tools/recovery_slo.py --require-success
       - name: Scan emulator report payloads
         id: emulator-scan
         if: always()
