@@ -30,6 +30,14 @@ internal data class SupportIncident(val clientId: String, val message: String) {
                 val integer = when (value) { is Int -> value.toLong(); is Long -> value; else -> null }
                 return integer?.takeIf { it in 1L..9_007_199_254_740_991L }?.toString() ?: "неизвестна"
             }
+            val lastGood = policy?.optJSONObject("lastKnownGoodPair")
+            val algorithm = lastGood?.opt("algorithmRevision") as? String
+            val pairRevision = when (val value = lastGood?.opt("configRevision")) {
+                is Int -> value.toLong(); is Long -> value; else -> null
+            }
+            val pair = if (pairRevision != null && pairRevision.toString() == revision("lastKnownGoodRevision") &&
+                algorithm in setOf(io.syn443.policy.Policy.BASELINE_ALGORITHM, io.syn443.policy.Policy.CONFIRMED_ALGORITHM,
+                    io.syn443.policy.Policy.ADAPTIVE_ALGORITHM)) "$pairRevision / $algorithm" else "неизвестна"
             val routes = status?.optJSONObject("routeHealth")?.optJSONArray("routes")
             var fresh = 0
             var failed = 0
@@ -66,7 +74,7 @@ internal data class SupportIncident(val clientId: String, val message: String) {
                 "Проверки маршрутов при создании - $evidence",
                 "Слой сбоя - " + causes.joinToString(", ").ifEmpty { "не установлен" },
                 "Активная версия политики - " + revision("activeRevision"),
-                "Последняя рабочая версия политики - " + revision("lastKnownGoodRevision"),
+                "Последняя рабочая пара (конфигурация / алгоритм) - $pair",
             ).joinToString("\n"))
         }
     }

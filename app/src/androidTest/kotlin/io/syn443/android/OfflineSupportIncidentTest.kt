@@ -24,7 +24,8 @@ class OfflineSupportIncidentTest {
     private val id = "0123456789abcdef".repeat(2)
     private fun sample() = JSONObject().put("desiredOn", true).put("phase", "Degraded")
         .put("engineStateKnown", true).put("engineActive", true).put("reason", "private-marker")
-        .put("account", "private-marker").put("policy", JSONObject().put("activeRevision", 9).put("lastKnownGoodRevision", 7))
+        .put("account", "private-marker").put("policy", JSONObject().put("activeRevision", 9).put("lastKnownGoodRevision", 7)
+            .put("lastKnownGoodPair", JSONObject().put("configRevision", 7).put("algorithmRevision", io.syn443.policy.Policy.ADAPTIVE_ALGORITHM)))
         .put("routeHealth", JSONObject().put("routes", JSONArray()
             .put(JSONObject().put("state", "working").put("label", "private-marker"))
             .put(JSONObject().put("state", "failed").put("reason", "tls_failed"))
@@ -34,9 +35,12 @@ class OfflineSupportIncidentTest {
         val raw = sample()
         val message = SupportIncident.capture(raw, id).message
         for (label in listOf("SYN-0123456789ab", "частичная доступность", "работают 1, с ошибкой 1, устарели 1",
-            "Слой сбоя - TLS", "Активная версия политики - 9", "Последняя рабочая версия политики - 7"))
+            "Слой сбоя - TLS", "Активная версия политики - 9", "Последняя рабочая пара (конфигурация / алгоритм) - 7 / m4-graph-tcp-v1"))
             assertTrue(label, message.contains(label))
         assertFalse(message.contains("private-marker"))
+        raw.getJSONObject("policy").getJSONObject("lastKnownGoodPair").put("configRevision",8)
+        assertTrue(SupportIncident.capture(raw,id).message.contains("пара (конфигурация / алгоритм) - неизвестна"))
+        raw.getJSONObject("policy").getJSONObject("lastKnownGoodPair").put("configRevision",7).put("algorithmRevision","private-marker")
         raw.put("engineStateKnown", false).put("phase", "Online")
         raw.getJSONObject("policy").put("activeRevision", "private-marker")
         val old = SupportIncident.capture(raw, id).message

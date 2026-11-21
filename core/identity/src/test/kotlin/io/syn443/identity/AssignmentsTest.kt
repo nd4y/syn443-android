@@ -164,6 +164,24 @@ class AssignmentsTest {
         invalid {permit.authorized(current,committed,1,1000)}
         assertEquals(engine,Assignments.permit(committed,current,payload,1,1000).authorized(current,committed,1,1000).engineConfig)
     }
+    @Test fun lastWorkingPairRemainsHistoricalAcrossDegradedActivationAndRespectsRevocation() {
+        val first = receive()
+        val original = acknowledged(first)
+        val good = Assignments.finish(Assignments.begin(first,original,payload,listOf(false),1,1000),
+            original,payload,listOf(true),true,1,1000)
+        val second = receive(good,policy(2).copy(activation=policy().activation.copy(allowDegraded=true,timeoutSeconds=31)),original)
+        val current = acknowledged(second)
+        val degraded = Assignments.finish(Assignments.begin(second,current,payload,listOf(false),1,1000),
+            current,payload,listOf(false),true,1,1000)
+        assertEquals("degraded",degraded.journal.phase)
+        assertEquals(2L,Assignments.authorized(degraded,current,payload,1,1000).payload.revision)
+        val pair = Assignments.lastWorkingPolicy(degraded,current,payload,1,1000)
+        assertEquals(1L,pair.configRevision)
+        assertEquals(policy().algorithmRevision,pair.algorithmRevision)
+        invalid {Assignments.lastWorkingPolicy(degraded,current,payload,2,1000)}
+        invalid {Assignments.lastWorkingPolicy(degraded,current.copy(policyHash=Identity.random()),payload,1,1000)}
+        invalid {Assignments.lastWorkingPolicy(degraded.copy(journal=degraded.journal.copy(floor=2)),current,payload,1,1000)}
+    }
     @Test fun runtimePermitFencesLogoutDifferentReceiptIdentityActivationAndRevocation() {
         val prepared=receive();val current=acknowledged(prepared)
         val applying=Assignments.begin(prepared,current,payload,listOf(false),1,1000)

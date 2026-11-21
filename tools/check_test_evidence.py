@@ -116,6 +116,7 @@ if mode=="emulator":
         ('io.syn443.android.HomeWiFiProofTest', 'staleHomeProofCannotCrossLinkAuthorityTimeOrRetryBudget'),
     } <= set(identities), "Missing signed home Wi-Fi proof outcomes"
     assert ("io.syn443.android.ChatUiTest", "existingChatAcceptsIncidentEntryAndDismissalSurvivesRecreation") in identities
+    assert ("io.syn443.android.LoginControllerTest", "assignedActivationPersistsBeforeUseAndCommitsAcrossControllerRestart") in identities
     assert {("io.syn443.android.OfflineSupportIncidentTest", name) for name in (
         "snapshotOnlyContainsClosedFactsAndDropsObsoleteEngineEvidence",
         "encryptedOfflineReportSurvivesReopenAndOnlyBindsOnceToSelf",

@@ -61,7 +61,8 @@ long endurance and the complete M1/M2 release gate have not been accepted.
 
 The phone home screen opens an incident preview. It shows the user intent,
 corroborated VPN phase, counts of route check outcomes, a bounded fault category
-and active and last-known-good policy revisions. The report has a short public
+and the active revision. Its last-known-good configuration and algorithm come
+from the same authorized envelope that passed activation checks. The report has a short public
 reference derived from the full idempotency key. Unknown and stale evidence
 are shown explicitly. Hostnames, raw logs, addresses, account identifiers,
 provider names, chat files and the diagnostic archive are excluded.

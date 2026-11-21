@@ -1127,7 +1127,15 @@ class LoginControllerTest {
         assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()
         val committed=f.journal.readAssignment(s)!!;assertEquals("committed",committed.journal.phase)
         assertEquals(committed.journal.active,committed.journal.lastGood)
+        val checked = checkNotNull(f.controller.assignedRuntime.allowed(s, committed.journal.lastGood)).payload
+        fun assertLastGoodPair() {
+            val pair = io.syn443.android.vpn.RuntimePolicies(context) { f.controller }.status().getJSONObject("lastKnownGoodPair")
+            assertEquals(checked.revision, pair.getLong("configRevision"))
+            assertEquals(checked.algorithmRevision, pair.getString("algorithmRevision"))
+        }
+        assertLastGoodPair()
         f.restart();assertEquals(config,f.controller.assignedRuntime.config(f.journal.snapshot()))
+        assertLastGoodPair()
         assertEquals("committed",f.journal.readAssignment(f.journal.snapshot())!!.journal.phase)
         assertTrue(f.controller.allowsConnect())
     }
