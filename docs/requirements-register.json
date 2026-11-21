@@ -1437,8 +1437,14 @@
     {
       "id": "ROUTE-03",
       "text": "Внутренние зоны имеют назначенный резолвер и запрет публичного fallback. Публичные bootstrap-резолверы и резолверы через туннель разделены. FakeIP допустим только как явная политика с исключениями для внутренних зон.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "native/bridge/split_dns_wire_test.go",
+        "native/bridge/dns_wire_test.go",
+        "native/engine-netbird/dns_test.go"
+      ],
+      "implementationScope": "The embedded DNS router sends internal requests only to the assigned test resolver. Loopback witnesses check application delivery through an HTTP proxy, A/AAAA, NXDOMAIN, SERVFAIL, silence, unrelated public names and recovery.",
+      "remainingScope": "Physical managed-overlay DNS and application acceptance; bootstrap, FakeIP exclusions and device fail policy coverage remain separate."
     },
     {
       "id": "ROUTE-04",
@@ -2829,8 +2835,14 @@
     {
       "id": "AC15",
       "specRow": " Внутренние DNS и назначенный ресурс | DNS, TCP и прикладной запрос проходят; при отказе DNS не утекает публично |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "native/bridge/split_dns_wire_test.go",
+        "native/bridge/dns_wire_test.go",
+        "native/engine-netbird/dns_test.go"
+      ],
+      "implementationScope": "The embedded DNS router sends internal requests only to the assigned test resolver. Loopback witnesses check application delivery through an HTTP proxy, A/AAAA, NXDOMAIN, SERVFAIL, silence, unrelated public names and recovery.",
+      "remainingScope": "Physical managed-overlay DNS and application acceptance; bootstrap, FakeIP exclusions and device fail policy coverage remain separate."
     },
     {
       "id": "AC16",

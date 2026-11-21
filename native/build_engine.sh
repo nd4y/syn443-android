@@ -58,6 +58,7 @@ python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-tests.js
 python3 "$root/tools/check_native_protocol_evidence.py" "$work/native-tests.jsonl"
 python3 "$root/tools/check_native_check_plan_evidence.py" "$work/native-tests.jsonl"
 python3 "$root/tools/check_native_report_evidence.py" "$work/native-tests.jsonl"
+jq -es '[.[] | select(.Package == "io.syn443/bridge" and .Action == "pass") | .Test | strings | select(startswith("TestSplitDNSInternalApplicationAndNoPublicFallback/")) | split("/")[-1]] | sort == ["dns_tcp_http","nxdomain","recovery","servfail","silent"]' "$work/native-tests.jsonl"
 if [ "${SYN443_RACE:-0}" = 1 ]; then
     go test -json -race -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbird | tee "$work/native-race-tests.jsonl"
     python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-race-tests.jsonl"
@@ -65,6 +66,7 @@ if [ "${SYN443_RACE:-0}" = 1 ]; then
     python3 "$root/tools/check_native_protocol_evidence.py" "$work/native-race-tests.jsonl"
     python3 "$root/tools/check_native_check_plan_evidence.py" "$work/native-race-tests.jsonl"
     python3 "$root/tools/check_native_report_evidence.py" "$work/native-race-tests.jsonl"
+    jq -es '[.[] | select(.Package == "io.syn443/bridge" and .Action == "pass") | .Test | strings | select(startswith("TestSplitDNSInternalApplicationAndNoPublicFallback/")) | split("/")[-1]] | sort == ["dns_tcp_http","nxdomain","recovery","servfail","silent"]' "$work/native-race-tests.jsonl"
     go test -race -count=1 -timeout=90s -tags=with_gvisor,with_utls,with_quic \
       github.com/sagernet/sing-box/transport/v2raygrpclite \
       github.com/sagernet/sing-box/transport/v2rayxhttp \
