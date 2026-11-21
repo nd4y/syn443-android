@@ -697,8 +697,13 @@
     {
       "id": "PROTO-03",
       "text": "IPv4 интернет-трафик обязателен. Для IPv6 первая версия должна либо обеспечивать проверенный путь, либо явно блокировать его в политике; нельзя допускать незаметный прямой обход VPN. NetBird IPv6 не является обязательным для 1.0.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/VpnLifecycleTest.kt",
+        "tools/check_test_evidence.py"
+      ],
+      "remainingScope": "Android captures both default routes. The hosted scenario exercises an IPv6-wide block and a subsequent allowed proxy path with distinct IPv4 and IPv6 application traffic. Real dual-stack underlay and broader leak acceptance remain open."
     },
     {
       "id": "PROTO-04",

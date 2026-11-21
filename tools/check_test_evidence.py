@@ -80,6 +80,8 @@ if mode=="jvm":
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
+    assert ("io.syn443.android.VpnLifecycleTest",
+            "defaultVpnRoutesCaptureBothFamiliesAndExplicitIpv6DenialPreservesIpv4") in identities, "Missing dual-stack VPN policy outcome"
     assert {("io.syn443.android.ManualRouteExplanationTest", name) for name in (
         "explainsCompiledPathAndDnsWithoutReturningTheTarget",
         "selectedProxyMeasurementRequiresSuccessfulCurrentOwnerAndConfig",
