@@ -31,6 +31,12 @@ encrypted persistence/account fences, 25 MiB chunk integrity, local quotas/key
 retirement, photo orientation/GPS removal, invalid media and the visible UI.
 These tests are mandatory in the emulator evidence gate.
 
+Android keeps the encrypted draft and file chunks until the send response
+identifies the same conversation, client message, text and uploaded files.
+It accepts either server attachment order. A missing or mismatched receipt
+leaves the original client ID available for retry. Confirming delivery removes
+the draft and its local chunks in one SQLite transaction.
+
 The required Actions gate now contains 110 outcomes on each Android API and 80
 identity JVM methods. It covers an interrupted session refresh with exact request
 reuse, stale generation/boot rejection and a publisher requiring reauthentication.

@@ -310,6 +310,8 @@ if mode=="emulator":
     chat_required={"chatSqlOutboxPersistsCiphertextAndFencesAccountGeneration","chatSqlChunksPreserveTwentyFiveMiBAndRejectOversize","chatOutboxQuotaAndLogoutEraseTheOwnedKey","chatPhotoCompressionAppliesOrientationAndStripsGps","chatTextAndDocumentBoundariesDoNotAcceptInvalidMedia","supportChatHasVisibleTitleAndConnectionStatus","supportChatKeepsItsRootAcrossRepeatedRecreation","supportChatResumesAfterRepeatedBackgroundTransitions"}
     chat_required.add("chatReadinessRejectsMissingRootTitleAndStatus")
     chat_required |= {"chatRestartReclaimsUnsentFilesButPreservesDraftAttachments","chatVideoCompressionProducesBoundedMp4AndStripsLocation","chatCancellingActiveVideoExportRemovesPrivateTemporaryFiles"}
+    chat_required |= {"sendReceiptPreservesPendingBytesAcrossWrongRepliesAndStorageFailure",
+                      "visiblePendingMessagesStayInTheSelectedConversationUntilAcknowledged"}
     chat_required |= {"chatReplyIsPrivateAndDenialDoesNotWithdrawAssignedPolicy","cancelledQueuedChatNeverTransmitsAndDoesNotPoisonNextRequest"}
     chat_required |= {"chatCancelledImportRollsBackPartialSqlAndCanBeRetried"}
     chat_required |= {"chatDecoderSelectionPreservesPhysicalCodecsAndExcludesBrokenVirtualDecoder"}

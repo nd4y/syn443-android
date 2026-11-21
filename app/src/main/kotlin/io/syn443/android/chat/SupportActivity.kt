@@ -132,8 +132,7 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
         download = null
         pending = emptyList()
     }
-    fun currentDrafts(drafts: List<Pair<String, JSONObject>>) =
-        drafts.filter { it.second.getString("conversation") == conversation }
+    fun currentDrafts(drafts: List<Pair<String, JSONObject>>) = pendingInConversation(drafts,conversation)
     suspend fun refreshInbox(older: Boolean) {
         val api = client ?: return
         if (!admin || conversation.isNotEmpty()) return
@@ -315,7 +314,7 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
                 Button(onClick={run {
                     val id=ChatLimits.id();val draft=JSONObject().put("conversation",conversation).put("text",text).put("files",JSONArray(files))
                     withContext(Dispatchers.IO) {requireNotNull(store).saveDraft(id,draft)}
-                    text="";files=emptyList();pending=withContext(Dispatchers.IO) {store!!.drafts()};sendPending(id)
+                    text="";files=emptyList();pending=currentDrafts(withContext(Dispatchers.IO) {store!!.drafts()});sendPending(id)
                 }},enabled=!busy && (text.isNotBlank() || files.isNotEmpty()),modifier=Modifier.testTag("chat-send")) {Text("Отправить")}
             }
         }
