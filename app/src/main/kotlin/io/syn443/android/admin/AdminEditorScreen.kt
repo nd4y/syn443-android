@@ -11,6 +11,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -92,23 +95,24 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
                 TextButton(onClick={if(page<pages.lastIndex)page++},enabled=page<pages.lastIndex,modifier=Modifier.testTag("editor-page-next")) {Text("Следующая")}
             }}
             item {OutlinedTextField(value=pages[page],onValueChange={value->
-                if(editable) {
+                if(editable && value!=pages[page]) {
                     pageInputError = when {
                         value.length > EDITOR_PAGE_SIZE -> "Текст не поместился на странице. Вставьте его частями."
                         !editorUnicode(value) -> "В тексте есть неполный символ. Повторите ввод."
                         else -> ""
                     }
-                    if(pageInputError.isEmpty() && value!=pages[page]) {
+                    if(pageInputError.isEmpty()) {
                         pages[page]=value;confirmation=null;localError="";reviewInvalidated=true
                         if(!dirty){dirty=true;actions.edited()}
                     }
                 }
             },readOnly=!editable,modifier=Modifier.fillMaxWidth().testTag("editor-page-input"),
                 isError=pageInputError.isNotEmpty(),
-                supportingText=if(pageInputError.isEmpty()) null else {
-                    { Text(pageInputError,Modifier.testTag("editor-page-error")) }
-                },
                 label={Text("Страница предложения ${page+1}")},textStyle=MaterialTheme.typography.bodySmall.copy(fontFamily=FontFamily.Monospace),minLines=8,maxLines=16)}
+            if (pageInputError.isNotEmpty()) item(key="input-error") {
+                Text(pageInputError, Modifier.testTag("editor-page-error").semantics { liveRegion=LiveRegionMode.Polite },
+                    color=MaterialTheme.colorScheme.error)
+            }
             if(editable && (pages[page].length == EDITOR_PAGE_SIZE || pageInputError.isNotEmpty()) && pages[page].length >= 2) {
                 val originalPage = pages[page]
                 val index = page
