@@ -70,6 +70,62 @@ class AdminEditorUiTest {
         compose.runOnIdle {assertEquals(64,saved.single().size);assertEquals(pages.take(63),saved.single().take(63));assertEquals("last page changed",saved.single().last())}
     }
 
+    @Test fun splittingFullPagePreservesUnicodeAndReviewUntilContentChanges() {
+        val left = "a".repeat(4095)
+        val right = "\uD83D\uDE80" + "b".repeat(4095)
+        val saved = mutableListOf<List<String>>()
+        var edits = 0
+        compose.setContent {
+            MaterialTheme { AdminEditorScreen(model(phase=AdminEditorPhase.REVIEW,pages=listOf(left + right,"end")),
+                AdminEditorActions(edited={ edits++ },saveLocal={ saved.add(it) }),elapsed={1000}) }
+        }
+        scroll("editor-page-input")
+        compose.onNodeWithTag("editor-page-input").performTextReplacement(left + "x" + right)
+        val error = compose.onNodeWithTag("editor-page-error")
+        error.assertExists()
+        error.assertIsDisplayed().assertTextEquals("Текст не поместился на странице. Вставьте его частями.")
+        compose.onNodeWithTag("editor-error-dismiss").assertIsDisplayed().performClick()
+        error.assertDoesNotExist()
+        scroll("editor-page-input"); input(left + right)
+        compose.onNodeWithTag("editor-page-input").performTextReplacement(left + right)
+        scroll("editor-publish"); compose.onNodeWithTag("editor-publish").assertIsEnabled()
+        scroll("editor-page-input")
+        compose.onNodeWithTag("editor-page-input").performTextReplacement(left + "x" + right)
+        error.assertExists()
+        error.assertIsDisplayed()
+        compose.onNodeWithTag("editor-error-split").assertIsDisplayed().performClick()
+        scroll("editor-page-input"); input(left)
+        compose.onNodeWithTag("editor-page-error").assertDoesNotExist()
+        scroll("editor-page-next"); compose.onNodeWithTag("editor-page-next").performClick()
+        scroll("editor-page-input"); input(right)
+        scroll("editor-publish"); compose.onNodeWithTag("editor-publish").assertIsEnabled()
+        compose.runOnIdle { assertEquals(0,edits); assertTrue(saved.isEmpty()) }
+        scroll("editor-page-input")
+        compose.onNodeWithTag("editor-page-input").performTextReplacement("x" + right)
+        scroll("editor-publish"); compose.onNodeWithTag("editor-publish").assertIsNotEnabled()
+        scroll("editor-save-local"); compose.onNodeWithTag("editor-save-local").performClick()
+        compose.runOnIdle {
+            assertEquals(1,edits)
+            assertEquals(listOf(left,"x" + right,"end"),saved.single())
+        }
+    }
+
+    @Test fun fullPageOffersNoLayoutMutationAtCapacityOrWithReadOnlyAccess() {
+        val full = "z".repeat(8192)
+        val state = mutableStateOf(model(pages=listOf(full) + List(63) { "part" }))
+        compose.setContent { MaterialTheme { AdminEditorScreen(state.value,AdminEditorActions(),elapsed={1000}) } }
+        scroll("editor-page-limit")
+        compose.onNodeWithTag("editor-page-limit").assertExists()
+        compose.onNodeWithTag("editor-split-page").assertDoesNotExist()
+        compose.runOnIdle { state.value = model(readOnly=true,pages=listOf(full),binding="read-only") }
+        scroll("editor-page-input"); input(full)
+        compose.onNodeWithTag("editor-split-page").assertDoesNotExist()
+        compose.runOnIdle {
+            assertNull(editorPageSplitPoint("\uD83D\uDE80"))
+            assertEquals(2,editorPageSplitPoint("\uD83D\uDE80x"))
+        }
+    }
+
     @Test fun localEditPermanentlyInvalidatesSameReviewAcrossAcknowledgementAndBusyPhaseUpdates() {
         val state=mutableStateOf(model(phase=AdminEditorPhase.REVIEW));val commands=mutableListOf<String>()
         compose.setContent {MaterialTheme(colorScheme=darkColorScheme()) {AdminEditorScreen(state.value,

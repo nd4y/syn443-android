@@ -27,6 +27,7 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
     val pages=remember(model.device,model.documentBinding) {model.pages.toMutableStateList()}
     var dirty by remember(model.device,model.documentBinding) {mutableStateOf(false)}
     var page by remember(model.device,model.documentBinding) {mutableIntStateOf(0)}
+    var pageInputError by remember(model.device,model.documentBinding,page) {mutableStateOf("")}
     var confirmation by remember(model.device,model.documentBinding) {mutableStateOf<EditorConfirmation?>(null)}
     val originalReviewDeadline=remember(model.reviewBinding) {model.reviewDeadlineElapsed}
     val reviewDocumentBinding=remember(model.reviewBinding) {model.documentBinding}
@@ -43,6 +44,14 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
     LaunchedEffect(model.operationBinding,model.canSeal,model.busy) {if(model.canSeal && !model.busy)sealSubmitted=false}
     val activeBusy=editorBusy(model)
     val editable=editorEditable(model) && !activeBusy && pages.isNotEmpty()
+    fun splitPage(index: Int, original: String, split: Int) {
+        if (!editorEditable(latestModel) || editorBusy(latestModel) ||
+            latestModel.documentBinding != model.documentBinding || index != page ||
+            pages.getOrNull(index) != original || pages.size >= EDITOR_MAX_PAGES) return
+        pages[index] = original.substring(0, split)
+        pages.add(index + 1, original.substring(split))
+        pageInputError = ""
+    }
     fun proceed(target:String) {when(target){"WEB"->latestActions.web();"LOGIN"->latestActions.login();else->latestActions.back()}}
     fun navigate(target:String) {
         if(dirty){leaveTarget=target;leaveConfirmation=true} else proceed(target)
@@ -91,12 +100,31 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
                 TextButton(onClick={if(page<pages.lastIndex)page++},enabled=page<pages.lastIndex,modifier=Modifier.testTag("editor-page-next")) {Text("Следующая")}
             }}
             item {OutlinedTextField(value=pages[page],onValueChange={value->
-                if(editable && value.length<=8192 && editorUnicode(value) && value!=pages[page]) {
-                    pages[page]=value;confirmation=null;localError="";reviewInvalidated=true
-                    if(!dirty){dirty=true;actions.edited()}
+                if(editable && value!=pages[page]) {
+                    pageInputError = when {
+                        value.length > EDITOR_PAGE_SIZE -> "Текст не поместился на странице. Вставьте его частями."
+                        !editorUnicode(value) -> "В тексте есть неполный символ. Повторите ввод."
+                        else -> ""
+                    }
+                    if(pageInputError.isEmpty()) {
+                        pages[page]=value;confirmation=null;localError="";reviewInvalidated=true
+                        if(!dirty){dirty=true;actions.edited()}
+                    }
                 }
             },readOnly=!editable,modifier=Modifier.fillMaxWidth().testTag("editor-page-input"),
+                isError=pageInputError.isNotEmpty(),
                 label={Text("Страница предложения ${page+1}")},textStyle=MaterialTheme.typography.bodySmall.copy(fontFamily=FontFamily.Monospace),minLines=8,maxLines=16)}
+            if(editable && (pages[page].length == EDITOR_PAGE_SIZE || pageInputError.isNotEmpty()) && pages[page].length >= 2) {
+                val originalPage = pages[page]
+                val index = page
+                val split = editorPageSplitPoint(originalPage)
+                if (split != null && pages.size < EDITOR_MAX_PAGES) item {
+                    OutlinedButton(onClick={splitPage(index,originalPage,split)},modifier=Modifier.testTag("editor-split-page")) {Text("Разделить страницу для ввода")}
+                } else if (pages.size == EDITOR_MAX_PAGES) item {
+                    Text("Достигнут предел в 64 страницы. Чтобы освободить место, сократите текст.",
+                        Modifier.testTag("editor-page-limit"))
+                }
+            }
             if(model.readOnly)item {Text("Для этой конфигурации доступно только чтение.",Modifier.testTag("editor-read-only"))}
             if(model.phase !in setOf(AdminEditorPhase.UNCERTAIN,AdminEditorPhase.CONFLICT,AdminEditorPhase.NEEDS_REAUTH,AdminEditorPhase.LIMITED,AdminEditorPhase.UNAVAILABLE)) {
                 item {Button(onClick={if(dirty && editable)actions.saveLocal(Collections.unmodifiableList(ArrayList(pages)))},
@@ -141,6 +169,27 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
         if(model.localRevision>0 && model.phase !in setOf(AdminEditorPhase.UNCERTAIN,AdminEditorPhase.NEEDS_REAUTH))item {
             TextButton(onClick={closeConfirmation=true},enabled=!activeBusy,modifier=Modifier.testTag("editor-close")) {Text("Закрыть локальную копию")}
         }
+    }
+    if (pageInputError.isNotEmpty() && editable) {
+        val index = page
+        val original = pages[index]
+        val split = if (pages.size < EDITOR_MAX_PAGES) editorPageSplitPoint(original) else null
+        AlertDialog(
+            onDismissRequest = { pageInputError = "" },
+            title = { Text("Ввод на странице") },
+            text = { Text(pageInputError, Modifier.testTag("editor-page-error")) },
+            confirmButton = {
+                if (split != null) TextButton(
+                    onClick = { splitPage(index, original, split) },
+                    modifier = Modifier.testTag("editor-error-split"),
+                ) { Text("Разделить страницу") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pageInputError = "" }, modifier = Modifier.testTag("editor-error-dismiss")) {
+                    Text("Вернуться к вводу")
+                }
+            },
+        )
     }
     if(leaveConfirmation)AlertDialog(onDismissRequest={leaveConfirmation=false},
         title={Text("Оставить несохранённый ввод?")},text={Text("Изменения после последнего локального сохранения будут потеряны. Сохранённый черновик останется на устройстве.")},

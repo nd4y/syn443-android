@@ -122,7 +122,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual({'identity', 'emulator'}, set(editor))
         self.assertEqual({'identity', 'emulator'}, set(comparison))
         required = {}
-        for mode, old_count, new_count in [('identity', 43, 14), ('emulator', 44, 21)]:
+        for mode, old_count, new_count in [('identity', 43, 14), ('emulator', 46, 21)]:
             self.assertEqual(old_count, len(editor[mode]))
             self.assertEqual(new_count, len(comparison[mode]))
             self.assertFalse(set(editor[mode]) & set(comparison[mode]))
@@ -133,7 +133,7 @@ class CoverageEvidenceTest(unittest.TestCase):
                 'AdminLayerControlTest': 23, 'AdminLayerJsonTest': 4,
                 'AdminLayerProtocolTest': 7, 'AdminLayerOwnershipTest': 4, 'AdminLayerComparisonTest': 14}),
             ('emulator', 'app/src/androidTest/kotlin/io/syn443/android', {
-                'AdminEditorStoreTest': 12, 'AdminEditorWireTest': 5, 'AdminEditorUiTest': 10,
+                'AdminEditorStoreTest': 12, 'AdminEditorWireTest': 5, 'AdminEditorUiTest': 12,
                 'AdminEditorCoordinatorTest': 15, 'AdminEditorRouteTest': 4,
                 'AdminComparisonUiTest': 7, 'AdminComparisonWireTest': 5, 'AdminComparisonRouteTest': 4}),
         ]:
@@ -157,7 +157,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         })
         for mode, count, floor, folder in [
             ('identity', 57, 249, 'core/identity/src/test/kotlin/io/syn443/identity'),
-            ('emulator', 65, 524, 'app/src/androidTest/kotlin/io/syn443/android'),
+            ('emulator', 67, 524, 'app/src/androidTest/kotlin/io/syn443/android'),
         ]:
             self.assertEqual(count, len(required[mode]))
             self.assertEqual(expected[mode], set(required[mode]))

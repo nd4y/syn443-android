@@ -25,6 +25,8 @@ def parse_run(output):
     fields = {}
     cases = {}
     active = None
+    source_lines = {}
+    reading_stack = False
     total = None
     finished = False
     for line in output.splitlines():
@@ -36,11 +38,13 @@ def parse_run(output):
             finished = True
         elif line.startswith('INSTRUMENTATION_STATUS: '):
             key, _, value = line.removeprefix('INSTRUMENTATION_STATUS: ').partition('=')
+            reading_stack = key == 'stack' and active is not None
             if key in ('class', 'test', 'id', 'current', 'numtests'):
                 if finished or key in fields:
                     raise ValueError('Repeated or late instrumentation field')
                 fields[key] = value
         elif line.startswith('INSTRUMENTATION_STATUS_CODE: '):
+            reading_stack = False
             if finished or set(fields) != {'class', 'test', 'id', 'current', 'numtests'}:
                 raise ValueError('Incomplete instrumentation status')
             identity = fields['class'], fields['test']
@@ -59,6 +63,13 @@ def parse_run(output):
             else:
                 raise ValueError('Unpaired instrumentation outcome')
             fields.clear()
+        elif reading_stack and active not in source_lines:
+            classname, test = active
+            simple_class = classname.rsplit('.', 1)[-1]
+            frame = re.fullmatch(r'\s*at ' + re.escape(classname + '.' + test + '(' + simple_class + '.kt:') +
+                                 r'([1-9][0-9]{0,3})\)\s*', line)
+            if frame:
+                source_lines[active] = int(frame[1])
     if not finished or not cases:
         raise ValueError('Missing instrumentation completion')
     suite = ET.Element('testsuite', name='Packaged Android instrumentation', tests=str(len(cases)))
@@ -68,6 +79,8 @@ def parse_run(output):
             tag = {-1: 'error', -2: 'failure', -3: 'skipped', -4: 'skipped'}[code]
             ET.SubElement(case, tag, message='AndroidJUnitRunner status ' + str(code))
             print(f'{tag}: {classname}.{method}')
+            if (classname, method) in source_lines:
+                print(f'Test source line: {source_lines[classname, method]}')
     return suite
 
 

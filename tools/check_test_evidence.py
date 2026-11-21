@@ -592,6 +592,8 @@ ADMIN_LAYER_EDITOR_REQUIRED = {
         ('io.syn443.android.AdminEditorWireTest', 'mainAndBinderCannotSerializeOrParseEvenMalformedOrOversizedInput'),
         ('io.syn443.android.AdminEditorUiTest', 'smallEditorSeparatesLocalSaveServerDraftAndPreviewAndShowsParentProvenance'),
         ('io.syn443.android.AdminEditorUiTest', 'sixtyFourPagesExposeFullRangeWithoutTruncatingOrJoiningProposalOnMain'),
+        ('io.syn443.android.AdminEditorUiTest', 'splittingFullPagePreservesUnicodeAndReviewUntilContentChanges'),
+        ('io.syn443.android.AdminEditorUiTest', 'fullPageOffersNoLayoutMutationAtCapacityOrWithReadOnlyAccess'),
         ('io.syn443.android.AdminEditorUiTest', 'localEditPermanentlyInvalidatesSameReviewAcrossAcknowledgementAndBusyPhaseUpdates'),
         ('io.syn443.android.AdminEditorUiTest', 'publicationNeedsExplicitRecipientConfirmationAndSendsOriginalBindingOnlyOnce'),
         ('io.syn443.android.AdminEditorUiTest', 'lateConfirmationExpiryAndSameBindingDeadlineExtensionNeverPublish'),
