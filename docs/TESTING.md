@@ -8,6 +8,14 @@ the manifest for the checked-out revision and workflow run. AndroidJUnitRunner
 executes the complete suite. Its per-test start, finish, result and final count
 are verified before the existing mandatory named and system scenarios run.
 
+The dual-stack VPN lifecycle case checks both default routes in Android's
+active VPN and uses ordinary app sockets with numeric destinations. Its HTTP
+proxy counts IPv4 and IPv6 requests separately from the engine's health checks.
+An explicit IPv6 block must preserve IPv4. Removing the block must allow
+the same IPv6 destination to return HTTP 204 through the proxy. The synthetic
+fixture runs on all three Android API levels. Physical dual-stack Wi-Fi is
+a separate release check.
+
 [Offline support archive](offline-support-bundle.md) adds39exact Android roots
 across archive/projection/owner/source/UI/passive-cache classes and one actual
 fresh-emulator Provider/CLI case. The composed per-API floor is524, including the eight

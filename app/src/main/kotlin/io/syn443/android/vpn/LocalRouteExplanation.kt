@@ -145,7 +145,7 @@ internal object LocalRouteExplanation {
         val order = hops.asReversed().joinToString(" → ")
         return if (dynamic) "$order · выбор участника зависит от состояния группы" else "$order · выход по конфигурации $target"
     }
-    private fun choice(config: JSONObject, q: LocalRouteQuery, dns: Boolean): String {
+    private fun choice(config: JSONObject, q: LocalRouteQuery, dns: Boolean, selected: (String) -> Unit = {}): String {
         if (dns && q.domain == null) return if (q.ip != null) "для IP-адреса не требуется" else "для проверки нужен домен"
         val section = config.optJSONObject(if (dns) "dns" else "route") ?: return "не задано"
         val rules = section.optJSONArray("rules") ?: JSONArray()
@@ -169,11 +169,13 @@ internal object LocalRouteExplanation {
             }
         }
         if (!alias.matches(selection)) return "$source · назначение не определено"
-        return "$source · " + if (dns) selection else path(config, selection)
+        if (dns) return "$source · $selection"
+        selected(selection)
+        return "$source · " + path(config, selection)
     }
-    fun describe(raw: String, q: LocalRouteQuery): String {
+    fun describe(raw: String, q: LocalRouteQuery, selected: (String) -> Unit = {}): String {
         require(raw.length <= 1_048_576)
         val config = JSONObject(raw)
-        return "Маршрут: " + choice(config, q, false) + "\nDNS: " + choice(config, q, true)
+        return "Маршрут: " + choice(config, q, false, selected) + "\nDNS: " + choice(config, q, true)
     }
 }

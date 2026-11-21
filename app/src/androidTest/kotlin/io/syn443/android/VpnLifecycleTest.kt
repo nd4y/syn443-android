@@ -1,12 +1,16 @@
 package io.syn443.android
 
 import android.app.ActivityManager
+import android.net.ConnectivityManager
+import android.net.InetAddresses
+import android.net.NetworkCapabilities
 import androidx.core.net.toUri
 import android.net.VpnService
 import android.os.Build
 import android.util.Base64
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
@@ -15,6 +19,9 @@ import org.junit.Test
 import java.io.IOException
 import java.io.FileInputStream
 import java.net.InetAddress
+import java.net.Inet4Address
+import java.net.Inet6Address
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
@@ -95,6 +102,8 @@ class VpnLifecycleTest {
     private val workers = Executors.newFixedThreadPool(4)
     private val tunnels = AtomicInteger()
     private val controlProbes = AtomicInteger()
+    private val ipv4ApplicationRequests = AtomicInteger()
+    private val ipv6ApplicationRequests = AtomicInteger()
     @Volatile private var serving = true
     private val peerSockets = ConcurrentHashMap.newKeySet<Socket>()
     private val fixtureFailure = AtomicReference<Throwable?>()
@@ -164,9 +173,20 @@ class VpnLifecycleTest {
                 }
             }
         }
-        val config = """{"outbounds":[{"type":"http","tag":"test-proxy","server":"127.0.0.1","server_port":${server.localPort}}],"route":{"final":"test-proxy"}}"""
-        call("import", Base64.encodeToString(config.toByteArray(), Base64.NO_WRAP))
+        importProxyPolicy(blockIpv6 = false)
         call("test-health", "synthetic-http")
+    }
+    private fun importProxyPolicy(blockIpv6: Boolean) {
+        val route = JSONObject().put("final", "test-proxy")
+        if (blockIpv6) {
+            val rule = JSONObject().put("ip_cidr", JSONArray().put("::/0"))
+                .put("action", "reject").put("method", "drop")
+            route.put("rules", JSONArray().put(rule))
+        }
+        val proxy = JSONObject().put("type", "http").put("tag", "test-proxy")
+            .put("server", "127.0.0.1").put("server_port", server.localPort)
+        val config = JSONObject().put("outbounds", JSONArray().put(proxy)).put("route", route)
+        call("import", Base64.encodeToString(config.toString().toByteArray(), Base64.NO_WRAP))
     }
     private fun closeFixtureSocket(socket:Socket) {
         try {socket.close();peerSockets.remove(socket)}
@@ -179,8 +199,17 @@ class VpnLifecycleTest {
             val first = reader.readLine() ?: return
             while (!reader.readLine().isNullOrEmpty()) { /* bounded by socket timeout */ }
             if (first.startsWith("CONNECT 198.51.100.11:80 ")) {controlProbes.incrementAndGet();return}
-            if (!first.startsWith("CONNECT 203.0.113.10:80 ")) return
-            tunnels.incrementAndGet()
+            if (!first.startsWith("CONNECT ")) return
+            val target = first.substringBeforeLast(' ').removePrefix("CONNECT ")
+            val requestCounter = when {
+                target == "203.0.113.10:80" -> tunnels
+                target == "203.0.113.43:80" -> ipv4ApplicationRequests
+                target.startsWith("[") && target.endsWith("]:80") &&
+                    InetAddresses.parseNumericAddress(target.substring(1, target.length - 4)) ==
+                    InetAddresses.parseNumericAddress("2001:db8::443") -> ipv6ApplicationRequests
+                else -> return
+            }
+            requestCounter.incrementAndGet()
             socket.getOutputStream().write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray())
             socket.getOutputStream().flush()
             val get = reader.readLine() ?: return
@@ -235,6 +264,43 @@ class VpnLifecycleTest {
         await { !status().optBoolean("desiredOn") && pid() == null }
         Thread.sleep(1_500)
         assertFalse(status().getBoolean("desiredOn"))
+    }
+    @Test fun defaultVpnRoutesCaptureBothFamiliesAndExplicitIpv6DenialPreservesIpv4() {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java)
+        val tunnelAddress = InetAddresses.parseNumericAddress("fd00:443::1")
+        fun awaitOwnedDefaultRoutes() = await {
+            val active = connectivity.activeNetwork ?: return@await false
+            val caps = connectivity.getNetworkCapabilities(active) ?: return@await false
+            val link = connectivity.getLinkProperties(active) ?: return@await false
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                link.linkAddresses.any { it.address == tunnelAddress } &&
+                link.routes.any { it.isDefaultRoute && it.destination.address is Inet4Address } &&
+                link.routes.any { it.isDefaultRoute && it.destination.address is Inet6Address }
+        }
+        fun request(address: String): String? = Socket().use { socket ->
+            socket.soTimeout = 3_000
+            socket.connect(InetSocketAddress(InetAddresses.parseNumericAddress(address), 80), 3_000)
+            socket.getOutputStream().write("GET /generate_204 HTTP/1.1\r\nHost: fixture.invalid\r\nConnection: close\r\n\r\n".toByteArray())
+            socket.getInputStream().bufferedReader().readLine()
+        }
+        importProxyPolicy(blockIpv6 = true)
+        connect()
+        awaitOwnedDefaultRoutes()
+        val blockedResponse = try { request("2001:db8::443") } catch (_: IOException) { null }
+        assertNull("Blocked IPv6 produced an application response", blockedResponse)
+        assertEquals("HTTP/1.1 204 No Content", request("203.0.113.43"))
+        assertEquals(0, ipv6ApplicationRequests.get())
+        assertEquals(1, ipv4ApplicationRequests.get())
+
+        call("disconnect")
+        await { stoppedForFixture() }
+        importProxyPolicy(blockIpv6 = false)
+        connect()
+        awaitOwnedDefaultRoutes()
+        assertEquals("HTTP/1.1 204 No Content", request("2001:db8::443"))
+        assertEquals("HTTP/1.1 204 No Content", request("203.0.113.43"))
+        assertEquals(1, ipv6ApplicationRequests.get())
+        assertEquals(2, ipv4ApplicationRequests.get())
     }
     @Test fun unavailableOptionalOverlayDoesNotBlockVpnOrLeakPrivateRoute() {
         val config = """{"outbounds":[

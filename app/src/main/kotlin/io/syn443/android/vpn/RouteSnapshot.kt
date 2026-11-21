@@ -210,8 +210,15 @@ object RouteSnapshot {
         })
     }
     @Synchronized fun accepts(only:String?)=rows.any {(only==null || it.id==only) && it.configured()}
-    @Synchronized fun view(status:JSONObject):JSONObject = read(status.optBoolean("desiredOn"),status.optBoolean("engineActive") && live!=null,
-        live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch")))
+    @Synchronized fun view(status:JSONObject):JSONObject {
+        val scope = live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch"))
+        val on = status.optBoolean("desiredOn")
+        val ready = status.optBoolean("engineActive") && live != null
+        return read(on,ready,scope).also { report ->
+            if (on && ready && scope != null && scope == live && scope.config == revision &&
+                revision == status.optString("configRevision")) report.put("measurementRevision", revision)
+        }
+    }
     private fun failoverContext(scope:RouteScope, algorithm:FailoverAlgorithm) =
         Context(scope.network,scope.activation,"active",algorithm.revision,scope.intent,scope.config)
 
@@ -369,6 +376,7 @@ object RouteSnapshot {
             val state=if(scope==null) {if(on) RouteState.UNAVAILABLE else RouteState.OFF} else RouteEvidence.classify(on,ready,scope,sample,row.id in queued,now)
             JSONObject().put("id",row.id).put("label",row.tag.take(80)).put("type",row.type).put("required",row.required).put("state",state.name.lowercase(java.util.Locale.ROOT))
                 .put("configured",row.configured()).put("chain",JSONArray(row.chain)).put("routingRules",row.rules)
+                .put("checkPending",row.id in queued)
                 .put("measuredPath",if(sample?.scope==scope)measuredPaths[row.id] ?: JSONArray() else JSONArray())
                 .put("reason",if(sample?.scope==scope)codes[row.id] ?: "not_checked" else "not_checked")
                 .put("ageMs",if(sample!=null && sample.scope==scope && now>=sample.elapsedMs)now-sample.elapsedMs else JSONObject.NULL)
