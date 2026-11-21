@@ -58,6 +58,11 @@ class HomeWiFiProofTest {
         val scope=HomeProofScope(RouteScope(1,2,3,"engine","config"),4,5,"authority",1)
         val next=scope.copy(networkHandle=7)
         state.observe(scope)
+        // Synchronous socket or executor setup failure must also respect retry backoff.
+        val failing = HomeWiFiMonitor { now }.apply { observe(scope) }
+        val setupFailure = checkNotNull(failing.begin(scope))
+        failing.finish(setupFailure, false, now)
+        assertNull(failing.begin(scope))
         val old=checkNotNull(state.begin(scope))
         var canceled=false
         old.cancel={canceled=true}

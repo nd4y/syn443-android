@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 
 /** Address is a numeric private destination. Hostname is exclusively the TLS peer name. */
-data class HomeWiFiProof private constructor(val hostname:String,val address:String,val port:Int,val spkiSha256:String) {
+class HomeWiFiProof private constructor(val hostname:String,val address:String,val port:Int,val spkiSha256:String) {
     override fun toString()="HomeWiFiProof([redacted])"
 
     fun socketAddress(): InetAddress = privateAddress(address)

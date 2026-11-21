@@ -109,6 +109,11 @@ if mode=="emulator":
         "familyFactsExcludeLinkLocalAndKeepAddressAndDefaultRouteSeparate",
         "lostPhysicalLinkRemovesFamilyFactsFromVisibleDiagnostics",
     )} <= set(identities), "Missing physical link diagnostic outcomes"
+    assert {
+        ('io.syn443.android.PhysicalLinkDetailsTest', 'homeProofStatusRequiresCurrentWiFiObservation'),
+        ('io.syn443.android.HomeWiFiProofTest', 'actualTLSRequiresBoundSocketTrustedHostnameAndMatchingLeafPin'),
+        ('io.syn443.android.HomeWiFiProofTest', 'staleHomeProofCannotCrossLinkAuthorityTimeOrRetryBudget'),
+    } <= set(identities), "Missing signed home Wi-Fi proof outcomes"
     required_storage_outcomes = {
         ("io.syn443.android.AttachmentStorageFailureTest", "failedWritePreservesSourceAndReleasesScratchBeforeRetry"),
         ("io.syn443.android.AttachmentStorageFailureTest", "boundedOutboxFullRollsBackPartialFileAndAllowsRetry"),
@@ -602,9 +607,6 @@ ADMIN_LAYER_EDITOR_REQUIRED = {
         ('io.syn443.android.AdminEditorWireTest', 'duplicateUnknownNullCoercedAndNestedFieldsNeverProduceAStateSnapshot'),
         ('io.syn443.android.AdminEditorWireTest', 'malformedUtf8SurrogatesEscapesAndWideOrRepeatedCollectionsFailFinitely'),
         ('io.syn443.android.AdminEditorWireTest', 'mainAndBinderCannotSerializeOrParseEvenMalformedOrOversizedInput'),
-        ('io.syn443.android.PhysicalLinkDetailsTest', 'homeProofStatusRequiresCurrentWiFiObservation'),
-        ('io.syn443.android.HomeWiFiProofTest', 'actualTLSRequiresBoundSocketTrustedHostnameAndMatchingLeafPin'),
-        ('io.syn443.android.HomeWiFiProofTest', 'staleHomeProofCannotCrossLinkAuthorityTimeOrRetryBudget'),
         ('io.syn443.android.AdminEditorUiTest', 'smallEditorSeparatesLocalSaveServerDraftAndPreviewAndShowsParentProvenance'),
         ('io.syn443.android.AdminEditorUiTest', 'sixtyFourPagesExposeFullRangeWithoutTruncatingOrJoiningProposalOnMain'),
         ('io.syn443.android.AdminEditorUiTest', 'splittingFullPagePreservesUnicodeAndReviewUntilContentChanges'),

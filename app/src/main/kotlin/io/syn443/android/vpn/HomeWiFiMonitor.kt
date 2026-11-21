@@ -4,6 +4,7 @@ import android.net.Network
 import android.os.SystemClock
 import io.syn443.recovery.RouteScope
 import io.syn443.policy.HomeWiFiProof
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
@@ -21,6 +22,7 @@ internal class HomeWiFiMonitor(private val elapsed: () -> Long) {
     private var failures = 0
     internal class Attempt(val scope: HomeProofScope, val started: Long) {
         var cancel: (() -> Unit)? = null
+        var retired = false
     }
 
     fun observe(current: HomeProofScope?) {
@@ -29,7 +31,11 @@ internal class HomeWiFiMonitor(private val elapsed: () -> Long) {
         validUntil = 0
         nextAt = 0
         failures = 0
-        worker?.let { pending -> pending.cancel?.invoke(); pending.cancel = null }
+        worker?.let { pending ->
+            pending.retired = true
+            pending.cancel?.invoke()
+            pending.cancel = null
+        }
     }
 
     fun begin(current: HomeProofScope): Attempt? {
@@ -41,7 +47,7 @@ internal class HomeWiFiMonitor(private val elapsed: () -> Long) {
     fun finish(attempt: Attempt, verified: Boolean, observedAt: Long) {
         if (worker !== attempt) return
         worker = null
-        if (attempt.scope != scope || attempt.cancel == null) return
+        if (attempt.scope != scope || attempt.retired) return
         val now = elapsed()
         if (verified && observedAt in attempt.started..(attempt.started+8_000L) && now >= observedAt && now-observedAt < VALID_MS) {
             failures = 0
@@ -73,13 +79,22 @@ internal class HomeWiFiWorker(private val post: (() -> Unit) -> Unit) : AutoClos
     }
 
     fun check(attempt: HomeWiFiMonitor.Attempt, proof: HomeWiFiProof, network: Network, complete: (Boolean, Long) -> Unit) {
-        val handshake = HomeWiFiHandshake(proof, network)
-        attempt.cancel = { runCatching { handshake.close() } }
-        val timeout = pool.schedule({ runCatching { handshake.close() } }, 8, TimeUnit.SECONDS)
-        pool.execute {
-            val ok = try { handshake.verify() } finally { timeout.cancel(false) }
+        var timeout: ScheduledFuture<*>? = null
+        try {
+            val handshake = HomeWiFiHandshake(proof, network)
+            attempt.cancel = { runCatching { handshake.close() } }
+            val limit = pool.schedule({ runCatching { handshake.close() } }, 8, TimeUnit.SECONDS)
+            timeout = limit
+            pool.execute {
+                val ok = try { handshake.verify() } finally { limit.cancel(false) }
+                val observedAt = SystemClock.elapsedRealtime()
+                post { complete(ok, observedAt) }
+            }
+        } catch (_: Exception) {
+            timeout?.cancel(false)
+            attempt.cancel?.invoke()
             val observedAt = SystemClock.elapsedRealtime()
-            post { complete(ok, observedAt) }
+            post { complete(false, observedAt) }
         }
     }
 
