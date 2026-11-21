@@ -81,9 +81,9 @@ class AdminEditorUiTest {
         }
         scroll("editor-page-input")
         compose.onNodeWithTag("editor-page-input").performTextReplacement(left + "x" + right)
+        compose.onNodeWithTag("editor-page-error").assertIsDisplayed()
         scroll("editor-page-input"); input(left + right)
         compose.onNodeWithTag("editor-page-input").performTextReplacement(left + right)
-        scroll("editor-page-error")
         compose.onNodeWithTag("editor-page-error").assertIsDisplayed()
             .assertTextEquals("Текст не поместился на странице. Вставьте его частями.")
         scroll("editor-split-page"); compose.onNodeWithTag("editor-split-page").performClick()

@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import java.util.Collections
 
 /** Presentation only. No RPC, JSON parsing, storage, OAuth or VPN action. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions,elapsed:()->Long={SystemClock.elapsedRealtime()}) {
     val latestModel by rememberUpdatedState(model)
@@ -66,6 +67,13 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
     }
     LazyColumn(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal=20.dp).testTag("editor-content"),
         verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(vertical=20.dp)) {
+        if (pageInputError.isNotEmpty()) stickyHeader(key="input-error") {
+            Surface(Modifier.fillMaxWidth(), color=MaterialTheme.colorScheme.errorContainer) {
+                Text(pageInputError,
+                    modifier=Modifier.padding(12.dp).testTag("editor-page-error").semantics { liveRegion=LiveRegionMode.Polite },
+                    color=MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
         item {Text("Редактор конфигурации",Modifier.testTag("editor-title"),style=MaterialTheme.typography.headlineMedium)}
         item {TextButton(onClick={navigate("BACK")},enabled=!activeBusy,
             modifier=Modifier.testTag("editor-back")) {Text("К устройствам")}}
@@ -109,10 +117,6 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
             },readOnly=!editable,modifier=Modifier.fillMaxWidth().testTag("editor-page-input"),
                 isError=pageInputError.isNotEmpty(),
                 label={Text("Страница предложения ${page+1}")},textStyle=MaterialTheme.typography.bodySmall.copy(fontFamily=FontFamily.Monospace),minLines=8,maxLines=16)}
-            if (pageInputError.isNotEmpty()) item(key="input-error") {
-                Text(pageInputError, Modifier.testTag("editor-page-error").semantics { liveRegion=LiveRegionMode.Polite },
-                    color=MaterialTheme.colorScheme.error)
-            }
             if(editable && (pages[page].length == EDITOR_PAGE_SIZE || pageInputError.isNotEmpty()) && pages[page].length >= 2) {
                 val originalPage = pages[page]
                 val index = page
