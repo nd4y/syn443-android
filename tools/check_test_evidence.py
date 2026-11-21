@@ -425,7 +425,6 @@ if mode in ADAPTIVE_REQUIRED:
         ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'otherPhysicalTransportStartsIndependentAdaptiveSearchAndRetiresWifiProof'))
         ADAPTIVE_REQUIRED[mode].extend([
             ('io.syn443.android.ManagedAdaptiveRoutesTest', 'manualGroupRecheckKeepsOtherHealthyGroupsOnTheirOriginalCadence'),
-            ('io.syn443.android.RouteSearchStatusTest', 'singleRouteControlKeepsItsRowAndRejectsAReplacedNetworkOrConfiguration'),
         ])
     assert set(ADAPTIVE_REQUIRED[mode]) <= {(c.get("classname"),c.get("name")) for c in cases}, "Missing actual managed adaptive outcome"
 
@@ -768,6 +767,7 @@ if mode in ADMIN_OPERATION_RECONCILE_REQUIRED:
     assert set(ADMIN_OPERATION_RECONCILE_REQUIRED[mode]) <= set(identities), "Missing exact operation outcome, deadline, stable editor ownership or explicit presentation outcomes"
 
 ADAPTIVE_SEARCH_REQUIRED = [
+    ('io.syn443.android.RouteSearchStatusTest', 'singleRouteControlKeepsItsRowAndRejectsAReplacedNetworkOrConfiguration'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'onlyFreshSelectedAcknowledgementChangesSearchingToVerified'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'minuteBudgetWaitRetainsContinuationWithoutInventingNoCandidateVerdict'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'cpuYieldAndExhaustedMetadataDoNotHideAnIndependentlyVerifiedGroup'),
