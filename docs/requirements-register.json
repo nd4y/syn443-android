@@ -1295,9 +1295,10 @@
         "docs/route-frontier.md",
         "docs/route-lifecycle.md#reserve-probe-cooldown",
         "docs/native-owner-recovery.md",
-        "docs/negative-path-continuity.md"
+        "docs/negative-path-continuity.md",
+        "native/bridge/private_adaptive_owner_test.go"
       ],
-      "implementationScope": "The bounded RAM primitive retains one half-open retry and fixed cooldown/configuration fences. The negative-path candidate preserves original absolute retry/trial deadlines and failure ordinals across repeated compatible metadata rebinds; old-context attempts cannot settle the owned copy and an eligible failed fork retires instead of creating empty history.",
+      "implementationScope": "The bounded RAM primitive retains one half-open retry and fixed cooldown/configuration fences. The negative-path candidate preserves original absolute retry/trial deadlines and failure ordinals across repeated compatible metadata rebinds; old-context attempts cannot settle the owned copy and an eligible failed fork retires instead of creating empty history. Adaptive retry attempts also bind the exclusive deadline to the native check and final locked data-path selection. The controller discards late verification and reconciles an uncertain selection.",
       "remainingScope": "Complete persistent profile/edge/chain quarantine and selective credentials/profile invalidation remain open. Source/Actions/main/scoped phone regression are separate from real managed-route cooldown and four-mode acceptance."
     },
     {

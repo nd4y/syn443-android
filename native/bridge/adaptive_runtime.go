@@ -245,7 +245,17 @@ func (e *Runtime) AdaptiveCommand(raw string) bool {
 		mode, _ := f["mode"].(string)
 		return e.adaptive.configure(uint64(epoch), scope, mode)
 	case "start":
-		if len(f) != 6 {
+		var retryUntil int64
+		if value, present := f["retryUntilBootMs"]; present {
+			number, ok := value.(json.Number)
+			if !ok || len(f) != 7 {
+				return false
+			}
+			retryUntil, err = number.Int64()
+			if err != nil || retryUntil <= 0 {
+				return false
+			}
+		} else if len(f) != 6 {
 			return false
 		}
 		request, _ := f["request"].(string)
@@ -262,7 +272,7 @@ func (e *Runtime) AdaptiveCommand(raw string) bool {
 			}
 			hops[i] = hop
 		}
-		return e.adaptive.start(request, uint64(epoch), scope, group, hops)
+		return e.adaptive.startUntil(request, uint64(epoch), scope, group, hops, retryUntil)
 	case "commit", "discard":
 		if len(f) != 5 {
 			return false
