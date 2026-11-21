@@ -15,6 +15,41 @@ class SupportBundleSourcesTest {
     private fun state() = JSONObject().put("phase", "Online").put("generation", 7).put("networkEpoch", 4)
         .put("desiredOn", true).put("engineActive", true)
 
+    @Test fun offlineArchiveContainsOnlyCurrentPhysicalFactsAndTypedPortalReason() {
+        val owner = state().put("reason", "captive_portal")
+        // A persisted field cannot stand in for a current service observation.
+        owner.put("physicalLink", JSONObject().put("transport", "WIFI").put("homeProof", "verified"))
+        fun exported(link: JSONObject?, replaced: Boolean = false): JSONObject? {
+            var reads = 0
+            val parts = SupportBundleSources.capture(
+                state = { if (++reads == 2 && replaced) state().put("networkEpoch", 5) else owner },
+                overlay = { null }, checks = { null }, exits = { null },
+                versionName = "0.9.94", versionCode = 122, sdk = 35, physicalLink = { link },
+            )
+            val archive = DiagnosticArchive.create(parts)
+            java.util.zip.ZipInputStream(archive.bytes.inputStream()).use { input ->
+                while (true) {
+                    val entry = input.nextEntry ?: break
+                    if (entry.name == "health.json") return JSONObject(input.readBytes().toString(Charsets.UTF_8))
+                }
+            }
+            return null
+        }
+        val noLink = checkNotNull(exported(null))
+        assertEquals("captive_portal", noLink.getString("reason"))
+        assertFalse(noLink.has("physicalLink"))
+        val live = JSONObject().put("transport", "WIFI").put("homeProof", "verified")
+            .put("ipv4Address", true).put("ipv4Default", false).put("ipv6Address", "invalid")
+            .put("ssid", "fixture-private").put("spkiSha256", "fixture-private")
+        val health = checkNotNull(exported(live)).getJSONObject("physicalLink")
+        assertEquals(setOf("transport", "homeProof", "ipv4Address", "ipv4Default"), health.keys().asSequence().toSet())
+        assertTrue(health.getBoolean("ipv4Address")); assertFalse(health.getBoolean("ipv4Default"))
+        assertEquals("verified", health.getString("homeProof"))
+        val other = checkNotNull(exported(live.put("transport", "OTHER"))).getJSONObject("physicalLink")
+        assertFalse(other.has("homeProof"))
+        assertNull(exported(live, replaced = true))
+    }
+
     @Test fun passiveCaptureLeavesItsSourcesUnchangedAndRunsEachSupplierOnce() {
         val before = state()
         val saved = before.toString()

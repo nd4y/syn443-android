@@ -60,6 +60,7 @@ enum class EventCode(val wire: String, val channel: EventChannel = EventChannel.
     AWAITING_IDENTITY_RELEASE("awaiting_identity_release"),
     CONFIGURATION_INVALID("configuration_invalid", EventChannel.PROVISIONING),
     CONFIGURATION_OR_CAPABILITY_INVALID("configuration_or_capability_invalid", EventChannel.PROVISIONING),
+    CAPTIVE_PORTAL("captive_portal", EventChannel.NETWORK),
     CONTROLLER_RECREATED("controller_recreated"),
     DNS_RESOLUTION_FAILED("dns_resolution_failed", EventChannel.DNS), DNS_TIMEOUT("dns_timeout", EventChannel.DNS),
     EXPLICIT_RESUME_REQUIRED("explicit_resume_required"),

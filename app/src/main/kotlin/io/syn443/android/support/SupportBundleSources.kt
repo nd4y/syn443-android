@@ -24,6 +24,7 @@ internal object SupportBundleSources {
             checks = { PolicyChecks.snapshotForDiagnostics() },
             exits = { EngineExitDiagnostics.snapshot(context) },
             versionName = BuildConfig.VERSION_NAME, versionCode = BuildConfig.VERSION_CODE, sdk = Build.VERSION.SDK_INT,
+            physicalLink = LifecycleAccess::physicalLink,
             journal = { io.syn443.android.observability.LocalDiagnosticJournal.passive(context) },
         )
     }
@@ -33,6 +34,7 @@ internal object SupportBundleSources {
         versionName: String, versionCode: Int, sdk: Int,
         journal: () -> DiagnosticArchive.Component? = { null },
         readyConfig: () -> ReadyConfig? = { ReadyConfig.current },
+        physicalLink: (JSONObject) -> JSONObject? = { null },
     ): List<DiagnosticArchive.Component> {
         val readyBefore = readyConfig()
         val before = runCatching { state() }.getOrNull()
@@ -40,6 +42,7 @@ internal object SupportBundleSources {
         val result = DiagnosticProjection.project(
             source, runCatching { overlay() }.getOrNull(), runCatching { checks(source) }.getOrNull(),
             runCatching { exits() }.getOrNull(), versionName, versionCode, sdk,
+            if (before == null) null else runCatching { physicalLink(before) }.getOrNull(),
         )
         val suppliedHistory = try { journal() } catch (_: Exception) {
             DiagnosticArchive.Component(DiagnosticArchive.Name.EVENTS, null, DiagnosticArchive.State.ERROR, DiagnosticArchive.Reason.IO_ERROR)

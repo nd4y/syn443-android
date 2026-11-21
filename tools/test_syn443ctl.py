@@ -32,6 +32,27 @@ class AdbControlTest(unittest.TestCase):
                 syn443ctl.Device("synthetic-device", 3).call("status")
         self.assertEqual((timeout.exception.code, timeout.exception.exit_status), ("adb_timeout", 3))
 
+    def test_wifi_bundle_keeps_only_public_link_facts_and_portal_reason(self):
+        link = {"transport": "WIFI", "homeProof": "verified", "ipv4Address": True,
+                "ipv4Default": False, "ipv6Default": "invalid", "ssid": "private-fixture",
+                "address": "private-fixture", "spkiSha256": "private-fixture"}
+        state = {"desiredOn": True, "phase": "NoNetwork", "reason": "captive_portal", "physicalLink": link,
+                 "events": [{"phase": "NoNetwork", "code": "captive_portal"}]}
+        device = syn443ctl.Device("synthetic-device", 3)
+        def snapshot():
+            with patch.object(device, "call", side_effect=[state, {}]):
+                return syn443ctl.bundle(device)
+        result = snapshot()
+        self.assertEqual(result["state"]["physicalLink"], {
+            "transport": "WIFI", "homeProof": "verified", "ipv4Address": True, "ipv4Default": False})
+        self.assertEqual(result["state"]["reason"], "captive_portal")
+        self.assertEqual(result["events"][0]["code"], "captive_portal")
+        self.assertNotIn("private-fixture", json.dumps(result))
+        link["transport"] = "OTHER"
+        self.assertNotIn("homeProof", snapshot()["state"]["physicalLink"])
+        state["desiredOn"] = False
+        self.assertNotIn("physicalLink", snapshot()["state"])
+
     def test_bundle_omits_peers_labels_and_free_form_fields(self):
         state = {"generation": 5, "phase": "Recovering", "desiredOn": True,
                  "routeHealth": {"routes": [{"label": "synthetic route", "state": "working"}]}, "netbird": {"peers": ["synthetic peer"]},

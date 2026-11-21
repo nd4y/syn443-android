@@ -133,3 +133,9 @@ Run44180820226 then exposed the same lint issue in the separate provider
 client. That remaining call also uses `toUri`; the whole new support package
 contains no remaining `Uri.parse` call. This failure stays recorded and does
 not count as Android test acceptance.
+
+The health projection can include the current VPN transport, boolean IPv4/IPv6
+address and default-route availability, and the home TLS verification category
+on Wi-Fi. The collector reads the current engine owner and network epoch.
+Historical events retain Android's captive-portal classification. Addresses,
+network names, peer names and key pins are excluded from this projection.
