@@ -115,6 +115,12 @@ if mode=="emulator":
         ('io.syn443.android.ManagedAdaptiveRoutesTest', 'nativeHomeAdmissionNeedsTheExactLiveDeadlineAcrossRenewalAndExpiry'),
         ('io.syn443.android.HomeWiFiProofTest', 'staleHomeProofCannotCrossLinkAuthorityTimeOrRetryBudget'),
     } <= set(identities), "Missing signed home Wi-Fi proof outcomes"
+    assert ("io.syn443.android.ChatUiTest", "existingChatAcceptsIncidentEntryAndDismissalSurvivesRecreation") in identities
+    assert {("io.syn443.android.OfflineSupportIncidentTest", name) for name in (
+        "snapshotOnlyContainsClosedFactsAndDropsObsoleteEngineEvidence",
+        "encryptedOfflineReportSurvivesReopenAndOnlyBindsOnceToSelf",
+        "previewRequiresExplicitSubmissionAndAllowsCancelWithoutAnAccount",
+    )} <= set(identities), "Missing offline incident outcomes"
     assert {("io.syn443.android.ManagedNetworkModeTest", name) for name in (
         "userChoicePrecedesAssignmentAndExpiresAtTheExactMonotonicBoundary",
         "changedPhysicalNetworkAuthorityOrExpiredLeaseRetireTheChoiceAndItsCommands",

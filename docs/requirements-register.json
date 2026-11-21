@@ -2017,8 +2017,13 @@
     {
       "id": "OWN-03",
       "text": "Кнопка «Не работает / обратиться в поддержку» создаёт incident с коротким ID и минимальным очищенным snapshot, согласованным с privacy policy. Offline incident сохраняется локально. Расширенный бандл отправляется отдельным подтверждённым действием; пользователю не нужно вручную искать файлы. Администратор по ID видит intent, freshness, последнюю успешную пару и слой ошибки, затем тестирует исправление на одном устройстве и rollout cohort.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/support-chat.md#report-a-problem",
+        "app/src/androidTest/kotlin/io/syn443/android/OfflineSupportIncidentTest.kt"
+      ],
+      "implementationScope": "The phone previews a minimized incident with a short reference and an allowlisted state snapshot, saves it offline and sends the exact approved text to the authenticated owner conversation when chat reconnects.",
+      "remainingScope": "Cross-conversation administrator lookup by incident reference, a corroborated last-known-good engine and policy pair, and physical pilot acceptance."
     },
     {
       "id": "OWN-04",

@@ -88,6 +88,27 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
         require(count<8 || draft(id)!=null)
         db.insertWithOnConflict("drafts",null,ContentValues().apply {put("id",id);put("generation",generation);put("body",crypt("draft/$id",encoded))},SQLiteDatabase.CONFLICT_REPLACE).also {check(it!=-1L)}
     }
+    internal fun queueIncident(incident: SupportIncident) = db.transaction {
+        val saved = draft(incident.clientId)
+        if (saved != null) {
+            require(saved.opt("incident") == true && saved.opt("text") == incident.message)
+        } else {
+            saveDraft(incident.clientId, JSONObject().put("incident", true).put("conversation", "")
+                .put("text", incident.message).put("files", org.json.JSONArray()))
+        }
+    }
+
+    /** An unaddressed incident can be bound only by the authenticated self response. */
+    internal fun bindOwnIncidents(self: JSONObject) = db.transaction {
+        val own = self.getJSONObject("conversation").getString("id")
+        require(wireId.matches(own) && self.opt("admin") is Boolean)
+        for ((id, draft) in drafts()) {
+            if (draft.opt("incident") == true && draft.opt("conversation") == "") {
+                saveDraft(id, draft.put("conversation", own))
+            }
+        }
+    }
+
     fun draft(id:String):JSONObject?=db.rawQuery("SELECT body FROM drafts WHERE id=? AND generation=?",arrayOf(id,generation.toString())).use {
         if(it.moveToFirst())JSONObject(crypt("draft/$id",it.getBlob(0),true).toString(Charsets.UTF_8)) else null
     }

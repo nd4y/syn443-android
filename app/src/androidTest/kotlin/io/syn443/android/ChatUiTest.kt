@@ -6,6 +6,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeTimeoutException
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -31,6 +32,21 @@ import org.junit.Test
 
 class ChatUiTest {
     @get:Rule val compose=createAndroidComposeRule<SupportActivity>()
+    @Test fun existingChatAcceptsIncidentEntryAndDismissalSurvivesRecreation() {
+        assertReady()
+        val scenario = compose.activityRule.scenario
+        scenario.onActivity { activity ->
+            activity.startActivity(Intent(activity, SupportActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra(SupportActivity.REPORT_PROBLEM, true))
+        }
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("incident-preview").fetchSemanticsNodes().isNotEmpty() }
+        scenario.recreate()
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("incident-cancel").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("incident-cancel").performClick()
+        scenario.recreate()
+        assertReady()
+        compose.onNodeWithTag("incident-preview").assertDoesNotExist()
+    }
     @Test fun supportChatHasVisibleTitleAndConnectionStatus() {
         assertReady()
     }

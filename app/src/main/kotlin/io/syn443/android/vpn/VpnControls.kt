@@ -173,6 +173,11 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
             onConnect = ::requestConnect,
             onStop = { command("disconnect")?.let(::updateIntent) },
         )
+        TextButton(onClick = {
+            context.startActivity(android.content.Intent(context, io.syn443.android.chat.SupportActivity::class.java)
+                .putExtra(io.syn443.android.chat.SupportActivity.REPORT_PROBLEM, true)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        }, modifier = Modifier.testTag("report-problem")) { Text("Сообщить о проблеме") }
         if (statusAvailable == true && desiredOn == true) {
             if (phase == "NeedsPermission") TextButton(onClick = {
                 val intent = VpnService.prepare(context)
