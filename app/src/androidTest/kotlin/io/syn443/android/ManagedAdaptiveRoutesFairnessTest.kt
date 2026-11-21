@@ -358,6 +358,50 @@ class ManagedAdaptiveRoutesFairnessTest {
         }
     }
 
+    @Test fun halfOpenAcknowledgementsRespectTheOriginalTrialDeadline() {
+        for (outcome in listOf("timely","late-proof","late-ack")) {
+            Harness(config(choices=1,publicExit=true)).use {h->
+                h.ready(1000)
+                for (now in listOf(1000L,6000L)) {
+                    val first=checkNotNull(h.tick(now))
+                    assertFalse(first.has("retryUntilBootMs"))
+                    h.failed(first,now,"exit_mismatch")
+                }
+                val trial=(11000L..59_000L step 1000).firstNotNullOfOrNull {at->h.tick(at)?.let {at to it}}
+                val (start,probe)=checkNotNull(trial)
+                val deadline=probe.getLong("retryUntilBootMs")
+                assertEquals(start+15_000,deadline)
+                val receipt=Policy.hash(probe.getString("request"))
+                fun acknowledge(code:String,now:Long,selected:Boolean=false) {
+                    h.acknowledge(h.status().put("request",probe.getString("request")).put("group",probe.getString("group"))
+                        .put("hops",probe.getJSONArray("hops")).put("code",code).put("receipt",receipt)
+                        .put("probeMs",20).put("groupSelected",selected),now)
+                }
+                when(outcome) {
+                    "timely" -> {
+                        assertEquals("commit",h.verified(probe,deadline-2).getString("command"))
+                        acknowledge("selected",deadline-1,true)
+                        assertTrue(h.view().getBoolean("requiredReady"))
+                        assertFalse(h.controller.requiresRetirement())
+                    }
+                    "late-proof" -> {
+                        assertEquals("discard",h.verified(probe,deadline).getString("command"))
+                        acknowledge("discarded",deadline+1)
+                        assertFalse(h.view().getBoolean("requiredReady"))
+                        assertFalse(h.controller.requiresRetirement())
+                    }
+                    else -> {
+                        assertEquals("commit",h.verified(probe,deadline-1000).getString("command"))
+                        assertEquals("discard",h.verified(probe,deadline).getString("command"))
+                        acknowledge("selected",deadline+1,true)
+                        assertTrue(h.controller.requiresRetirement())
+                        assertFalse(h.view().getBoolean("requiredReady"))
+                    }
+                }
+            }
+        }
+    }
+
     @Test fun realContextNativeEpochAndClockChangesDoNotBorrowPositionsOrResetBudgets() {
         Harness(config(choices=500)).use { h ->
             h.ready(1000)

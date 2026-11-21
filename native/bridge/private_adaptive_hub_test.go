@@ -215,6 +215,46 @@ func TestPrivateAdaptiveHubRealTwoHopCommitDrainAndRebuild(t *testing.T) {
 	}
 }
 
+func TestUnknownUnderlayRequiresUniversalEntryAndFreshRealPayloadProof(t *testing.T) {
+	c, metadata, plans, paths, address := privateAdaptiveOneHopInputs(t, 2)
+	var graph map[string]json.RawMessage
+	if err := json.Unmarshal(metadata, &graph); err != nil {
+		t.Fatal(err)
+	}
+	var hops []map[string]any
+	if err := json.Unmarshal(graph["hops"], &hops); err != nil {
+		t.Fatal(err)
+	}
+	hops[1]["entryModes"] = []string{"UNKNOWN"}
+	graph["hops"] = privateAdaptiveMarshal(t, hops)
+	if bad, err := newPrivateAdaptiveHub(c, privateAdaptiveMarshal(t, graph), plans, strings.Repeat("c", 64), "UNKNOWN", 4, privatePoolLease(t)); bad != nil || err == nil {
+		t.Fatal("signed metadata invented an entry permission for an unrecognized network")
+	}
+	hops[1]["entryModes"] = []string{"HOME_WIFI", "WIFI", "CELLULAR", "CELLULAR_RESTRICTED"}
+	graph["hops"] = privateAdaptiveMarshal(t, hops)
+	h, _ := privateAdaptiveNewHub(t, c, privateAdaptiveMarshal(t, graph), plans, 4)
+	old, err := h.prepareProbe(context.Background(), "inside", paths[0])
+	if err != nil || old == nil || !h.changeScope(strings.Repeat("b", 64), "UNKNOWN") || h.commit(old, 1000) {
+		t.Fatal("a new underlay must retire the earlier Wi-Fi receipt", err)
+	}
+	if conn, err := h.dialTCP("inside", context.Background(), "tcp", M.ParseSocksaddr(address)); conn != nil || err != errPrivatePath {
+		t.Fatal("unverified entry carried user traffic")
+	}
+	if probe, err := h.prepareProbe(context.Background(), "inside", paths[0]); probe != nil || err != errPrivatePath {
+		t.Fatal("Wi-Fi-only path admitted on unknown underlay")
+	}
+	proof, err := h.prepareProbe(context.Background(), "inside", paths[1])
+	if err != nil || proof == nil || !h.commit(proof, 1000) {
+		t.Fatal("fresh probe on universal entry failed", err)
+	}
+	conn, err := h.dialTCP("inside", context.Background(), "tcp", M.ParseSocksaddr(address))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	privateAdaptiveEcho(t, conn, "unknown-underlay-verified-route")
+}
+
 func TestPrivateAdaptiveHubStrictPlansModesReceiptsAndFreshness(t *testing.T) {
 	c, metadata, plans, paths, address := privateAdaptiveOneHopInputs(t, 1)
 	for _, scenario := range []string{"nil catalogue", "empty metadata", "invalid scope", "zero capacity", "oversized capacity"} {

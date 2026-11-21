@@ -401,7 +401,7 @@ func declaresExit(exit, intent string) bool {
 // Allows is a static declaration predicate. It cannot grant a selection proof.
 func (g *Graph) Allows(groupID, mode string, path []string) bool {
 	row, ok := g.groups[groupID]
-	if !ok || !modes[mode] || len(path) < 1 || len(path) > 4 {
+	if !ok || !IsRuntimeMode(mode) || len(path) < 1 || len(path) > 4 {
 		return false
 	}
 	for i, name := range path {
@@ -414,7 +414,7 @@ func (g *Graph) Allows(groupID, mode string, path []string) bool {
 				return false
 			}
 		}
-		if i == 0 && !current.modes[mode] || i == len(path)-1 && !declaresExit(current.exit, row.intent) {
+		if i == 0 && !allowsEntry(current.modes, mode) || i == len(path)-1 && !declaresExit(current.exit, row.intent) {
 			return false
 		}
 		if i > 0 && !contains(g.edges[edgeKey{path[i-1], name}], row.features) {
@@ -439,6 +439,18 @@ func (g *Graph) Allows(groupID, mode string, path []string) bool {
 		}
 	}
 	return false
+}
+
+// IsRuntimeMode includes the local unknown underlay. Decode uses only modes.
+func IsRuntimeMode(mode string) bool {
+	return mode == "UNKNOWN" || modes[mode]
+}
+
+func allowsEntry(allowed map[string]bool, mode string) bool {
+	if mode == "UNKNOWN" {
+		return contains(allowed, modes)
+	}
+	return allowed[mode]
 }
 
 // StablePathID deliberately carries no authority or transport credentials.

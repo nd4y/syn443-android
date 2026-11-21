@@ -39,7 +39,7 @@ class AdaptivePathContinuityTest {
         val graph = JSONObject(Base64.getUrlDecoder().decode(wire.getString("graphB64")).toString(Charsets.UTF_8))
         val hops = graph.getJSONArray("hops")
         for (index in 0 until hops.length()) hops.getJSONObject(index)
-            .put("entryModes", JSONArray(NetworkMode.entries.map { it.name }))
+            .put("entryModes", JSONArray(NetworkMode.policyModes.map { it.name }))
         wire.put("graphB64", Base64.getUrlEncoder().withoutPadding()
             .encodeToString(canonical(Json.parseToJsonElement(graph.toString())).toByteArray(Charsets.UTF_8)))
         return root.toString()

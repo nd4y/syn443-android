@@ -15,6 +15,14 @@ A cached Online string or an unbound engine cannot become positive evidence.
 Transport uses one captured physical network and refuses substitution or loss.
 Stop, consent withdrawal, session changes and retirement fence late results.
 
+While VPN operation is requested, the controller's `Connecting` phase is
+reported as `starting` and `BlockedByPolicy` as `blocked`. The phone shows
+working or partially working only when the current engine has confirmed
+readiness. A pending stop can therefore show that the engine is still
+stopping. If a phase is unfamiliar or evidence is missing, the home screen
+shows that it is checking the VPN state. The last server observation retains
+its own timestamp when reporting is paused.
+
 A no-backup Keystore/AES-GCM AtomicFile holds one pending body and its per-key
 monotonic cursor and next-attempt deadline, in at most4096 encrypted bytes. Retries retain the exact
 body and sample time; a different state or a sample at least90 seconds old

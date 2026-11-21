@@ -15,6 +15,9 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+internal fun pendingInConversation(drafts:List<Pair<String,JSONObject>>, conversation:String) =
+    drafts.filter { conversation.isNotEmpty() && it.second.getString("conversation")==conversation }
+
 /** Single UI-process writer, ciphertext-only SQLite under noBackupFilesDir. */
 class ChatOutbox(context:Context,private val generation:Long,private val namespace:String="support-chat"):AutoCloseable {
     init {
@@ -22,6 +25,12 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
         require(namespace=="support-chat" || namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
     }
     companion object {
+        private val wireId=Regex("[0-9a-f]{32}")
+        private fun wireInteger(value:Any?):Long?=when(value) {
+            is Int -> value.toLong()
+            is Long -> value
+            else -> null
+        }
         fun erase(context:Context,namespace:String="support-chat") {
             require(namespace=="support-chat" || namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
             try {
@@ -71,16 +80,42 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
         return if(decrypt)c.doFinal(bytes,12,bytes.size-12) else c.iv+c.doFinal(bytes)
     }
     fun saveDraft(id:String,body:JSONObject) {
-        require(id.matches(Regex("[0-9a-f]{32}")) && body.toString().toByteArray().size<=32768)
+        val message = body.opt("text") as? String
+        require(wireId.matches(id) && message != null && ChatLimits.text(message))
+        val encoded = body.toString().toByteArray(Charsets.UTF_8)
+        require(encoded.size <= 32768)
         val count=db.rawQuery("SELECT count(*) FROM drafts",null).use {it.moveToFirst();it.getInt(0)}
         require(count<8 || draft(id)!=null)
-        db.insertWithOnConflict("drafts",null,ContentValues().apply {put("id",id);put("generation",generation);put("body",crypt("draft/$id",body.toString().toByteArray()))},SQLiteDatabase.CONFLICT_REPLACE).also {check(it!=-1L)}
+        db.insertWithOnConflict("drafts",null,ContentValues().apply {put("id",id);put("generation",generation);put("body",crypt("draft/$id",encoded))},SQLiteDatabase.CONFLICT_REPLACE).also {check(it!=-1L)}
     }
     fun draft(id:String):JSONObject?=db.rawQuery("SELECT body FROM drafts WHERE id=? AND generation=?",arrayOf(id,generation.toString())).use {
         if(it.moveToFirst())JSONObject(crypt("draft/$id",it.getBlob(0),true).toString(Charsets.UTF_8)) else null
     }
     fun drafts():List<Pair<String,JSONObject>> = db.rawQuery("SELECT id,body FROM drafts WHERE generation=? ORDER BY rowid",arrayOf(generation.toString())).use {c->
         buildList {while(c.moveToNext()) {val id=c.getString(0);add(id to JSONObject(crypt("draft/$id",c.getBlob(1),true).toString(Charsets.UTF_8)))}}
+    }
+    /** The server returns attachments ordered by its IDs, independently of the draft order. */
+    fun acknowledgeSent(id:String, uploaded:List<String>, receipt:JSONObject) = db.transaction {
+        val saved=draft(id) ?: throw ChatFailure("INVALID_REPLY")
+        val local=saved.getJSONArray("files")
+        val remote=receipt.optJSONArray("attachments") ?: throw ChatFailure("INVALID_REPLY")
+        val messageId=receipt.opt("id") as? String
+        if(messageId==null || !wireId.matches(messageId) || (wireInteger(receipt.opt("sequence")) ?: 0L)<=0L ||
+            receipt.opt("clientId")!=id || receipt.opt("conversation")!=saved.getString("conversation") ||
+            receipt.opt("text")!=saved.getString("text") || remote.length()!=local.length() ||
+            uploaded.size!=local.length() || uploaded.toSet().size!=uploaded.size || uploaded.any { !wireId.matches(it) })
+            throw ChatFailure("INVALID_REPLY")
+        val remaining=uploaded.withIndex().associate { it.value to local.getJSONObject(it.index) }.toMutableMap()
+        for(i in 0 until remote.length()) {
+            val file=remote.optJSONObject(i) ?: throw ChatFailure("INVALID_REPLY")
+            val remoteId=file.opt("id") as? String ?: throw ChatFailure("INVALID_REPLY")
+            val expected=remaining.remove(remoteId) ?: throw ChatFailure("INVALID_REPLY")
+            if(wireInteger(file.opt("size"))!=expected.getLong("size") ||
+                listOf("sha256","name","mime","kind").any { field -> file.opt(field)!=expected.getString(field) })
+                throw ChatFailure("INVALID_REPLY")
+        }
+        removeDraft(id)
+        for(i in 0 until local.length()) removeFile(local.getJSONObject(i).getString("localId"))
     }
     fun removeDraft(id:String) {db.delete("drafts","id=? AND generation=?",arrayOf(id,generation.toString()))}
     fun importFile(file:File,name:String,mime:String,kind:String,checkActive:()->Unit={}):JSONObject {

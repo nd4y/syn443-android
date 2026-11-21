@@ -157,6 +157,19 @@ class FailoverAdmissionTest {
         }
     }
 
+    @Test fun diagnosticCooldownDoesNotMoveTheAdmissionClockOrOpenTheFence() {
+        val admission = make()
+        for (n in 1..2) {
+            admission.decide(context, n.toLong(), "probe-$n", n * 1_000L, "primary",
+                sample("primary", n, ProbeVerdict.VERIFIED),
+                listOf(sample("reserve-a", n, ProbeVerdict.CONFIRMED_PATH_FAILURE)))
+        }
+        val retry = checkNotNull(admission.cooldown("reserve-a", 2_000)?.retryAtMs)
+        assertEquals(PathReadiness.REVALIDATE, admission.cooldown("reserve-a", retry)?.readiness)
+        assertTrue(admission.deferReserveProbe(context, "reserve-a", 3_000))
+        assertFalse(admission.deferReserveProbe(context, "reserve-a", retry))
+    }
+
     @Test fun optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator() {
         val d = make()
         fun batch(n: Int, active: ProbeVerdict, reserve: ProbeVerdict) =

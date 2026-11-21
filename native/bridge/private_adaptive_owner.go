@@ -219,7 +219,11 @@ func (o *privateAdaptiveOwner) configure(expectedEpoch uint64, policyScope, mode
 	return true
 }
 
-func (o *privateAdaptiveOwner) start(request string, expectedEpoch uint64, scope, group string, hops []string) (accepted bool) {
+func (o *privateAdaptiveOwner) start(request string, expectedEpoch uint64, scope, group string, hops []string) bool {
+	return o.startUntil(request, expectedEpoch, scope, group, hops, 0)
+}
+
+func (o *privateAdaptiveOwner) startUntil(request string, expectedEpoch uint64, scope, group string, hops []string, retryUntil int64) bool {
 	if !privateGroupID.MatchString(request) || len(hops) < 1 || len(hops) > 4 {
 		return false
 	}
@@ -234,6 +238,13 @@ func (o *privateAdaptiveOwner) start(request string, expectedEpoch uint64, scope
 	started := o.hub.pool.lease.clock()
 	if started < 0 || started > math.MaxInt64-30_000 {
 		return false
+	}
+	deadline := started + 30_000
+	if retryUntil != 0 {
+		if retryUntil <= started || retryUntil > started+15_000 {
+			return false
+		}
+		deadline = retryUntil
 	}
 	o.hub.mu.Lock()
 	o.hub.pool.mu.Lock()
@@ -269,7 +280,8 @@ func (o *privateAdaptiveOwner) start(request string, expectedEpoch uint64, scope
 			return false
 		}
 	}
-	ctx, cancel := context.WithTimeout(o.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(o.ctx, time.Duration(deadline-started)*time.Millisecond)
+	ctx = context.WithValue(ctx, privateAdaptiveWorkDeadlineKey{}, deadline)
 	done := make(chan struct{})
 	o.busy, o.workerDone, o.cancelWork = true, done, cancel
 	o.workStarted = started
@@ -349,7 +361,6 @@ func (o *privateAdaptiveOwner) run(ctx context.Context, cancel context.CancelFun
 		err = errPrivatePath
 		return
 	}
-	ctx = context.WithValue(ctx, privateAdaptiveWorkDeadlineKey{}, started+30_000)
 	receipt, err = o.hub.prepareProbe(ctx, group, hops)
 }
 

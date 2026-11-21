@@ -41,8 +41,10 @@ class RouteHealthMemory(private var context: Context) {
 
     private fun validKey(key: PathHealthKey) = Decision.validId(key.pathId) && Decision.validId(key.metricGroup)
 
+    private fun acceptsTime(nowMs: Long) = nowMs in clock..(Decision.MAX_TIME - 720_000)
+
     private fun advanceClock(nowMs: Long): Boolean {
-        if (nowMs !in clock..(Decision.MAX_TIME - 720_000)) return false
+        if (!acceptsTime(nowMs)) return false
         clock = nowMs
         return true
     }
@@ -71,13 +73,19 @@ class RouteHealthMemory(private var context: Context) {
 
     /** One half-open probe at a time. A late completion cannot open the fence. */
     @Synchronized
-    fun beginRetry(current: Context, key: PathHealthKey, attempt: Long, nowMs: Long): Boolean {
-        if (current != context || !validKey(key) || attempt !in 1..Decision.MAX_TIME || !advanceClock(nowMs)) return false
-        val old = table[key] ?: return false
-        val retry = old.retryAtMs ?: return false
-        if (nowMs < retry || attempt <= old.attempt || old.trial?.let { attempt <= it.attempt || nowMs < it.untilMs } == true) return false
-        table[key] = old.copy(trial = Trial(attempt, nowMs + 15_000))
-        return true
+    fun beginRetry(current: Context, key: PathHealthKey, attempt: Long, nowMs: Long): Boolean =
+        acquireRetry(current, key, attempt, nowMs) != null
+
+    /** Exclusive monotonic deadline for the one accepted trial, shared with its native worker. */
+    @Synchronized
+    fun acquireRetry(current: Context, key: PathHealthKey, attempt: Long, nowMs: Long): Long? {
+        if (current != context || !validKey(key) || attempt !in 1..Decision.MAX_TIME || !advanceClock(nowMs)) return null
+        val old = table[key] ?: return null
+        val retry = old.retryAtMs ?: return null
+        if (nowMs < retry || attempt <= old.attempt || old.trial?.let { attempt <= it.attempt || nowMs < it.untilMs } == true) return null
+        val trial = Trial(attempt, nowMs + 15_000)
+        table[key] = old.copy(trial = trial)
+        return trial.untilMs
     }
 
     /** One early probe per existing fence. A trial does not remove or shorten the fence. */
@@ -140,6 +148,17 @@ class RouteHealthMemory(private var context: Context) {
     @Synchronized
     fun view(current: Context, key: PathHealthKey, nowMs: Long): PathHealth {
         if (current != context || !validKey(key) || !advanceClock(nowMs)) return PathHealth(PathReadiness.NO_EVIDENCE)
+        return snapshot(key, nowMs)
+    }
+
+    /** A diagnostics read must not move the admission clock past an in-flight measurement. */
+    @Synchronized
+    internal fun inspect(current: Context, key: PathHealthKey, nowMs: Long): PathHealth {
+        if (current != context || !validKey(key) || !acceptsTime(nowMs)) return PathHealth(PathReadiness.NO_EVIDENCE)
+        return snapshot(key, nowMs)
+    }
+
+    private fun snapshot(key: PathHealthKey, nowMs: Long): PathHealth {
         val entry = table[key] ?: return PathHealth(PathReadiness.NO_EVIDENCE)
         if (entry.requiresChange) return PathHealth(PathReadiness.CONFIG_CHANGE_REQUIRED)
         val retry = entry.retryAtMs

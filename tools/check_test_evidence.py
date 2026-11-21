@@ -49,6 +49,7 @@ if mode=="jvm":
         "sharedMalformedGraphsNeverAcquirePartialAuthority",
         "graphFrontierEnumeratesOnlyBoundGroupPathsWithStableIDs",
         "graphWarmHintDoesNotBypassModeTemplateExpiryOrContext",
+        "unknownUnderlayRequiresAllDeclaredModesForHintsGraphAndEnumeration",
         "exactCatalogueAndCandidateBoundaryCannotBeTruncated",
         "perIntentBoundDeduplicatesSharedTemplatesAndRejectsSplitOverflow",
         "utf8ByteLimitsAndOwnedMetadataSurviveCallerMutation",
@@ -78,6 +79,7 @@ if mode=="jvm":
         "stabilityThenEnergyTakePriorityOverLatency",
         "evidenceFromAnotherExitCannotAuthorizeAReplacementOrAdvanceFailureCount",
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
+        "diagnosticCooldownDoesNotMoveTheAdmissionClockOrOpenTheFence",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
     assert ("io.syn443.android.VpnLifecycleTest",
@@ -127,6 +129,7 @@ if mode=="emulator":
     assert {
         ("io.syn443.android.PrototypeTest", "homeShowsVpnBeforeAccountAndKeepsToolsCollapsed"),
         ("io.syn443.android.VpnPrimaryActionTest", "startRequiresKnownReadyStateAndStopDoesNotRequireReadiness"),
+        ("io.syn443.android.VpnPrimaryActionTest", "statusRequiresCurrentEngineProofAndKeepsUnrecognizedIntentVisible"),
     } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required VPN home UI cases missing"
     assert {("io.syn443.android.RouteSnapshotTest",name) for name in {
         "sshWithoutServerPinCannotBeImportedAssignedOrRendered",
@@ -306,8 +309,12 @@ if mode=="emulator":
     fatal_required={"competingVpnOwnsTunAndRevokesOriginalWithoutRetryFight","fatalCommandsCannotStartAnOffNativeOwner","uncaughtJavaFaultRecoversRealTunAndRetainsIntent","uncaughtNativeFaultRecoversRealTunAndRetainsIntent","fatalCrashSeriesPreservesRestartBudgetAndStopFencesLateRecovery",
         "exitSnapshotFiltersRolesBoundsAndSortsWithoutIdentifiers","exitCategoriesAreFixedAndUnknownReasonCannotBecomeCrash","exitReadFailureAndInvalidQueryReturnUnavailableWithoutText","exitPidFilterRejectsStaleFutureAndForeignRecords","exitMetadataReadsRealPlatformWithoutChangingIntent","emptyExitHistoryIsAvailableAndDoesNotInventSuccess","engineExitHistoryHasVisibleOnDemandControls"}
     chat_required={"chatSqlOutboxPersistsCiphertextAndFencesAccountGeneration","chatSqlChunksPreserveTwentyFiveMiBAndRejectOversize","chatOutboxQuotaAndLogoutEraseTheOwnedKey","chatPhotoCompressionAppliesOrientationAndStripsGps","chatTextAndDocumentBoundariesDoNotAcceptInvalidMedia","supportChatHasVisibleTitleAndConnectionStatus","supportChatKeepsItsRootAcrossRepeatedRecreation","supportChatResumesAfterRepeatedBackgroundTransitions"}
+    chat_required |= {"invalidUnicodeCannotReplaceOrCreateEncryptedChatDrafts",
+                      "composingChatInputRequiresExplicitSendAfterCommit"}
     chat_required.add("chatReadinessRejectsMissingRootTitleAndStatus")
     chat_required |= {"chatRestartReclaimsUnsentFilesButPreservesDraftAttachments","chatVideoCompressionProducesBoundedMp4AndStripsLocation","chatCancellingActiveVideoExportRemovesPrivateTemporaryFiles"}
+    chat_required |= {"sendReceiptPreservesPendingBytesAcrossWrongRepliesAndStorageFailure",
+                      "visiblePendingMessagesStayInTheSelectedConversationUntilAcknowledged"}
     chat_required |= {"chatReplyIsPrivateAndDenialDoesNotWithdrawAssignedPolicy","cancelledQueuedChatNeverTransmitsAndDoesNotPoisonNextRequest"}
     chat_required |= {"chatCancelledImportRollsBackPartialSqlAndCanBeRetried"}
     chat_required |= {"chatDecoderSelectionPreservesPhysicalCodecsAndExcludesBrokenVirtualDecoder"}
@@ -417,6 +424,11 @@ ADAPTIVE_REQUIRED = {'emulator': [('io.syn443.android.AdaptiveEngineConfigTest',
 if mode in ADAPTIVE_REQUIRED:
     if mode == 'emulator':
         ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'currentCheckFailureRequiresFreshBoundReplacementAndMonotonicTime'))
+        ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'otherPhysicalTransportStartsIndependentAdaptiveSearchAndRetiresWifiProof'))
+        ADAPTIVE_REQUIRED[mode].extend([
+            ('io.syn443.android.ManagedAdaptiveRoutesTest', 'manualGroupRecheckKeepsOtherHealthyGroupsOnTheirOriginalCadence'),
+            ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'halfOpenAcknowledgementsRespectTheOriginalTrialDeadline'),
+        ])
     assert set(ADAPTIVE_REQUIRED[mode]) <= {(c.get("classname"),c.get("name")) for c in cases}, "Missing actual managed adaptive outcome"
 
 
@@ -592,6 +604,8 @@ ADMIN_LAYER_EDITOR_REQUIRED = {
         ('io.syn443.android.AdminEditorWireTest', 'mainAndBinderCannotSerializeOrParseEvenMalformedOrOversizedInput'),
         ('io.syn443.android.AdminEditorUiTest', 'smallEditorSeparatesLocalSaveServerDraftAndPreviewAndShowsParentProvenance'),
         ('io.syn443.android.AdminEditorUiTest', 'sixtyFourPagesExposeFullRangeWithoutTruncatingOrJoiningProposalOnMain'),
+        ('io.syn443.android.AdminEditorUiTest', 'splittingFullPagePreservesUnicodeAndReviewUntilContentChanges'),
+        ('io.syn443.android.AdminEditorUiTest', 'fullPageOffersNoLayoutMutationAtCapacityOrWithReadOnlyAccess'),
         ('io.syn443.android.AdminEditorUiTest', 'localEditPermanentlyInvalidatesSameReviewAcrossAcknowledgementAndBusyPhaseUpdates'),
         ('io.syn443.android.AdminEditorUiTest', 'publicationNeedsExplicitRecipientConfirmationAndSendsOriginalBindingOnlyOnce'),
         ('io.syn443.android.AdminEditorUiTest', 'lateConfirmationExpiryAndSameBindingDeadlineExtensionNeverPublish'),
@@ -756,6 +770,7 @@ if mode in ADMIN_OPERATION_RECONCILE_REQUIRED:
     assert set(ADMIN_OPERATION_RECONCILE_REQUIRED[mode]) <= set(identities), "Missing exact operation outcome, deadline, stable editor ownership or explicit presentation outcomes"
 
 ADAPTIVE_SEARCH_REQUIRED = [
+    ('io.syn443.android.RouteSearchStatusTest', 'singleRouteControlKeepsItsRowAndRejectsAReplacedNetworkOrConfiguration'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'onlyFreshSelectedAcknowledgementChangesSearchingToVerified'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'minuteBudgetWaitRetainsContinuationWithoutInventingNoCandidateVerdict'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'cpuYieldAndExhaustedMetadataDoNotHideAnIndependentlyVerifiedGroup'),
