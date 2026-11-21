@@ -65,6 +65,16 @@ class ControlProvider : ContentProvider() {
                 }
                 return Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
             }
+            if (method == "route-explain") {
+                require(caller == Process.myUid() && arg != null && arg.length <= 2048 && extras == null)
+                val query = LocalRouteQuery.parse(arg)
+                val store = StateStore.get(context)
+                val raw = checkNotNull(store.config())
+                val result = LocalRouteExplanation.describe(raw, query)
+                // A revocation or replacement concurrent with evaluation invalidates the answer.
+                require(store.config() == raw)
+                return Bundle().apply { putBoolean("ok", true); putString("description", result) }
+            }
             initializeUnlocked()
             val store = StateStore.get(context)
             when (method) {

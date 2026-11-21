@@ -45,6 +45,23 @@ class RouteCheckPlanTest {
         .put("results",JSONArray().put(JSONObject().put("id","route-1").put("complete",ok).put("ok",ok).put("code",if(ok)"ok" else "cancelled")
             .put("elapsedMs",5).put("sampledElapsedMs",SystemClock.elapsedRealtime()).put("path",JSONArray().put("route-1")).put("checkPlan",plan))).toString()
 
+    @Test fun canceledBatchClearsEarlierSuccessfulLeafOutcomes() {
+        val scope = configure()
+        val first = JSONObject(checkNotNull(RouteSnapshot.request(scope)))
+        assertTrue(RouteSnapshot.update(scope, report(first)))
+        assertEquals("TRUE", view(scope).getJSONObject("checkPlan").getString("outcome"))
+        val retry = JSONObject(checkNotNull(RouteSnapshot.request(scope, force = true)))
+        val terminal = JSONObject(report(retry)).put("results", JSONArray())
+        assertTrue(RouteSnapshot.update(scope, terminal.toString()))
+        val row = view(scope)
+        assertEquals("incomplete", row.getString("state"))
+        val plan = row.getJSONObject("checkPlan")
+        assertEquals("UNKNOWN", plan.getString("outcome"))
+        assertTrue((0 until plan.getJSONArray("leaves").length()).none {
+            plan.getJSONArray("leaves").getJSONObject(it).getString("outcome") == "TRUE"
+        })
+        assertFalse(RouteSnapshot.read(true, true, scope).getBoolean("requiredReady"))
+    }
     @Test fun ordinaryRequestOwnsWholeProfileAndNeverFlattensOrBorrowsMutatedInput() {
         val config=config();val scope=configure(config)
         row(config).getJSONObject("profile").put("revision",2)

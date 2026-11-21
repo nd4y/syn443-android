@@ -81,6 +81,25 @@ class RouteSearchStatusTest {
         assertEquals("WAITING_CONTEXT",search(row(scope)))
     }
 
+    @Test fun failedOrExpiredPathAndAbsentLatencyHaveDistinctLabels() {
+        val scope = configure()
+        RouteSnapshot.adaptive(scope, "managed-00", true, "ok", 0, listOf("synthetic-hop"))
+        fun snapshot(at: Long) = JSONObject().put("routeHealth", RouteSnapshot.readAt(true, true, scope, at))
+        val freshAt = SystemClock.elapsedRealtime()
+        val display = mutableStateOf(snapshot(freshAt))
+        compose.setContent { MaterialTheme { RouteControls(display.value) { _, _ -> error("read-only screen") } } }
+        compose.onNodeWithTag("route-1-timing").assertTextEquals("Возраст проверки 0 с · длительность 0 мс")
+        compose.onNodeWithTag("route-1-path").assertTextEquals("Проверенный путь · synthetic-hop")
+        compose.runOnIdle { display.value = snapshot(freshAt + 125_000) }
+        compose.onNodeWithTag("route-1-path").assertTextEquals("Путь предыдущей проверки · synthetic-hop")
+        compose.runOnIdle {
+            RouteSnapshot.adaptive(scope, "managed-00", false, "exit_mismatch", null, listOf("synthetic-next"))
+            display.value = snapshot(SystemClock.elapsedRealtime())
+        }
+        compose.onNodeWithTag("route-1-timing").assertTextEquals("Возраст проверки 0 с · длительность неизвестна")
+        compose.onNodeWithTag("route-1-path").assertTextEquals("Путь последней попытки · synthetic-next")
+        compose.onNodeWithTag("route-1-reason").assertTextEquals("Выход не соответствует назначенной проверке")
+    }
     @Test fun finiteSearchLabelsNeverClaimNoRoutesAndRecompositionDispatchesNothing() {
         val scope=configure()
         val view=mutableStateOf(JSONObject().put("routeHealth",RouteSnapshot.read(true,true,scope)))

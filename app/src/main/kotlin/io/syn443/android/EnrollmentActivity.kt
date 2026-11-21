@@ -21,7 +21,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import com.google.zxing.*
 import com.google.zxing.common.HybridBinarizer
@@ -30,9 +29,6 @@ import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
-
-// Separate provider identity keeps camera paths independent of debug chat fixtures.
-class EnrollmentFileProvider:FileProvider()
 
 /** Incoming content is preview-only. No key/code leaves this device before the
  * explicit binding confirmation and installation-root verification. */
@@ -120,17 +116,25 @@ internal object InvitationQr {
     var link by remember {mutableStateOf(initial)};var message by remember {mutableStateOf("")}
     var ticket by remember {mutableStateOf("")};var preview by remember {mutableStateOf<JSONObject?>(null)}
     var busy by remember {mutableStateOf(false)};var rotation by remember {mutableStateOf("")};var showRotation by remember {mutableStateOf(false)}
-    val cameraFile=remember {File(File(context.cacheDir,"enrollment-camera").apply {mkdirs()},"frame.jpg")}
+    // Older versions captured a photo here. A process death could outlive its cleanup.
+    LaunchedEffect(Unit) { withContext(Dispatchers.IO) { File(context.cacheDir,"enrollment-camera/frame.jpg").delete() } }
     suspend fun command(method:String,arg:String?=null,extras:Bundle?=null)=withContext(Dispatchers.IO){context.contentResolver.call(endpoint,method,arg,extras)}
     fun decode(uri:Uri) {scope.launch {
         busy=true;preview=null
         try {link=withContext(Dispatchers.Default){InvitationQr.decode(context,uri)};message="QR прочитан. Проверьте приглашение."}
         catch(_:Exception){message="Не удалось прочитать приглашение из QR."}
-        finally {busy=false;cameraFile.delete()}
+        finally {busy=false}
     }}
     val image=rememberLauncherForActivityResult(ActivityResultContracts.GetContent()){uri->if(uri!=null)decode(uri)}
-    val camera=rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()){success->
-        if(success)decode(FileProvider.getUriForFile(context,"io.syn443.android.enrollment.files",cameraFile))else cameraFile.delete()
+    val camera=rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()){result->
+        val scanned=scannedInvitation(result.data?.getStringExtra(InvitationScannerActivity.EXTRA_LINK))
+        if(result.resultCode==android.app.Activity.RESULT_OK && scanned!=null) {
+            link=scanned
+            preview=null
+            message="QR прочитан. Проверьте приглашение."
+        } else {
+            message="Сканирование завершено. Можно вставить ссылку или выбрать QR из фото."
+        }
     }
     LaunchedEffect(ticket) {
         if(ticket.isNotEmpty())repeat(100){
@@ -149,7 +153,7 @@ internal object InvitationQr {
             visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,autoCorrectEnabled=false),modifier=Modifier.fillMaxWidth().testTag("invite-link"),enabled=!busy,maxLines=3)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             Button(enabled=!busy,onClick={runCatching {image.launch("image/*")}.onFailure {message="Не удалось открыть выбор изображения."}},modifier=Modifier.testTag("invite-image")){Text("QR из фото")}
-            Button(enabled=!busy,onClick={runCatching {camera.launch(FileProvider.getUriForFile(context,"io.syn443.android.enrollment.files",cameraFile))}.onFailure {message="Приложение камеры недоступно."}},modifier=Modifier.testTag("invite-camera")){Text("Камера")}
+            Button(enabled=!busy,onClick={camera.launch(Intent(context,InvitationScannerActivity::class.java))},modifier=Modifier.testTag("invite-camera")){Text("Сканировать QR")}
         }
         Button(enabled=!busy && link.isNotBlank(),onClick={scope.launch {
             busy=true;message="";preview=null

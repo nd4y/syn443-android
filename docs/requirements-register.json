@@ -1420,8 +1420,13 @@
     {
       "id": "ROUTE-02",
       "text": "Панель и клиент предоставляют объяснение маршрута для введённого пользователем домена/IP или приложения: совпавшее правило, DNS, цепочка и exit. Тест запускается явно; история пользовательских доменов не собирается автоматически.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/LocalRouteExplanation.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManualRouteControl.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManualRouteExplanationTest.kt"
+      ],
+      "remainingScope": "Local manual evaluation identifies compiled rule positions, configured DNS and ordered static detours. Author rule IDs, live group member, observed exit and predicates that depend on native runtime state remain open."
     },
     {
       "id": "ROUTE-03",
@@ -1491,6 +1496,9 @@
         "native/bridge/route_checks_test.go",
         "app/src/androidTest/kotlin/io/syn443/android/PackagedProxyChainTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/RouteSnapshotTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteCheckPlanTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSearchStatusTest.kt",
+        "docs/route-lifecycle.md#reading-route-measurements",
         "docs/TESTING.md"
       ]
     },
@@ -2393,8 +2401,15 @@
     {
       "id": "BOOT-06",
       "text": "Приложение обрабатывает `syn443://enroll` через Android deep links, собственный QR-сканер и явную вставку ссылки. QR содержит ровно ту же версионированную ссылку; отдельного несовместимого QR-формата нет. Другие пользовательские URI-схемы и прежние алиасы не поддерживаются. Камера запрашивается только при сканировании; при отказе остаются ссылка и вставка.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md",
+        "app/src/main/kotlin/io/syn443/android/InvitationScannerActivity.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/InvitationScannerTest.kt",
+        "tools/run_invitation_camera_permission.py"
+      ],
+      "implementationScope": "Local QR decoding, URI and paste share the invitation preview. Camera access is requested on an explicit scan. Cancellation and denial preserve manual enrollment.",
+      "remainingScope": "Verify an optical read of a newly issued invitation on a clean physical device and the full claim, pairing and policy delivery flow."
     },
     {
       "id": "BOOT-07",
@@ -2916,8 +2931,15 @@
     {
       "id": "AC33",
       "specRow": " Ссылка/QR при холодном и тёплом запуске, камера запрещена | Ссылка syn443:// и QR с ней ведут в одинаковую привязку, вставка работает, Keycloak не запрашивается |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md",
+        "app/src/main/kotlin/io/syn443/android/InvitationScannerActivity.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/InvitationScannerTest.kt",
+        "tools/run_invitation_camera_permission.py"
+      ],
+      "implementationScope": "Local QR decoding, URI and paste share the invitation preview. Camera access is requested on an explicit scan. Cancellation and denial preserve manual enrollment.",
+      "remainingScope": "Verify an optical read of a newly issued invitation on a clean physical device and the full claim, pairing and policy delivery flow."
     },
     {
       "id": "AC34",
