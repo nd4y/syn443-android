@@ -182,6 +182,46 @@ class ManagedFailoverTest {
         } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
     }
 
+    @Test fun failedActiveWifiGetsOneEarlyReserveProbeAndStillNeedsTwoVerifiedBatches() {
+        val scope=RouteScope(10,29,30,"synthetic-early-engine",Policy.hash(config))
+        RouteSnapshot.configure(config,scope.config);RouteSnapshot.owner(scope)
+        fun request()=JSONObject(checkNotNull(RouteSnapshot.request(scope,force=true,deferCoolingReserves=true)))
+        fun batch(wire:JSONObject, primaryOK:Boolean, reserveOK:Boolean):RouteSnapshot.FailoverCommand? {
+            val results=JSONArray()
+            val checks=wire.getJSONArray("routes")
+            for(i in 0 until checks.length()) {
+                val row=checks.getJSONObject(i)
+                val id=row.getString("id")
+                val ok=if(id=="route-2")reserveOK else primaryOK
+                val path=if(id=="route-3")listOf(id,"route-1") else listOf(id)
+                val entry=JSONObject().put("id",id).put("complete",true).put("ok",ok)
+                    .put("code",if(ok)"ok" else "dial_failed").put("elapsedMs",20)
+                    .put("sampledElapsedMs",android.os.SystemClock.elapsedRealtime()).put("path",JSONArray(path))
+                if(!ok)entry.put("cause","connection_refused")
+                results.put(entry)
+            }
+            val report=JSONObject().put("request",wire.getString("request")).put("running",false).put("results",results)
+            assertTrue(RouteSnapshot.update(scope,report.toString()))
+            return RouteSnapshot.failoverAdvice(scope,trackReserveFailures=true)
+        }
+        fun reserveIncluded(wire:JSONObject):Boolean {
+            val list=wire.getJSONArray("routes")
+            return (0 until list.length()).any {list.getJSONObject(it).getString("id")=="route-2"}
+        }
+        try {
+            repeat(2){assertNull(batch(request(),true,false))}
+            val fenced=request()
+            assertFalse(reserveIncluded(fenced))
+            android.os.SystemClock.sleep(10_100)
+            assertNull(batch(fenced,false,false))
+            val trial=request()
+            assertTrue(reserveIncluded(trial))
+            assertNull(batch(trial,false,true))
+            val switch=checkNotNull(batch(request(),false,true))
+            assertEquals("primary",switch.previous);assertEquals("reserve",switch.candidate)
+        } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
+    }
+
     @Test fun meteredMaintenanceKeepsRequiredChecksAndOnlyFullComparisonsCountTowardSwitch() {
         val scope=RouteScope(10,26,30,"synthetic-engine",Policy.hash(config))
         RouteSnapshot.configure(config,scope.config)

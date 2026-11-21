@@ -119,6 +119,44 @@ class FailoverAdmissionTest {
             batch(6, 41_000, "reserve-a", "primary"))
     }
 
+    @Test fun earlyTrialRequiresAllReservesFencedAndTwoAttributedTransientFailures() {
+        val d=make()
+        val fail=ProbeVerdict.CONFIRMED_PATH_FAILURE
+        fun observe(n:Int, reserveB:Boolean) {
+            val a=sample("reserve-a",n,fail).copy(transientTransportFailure=true)
+            val b=sample("reserve-b",n,ProbeVerdict.PATH_AUTH_OR_CONFIGURATION)
+            d.decide(context,n.toLong(),"probe-$n",n*1000L,"primary",sample("primary",n,ProbeVerdict.VERIFIED),
+                if(reserveB)listOf(a,b) else listOf(a))
+        }
+        observe(1,false);observe(2,false)
+        assertNull(d.earlyReserve(context,"primary",12_000)) // An unknown alternative still needs an ordinary probe.
+        observe(13,true)
+        assertNull(d.beginEarlyReserve(context.copy(networkEpoch=8),"primary",14,13_000))
+        assertNull(d.beginEarlyReserve(context,"primary",13,13_000)) // Old observation or repeated admission.
+        assertEquals("reserve-a",d.beginEarlyReserve(context,"primary",14,13_000))
+        assertNull(d.beginEarlyReserve(context,"primary",14,13_001))
+        assertEquals(PathReadiness.HALF_OPEN,d.cooldown("reserve-a",13_001)?.readiness)
+        val stale=sample("reserve-a",14,ProbeVerdict.VERIFIED).copy(sampledAtMs=12_999)
+        assertNull(d.decide(context,14,"probe-14",14_000,"primary",sample("primary",14,fail),listOf(stale)))
+        assertEquals(PathReadiness.HALF_OPEN,d.cooldown("reserve-a",14_000)?.readiness)
+        assertNull(d.beginEarlyReserve(context,"primary",15,29_000))
+        assertEquals(PathReadiness.QUARANTINED,d.cooldown("reserve-a",29_000)?.readiness)
+        assertTrue(d.deferReserveProbe(context,"reserve-b",29_000))
+    }
+
+    @Test fun earlyTrialRejectsMixedCausesAndAnUncorroboratedOutage() {
+        for (unavailable in listOf(false,true)) {
+            val d=FailoverAdmission(context,ExitClass.privateRoute,setOf("primary","reserve-a"),"comparison")
+            for(n in 1..2) {
+                val active=if(unavailable)ProbeVerdict.CONFIRMED_PATH_FAILURE else ProbeVerdict.VERIFIED
+                d.decide(context,n.toLong(),"probe-$n",n*1000L,"primary",sample("primary",n,active),
+                    listOf(sample("reserve-a",n,ProbeVerdict.CONFIRMED_PATH_FAILURE).copy(transientTransportFailure=unavailable || n==2)))
+            }
+            assertNull(d.earlyReserve(context,"primary",13_000))
+            assertNull(d.beginEarlyReserve(context,"primary",3,13_000))
+        }
+    }
+
     @Test fun optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator() {
         val d = make()
         fun batch(n: Int, active: ProbeVerdict, reserve: ProbeVerdict) =

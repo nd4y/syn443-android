@@ -95,3 +95,20 @@ A pass containing only fenced paths waits for its earliest known retry deadline.
 The native probe budget, half-open checks and selection receipt still apply.
 The Android test fixture puts the sole Wi-Fi candidate at position 193 and checks
 that selection takes exactly one network probe and a current native receipt.
+
+## Transient reserve recovery on internal Wi-Fi
+
+For a managed internal Wi-Fi selector with reserve cooldown enabled, two separate
+failures on a reserve may open one early diagnostic opportunity. In each batch,
+a different authorized member must have a fresh accepted success on the same
+check. Only native dial causes for refused connections or timeouts qualify.
+Unknown alternatives and normal retries take precedence. Certificate errors,
+DNS name errors, bad credentials and wrong exits do not qualify.
+
+When the active path also has a fresh transient dial failure and every reserve is
+fenced, one reserve can be measured before its regular deadline. At least ten
+seconds must have passed since its last corroborated failure. The first regular
+retry deadline wins, followed by energy class and stable ID. A decision context
+can admit at most one such trial in five minutes. The trial lasts fifteen seconds
+and owns exactly the next batch. Until a fresh in-scope success arrives the
+original cooldown remains in force. Normal switch confirmations still apply.
