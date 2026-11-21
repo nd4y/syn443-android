@@ -149,16 +149,12 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
         val id=conversation
         if(id.isEmpty())return
         val previous = messages
-        val (before, after) = previous.request(move) ?: return
-        val request=JSONObject().put("conversation",id).put("before",before).put("after",after)
-        val response=api.objectCall("messages",request)
-        if (client !== api || conversation != id || messages !== previous) return
-        val page = response.getJSONArray("messages").objects()
-        require(page.all { it.getString("conversation") == id })
-        messages = previous.accept(move, page)
-        peerRead=response.getLong("peerRead")
-        if(visible && !messages.historical && move != HistoryMove.OLDER && messages.rows.isNotEmpty())
-            api.call("read",JSONObject().put("conversation",id).put("sequence",messages.rows.last().getLong("sequence")))
+        loadChatMessagePage(id, previous, move,
+            fetch = { api.objectCall("messages", it) },
+            current = { client === api && conversation == id && messages === previous },
+            visible = { visible },
+            publish = { page, read -> messages = page; peerRead = read },
+            acknowledge = { api.call("read", it) })
     }
     suspend fun sendPending(id:String) {
         val api=requireNotNull(client);val db=requireNotNull(store)

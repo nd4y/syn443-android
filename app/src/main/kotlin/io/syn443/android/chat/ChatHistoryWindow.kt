@@ -68,3 +68,27 @@ internal data class ChatMessageWindow(
             newestSeen = maxOf(newest, newestSeen))
     }
 }
+
+internal suspend fun loadChatMessagePage(
+    conversation: String,
+    previous: ChatMessageWindow,
+    move: HistoryMove,
+    fetch: suspend (JSONObject) -> JSONObject,
+    current: () -> Boolean,
+    visible: () -> Boolean,
+    publish: (ChatMessageWindow, Long) -> Unit,
+    acknowledge: suspend (JSONObject) -> Unit,
+) {
+    val (before, after) = previous.request(move) ?: return
+    val page = fetch(JSONObject().put("conversation", conversation).put("before", before).put("after", after))
+    if (!current()) return
+    val messages = page.getJSONArray("messages")
+    require(messages.length() <= 20)
+    val rows = List(messages.length()) { index -> messages.getJSONObject(index) }
+    require(rows.all { it.getString("conversation") == conversation })
+    val next = previous.accept(move, rows)
+    publish(next, page.getLong("peerRead"))
+    if (visible() && !next.historical && move != HistoryMove.OLDER && next.rows.isNotEmpty()) {
+        acknowledge(JSONObject().put("conversation", conversation).put("sequence", next.rows.last().getLong("sequence")))
+    }
+}

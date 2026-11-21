@@ -91,6 +91,7 @@ if mode=="emulator":
         "equalTimestampInboxPagesReachEveryConversationAndReturnToFirst",
         "deepMessagesNavigateBothDirectionsWithoutPollingOrSkippingHistory",
         "archiveButtonsReturnToLatestOrMoveOnePageAndRespectBusyState",
+        "lateForeignOrHiddenPagesCannotAcknowledgeTheActiveConversation",
     }
     assert {("io.syn443.android.ChatHistoryWindowTest", name) for name in history_cases} <= set(identities), "Missing mobile chat navigation outcomes"
     assert ("io.syn443.android.RuntimeHeapTest", "actualArtHeapSupportsTheMandatoryStorageAndUiSuite") in {

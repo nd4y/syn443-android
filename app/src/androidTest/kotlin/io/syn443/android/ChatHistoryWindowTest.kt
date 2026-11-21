@@ -10,6 +10,9 @@ import io.syn443.android.chat.ChatHistoryNavigation
 import io.syn443.android.chat.ChatInboxWindow
 import io.syn443.android.chat.ChatMessageWindow
 import io.syn443.android.chat.HistoryMove
+import io.syn443.android.chat.loadChatMessagePage
+import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Rule
@@ -102,5 +105,44 @@ class ChatHistoryWindowTest {
         next.performClick()
         latest.performClick()
         compose.runOnIdle { assertEquals(listOf(HistoryMove.NEWER, HistoryMove.LATEST), moves) }
+    }
+
+    @Test fun lateForeignOrHiddenPagesCannotAcknowledgeTheActiveConversation() = runBlocking {
+        val id = fixtureId(1)
+        var window = ChatMessageWindow()
+        val receipts = mutableListOf<Long>()
+        var requests = 0
+        var showing = true
+        val fetch = { query: JSONObject ->
+            requests++
+            assertEquals(id, query.getString("conversation"))
+            val seq = if (query.getLong("before") > 0L) 41L else 42L
+            JSONObject().put("peerRead", 7L).put("messages", JSONArray().put(
+                JSONObject().put("conversation", id).put("sequence", seq)))
+        }
+        suspend fun load(move: HistoryMove, current: Boolean = true, foreign: Boolean = false) {
+            loadChatMessagePage(id, window, move, fetch = { query ->
+                fetch(query).also { if (foreign) it.getJSONArray("messages").getJSONObject(0).put("conversation", fixtureId(2)) }
+            }, current = { current }, visible = { showing }, publish = { next, peer ->
+                assertEquals(7L, peer)
+                window = next
+            }, acknowledge = { receipts.add(it.getLong("sequence")) })
+        }
+        load(HistoryMove.LATEST, current = false)
+        assertTrue(window.rows.isEmpty())
+        assertTrue(runCatching { load(HistoryMove.LATEST, foreign = true) }.isFailure)
+        assertTrue(window.rows.isEmpty())
+        showing = false
+        load(HistoryMove.LATEST)
+        assertTrue(receipts.isEmpty())
+        showing = true
+        load(HistoryMove.LATEST)
+        assertEquals(listOf(42L), receipts)
+        load(HistoryMove.OLDER)
+        assertTrue(window.historical)
+        val before = requests
+        load(HistoryMove.POLL)
+        assertEquals(before, requests)
+        assertEquals(listOf(42L), receipts)
     }
 }
