@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import tempfile
+import traceback
 
 import run_support_bundle_smoke as smoke
 from syn443ctl import Device
@@ -9,11 +10,23 @@ from syn443ctl import Device
 
 class ObservedDevice(Device):
     controller = b""
+    prior = b""
+    history = []
 
     def call(self, operation, argument=None):
-        value = super().call(operation, argument)
+        try:
+            value = super().call(operation, argument)
+        except Exception as error:
+            self.history.append((operation, type(error).__name__))
+            raise
+        pid = smoke.adb("shell", "pidof", smoke.PACKAGE + ":controller").stdout.strip()
+        state = value.get("state")
+        known = {"failed", "expired", "cancelled", "busy", "not_found", "open", "collecting", "ready"}
+        self.history.append((operation, state if isinstance(state, str) and state in known else "chunk_or_unknown",
+            bool(pid), bool(self.prior) and self.prior != pid))
+        self.prior = pid
         if operation == "support-bundle-open":
-            self.controller = smoke.adb("shell", "pidof", smoke.PACKAGE + ":controller").stdout.strip()
+            self.controller = pid
         if operation == "support-bundle-read":
             fields = {"grant", "offset", "data", "nextOffset", "done"}
             state = value.get("state")
@@ -39,11 +52,19 @@ if __name__ == "__main__":
     for index in range(8):
         with tempfile.TemporaryDirectory(dir=root) as directory:
             os.environ["RUNNER_TEMP"] = directory
+            ObservedDevice.history.clear()
             try:
                 smoke.main()
             except Exception as error:
                 failures += 1
-                print("failed sample", index + 1, type(error).__name__, flush=True)
+                frames = [(Path(frame.filename).name, frame.lineno, frame.name)
+                          for frame in traceback.extract_tb(error.__traceback__)]
+                print("failed sample", index + 1, type(error).__name__, frames, ObservedDevice.history, flush=True)
+                events = smoke.adb("logcat", "-b", "events", "-d", "-t", "300",
+                    "-s", "am_kill:I", "am_proc_died:I", "am_proc_start:I").stdout.decode(errors="replace")
+                for line in events.splitlines():
+                    if smoke.PACKAGE + ":controller" in line:
+                        print("controller event", line[:320], flush=True)
     print("samples", 8, "failures", failures, flush=True)
     if failures:
         raise SystemExit(1)
