@@ -49,7 +49,7 @@ func privateAdaptiveWorkCurrent(ctx context.Context, clock func() int64) bool {
 		return true
 	} // legacy private callers retain their own hard budget
 	now := clock()
-	return deadline >= 30_000 && now >= deadline-30_000 && now < deadline
+	return deadline > 0 && now >= 0 && now >= deadline-30_000 && now < deadline
 }
 
 func newPrivateAdaptiveHub(c *privatePathCatalogue, metadata []byte, plans map[string][]routeCheck, scope, mode string, capacity int, lease *leaseGuard) (*privateAdaptiveHub, error) {
@@ -125,7 +125,7 @@ func newPrivateAdaptiveHubWithPrograms(c *privatePathCatalogue, metadata []byte,
 }
 
 func privateAdaptiveMode(mode string) bool {
-	return mode == "HOME_WIFI" || mode == "WIFI" || mode == "CELLULAR" || mode == "CELLULAR_RESTRICTED"
+	return routegraph.IsRuntimeMode(mode)
 }
 
 func (h *privateAdaptiveHub) makeGroupsLocked() bool {

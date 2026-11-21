@@ -5,9 +5,11 @@ HTTP, an encrypted local editor, the controller coordinator and an explicit
 native editing route to the existing Control API. Codec values and local files
 never establish permissions, satisfy fresh MFA or authorize publication. The
 current separate administrator session and server ACL remain mandatory at every
-operation. This candidate is source-pending: its new executable outcomes, live
-publication and physical editor UX have not been accepted. All builds and
-executable checks belong in GitHub Actions.
+operation. The protected Android suite exercises encrypted save, restart,
+preview, publication, current permissions and local rebase on API 29, 35 and
+37. The hosted fixtures use the real coordinator and synthetic server replies.
+Live administrative publication and physical editor UX have separate
+acceptance records. [Protected Android run](https://github.com/nd4y/syn443-android/actions/runs/44906428267)
 
 The source scope is editing one already assigned device, explicit private-draft
 save, preview, review, publication and reconciliation. The
@@ -100,11 +102,16 @@ increment that global revision again. `saveDraft` retains the separate explicit
 private draft CAS.
 
 A historical inventory may be used only as a captured base for private
-preparation. This is not a new base, automatic rebase, current approval, or
-publication grant. Comparison is explicit. Rebase onto a changed head is not
-implemented in this candidate: `REBASE_REQUIRED` retains private edits and blocks
-publication until the operator resolves the new base in the full panel. An
-unchanged base still requires a fresh authoritative server preview and review.
+preparation. The comparison screen lets an administrator resolve a changed
+head explicitly. Applying that resolution rechecks the current head and the
+saved draft revision before writing the local proposal. Publication requires
+a fresh authoritative server preview and review.
+
+The editor shows a large proposal in bounded pages. When a page is full,
+the administrator can split it and continue typing on either half. A split
+preserves the original text and keeps the current review valid. An actual
+content edit invalidates that review. The UI reports an oversized paste
+and retains the text that was already on the page.
 
 `SET` stores one bounded portable value, `DELETE` emits an explicit field deletion,
 and `INHERIT` removes an existing override without emitting a deletion. The helper

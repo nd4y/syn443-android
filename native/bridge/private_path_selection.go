@@ -75,6 +75,7 @@ type privateSelectionProof struct {
 	entry, previous          *privatePoolEntry
 	scope, group, checksHash string
 	started, completed       int64
+	workDeadline             int64
 	flowEpoch                uint64
 	selectionToken           uint64 // captured only by the exact successful commit
 	checkPlan                *routeCheckPlanReport
@@ -261,7 +262,8 @@ func (s *privatePathSelector) probeWithRoots(parent context.Context, candidate *
 		}
 		return nil, errPrivatePath
 	}
-	proof = &privateSelectionProof{selector: s, entry: e, previous: previous, scope: s.scope, group: s.group, checksHash: s.checksHash, started: started, completed: now, flowEpoch: epoch, checkPlan: profileReport}
+	deadline, _ := parent.Value(privateAdaptiveWorkDeadlineKey{}).(int64)
+	proof = &privateSelectionProof{workDeadline: deadline, selector: s, entry: e, previous: previous, scope: s.scope, group: s.group, checksHash: s.checksHash, started: started, completed: now, flowEpoch: epoch, checkPlan: profileReport}
 	s.proof = proof
 	return proof, nil
 }
@@ -307,7 +309,11 @@ func (s *privatePathSelector) selectVerified(proof *privateSelectionProof, grace
 	defer p.mu.Unlock()
 	p.expireDrainsLocked()
 	now := p.lease.clock()
-	if !s.validLocked() || s.proof != proof || proof.selector != s || proof.scope != s.scope || proof.group != s.group || proof.checksHash != s.checksHash || proof.previous != s.active || proof.flowEpoch != s.flowEpoch || now < proof.completed || proof.completed < proof.started || now-proof.started > 15_000 {
+	if !s.validLocked() || s.proof != proof || proof.selector != s || proof.scope != s.scope || proof.group != s.group || proof.checksHash != s.checksHash || proof.previous != s.active || proof.flowEpoch != s.flowEpoch {
+		return false
+	}
+	if now < proof.completed || proof.completed < proof.started || now-proof.started > 15_000 ||
+		(proof.workDeadline != 0 && now >= proof.workDeadline) {
 		return false
 	}
 	s.proof = nil

@@ -49,6 +49,8 @@ PATH_REQUIRED = {
     'TestPrivateSelectionChecksAggregateBootBudgetBeforeNextTarget',
     'TestPrivateSelectionBlockedGroupCloseCannotBlockOtherFlowWithdrawal',
     'TestPrivateAdaptiveHubRealTwoHopCommitDrainAndRebuild',
+    'TestUnknownUnderlayRequiresUniversalEntryAndFreshRealPayloadProof',
+    'TestHalfOpenDeadlineRemainsBoundThroughActualNativeSelection',
     'TestPrivateAdaptiveHubStrictPlansModesReceiptsAndFreshness',
     'TestPrivateAdaptiveHubBoundedCacheRetainsActualOwnership',
     'TestPrivateAdaptiveHubBusyAndStopRequireActualOwnerExit',

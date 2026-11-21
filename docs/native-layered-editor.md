@@ -1,10 +1,11 @@
 # Native comparison and local rebase
 
-Version89 (`0.9.61-admin-compare`) is a source candidate. Its new executable
-outcomes, live administrator OIDC/MFA/API acceptance and physical comparison UX
-remain unverified. Builds and executable checks run only in GitHub Actions. LTE
-testing remains excluded. The existing [layered editor contract](mobile-layered-editor-contract.md)
-continues to define server drafts, preview, publication and durable pending work.
+The protected suite on API 29, 35 and 37 exercises the comparison screen,
+explicit conflict choices, read-only review and confirmed local rebase.
+Live administrative publication and physical comparison UX require separate
+acceptance. The layered editor contract defines server drafts, preview,
+publication and durable pending work. [Protected Android run](https://github.com/nd4y/syn443-android/actions/runs/44906428267)
+and [layered editor contract](mobile-layered-editor-contract.md).
 
 ## Explicit comparison workflow
 
@@ -82,3 +83,5 @@ pending bytes remain owned until exact reconciliation; a checked server
 operation-ledger/nonmutation-receipt protocol is still needed to safely release
 otherwise unknown outcomes. This comparison slice does not close that gap or
 claim completion of M3 or the full specification.
+
+If a page rejects a paste, the field keeps its previous text. The editor shows the reason in a dialog above the keyboard. The administrator can return to editing or split the existing page at a complete Unicode scalar. Splitting leaves the reviewed content intact.

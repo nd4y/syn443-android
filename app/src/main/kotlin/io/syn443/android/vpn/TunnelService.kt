@@ -95,11 +95,7 @@ class TunnelService : VpnService() {
         val envelope=if(state.journal.phase=="applying")state.journal.candidate else state.journal.active
         return policies.adaptiveBinding(envelope,state)?.takeIf {it.contentHash==runningConfigHash}
     }
-    private fun adaptiveMode():NetworkMode?=when(probeContext?.network?.transport) {
-        PhysicalTransport.WIFI->NetworkMode.WIFI
-        PhysicalTransport.CELLULAR->NetworkMode.CELLULAR
-        else->null
-    }
+    private fun adaptiveMode(): NetworkMode? = probeContext?.network?.transport?.adaptiveNetworkMode()
     private fun adaptiveTick(force:Boolean=false) {
         val routes=adaptiveRoutes ?: return
         val scope=routeScope() ?: return
@@ -141,10 +137,18 @@ class TunnelService : VpnService() {
             it.contentHash==runningConfigHash && "route.failover.v1" in it.requiredCapabilities
         }
     }
-    private fun checkRoutes(force:Boolean=false,only:String?=null,activation:Boolean=false,manual:Boolean=false) {
+    private fun checkRoutes(force:Boolean=false,only:String?=null,activation:Boolean=false,manual:Boolean=false,stamp:String?=null) {
         if(!ready || network==null || retiring || !Recovery.current(store.checkpoint(),boundGeneration))return
         val scope=routeScope() ?: return
         RouteSnapshot.owner(scope)
+        if(only!=null) {
+            val tag=RouteSnapshot.resolveManualCheck(scope,only,stamp) ?: return
+            adaptiveRoutes?.let { routes ->
+                // The ordinary heartbeat handles this group under the same fairness and energy budget.
+                routes.requestGroupCheck(scope,tag)
+                return
+            }
+        }
         if(adaptiveRoutes!=null) {adaptiveTick(force);return}
         val confirmation=RouteSnapshot.confirmingFailover(scope) && failoverWifi()
         val awaitingValidated=only==null && !activation && RouteSnapshot.awaitingValidatedBatch(scope)
@@ -274,7 +278,7 @@ class TunnelService : VpnService() {
                 runCatching { host?.netBirdView(session, request) }
             }
         }
-        if(intent?.action=="routes-check")checkRoutes(true,intent.getStringExtra("routeId"),manual=true)
+        if(intent?.action=="routes-check")checkRoutes(true,intent.getStringExtra("routeId"),manual=true,stamp=intent.getStringExtra("checkContext"))
         if(intent?.action=="routes-cancel") {RouteSnapshot.cancelled();token?.let {host?.cancelRouteChecks(it)}}
         if (intent?.action == "policy-refresh") forcePolicyFetch = true
         refreshNetwork()

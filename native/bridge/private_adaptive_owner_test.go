@@ -405,3 +405,62 @@ func TestPrivateAdaptiveOwnerLeaseUnknownConstructorAndAdmissionFailClosed(t *te
 		})
 	}
 }
+
+func TestHalfOpenDeadlineRemainsBoundThroughActualNativeSelection(t *testing.T) {
+	for _, offset := range []int64{-1, 0, 1} {
+		t.Run(fmt.Sprintf("commit-offset-%d", offset), func(t *testing.T) {
+			var permits atomic.Int32
+			f := newPrivateAdaptiveOwnerFixture(t, func(bool) (func(), bool) { permits.Add(1); return func() {}, true })
+			runtime := &Runtime{adaptive: f.owner}
+			report := readPrivateAdaptiveOwner(t, f.owner)
+			command := map[string]any{"command": "start", "nativeEpoch": report.NativeEpoch, "scope": report.Scope,
+				"group": "inside", "request": "bounded-retry", "hops": f.path}
+			call := func() bool {
+				raw, err := json.Marshal(command)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return runtime.AdaptiveCommand(string(raw))
+			}
+			now := f.now.Load()
+			for _, bad := range []any{nil, "later", 0, float64(now) + 0.5, now, now + 15_001} {
+				command["retryUntilBootMs"] = bad
+				if call() {
+					t.Fatal("invalid retry window reached worker")
+				}
+			}
+			if permits.Load() != 0 {
+				t.Fatal("malformed operation used a permit")
+			}
+			deadline := now + 13_000
+			command["retryUntilBootMs"] = deadline
+			if !call() {
+				t.Fatal("current retry not admitted")
+			}
+			proof := awaitPrivateAdaptiveOwner(t, f.owner)
+			if proof.Code != "verified" || proof.Receipt == "" || f.entry.calls.Load() == 0 || f.exit.calls.Load() == 0 {
+				t.Fatal("native two-hop verification missing")
+			}
+			// Delay the bare commit after the probe. Omitting the retry field
+			// on that later message cannot extend the already-issued proof.
+			f.now.Store(deadline + offset)
+			command = map[string]any{"command": "commit", "nativeEpoch": report.NativeEpoch, "scope": report.Scope, "request": "bounded-retry", "receipt": proof.Receipt}
+			if got := call(); got != (offset < 0) {
+				t.Fatal("wrong exclusive commit boundary", offset)
+			}
+			conn, err := f.managed.DialContext(context.Background(), "tcp", M.ParseSocksaddr(f.address))
+			if offset < 0 {
+				if err != nil || conn == nil {
+					t.Fatal("selected path unavailable")
+				}
+				defer conn.Close()
+				privateAdaptiveEcho(t, conn, "confirmed-before-expiry")
+			} else if conn != nil || err != errPrivatePath || readPrivateAdaptiveOwner(t, f.owner).GroupSelected {
+				if conn != nil {
+					conn.Close()
+				}
+				t.Fatal("late commit selected a data path")
+			}
+		})
+	}
+}

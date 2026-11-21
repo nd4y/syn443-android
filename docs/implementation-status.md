@@ -320,3 +320,13 @@ DEBUG worker diagnostics remain available; unrelated changes are not called its 
 All builds run in GitHub Actions. Physical USB/Wi-Fi and privacy/cleanup evidence
 remain separate. No production secret, provider URL, identity file or raw device
 log belongs in source, fixtures, Issues, Actions artifacts or releases.
+
+### Android chat composition and encrypted outbox
+
+The shared user and administrator composer keeps the IME composition range. A message or attachment can enter the outbox only after composition ends and the user activates Send. The outbox checks Unicode before encoding or changing an existing draft. Instrumentation covers the button, Enter during composition and SQL reopen after rejected malformed and oversized replacements.
+
+### Common probe failure and NetBird status
+
+A failed check at the same destination on both the active and reserve paths leaves both eligible for another attempt. The coordinator needs a fresh, independently verified and selected replacement before attributing a failure to the previous path. A cancelled or unavailable check has its own status. This covers the shared-target case in CHECK-07. Wider correlation across independently managed health services still needs acceptance.
+
+The Android NetBird screen distinguishes a reported connection from missing evidence, limits the peer list to the current owner, and shows the reported direct or proxy path. The OVL-07 register entry covers this NetBird view. The generic status surface for future overlay providers remains open. [Protected source and emulator checks](https://github.com/nd4y/syn443-android/actions/runs/44923778498)
