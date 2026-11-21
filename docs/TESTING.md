@@ -1,6 +1,8 @@
 # Testing and release gates
 
 Each emulator installs both APKs from the same workflow's scanned build artifact.
+Pinned transport test libraries can resolve through the Google-hosted Maven
+Central mirror when the shared runner's Maven Central IP is rate limited.
 Before installation it checks their package metadata, bytes and SHA-256 against
 the manifest for the checked-out revision and workflow run. AndroidJUnitRunner
 executes the complete suite. Its per-test start, finish, result and final count
