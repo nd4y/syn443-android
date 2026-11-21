@@ -630,7 +630,8 @@ class CoverageEvidenceTest(unittest.TestCase):
         gate = compile(ast.Module(body=[declaration, block], type_ignores=[]), '<packaged-chain>', 'exec')
         projection = ('io.syn443.android.RouteSnapshotTest', 'currentFailedProbeOnlyShowsKnownCauseForItsStage')
         display = ('io.syn443.android.RouteFailureLabelTest', 'routeScreenExplainsEachFailureAndClearsItAfterRecovery')
-        outcomes = cases | {projection, display}
+        renewal = ('io.syn443.android.LoginControllerTest', 'foregroundPollRenewsExpiredCommittedPolicyWithoutStartingVpnOrChangingIdentity')
+        outcomes = cases | {projection, display, renewal}
         exec(gate, {'mode':'emulator', 'identities':outcomes})
         for case in outcomes:
             with self.assertRaises(AssertionError):

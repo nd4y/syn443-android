@@ -996,6 +996,7 @@ if mode == "emulator":
     assert PACKAGED_CHAIN_REQUIRED <= set(identities), "Missing packaged proxy chain outcomes"
     assert ("io.syn443.android.RouteSnapshotTest", "currentFailedProbeOnlyShowsKnownCauseForItsStage") in identities
     assert ("io.syn443.android.RouteFailureLabelTest", "routeScreenExplainsEachFailureAndClearsItAfterRecovery") in identities
+    assert ("io.syn443.android.LoginControllerTest", "foregroundPollRenewsExpiredCommittedPolicyWithoutStartingVpnOrChangingIdentity") in identities
 
 JOURNAL_REQUIRED = {
     "observability": {

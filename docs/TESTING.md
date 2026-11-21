@@ -493,3 +493,13 @@ Details expire with the sample and are discarded after a successful probe.
 Selection and retry decisions continue to consume their existing verdicts.
 Proxy authentication and provider expiry require separate evidence from the
 corresponding protocol or provisioning layer.
+
+### Opening the app after a policy expires
+
+The enrollment test activates a signed policy, lets its permit expire with
+the VPN off and polls from the visible login screen's controller path. A fresh
+signed lease restores eligibility for the same device and key. The test checks
+that an old generation cannot trigger the fetch, that a healthy permit stops
+polling and that the VPN remains off. Foreground retries share the existing
+provisioning budget and backoff. A manual refresh is available on the same
+screen while a cached policy has no usable permit.
