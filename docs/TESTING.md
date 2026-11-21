@@ -1,5 +1,11 @@
 # Testing and release gates
 
+Each emulator installs both APKs from the same workflow's scanned build artifact.
+Before installation it checks their package metadata, bytes and SHA-256 against
+the manifest for the checked-out revision and workflow run. AndroidJUnitRunner
+executes the complete suite. Its per-test start, finish, result and final count
+are verified before the existing mandatory named and system scenarios run.
+
 [Offline support archive](offline-support-bundle.md) adds39exact Android roots
 across archive/projection/owner/source/UI/passive-cache classes and one actual
 fresh-emulator Provider/CLI case. The composed per-API floor is524, including the eight

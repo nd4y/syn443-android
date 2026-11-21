@@ -41,7 +41,7 @@ def main():
         adb('shell', 'input', 'keyevent', 'KEYCODE_BACK')
         adb('shell', 'pm', 'clear-permission-flags', PACKAGE, camera, 'user-set', 'user-fixed')
     suite = ET.Element('testsuite', name='InvitationCameraPermission', tests='1', failures='0')
-    ET.SubElement(suite, 'testcase', classname='InvitationCameraPermission', name='systemDenialReturnsToEnrollmentWithImageAndPaste')
+    ET.SubElement(suite, 'testcase', classname='io.syn443.android.InvitationCameraPermission', name='systemDenialReturnsToEnrollmentWithImageAndPaste')
     path = ROOT / 'app/build/outputs/androidTest-results/external/TEST-invitation-camera-permission.xml'
     path.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(suite).write(path, encoding='utf-8', xml_declaration=True)
