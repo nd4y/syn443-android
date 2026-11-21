@@ -19,6 +19,7 @@ type routeCheckLeafReport struct {
 	ID      string `json:"id"`
 	Outcome string `json:"outcome"`
 	Code    string `json:"code"`
+	cause   string
 }
 type routeCheckPlanReport struct {
 	ID       string                 `json:"id"`
@@ -46,6 +47,7 @@ func (r *routeCheckPlanReport) unknown() *routeCheckPlanReport {
 	for i := range copy.Leaves {
 		if copy.Leaves[i].Outcome != checkSkipped {
 			copy.Leaves[i].Outcome, copy.Leaves[i].Code = checkUnknown, "probe_unavailable"
+			copy.Leaves[i].cause = ""
 		}
 	}
 	return copy
@@ -60,6 +62,7 @@ func (p *routeCheckProfile) emptyReport() *routeCheckPlanReport {
 
 type routeCheckProbeResult struct {
 	code     string
+	cause    string
 	complete bool
 	witness  bool // This leaf's actual admitted dispatch only. Never a sibling's.
 }
@@ -134,6 +137,7 @@ func evaluateRouteCheckProfile(parent context.Context, p *routeCheckProfile, clo
 		}
 		result.report.Leaves[index].Outcome, result.report.Leaves[index].Code = state, code
 		if state == checkFalse {
+			result.report.Leaves[index].cause = observed.cause
 			if code == "exit_ip_mismatch" || code == "exit_country_mismatch" {
 				result.hardExit = true
 			}

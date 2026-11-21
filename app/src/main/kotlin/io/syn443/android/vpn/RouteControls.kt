@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import io.syn443.recovery.RouteFailureCause
 import org.json.JSONObject
 
 @Composable fun RouteControls(status:JSONObject,command:(String,String?)->Unit) {
@@ -59,7 +60,11 @@ import org.json.JSONObject
             if(!row.isNull("ageMs"))Text("Возраст проверки: ${row.getLong("ageMs")/1000} с; время: ${row.optLong("latencyMs")} мс")
             val path=row.optJSONArray("measuredPath")
             if(path!=null && path.length()>0)Text("Проверенный путь: "+(0 until path.length()).joinToString(" → "){path.getString(it)})
-            if(row.optString("reason") !in setOf("ok","not_checked"))Text("Причина: ${row.optString("reason")}")
+            val reason=row.optString("reason")
+            if(reason !in setOf("ok","not_checked")){
+                val cause=RouteFailureCause.fromWire(reason,row.optString("cause"))
+                Text(routeFailureLabel(reason,cause),Modifier.testTag("route-${i+1}-reason"))
+            }
         }
         val enabled=status.optBoolean("desiredOn") && status.optBoolean("engineActive") && routes!=null && (0 until routes.length()).any {routes.getJSONObject(it).optBoolean("configured")}
         Button(onClick={command("routes-check",null)},enabled=enabled && health?.optBoolean("running")!=true,modifier=Modifier.testTag("routes-check")){Text("Проверить маршруты")}
@@ -68,6 +73,21 @@ import org.json.JSONObject
         Text(if(os?.optBoolean("known")==true)"Android: Always-on=${os.optBoolean("alwaysOn")}; блокировка без VPN=${os.optBoolean("lockdown")}" else "Android: состояние Always-on/lockdown неизвестно без активного VPN",Modifier.testTag("os-vpn-policy"))
         Text("Stop сохраняет выключенное намерение. Системный lockdown при этом может блокировать сеть.")
         Button(onClick={context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS))},modifier=Modifier.testTag("vpn-system-settings")){Text("Настройки VPN в Android")}
+    }
+}
+internal fun routeFailureLabel(reason: String, cause: RouteFailureCause?): String = when (cause) {
+    RouteFailureCause.DNS_NOT_FOUND -> "DNS не нашёл имя узла"
+    RouteFailureCause.DNS_TIMEOUT -> "Истекло время ожидания ответа DNS"
+    RouteFailureCause.DNS_FAILED -> "Ошибка разрешения имени в DNS"
+    RouteFailureCause.CONNECTION_REFUSED -> "Получен отказ в TCP-соединении"
+    RouteFailureCause.CERTIFICATE_NAME_MISMATCH -> "Имя узла отсутствует в сертификате TLS"
+    RouteFailureCause.CERTIFICATE_UNTRUSTED -> "Не удалось подтвердить доверие к сертификату TLS"
+    RouteFailureCause.CERTIFICATE_NOT_CURRENT -> "Текущая дата вне срока действия сертификата TLS"
+    RouteFailureCause.TIMEOUT -> if (reason=="tls_failed") "Истекло время ожидания рукопожатия TLS" else "Истекло время ожидания соединения"
+    null -> when (reason) {
+        "dial_failed" -> "Не удалось установить соединение"
+        "tls_failed" -> "Не удалось установить защищённое соединение TLS"
+        else -> "Причина: $reason"
     }
 }
 internal fun checkPlanOutcomeLabel(value:String)=when(value) {

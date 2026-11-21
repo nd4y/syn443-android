@@ -73,13 +73,17 @@ class PackagedProxyChainTest {
             {"type":"http","tag":"entry","server":"127.0.0.1","server_port":$entry},
             {"type":"vless","tag":"exit","server":"127.0.0.1","server_port":$exit,"uuid":"$uuid","detour":"entry"}
             ],"route":{"final":"exit"}}"""
+        val request = """{"request":"packaged-proxy","routes":[{"id":"server","outbound":"exit",
+            "checks":[{"method":"ssh_banner","target":"127.0.0.1:$target"}]}]}"""
+        return completedCheck(config, request, listOf("route-2", "route-1"))
+    }
+
+    private fun completedCheck(config: String, request: String, expectedPath: List<String>): JSONObject {
         val protector = object : Protector {
             override fun protect(socket: Int) { check(socket >= 0) }
             override fun exchangeDNS(query: ByteArray): ByteArray = error("unexpected DNS")
             override fun physicalInterfaces(): String = "[]"
         }
-        val request = """{"request":"packaged-proxy","routes":[{"id":"server","outbound":"exit",
-            "checks":[{"method":"ssh_banner","target":"127.0.0.1:$target"}]}]}"""
         ParcelFileDescriptor.open(File("/dev/null"), ParcelFileDescriptor.MODE_READ_WRITE).use { fd ->
             val core = Bridge.newRuntime(config, "", fd.fd, protector, "lo", 1, 0L)
             try {
@@ -94,7 +98,7 @@ class PackagedProxyChainTest {
                         val row = rows.getJSONObject(0)
                         assertEquals("server", row.getString("id"))
                         assertTrue(row.getBoolean("complete"))
-                        assertEquals(listOf("route-2", "route-1"), row.getJSONArray("path").let { paths ->
+                        assertEquals(expectedPath, row.getJSONArray("path").let { paths ->
                             (0 until paths.length()).map { paths.getString(it) }
                         })
                         return row
@@ -141,6 +145,19 @@ class PackagedProxyChainTest {
             } finally {
                 workers.shutdownNow()
             }
+        }
+    }
+
+    @Test fun refusedTcpConnectionReportsItsCauseWithoutEndpointDetails() {
+        Socket().use { refused ->
+            refused.bind(InetSocketAddress(loopback, 0))
+            val config = """{"log":{"disabled":true},"inbounds":[],"outbounds":[{"type":"direct","tag":"local"}],"route":{"final":"local"}}"""
+            val request = """{"request":"packaged-proxy","routes":[{"id":"server","outbound":"local","checks":[{"method":"tcp","target":"127.0.0.1:${refused.localPort}"}]}]}"""
+            val status = completedCheck(config, request, listOf("route-1"))
+            assertFalse(status.getBoolean("ok"))
+            assertEquals("dial_failed", status.getString("code"))
+            assertEquals("connection_refused", status.getString("cause"))
+            assertFalse(status.toString().contains("127.0.0.1"))
         }
     }
 

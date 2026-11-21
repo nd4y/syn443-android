@@ -599,10 +599,10 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual(2, len(assignments))
         values = {node.targets[0].id: ast.literal_eval(node.value) for node in assignments}
         required = values['SUPPORT_BUNDLE_REQUIRED']
-        self.assertEqual([8,9,10,6,6,2,1], [len(methods) for methods in required.values()])
+        self.assertEqual([8,9,10,6,6,2,1,2], [len(methods) for methods in required.values()])
         all_cases = {(owner, name) for owner, methods in required.items() for name in methods}
         all_cases.add(values['SUPPORT_BUNDLE_EXTERNAL_REQUIRED'])
-        self.assertEqual(43, len(all_cases))
+        self.assertEqual(45, len(all_cases))
         block, = [node for node in tree.body if isinstance(node, ast.If) and
                   any(isinstance(child, ast.Name) and child.id == 'SUPPORT_BUNDLE_REQUIRED' for child in ast.walk(node))]
         self.assertIsInstance(block, ast.If)
@@ -626,12 +626,16 @@ class CoverageEvidenceTest(unittest.TestCase):
         cases_from_source = re.findall(r'@Test\s+fun\s+(\w+)', (root /
             'app/src/androidTest/kotlin/io/syn443/android/PackagedProxyChainTest.kt').read_text(encoding='utf-8'))
         self.assertEqual(cases, {('io.syn443.android.PackagedProxyChainTest', method) for method in cases_from_source})
-        self.assertEqual(len(cases), 2)
+        self.assertEqual(len(cases), 3)
         gate = compile(ast.Module(body=[declaration, block], type_ignores=[]), '<packaged-chain>', 'exec')
-        exec(gate, {'mode':'emulator', 'identities':cases})
-        for case in cases:
+        projection = ('io.syn443.android.RouteSnapshotTest', 'currentFailedProbeOnlyShowsKnownCauseForItsStage')
+        display = ('io.syn443.android.RouteFailureLabelTest', 'routeScreenExplainsEachFailureAndClearsItAfterRecovery')
+        renewal = ('io.syn443.android.LoginControllerTest', 'foregroundPollRenewsExpiredCommittedPolicyWithoutStartingVpnOrChangingIdentity')
+        outcomes = cases | {projection, display, renewal}
+        exec(gate, {'mode':'emulator', 'identities':outcomes})
+        for case in outcomes:
             with self.assertRaises(AssertionError):
-                exec(gate, {'mode':'emulator', 'identities':cases - {case} | {('other', case[1])}})
+                exec(gate, {'mode':'emulator', 'identities':outcomes - {case} | {('other', case[1])}})
 
     def test_netbird_report_roots_require_each_actual_outcome_and_exact_sources(self):
         root = Path(__file__).resolve().parent.parent

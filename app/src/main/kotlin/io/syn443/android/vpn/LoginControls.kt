@@ -41,7 +41,8 @@ import org.json.JSONObject
         if(visible)while(true) {
             val result=command("auth-status")
             status=runCatching {JSONObject(result?.getString("json")?:"{}")} .getOrDefault(JSONObject())
-            if(status.optString("phase") in setOf("PROVISIONING","INVITING","ENROLLING") && !status.optBoolean("busy") &&
+            val awaitingPermit=needsForegroundRenewal(status.optString("phase"),status.optString("reason"),status.optJSONObject("assignedPolicy"))
+            if((awaitingPermit || status.optString("phase") in setOf("PROVISIONING","INVITING","ENROLLING")) && !status.optBoolean("busy") &&
                 lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
                 command("auth-poll",status.optLong("generation",-1).toString())
             }
@@ -110,11 +111,12 @@ import org.json.JSONObject
         if(phase=="BROWSER")Button(enabled=status.optBoolean("browserReady") && (!canReauthenticate || vpnStopped),onClick={
             launchAfterRevision=null;launchGeneration=generation
         },modifier=Modifier.testTag("auth-open")) {Text("Продолжить вход")}
-        if(phase !in setOf("SIGNED_OUT","BLOCKED","BROWSER","NEEDS_REAUTH") && (phase!="POLICY_CACHED" || reason.isNotEmpty()))
+        val awaitingPermit=needsForegroundRenewal(phase,reason,status.optJSONObject("assignedPolicy"))
+        if(phase !in setOf("SIGNED_OUT","BLOCKED","BROWSER","NEEDS_REAUTH") && (phase!="POLICY_CACHED" || reason.isNotEmpty() || awaitingPermit))
             TextButton(enabled=!status.optBoolean("busy"),onClick={scope.launch {
             if(command("auth-retry",generation.toString())?.getBoolean("ok")!=true)message="Не удалось повторить операцию."
             else message=""
-        }},modifier=Modifier.testTag("auth-retry")) {Text("Повторить")}
+        }},modifier=Modifier.testTag("auth-retry")) {Text(if(awaitingPermit)"Обновить конфигурацию" else "Повторить")}
         if(phase!="SIGNED_OUT")TextButton(onClick={launchGeneration=null;launchAfterRevision=null;scope.launch {
             if(command("auth-cancel")?.getBoolean("ok")!=true)message="Завершение не подтверждено. Повторите попытку."
         }},modifier=Modifier.testTag("auth-cancel")) {Text("Завершить сессию")}

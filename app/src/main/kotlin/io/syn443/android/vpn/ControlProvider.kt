@@ -14,6 +14,7 @@ import io.syn443.recovery.Recovery
 /** One durable command writer in :controller. Shell access exists in debug builds only. */
 class ControlProvider : ContentProvider() {
     private val resources by lazy { ResourceDiagnostics(checkNotNull(context).applicationContext) }
+    private val bundleShell = io.syn443.android.support.BundleShellConnection()
     companion object { @Volatile var explicitConnectInProcess = false }
     private var initialized=false
     @Synchronized private fun initializeUnlocked() {
@@ -47,6 +48,11 @@ class ControlProvider : ContentProvider() {
         return try {
             // Passive diagnostics must not initialize login, observe OS intent,
             // configure routes, or reconcile the VPN as a side effect of collection.
+            if (method in setOf("bundle-shell-hold", "bundle-shell-state", "bundle-shell-release")) {
+                require(io.syn443.android.BuildConfig.DEBUG && caller == 2000 && (extras == null || extras.isEmpty))
+                val state = bundleShell.command(method, requireNotNull(arg))
+                return Bundle().apply { putBoolean("ok", true); putString("json", org.json.JSONObject().put("state", state).toString()) }
+            }
             if (method in setOf("bundle-collect", "bundle-status", "bundle-cancel", "bundle-open", "bundle-read")) {
                 require(extras == null || extras.isEmpty)
                 val bundles = io.syn443.android.support.SupportBundleController.get(context)
@@ -423,7 +429,9 @@ class ControlProvider : ContentProvider() {
         }
     }
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? = null
-    override fun getType(uri: Uri): String? = null
+    override fun getType(uri: Uri): String? =
+        if (io.syn443.android.BuildConfig.DEBUG && uri.toString() == "content://io.syn443.control/support-bundle-session")
+            "application/vnd.syn443.bundle-session-v1" else null
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0

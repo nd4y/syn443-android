@@ -2,6 +2,7 @@
 """Bounded JSON client for the SYN443 debug ADB control provider."""
 import argparse
 import base64
+from contextlib import contextmanager, nullcontext
 import hashlib
 import io
 import json
@@ -27,6 +28,7 @@ METHODS = {
     "support-bundle-collect": "bundle-collect", "support-bundle-status": "bundle-status",
     "support-bundle-cancel": "bundle-cancel", "support-bundle-open": "bundle-open",
     "support-bundle-read": "bundle-read",
+    "support-bundle-shell-state": "bundle-shell-state", "support-bundle-shell-release": "bundle-shell-release",
 }
 OPERATIONS = ("capabilities", "status", "logs", "diagnostic-bundle", "routes-status",
               "routes-check", "routes-cancel", "netbird-status", "netbird-diagnose", "netbird-view",
@@ -127,7 +129,8 @@ class Device:
         if argument is not None:
             route = operation == "routes-check" and re.fullmatch(r"route-[1-9][0-9]?", argument)
             ticket = operation in CONFIG and re.fullmatch(r"(?:none|[0-9a-f]{64}):[0-9a-f]{64}:[0-9a-f]{32}", argument)
-            bundle_id = operation in {"support-bundle-status", "support-bundle-cancel", "support-bundle-open"} and re.fullmatch(r"[0-9a-f]{32}", argument)
+            bundle_id = operation in {"support-bundle-status", "support-bundle-cancel", "support-bundle-open",
+                                      "support-bundle-shell-state", "support-bundle-shell-release"} and re.fullmatch(r"[0-9a-f]{32}", argument)
             bundle_read = operation == "support-bundle-read" and re.fullmatch(r"[0-9a-f]{32}:(?:0|[1-9][0-9]{0,5})", argument) and int(argument.split(":")[1]) <= SUPPORT_MAX
             view = canonical_view(argument) if operation == "netbird-view" else None
             if not route and not ticket and not bundle_id and not bundle_read and view is None:
@@ -177,6 +180,61 @@ class Device:
         if not isinstance(data, dict):
             raise ControlError("invalid_reply", 5)
         return data
+
+    @contextmanager
+    def bundle_connection(self):
+        # gettype is passive even on older clients; an unknown call() would initialize their VPN state.
+        adb = ["adb", "-s", self.serial, "shell", "content"]
+        try:
+            reply = subprocess.run(adb + ["gettype", "--uri", URI + "/support-bundle-session"],
+                                   capture_output=True, timeout=self.timeout, check=False)
+        except subprocess.TimeoutExpired as err:
+            raise ControlError("adb_timeout", 3) from err
+        except OSError as err:
+            raise ControlError("adb_unavailable", 3) from err
+        if reply.returncode:
+            raise ControlError("adb_failed", 3)
+        kind = reply.stdout.strip()
+        if kind == b"Result: null":
+            yield False  # Older APKs retain their original protocol.
+            return
+        if kind != b"Result: application/vnd.syn443.bundle-session-v1":
+            raise ControlError("invalid_reply", 5)
+
+        client = secrets.token_hex(16)
+        try:
+            holder = subprocess.Popen(adb + ["call", "--uri", URI, "--method", "bundle-shell-hold", "--arg", client],
+                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as err:
+            raise ControlError("adb_unavailable", 3) from err
+        try:
+            deadline = time.monotonic() + min(self.timeout, 10)
+            while time.monotonic() < deadline:
+                state = self.call("support-bundle-shell-state", client)
+                if state == {"state": "held"} and holder.poll() is None:
+                    break
+                if state == {"state": "busy"}:
+                    raise ControlError("support_bundle_busy", 4)
+                if state != {"state": "absent"} or holder.poll() is not None:
+                    raise ControlError("support_bundle_unavailable", 4)
+                time.sleep(0.1)
+            else:
+                raise ControlError("adb_timeout", 3)
+            yield True
+        finally:
+            # An unplugged cable cannot keep the provider occupied indefinitely.
+            # The Android side enforces its own maximum lifetime.
+            try:
+                if holder.poll() is None:
+                    self.call("support-bundle-shell-release", client)
+            except ControlError:
+                pass
+            finally:
+                try:
+                    holder.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    holder.kill()
+                    holder.wait(timeout=2)
 
     def _stage(self, script, data=None):
         command = ["adb", "-s", self.serial, "shell", "-T", script]
@@ -511,6 +569,8 @@ def support_export(sequence, bundle_id, output, ready=None):
         raise ControlError("support_bundle_unavailable", 4)
     opened_at = sequence.now()
     value = sequence.call("support-bundle-open", bundle_id)
+    if isinstance(value, dict) and set(value) == {"state", "id"} and value["id"] == bundle_id:
+        support_export_denied(value["state"], allow_busy=False)
     if not isinstance(value, dict) or set(value) != {"state", "grant", "bytes", "sha256", "expiresInMs", "manifest"} or value.get("state") != "open" or not support_hex(value.get("grant"), 32) or not support_int(value.get("bytes"), SUPPORT_MAX) or not support_hex(value.get("sha256"), 64) or not support_int(value.get("expiresInMs"), 60_000) or value["expiresInMs"] == 0:
         support_invalid()
     manifest = support_manifest(value["manifest"])
@@ -521,6 +581,8 @@ def support_export(sequence, bundle_id, output, ready=None):
     for _ in range(max(1, (value["bytes"] + SUPPORT_CHUNK - 1) // SUPPORT_CHUNK)):
         at = len(payload)
         part = sequence.call("support-bundle-read", value["grant"] + ":" + str(at), deadline)
+        if isinstance(part, dict) and set(part) == {"state"}:
+            support_export_denied(part["state"], allow_busy=True)
         if not isinstance(part, dict) or set(part) != {"grant", "offset", "data", "nextOffset", "done"} or part["grant"] != value["grant"] or not support_int(part["offset"], SUPPORT_MAX) or part["offset"] != at or not isinstance(part["data"], str) or len(part["data"]) > 43_692 or not support_int(part["nextOffset"], SUPPORT_MAX) or type(part["done"]) is not bool:
             support_invalid()
         try:
@@ -536,6 +598,12 @@ def support_export(sequence, bundle_id, output, ready=None):
     checked = support_archive(archive, manifest)
     support_write(output, archive, sequence)
     return {"bytes": len(archive), "sha256": value["sha256"], "complete": checked["complete"], "exported": True}
+
+
+def support_export_denied(state, *, allow_busy):
+    if isinstance(state, str) and (state in {"expired", "cancelled", "failed", "not_found"} or (allow_busy and state == "busy")):
+        raise ControlError("support_bundle_" + state, 4)
+    support_invalid()
 
 
 def support_operation(device, operation, output=None, bundle_id=None, clock=None, sleeper=None):
@@ -631,7 +699,9 @@ def main(argv=None):
             raise ControlError("invalid_arguments", 2)
         device = Device(args.serial, args.timeout)
         if args.operation in SUPPORT_OPERATIONS:
-            data = support_operation(device, args.operation, args.output, args.bundle_id)
+            connection = device.bundle_connection() if args.operation in {"support-bundle", "support-bundle-export"} else nullcontext()
+            with connection:
+                data = support_operation(device, args.operation, args.output, args.bundle_id)
         elif args.operation == "capabilities":
             state = device.call("status")
             operations = [op for op in OPERATIONS if op not in CONFIG or state.get("localConfigControl") is True]

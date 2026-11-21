@@ -85,6 +85,21 @@ under16KiB; chunks stay well below Binder's transaction limit. Grants never
 appear in UI, CLI output, filenames or logs. No retry recreates collection or
 export authority after a lost acknowledgement.
 
+If the provider reports that a grant is missing, expired or cancelled during
+export, the CLI returns its specific reason with exit code 4. A concurrent
+read can report busy. A failed archive reports failed. These responses stop
+the export before creating the output file. An unknown or malformed reply
+uses exit code 5. A missing grant alone cannot identify why it disappeared.
+
+On supported debug APKs the combined collection/export and the explicit
+export command hold one Android shell provider call for the transaction.
+Android then sees an active external client between chunk requests. The
+connection grants no access to an archive. A second holder receives busy,
+and only the matching client can release it. It expires after 135 seconds
+even if USB disconnects. Each archive and chunk still requires its own
+existing checks. Separate CLI invocations retain the normal process-lifetime
+limit. A passive MIME query selects the original protocol on older APKs.
+
 The CLI provides `support-bundle-collect/status/cancel/export` and the
 `support-bundle --output FILE` convenience path. Polling and download are
 bounded. Before exclusively creating the output file, it verifies the whole

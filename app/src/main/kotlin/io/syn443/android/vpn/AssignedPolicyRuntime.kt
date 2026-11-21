@@ -10,6 +10,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.json.JSONObject
 
+/** An already accepted policy can lose its permit while the VPN is off. */
+internal fun needsForegroundRenewal(phase:String,reason:String,assignment:JSONObject?):Boolean =
+    phase=="POLICY_CACHED" && reason in setOf("","TRANSPORT","THROTTLED","UNAVAILABLE","PENDING") &&
+        assignment!=null && assignment.optString("phase") in setOf("committed","rolled_back","degraded") &&
+        assignment.opt("runtimeAuthorized")==false && assignment.opt("candidateValidated")==false
+
 /** Immutable worker-built view. Binder/native reads never decrypt or verify signatures. */
 internal class AssignedPolicyRuntime(private val boot:()->Int,private val elapsed:()->Long,
     private val anchorFingerprint:()->String?={null},

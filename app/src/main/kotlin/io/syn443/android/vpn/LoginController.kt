@@ -884,15 +884,17 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     /** Visible UI asks; controller owns rate/queue/generation fences. Hidden UI has no timer. */
     fun pollProvisioning(expectedGeneration:Long):Boolean {
-        lateinit var expected:LoginIntent
+        val expected=journal.snapshot()
+        if(expected.generation!=expectedGeneration)return false
+        val assignment=if(expected.phase==LoginPhase.POLICY_CACHED)assignedRuntime.status(expected) else null
         var next:ProvisioningRetry?=null
         return submitIfIdle(admit={
             val s=journal.snapshot()
-            if(s.generation!=expectedGeneration || s.phase !in setOf(LoginPhase.PROVISIONING,LoginPhase.INVITING,LoginPhase.ENROLLING) ||
-                error !in setOf("PENDING","TRANSPORT","THROTTLED","UNAVAILABLE"))false
+            val provisioning=s.phase in setOf(LoginPhase.PROVISIONING,LoginPhase.INVITING,LoginPhase.ENROLLING) &&
+                error in setOf("PENDING","TRANSPORT","THROTTLED","UNAVAILABLE")
+            if(s!=expected || !(provisioning || needsForegroundRenewal(s.phase.name,error,assignment)))false
             else {
-                expected=s
-                next=provisioningRetry.admit(s.generation,elapsed(),lastAssignmentFetch,error=="THROTTLED")
+                next=provisioningRetry.admit(s.generation,elapsed(),lastAssignmentFetch.coerceAtLeast(0),error=="THROTTLED")
                 next!=null
             }
         },onAdmission={provisioningRetry=checkNotNull(next)}) {

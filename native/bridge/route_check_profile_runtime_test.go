@@ -257,9 +257,9 @@ func TestCheckPlanV2GlobalAbortAndLeafWitnessAreIndependent(t *testing.T) {
 		if calls == 1 {
 			return routeCheckProbeResult{code: "ok", complete: true, witness: true}
 		}
-		return routeCheckProbeResult{code: "tls_failed", complete: true, witness: false}
+		return routeCheckProbeResult{code: "tls_failed", complete: true, witness: false, cause: "certificate_untrusted"}
 	})
-	if result.report.Outcome != checkUnknown || result.witness != -1 || result.report.Leaves[1].Code != "probe_unavailable" {
+	if result.report.Outcome != checkUnknown || result.witness != -1 || result.report.Leaves[1].Code != "probe_unavailable" || result.report.Leaves[1].cause != "" {
 		t.Fatal("successful sibling supplied another leaf's failure witness")
 	}
 	any := checkPlanProgram(t, p.allChecks(), []string{}, []routeCheckExpr{{Any: []routeCheckExpr{checkPlanLeaf("l0"), checkPlanLeaf("l1")}}})

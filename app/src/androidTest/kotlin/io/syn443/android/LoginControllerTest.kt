@@ -8,6 +8,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.syn443.android.vpn.DeviceKey
 import io.syn443.android.vpn.BootstrapTrustStore
 import io.syn443.android.vpn.LoginController
+import io.syn443.android.vpn.needsForegroundRenewal
 import io.syn443.android.vpn.LoginJournal
 import io.syn443.android.vpn.LoginStorageException
 import io.syn443.android.vpn.ManagedOverlayStorage
@@ -123,6 +124,7 @@ class LoginControllerTest {
             return reply(text=Canonical.encode(buildJsonObject{put("consumed",false);put("envelope",envelope)}),timeMs=issued)
         }
         @Volatile var policyRevision=1L
+        @Volatile var policyLifetimeMs=3_600_000L
         @Volatile var activationStatus=204
         @Volatile var technicalTelemetry=false
         val activationReports=java.util.Collections.synchronizedList(mutableListOf<DeviceActivationReport>())
@@ -270,7 +272,8 @@ class LoginControllerTest {
                 val envelope=policies.getOrPut(thumb+foreignPolicyKey+policyRevision) {
                     val engine=if(managedOverlayPolicy)managedEngine(thumb) else if(overlayPolicy)"""{"outbounds":[{"type":"netbird","tag":"overlay","management_url":"https://overlay.example.invalid"}],"route":{"final":"overlay"}}"""
                         else """{"outbounds":[{"type":"direct","tag":"$engineTag"}],"route":{"final":"$engineTag"}}"""
-                    val payload=Payload(2,policyRevision,0,0,session.deviceId,"syn443-device",now(),now(),now()+30_000,now()+3_600_000,
+                    val issued=now()
+                    val payload=Payload(2,policyRevision,0,0,session.deviceId,"syn443-device",issued,issued,issued+minOf(30_000L,policyLifetimeMs),issued+policyLifetimeMs,
                         IdentityOperation.requiredCapabilities+(if(managedOverlayPolicy)listOf("overlay.credentials.v1") else emptyList()),"m1-local-v1",Identity.encode(engine.toByteArray()),Policy.hash(engine),
                         Gate(30,false,listOf(Check("internet","https_204","https://health.example.org/generate_204"))),
                         keyThumbprint=if(foreignPolicyKey)Identity.random() else thumb)
@@ -660,6 +663,41 @@ class LoginControllerTest {
         val p=LoginPayload.decode(f.journal.readProtected(after),after)
         assertEquals(IdentityOperation.supportedCapabilities.sorted(),p.advertisedCapabilities)
         val posts=f.server.capabilityBodies.size;f.restart();assertEquals(posts,f.server.capabilityBodies.size)
+    }
+    @Test fun foregroundPollRenewsExpiredCommittedPolicyWithoutStartingVpnOrChangingIdentity()=fixture {f->
+        f.server.policyLifetimeMs=15_000
+        f.server.policyReady=true
+        f.controller.callback(f.begin());f.idle()
+        val login=f.journal.snapshot()
+        val ticket=f.controller.assignmentTicket()
+        assertTrue(f.controller.beginAssignment(ticket,listOf(false)));f.idle()
+        assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()
+        assertTrue(f.controller.allowsConnect())
+        assertFalse(f.controller.pollProvisioning(login.generation))
+        until {!f.controller.allowsConnect()}
+        val expired=f.controller.status()
+        assertEquals("",expired.getString("reason"))
+        val assignment=expired.getJSONObject("assignedPolicy")
+        assertTrue(needsForegroundRenewal(expired.getString("phase"),"",assignment))
+        assertFalse(needsForegroundRenewal("NEEDS_REAUTH","",assignment))
+        assertFalse(needsForegroundRenewal("POLICY_CACHED","ACCESS_DENIED",assignment))
+        assertFalse(f.controller.pollProvisioning(login.generation+1))
+        val reads=f.server.paths.count {it.endsWith("/device/policy")}
+        f.server.policyLifetimeMs=3_600_000L
+        f.server.policyRevision=2
+        assertTrue(f.controller.pollProvisioning(login.generation));f.idle()
+        assertEquals(reads+1,f.server.paths.count {it.endsWith("/device/policy")})
+        assertFalse(f.controller.pollProvisioning(login.generation))
+        val renewed=f.controller.status().getJSONObject("assignedPolicy")
+        assertTrue(renewed.getBoolean("runtimeAuthorized"))
+        assertFalse(needsForegroundRenewal("POLICY_CACHED","",renewed))
+        val fresh=f.journal.snapshot()
+        assertEquals(login.generation,fresh.generation)
+        assertEquals(login.keyAlias,fresh.keyAlias)
+        assertEquals(login.deviceId,fresh.deviceId)
+        val status=context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null)!!
+        val vpn=org.json.JSONObject(status.getString("json")!!)
+        assertEquals("Off",vpn.getString("phase"));assertFalse(vpn.getBoolean("desiredOn"))
     }
     @Test fun lostCapabilityAckAndUnavailableEndpointKeepCurrentAssignmentAndStopStillWins()=fixture {f->
         f.server.policyReady=true;f.controller.callback(f.begin());f.idle();val first=f.journal.snapshot();f.legacyCache()

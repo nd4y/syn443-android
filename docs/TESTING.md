@@ -481,3 +481,25 @@ They also run independently on an enrolled phone with VPN off. They require no
 provider credentials, VPN permission, configuration import or enrollment change.
 The fixture covers the packaged dialer and diagnostics, without opening a TUN
 or qualifying an external provider or XHTTP/TLS deployment.
+
+### Current route failure details
+
+A third packaged test connects to a bound, non-listening loopback port. The JNI
+report must identify TCP refusal without including the endpoint. Native tests
+also check typed DNS errors, a real untrusted TLS handshake, certificate name
+and validity errors, opaque errors and expired probe results. The Android
+snapshot test checks the diagnostic against the failure's stage and scope.
+Details expire with the sample and are discarded after a successful probe.
+Selection and retry decisions continue to consume their existing verdicts.
+Proxy authentication and provider expiry require separate evidence from the
+corresponding protocol or provisioning layer.
+
+### Opening the app after a policy expires
+
+The enrollment test activates a signed policy, lets its permit expire with
+the VPN off and polls from the visible login screen's controller path. A fresh
+signed lease restores eligibility for the same device and key. The test checks
+that an old generation cannot trigger the fetch, that a healthy permit stops
+polling and that the VPN remains off. Foreground retries share the existing
+provisioning budget and backoff. A manual refresh is available on the same
+screen while a cached policy has no usable permit.

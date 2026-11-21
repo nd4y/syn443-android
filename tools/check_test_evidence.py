@@ -942,12 +942,13 @@ SUPPORT_BUNDLE_REQUIRED = {'io.syn443.android.DiagnosticArchiveTest': ['storedAr
                                               'delayedDocumentResultAfterRestorationUsesReviewedArtifactAndCancelledPickerNeverReplaysCollection'],
  'io.syn443.android.PassivePolicyDiagnosticTest': ['historicalExportKeepsRealBatchWithoutInventingActivationOrChangingAuthority',
                                                    'expiredRetiredAndBackwardHistoryNeverBecomesCurrentOrGetsANewSampleTime'],
- 'io.syn443.android.SupportBundleClientTest': ['blockedCancellationAndDocumentWriteFailureRetainExportOwnershipUntilActualExit']}
+ 'io.syn443.android.SupportBundleClientTest': ['blockedCancellationAndDocumentWriteFailureRetainExportOwnershipUntilActualExit'],
+ 'io.syn443.android.BundleShellConnectionTest': ['onlyOwnerCanReleaseTheSingleExternalCall', 'abandonedConnectionExpiresAndReleasesItsSlot']}
 SUPPORT_BUNDLE_EXTERNAL_REQUIRED = ('io.syn443.android.SupportBundleProtocolTest', 'freshProviderCollectExportAndCancelNeverInitializesVpnOrIdentity')
 if mode == "emulator":
     required = {(owner, name) for owner, names in SUPPORT_BUNDLE_REQUIRED.items() for name in names}
     required.add(SUPPORT_BUNDLE_EXTERNAL_REQUIRED)
-    assert len(required) == 43, "Duplicate support bundle requirement"
+    assert len(required) == 45, "Duplicate support bundle requirement"
     assert required <= set(identities), "Missing exact offline support archive outcomes"
     for owner, expected in SUPPORT_BUNDLE_REQUIRED.items():
         path = root / "app/src/androidTest/kotlin/io/syn443/android" / (owner.rsplit(".", 1)[1] + ".kt")
@@ -990,9 +991,13 @@ if mode == "emulator":
 PACKAGED_CHAIN_REQUIRED = {
     ("io.syn443.android.PackagedProxyChainTest", "packagedHttpEntryCarriesVlessToBannerTarget"),
     ("io.syn443.android.PackagedProxyChainTest", "refusedHttpEntryNeverFallsBackToVlessOrTarget"),
+    ("io.syn443.android.PackagedProxyChainTest", "refusedTcpConnectionReportsItsCauseWithoutEndpointDetails"),
 }
 if mode == "emulator":
     assert PACKAGED_CHAIN_REQUIRED <= set(identities), "Missing packaged proxy chain outcomes"
+    assert ("io.syn443.android.RouteSnapshotTest", "currentFailedProbeOnlyShowsKnownCauseForItsStage") in identities
+    assert ("io.syn443.android.RouteFailureLabelTest", "routeScreenExplainsEachFailureAndClearsItAfterRecovery") in identities
+    assert ("io.syn443.android.LoginControllerTest", "foregroundPollRenewsExpiredCommittedPolicyWithoutStartingVpnOrChangingIdentity") in identities
 
 JOURNAL_REQUIRED = {
     "observability": {

@@ -33,6 +33,33 @@ class RouteSnapshotTest {
         assertEquals("off",RouteSnapshot.read(false,true,scope).getJSONArray("routes").getJSONObject(0).getString("state"))
         assertFalse(RouteSnapshot.read(true,true,scope.copy(network=3)).getBoolean("requiredReady"))
     }
+    @Test fun currentFailedProbeOnlyShowsKnownCauseForItsStage() {
+        setup()
+        fun row(on: Boolean = true, active: RouteScope = scope) =
+            RouteSnapshot.read(on, true, active).getJSONArray("routes").getJSONObject(0)
+        fun accept(reason: String, detail: String, ok: Boolean = false) {
+            val request = checkNotNull(RouteSnapshot.request(scope, force = true))
+            val frame = JSONObject(report(request, ok))
+            frame.getJSONArray("results").getJSONObject(0).put("code", reason).put("cause", detail)
+            assertTrue(RouteSnapshot.update(scope, frame.toString()))
+        }
+        accept("dial_failed", "dns_not_found")
+        assertEquals("failed", row().getString("state"))
+        assertEquals("dial_failed", row().getString("reason"))
+        assertEquals("dns_not_found", row().getString("cause"))
+        assertFalse(row(false).has("cause"))
+        assertFalse(row(active = scope.copy(network = 9)).has("cause"))
+        val stale = RouteSnapshot.readAt(true, true, scope, android.os.SystemClock.elapsedRealtime()+120001)
+        assertFalse(stale.getJSONArray("routes").getJSONObject(0).has("cause"))
+        accept("tls_failed", "dns_not_found")
+        assertFalse(row().has("cause"))
+        accept("tls_failed", "sensitive.invalid")
+        assertFalse(row().toString().contains("sensitive.invalid"))
+        accept("tls_failed", "certificate_untrusted")
+        assertEquals("certificate_untrusted", row().getString("cause"))
+        accept("ok", "connection_refused", ok = true)
+        assertFalse(row().has("cause"))
+    }
     @Test fun duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult() {
         setup();val first=checkNotNull(RouteSnapshot.request(scope))
         val invalid=JSONObject(report(first,true,true));invalid.getJSONArray("results").getJSONObject(1).put("id","route-99")
