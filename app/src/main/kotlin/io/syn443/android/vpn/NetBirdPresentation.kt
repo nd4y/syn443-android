@@ -106,6 +106,10 @@ internal object NetBirdPresentation {
         if (total != view.total || omitted != view.omitted || planned > view.retained || checked > planned || unprobed != total - checked) return null
         return Coverage(total, planned, checked, unprobed, omitted)
     }
+    internal fun sampledAt(state: JSONObject?): Long? = text(state?.opt("sampled_at"), 64)?.let {
+        runCatching { Instant.parse(it).toEpochMilli() }.getOrNull()
+    }
+
     fun read(overlay: JSONObject, nowWallMs: Long = System.currentTimeMillis()): Report {
         val state = overlay.opt("peer_state") as? JSONObject
         val connectionUnknown = state?.has("connection_unknown") == true && bool(state, "connection_unknown") != false
@@ -117,7 +121,7 @@ internal object NetBirdPresentation {
             state?.has("mode") == true && state.opt("mode") != it
         }
         val age = when (val raw = overlay.opt("snapshotAgeMs")) { is Int -> raw.toLong(); is Long -> raw; else -> null }
-        val sampled = text(state?.opt("sampled_at"), 64)?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
+        val sampled = sampledAt(state)
         val stale = age == null || age !in 0..25_000 || sampled == null || sampled > nowWallMs || nowWallMs - sampled !in 0..25_000
         val phase = text(overlay.opt("phase"), 48)?.takeIf { it.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,47}")) } ?: "неизвестно"
         val reason = text(overlay.opt("reason"), 64)?.takeIf { it.matches(Regex("[a-z][a-z0-9_]{0,63}")) }

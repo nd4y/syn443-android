@@ -183,9 +183,9 @@ class NetBirdReportTest {
         try {
             val empty = "{\"pad\":\"\"}"
             val exact = empty.replace("\"\"", "\"" + "a".repeat(65_536 - empty.toByteArray().size) + "\"")
-            OverlaySnapshot.update(exact)
+            OverlaySnapshot.update(exact, 1, 1)
             for (raw in listOf(JSONObject().put("pad", "я".repeat(32_768)).toString(), "{", "{\"pad\":\"\uD800\"}")) {
-                try { OverlaySnapshot.update(raw); fail("invalid report admitted") }
+                try { OverlaySnapshot.update(raw, 1, 1); fail("invalid report admitted") }
                 catch (_: IllegalArgumentException) { } catch (_: org.json.JSONException) { }
                 assertEquals(65_536 - empty.toByteArray().size, OverlaySnapshot.read().getString("pad").length)
             }

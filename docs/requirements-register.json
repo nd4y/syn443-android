@@ -964,8 +964,15 @@
     {
       "id": "AUTO-09",
       "text": "Статус формируется по отдельным плоскостям: интернет, DNS, RU/NonRU направления, NetBird и назначенные ресурсы. Если интернет работает, а NetBird нет, главный экран сообщает об ограничении. Необязательный peer не должен делать весь VPN красным. Намерение «включено», фактическая готовность, причина и следующая попытка показываются раздельно по REC-05.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/VpnControls.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlaySnapshot.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/NetBirdProfileStateTest.kt",
+        "docs/netbird-report-views.md#control-connection-on-the-home-screen"
+      ],
+      "implementationScope": "The primary screen separates VPN readiness from current NetBird module and control-channel state. Optional peer results stay in diagnostics.",
+      "remainingScope": "Unify DNS, regional exits and assigned target checks with current mandatory data-plane evidence and physical acceptance."
     },
     {
       "id": "AUTO-10",

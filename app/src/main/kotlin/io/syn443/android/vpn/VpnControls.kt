@@ -327,6 +327,15 @@ internal fun VpnStatusSummary(status: JSONObject, available: Boolean?, accountPo
         }
     }
     Text(label, Modifier.testTag("vpn-status").semantics { liveRegion = LiveRegionMode.Polite })
+    if (available == true && status.opt("desiredOn") == true && known && active &&
+        phase in setOf("Online", "Degraded", "Recovering")) {
+        val overlay = status.optJSONObject("netbird")
+        if (overlay?.opt("configuredInRunningProfile") == true) {
+            val summary = NetBirdConnectionState.entries.firstOrNull { it.name == overlay.opt("connectionState") }
+                ?: NetBirdConnectionState.UNKNOWN
+            Text(summary.label, Modifier.testTag("vpn-netbird-summary").semantics { liveRegion = LiveRegionMode.Polite })
+        }
+    }
 }
 
 @Composable

@@ -413,6 +413,7 @@ class TunnelService : VpnService() {
             networkWaitReason=waiting
             network = selected
             epoch++
+            OverlaySnapshot.clear()
             selectedLinkReport = if (selected != null && context != null)
                 networkObservations[selected]?.families?.let { PhysicalLinkReport(epoch, context.network.transport, it) }
                 else null
@@ -576,10 +577,14 @@ class TunnelService : VpnService() {
             if (addresses.isEmpty()) return ""
             return "$name ${iface.index} ${iface.mtu} ${iface.isUp} true false ${iface.isPointToPoint} ${iface.supportsMulticast()}|$addresses"
         }
-        override fun overlayState(session: String, raw: String) { handler.post {
-            if (session == token && Recovery.current(store.checkpoint(), boundGeneration) && !retiring)
-                runCatching { OverlaySnapshot.update(raw) }
-        } }
+        override fun overlayState(session: String, raw: String) {
+            val observedEpoch = epoch
+            handler.post {
+                if (observedEpoch == epoch && session == token && !retiring &&
+                    Recovery.current(store.checkpoint(), boundGeneration))
+                    runCatching { OverlaySnapshot.update(raw, boundGeneration, observedEpoch) }
+            }
+        }
         override fun overlayIdentity(session:String,raw:String) {
             if(raw.length !in 3..512)return
             handler.post {
