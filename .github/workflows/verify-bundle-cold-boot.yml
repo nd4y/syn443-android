@@ -29,6 +29,7 @@ jobs:
           name: syn443-build-manifest
           path: ${{ runner.temp }}/bundle-manifest
           github-token: ${{ github.token }}
+      - uses: android-actions/setup-android@9fc6c4e9069bf8f6ef7065407
       - name: Verify build and enable KVM
         run: |
           set -euo pipefail
