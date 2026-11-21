@@ -16,6 +16,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
@@ -60,7 +63,7 @@ private fun chatError(e:Exception,queued:Boolean)=when(chatCode(e)) {
     "ACCESS_DENIED"->"Нет доступа к этому диалогу."
     "THROTTLED"->"Сервер занят. Повторим подключение позже."
     "BUSY"->"Клиент выполняет другую операцию. Повторим позже."
-    "MEDIA_UNSUPPORTED"->"Не удалось сжать видео. Выберите другой файл или отправьте оригинал до 25 МБ."
+    "MEDIA_UNSUPPORTED"->AttachmentProblem.UNSUPPORTED_MEDIA.message
     else->if(queued)"Сообщение сохранено на устройстве. Отправку можно повторить."
         else "Чат временно недоступен. Повторим подключение."
 }
@@ -81,8 +84,9 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
     var store by remember {mutableStateOf<ChatOutbox?>(null)}
     var admin by remember {mutableStateOf(false)}
     var conversation by remember {mutableStateOf("")}
-    var inbox by remember {mutableStateOf(emptyList<JSONObject>())}
-    var messages by remember {mutableStateOf(emptyList<JSONObject>())}
+    var attachmentProblem by remember(generation, conversation) { mutableStateOf<AttachmentProblem?>(null) }
+    var inbox by remember {mutableStateOf(ChatInboxWindow())}
+    var messages by remember {mutableStateOf(ChatMessageWindow())}
     var peerRead by remember {mutableStateOf(0L)}
     var pending by remember {mutableStateOf(emptyList<Pair<String,JSONObject>>())}
     var text by remember {mutableStateOf("")}
@@ -121,19 +125,42 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
             finally {operation=null}
         }
     }
-    suspend fun refresh(older:Boolean=false) {
+    fun selectConversation(id: String) {
+        conversation = id
+        messages = ChatMessageWindow()
+        peerRead = 0L
+        download = null
+        pending = emptyList()
+    }
+    fun currentDrafts(drafts: List<Pair<String, JSONObject>>) =
+        drafts.filter { it.second.getString("conversation") == conversation }
+    suspend fun refreshInbox(older: Boolean) {
+        val api = client ?: return
+        if (!admin || conversation.isNotEmpty()) return
+        val previous = inbox
+        val (before, beforeId) = previous.request(older) ?: return
+        val query = JSONObject().put("before", before).put("beforeId", beforeId)
+        val page = (api.call("inbox", query) as JSONArray).objects()
+        if (api === client && admin && conversation.isEmpty() && previous === inbox)
+            inbox = previous.accept(page, older)
+    }
+    suspend fun refresh(move: HistoryMove = HistoryMove.POLL) {
         val api=client?:return
-        if(conversation.isEmpty())return
-        val request=JSONObject().put("conversation",conversation).put("before",if(older)messages.firstOrNull()?.getLong("sequence")?:0L else 0L).put("after",if(older)0L else messages.lastOrNull()?.getLong("sequence")?:0L)
-        val response=api.objectCall("messages",request)
-        messages=(messages+response.getJSONArray("messages").objects()).distinctBy {it.getString("id")}.sortedBy {it.getLong("sequence")}.takeLast(200)
-        peerRead=response.getLong("peerRead")
-        if(visible && !older && messages.isNotEmpty())api.call("read",JSONObject().put("conversation",conversation).put("sequence",messages.last().getLong("sequence")))
+        val id=conversation
+        if(id.isEmpty())return
+        val previous = messages
+        loadChatMessagePage(id, previous, move,
+            fetch = { api.objectCall("messages", it) },
+            current = { client === api && conversation == id && messages === previous },
+            visible = { visible },
+            publish = { page, read -> messages = page; peerRead = read },
+            acknowledge = { api.call("read", it) })
     }
     suspend fun sendPending(id:String) {
         val api=requireNotNull(client);val db=requireNotNull(store)
         ChatTransfer.send(api,db,id) {status=it}
-        pending=withContext(Dispatchers.IO) {db.drafts()};status="Отправлено";refresh()
+        pending=currentDrafts(withContext(Dispatchers.IO) {db.drafts()})
+        status="Отправлено";refresh()
     }
     val save=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {uri->
         val attachment=download;download=null
@@ -148,12 +175,24 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
     }
     fun prepare(uri:android.net.Uri,compress:Boolean) {run {
         require(files.size<4)
-        val prepared=ChatMedia.prepare(context,uri,compress) {status=it}
-        try {files=files+withContext(Dispatchers.IO) {
-            val owner=currentCoroutineContext()
-            requireNotNull(store).importFile(prepared.file,prepared.name,prepared.mime,prepared.kind) {owner.ensureActive()}
-        }}
-        finally {prepared.close()}
+        attachmentProblem = null
+        val previousStatus = status
+        val file = try {
+            ChatMedia.prepare(context,uri,compress) {status=it}.use { prepared ->
+                withContext(Dispatchers.IO) {
+                    val owner = currentCoroutineContext()
+                    requireNotNull(store).importFile(prepared.file,prepared.name,prepared.mime,prepared.kind) {owner.ensureActive()}
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            status = previousStatus
+            throw cancelled
+        } catch (error: Exception) {
+            attachmentProblem = AttachmentProblem.from(error) ?: throw error
+            status = previousStatus
+            return@run
+        }
+        files = files + file
         status="Файл подготовлен"
     }}
     val document=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->if(uri!=null)prepare(uri,false)}
@@ -164,12 +203,12 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
                 val login=withContext(Dispatchers.IO) {JSONObject(context.contentResolver.call("content://io.syn443.control".toUri(),"auth-status",null,null)?.getString("json")?:"{}")}
                 val next=login.optLong("generation",-1)
                 if(login.optString("phase") !in setOf("PROVISIONING","POLICY_CACHED","REFRESHING")) {
-                    generation= -1;client=null;store=null;messages=emptyList();inbox=emptyList();pending=emptyList();files=emptyList();text="";conversation="";admin=false
+                    generation= -1;client=null;store=null;selectConversation("");inbox=ChatInboxWindow();files=emptyList();text="";admin=false
                     refreshGate=ChatRefreshGate();connectionProblem=false;manualRefresh=false
                     status="Для чата войдите в SYN443 на главном экране."
                 } else {
                     if(generation!=next) {
-                        messages=emptyList();conversation="";files=emptyList();text="";inbox=emptyList();pending=emptyList();admin=false
+                        selectConversation("");files=emptyList();text="";inbox=ChatInboxWindow();admin=false
                         client=null;store=null;generation=next;refreshGate=ChatRefreshGate()
                     }
                     val gate=refreshGate
@@ -185,18 +224,19 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
                                 store=opened;client=ChatClient(context,next)
                             }
                             // Keep the generation-bound queue visible while the server is unavailable.
-                            pending=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}
+                            pending=currentDrafts(withContext(Dispatchers.IO) {requireNotNull(store).drafts()})
                             val own=requireNotNull(client).objectCall("self")
                             val permittedAdmin=own.getBoolean("admin")
-                            if(admin && !permittedAdmin) {conversation="";messages=emptyList();inbox=emptyList();files=emptyList();text=""}
+                            if(admin && !permittedAdmin) {selectConversation("");inbox=ChatInboxWindow();files=emptyList();text=""}
                             admin=permittedAdmin
                             if(!admin)conversation=own.getJSONObject("conversation").getString("id")
-                            if(admin)inbox=(requireNotNull(client).call("inbox",JSONObject().put("before",0).put("beforeId","")) as JSONArray).objects()
+                            if(admin && conversation.isEmpty() && !inbox.historical) refreshInbox(false)
                             refresh()
-                            pending=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}.filter {admin || it.second.getString("conversation")==conversation}
-                            if(pending.isNotEmpty() && android.os.SystemClock.elapsedRealtime()>=nextAttempt) {
+                            val eligible=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}.filter {admin || it.second.getString("conversation")==conversation}
+                            pending=currentDrafts(eligible)
+                            if(eligible.isNotEmpty() && android.os.SystemClock.elapsedRealtime()>=nextAttempt) {
                                 nextAttempt=android.os.SystemClock.elapsedRealtime()+30_000
-                                sendPending(pending.first().first)
+                                sendPending(eligible.first().first)
                             } else status=if(admin && conversation.isEmpty())"Выберите диалог" else "На связи"
                             connectionProblem=false
                             gate.complete(ticket,ChatRefreshGate.Result.SUCCESS,android.os.SystemClock.elapsedRealtime())
@@ -228,24 +268,23 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
         Text("Сообщения доступны администраторам сервиса. Файлы до 25 МБ.",style=MaterialTheme.typography.bodySmall)
         if(admin) {
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                Button(onClick={conversation="";messages=emptyList()},enabled=!busy && text.isBlank() && files.isEmpty()) {Text("Все диалоги")}
+                Button(onClick={selectConversation(""); run { if (!inbox.historical) refreshInbox(false) }},
+                    enabled=conversation.isNotEmpty() && !busy && !refreshRunning && text.isBlank() && files.isEmpty()) {Text("Все диалоги")}
                 Text("Администратор")
             }
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             if(admin && conversation.isEmpty()) {
-                items(inbox,key={it.getString("id")}) {row->
-                    Button(onClick={conversation=row.getString("id");messages=emptyList();run {refresh()}},enabled=!busy) {
+                if(inbox.historical)item {TextButton(onClick={run {refreshInbox(false)}},enabled=!busy && !refreshRunning) {Text("К началу списка диалогов")}}
+                items(inbox.rows,key={it.getString("id")}) {row->
+                    Button(onClick={selectConversation(row.getString("id"));run {refresh(HistoryMove.LATEST)}},enabled=!busy && !refreshRunning) {
                         Text("Пользователь ${row.getString("owner").take(10)}"+if(row.getLong("lastSeq")>row.getLong("readSeq"))" - новые сообщения" else "")
                     }
                 }
-                if(inbox.size>=50)item {Button(onClick={run {
-                    val last=inbox.last();val more=(requireNotNull(client).call("inbox",JSONObject().put("before",last.getLong("updatedAt")).put("beforeId",last.getString("id"))) as JSONArray).objects()
-                    inbox=(inbox+more).distinctBy {it.getString("id")}.take(200)
-                }},enabled=!busy) {Text("Ещё диалоги")}}
+                if(inbox.olderAvailable)item {Button(onClick={run {refreshInbox(true)}},enabled=!busy && !refreshRunning) {Text("Следующие диалоги")}}
             } else {
-                if(messages.isNotEmpty())item {TextButton(onClick={run {refresh(true)}},enabled=!busy) {Text("Предыдущие сообщения")}}
-                items(messages,key={it.getString("id")}) {msg->
+                if(messages.olderAvailable)item {TextButton(onClick={run {refresh(HistoryMove.OLDER)}},enabled=!busy && !refreshRunning) {Text("Предыдущие сообщения")}}
+                items(messages.rows,key={it.getString("id")}) {msg->
                     Card(Modifier.fillMaxWidth()) {Column(Modifier.padding(12.dp)) {
                         Text(if(msg.getString("senderRole")=="admin")"Администратор" else "Пользователь",style=MaterialTheme.typography.labelMedium)
                         SelectionContainer {Text(msg.getString("text"))}
@@ -254,18 +293,22 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
                             if(msg.getLong("sequence")<=peerRead)" - прочитано" else "",style=MaterialTheme.typography.labelSmall)
                     }}
                 }
+                if(messages.newerAvailable)item {
+                    ChatHistoryNavigation(enabled=!busy && !refreshRunning, onMove={move->run {refresh(move)}})
+                }
             }
             items(pending,key={it.first}) {(id,draft)->
                 Card {Column(Modifier.padding(8.dp)) {
                     Text("Ожидает отправки: ${draft.getString("text").take(80)}")
                     Row {TextButton(onClick={run {sendPending(id)}},enabled=!busy) {Text("Повторить")}
-                        TextButton(onClick={run {withContext(Dispatchers.IO) {requireNotNull(store).removeDraft(id);for(file in draft.getJSONArray("files").objects())store!!.removeFile(file.getString("localId"))};pending=withContext(Dispatchers.IO) {store!!.drafts()}}},enabled=!busy) {Text("Удалить попытку")}}
+                        TextButton(onClick={run {withContext(Dispatchers.IO) {requireNotNull(store).removeDraft(id);for(file in draft.getJSONArray("files").objects())store!!.removeFile(file.getString("localId"))};pending=currentDrafts(withContext(Dispatchers.IO) {store!!.drafts()})}},enabled=!busy) {Text("Удалить попытку")}}
                 }}
             }
         }
         if(client!=null && conversation.isNotEmpty()) {
             for(file in files)TextButton(onClick={run {withContext(Dispatchers.IO) {store!!.removeFile(file.getString("localId"))};files=files-file}},enabled=!busy) {Text("${file.getString("name")} - убрать")}
             OutlinedTextField(text,{if(ChatLimits.text(it))text=it},label={Text("Сообщение")},maxLines=4,enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("chat-text"))
+            attachmentProblem?.let { ChatAttachmentNotice(it) }
             Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                 TextButton(onClick={media.launch(arrayOf("image/*","video/*"))},enabled=!busy && files.size<4) {Text("Фото / видео")}
                 TextButton(onClick={document.launch(arrayOf("*/*"))},enabled=!busy && files.size<4) {Text("Файл")}
@@ -277,5 +320,17 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
             }
         }
         if(busy || refreshRunning)TextButton(onClick={if(busy)operation?.cancel() else refreshNonce++}) {Text("Отменить операцию")}
+    }
+}
+
+@Composable internal fun ChatAttachmentNotice(problem: AttachmentProblem) {
+    Text(problem.message, color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.testTag("chat-attachment-problem").semantics { liveRegion = LiveRegionMode.Polite })
+}
+
+@Composable internal fun ChatHistoryNavigation(enabled: Boolean, onMove: (HistoryMove) -> Unit) {
+    Column {
+        TextButton(onClick = { onMove(HistoryMove.NEWER) }, enabled = enabled) { Text("Следующие сообщения") }
+        TextButton(onClick = { onMove(HistoryMove.LATEST) }, enabled = enabled) { Text("К последним сообщениям") }
     }
 }
