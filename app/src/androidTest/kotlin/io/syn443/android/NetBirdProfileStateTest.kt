@@ -131,11 +131,11 @@ class NetBirdProfileStateTest {
         compose.setContent { VpnStatusSummary(snapshot.value, true, false) }
         val overlay = compose.onNodeWithTag("vpn-netbird-summary")
         compose.onNodeWithTag("vpn-status").assertTextContains("Работает")
-        overlay.assertTextContains("сервер управления недоступен")
+        overlay.assertTextContains("NetBird · сервер управления недоступен")
         compose.runOnIdle { snapshot.value = status(true, "VLESS") }
-        overlay.assertTextContains("через VLESS")
+        overlay.assertTextContains("NetBird через VLESS · управление и сигнализация доступны")
         compose.runOnIdle { snapshot.value = status(true, "future-state") }
-        overlay.assertTextContains("ждём свежие данные")
+        overlay.assertTextContains("NetBird · ждём свежие данные")
         compose.runOnIdle { snapshot.value = status(false, "DIRECT") }
         overlay.assertDoesNotExist()
         compose.runOnIdle { snapshot.value = status(null, "DIRECT") }
