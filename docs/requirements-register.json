@@ -973,8 +973,16 @@
     {
       "id": "AUTO-08",
       "text": "TCP-сессия закрепляется за выбранным выходом на время жизни. Смена балансира касается новых соединений; при физической потере транспорта существующие сессии могут оборваться. Бесшовное сохранение любого TCP при handover не обещается. Для UDP задаются срок привязки и поведение при смене пути.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "native/bridge/route_selection_wire_test.go",
+        "native/bridge/socks_udp_wire_test.go",
+        "app/src/main/kotlin/io/syn443/android/vpn/EngineConfig.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdaptiveEngineConfigTest.kt",
+        "docs/route-frontier.md"
+      ],
+      "implementationScope": "The managed selector preserves existing TCP connections and external SOCKS5 UDP associations during a healthy member change. New associations resolve the current member. Android owns the five-minute TUN UDP idle setting.",
+      "remainingScope": "Actual idle expiry through the Android TUN, physical handover and other UDP transports need separate acceptance. Private adaptive chains currently admit TCP only."
     },
     {
       "id": "AUTO-09",
