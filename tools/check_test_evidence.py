@@ -80,6 +80,10 @@ if mode=="jvm":
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
+    assert {("io.syn443.android.NetBirdProfileStateTest", name) for name in (
+        "runningProfileEvidenceRequiresAReadyCurrentOwnerAndSuppressesRetiredRows",
+        "profileWithoutNetBirdHasOneExplanationAndConfiguredModuleKeepsItsControls",
+    )} <= set(identities), "Missing NetBird profile-presence outcomes"
     assert {("io.syn443.android.PhysicalLinkDetailsTest", name) for name in (
         "familyFactsExcludeLinkLocalAndKeepAddressAndDefaultRouteSeparate",
         "lostPhysicalLinkRemovesFamilyFactsFromVisibleDiagnostics",

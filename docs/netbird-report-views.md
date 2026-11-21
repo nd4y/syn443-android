@@ -5,6 +5,16 @@ roster. It does not establish a tunnel crash or out-of-memory root cause. The
 SDK still creates its complete connection snapshot before our projection; that
 SDK allocation is outside this wrapper's bound.
 
+## Profile without NetBird
+
+When an active VPN profile has no NetBird outbound, route diagnostics say so
+and omit peer checks. The local `netbird-status` result then reports
+`configuredInRunningProfile: false` and carries no peer rows. A configured
+module can separately be connecting, disconnected, or missing a fresh report.
+The controller derives profile presence from the configuration of the running
+engine for the same VPN intent generation. An unavailable or conflicting
+observation leaves the field unknown.
+
 ## Owned memory and coverage
 
 Our connection projection contains at most16 peer rows. The diagnostic job
