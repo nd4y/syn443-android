@@ -76,6 +76,9 @@ class FakeDevice:
         self.mutate = {}
         self.collecting = 0
 
+    def bundle_connection(self):
+        return contextlib.nullcontext(True)
+
     def call(self, operation, argument=None):
         self.calls.append((operation, argument))
         if operation == "support-bundle-collect":
@@ -104,6 +107,31 @@ class FakeDevice:
 
 
 class SupportBundleCliTest(unittest.TestCase):
+    def test_passive_connection_negotiation_never_collects_or_replays_after_denial(self):
+        device = ctl.Device("synthetic-device", 3)
+        for mime, error in ((b"null", None), (b"unexpected", "invalid_reply")):
+            reply = subprocess.CompletedProcess([], 0, stdout=b"Result: " + mime + b"\n")
+            with patch.object(subprocess, "run", return_value=reply), patch.object(subprocess, "Popen") as holder:
+                if error:
+                    with self.assertRaises(ctl.ControlError) as raised, device.bundle_connection():
+                        self.fail("malformed negotiation admitted a client")
+                    self.assertEqual(raised.exception.code, error)
+                else:
+                    with device.bundle_connection() as active:
+                        self.assertFalse(active)
+                holder.assert_not_called()
+        current = subprocess.CompletedProcess([], 0, stdout=b"Result: application/vnd.syn443.bundle-session-v1\n")
+        for first, expected in (("busy", "support_bundle_busy"), ("held", "fixture_failure")):
+            with patch.object(subprocess, "run", return_value=current), patch.object(subprocess, "Popen") as start, \
+                    patch.object(device, "call", side_effect=[{"state": first}, {"state": "released"}]) as rpc:
+                start.return_value.poll.return_value = None
+                with self.assertRaises(ctl.ControlError) as raised, device.bundle_connection():
+                    raise ctl.ControlError("fixture_failure", 5)
+                self.assertEqual(raised.exception.code, expected)
+                self.assertEqual([call.args[0] for call in rpc.call_args_list],
+                                 ["support-bundle-shell-state", "support-bundle-shell-release"])
+                self.assertEqual(rpc.call_args_list[0].args[1], rpc.call_args_list[1].args[1])
+
     def export(self, device, output, operation="support-bundle"):
         return ctl.support_operation(device, operation, output, BUNDLE_ID if operation.endswith("export") else None,
                                      clock=device.clock, sleeper=device.clock.sleep)
@@ -183,6 +211,37 @@ class SupportBundleCliTest(unittest.TestCase):
             self.assertEqual(sum(op == failed for op, _ in device.calls), 1)
             self.assertEqual(device.calls[-1][0], failed)
             self.assertNotIn("support-bundle-cancel", [op for op, _ in device.calls])
+
+    def test_export_distinguishes_provider_denial_from_malformed_chunks_without_retry(self):
+        payload, manifest, _ = fixture()
+        for stage in ("support-bundle-open", "support-bundle-read"):
+            for state in ("not_found", "cancelled", "expired", "failed", "busy", "future", []):
+                reply = {"state": state}
+                if stage == "support-bundle-open":
+                    reply["id"] = BUNDLE_ID
+                known = state in ("not_found", "cancelled", "expired", "failed") or (
+                    stage == "support-bundle-read" and state == "busy")
+                with self.subTest(stage=stage, state=state), tempfile.TemporaryDirectory() as directory:
+                    output = Path(directory) / "support.zip"
+                    device = FakeDevice(payload, manifest)
+                    device.mutate[stage] = lambda _: reply
+                    with self.assertRaises(ctl.ControlError) as raised:
+                        self.export(device, output)
+                    expected = ("support_bundle_" + state, 4) if known else ("support_bundle_invalid", 5)
+                    self.assertEqual((raised.exception.code, raised.exception.exit_status), expected)
+                    self.assertEqual(sum(op == stage for op, _ in device.calls), 1)
+                    self.assertEqual(device.calls[-1][0], stage)
+                    self.assertFalse(output.exists())
+        for stage, reply in (("support-bundle-open", {"state": "expired", "id": "a" * 31}),
+                             ("support-bundle-read", {"state": "not_found", "data": "untrusted"})):
+            device = FakeDevice(payload, manifest)
+            device.mutate[stage] = lambda _: reply
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "support.zip"
+                with self.assertRaises(ctl.ControlError) as raised:
+                    self.export(device, output)
+                self.assertEqual(raised.exception.code, "support_bundle_invalid")
+                self.assertFalse(output.exists())
 
     def test_poll_and_overall_or_grant_deadlines_fail_closed_without_extra_calls(self):
         payload, manifest, _ = fixture()

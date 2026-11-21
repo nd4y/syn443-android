@@ -49,23 +49,29 @@ def main():
         assert not before.intersection({'vpn-intent.json', 'vpn-config.enc'}), 'fresh_app_required'
         no_engine()
         device = Device(serial.stdout.decode().strip(), 10)
-        sequence = SupportDeadline(device)
-        receipt = support_collect(sequence)
-        bundle_id = receipt['id']
-        ready = support_wait(sequence, bundle_id)
-        assert ready['manifest']['complete'] is False
-        with tempfile.TemporaryDirectory(prefix='syn443-bundle-protocol-') as directory:
-            output = Path(directory) / 'bundle.zip'
-            result = support_export(sequence, bundle_id, output, ready)
-            assert result['exported'] is True and result['bytes'] == output.stat().st_size
-            assert result['complete'] is False
-            # This is synthetic emulator data, never a real-device export.
-            subprocess.run(['python3', str(ROOT / 'tools/check_public_data.py'), str(output)], check=True)
-        cancelled = sequence.call('support-bundle-cancel', bundle_id)
-        assert cancelled == {'state': 'cancelled', 'id': bundle_id}
-        assert sequence.call('support-bundle-status', bundle_id) == cancelled
-        denied = sequence.call('support-bundle-open', bundle_id)
-        assert denied == cancelled, 'cancelled_export_grant_created'
+        with device.bundle_connection() as connected:
+            assert connected, 'active_shell_connection_required'
+            sequence = SupportDeadline(device)
+            receipt = support_collect(sequence)
+            bundle_id = receipt['id']
+            ready = support_wait(sequence, bundle_id)
+            assert ready['manifest']['complete'] is False
+            # Ask Android to reclaim eligible background processes in this disposable fixture.
+            owner = adb('shell', 'pidof', PACKAGE + ':controller').stdout.strip()
+            assert owner.isdigit() and adb('shell', 'am', 'kill', PACKAGE).returncode == 0
+            with tempfile.TemporaryDirectory(prefix='syn443-bundle-protocol-') as directory:
+                output = Path(directory) / 'bundle.zip'
+                result = support_export(sequence, bundle_id, output, ready)
+                assert result['exported'] is True and result['bytes'] == output.stat().st_size
+                assert result['complete'] is False
+                # This is synthetic emulator data, never a real-device export.
+                subprocess.run(['python3', str(ROOT / 'tools/check_public_data.py'), str(output)], check=True)
+            assert adb('shell', 'pidof', PACKAGE + ':controller').stdout.strip() == owner
+            cancelled = sequence.call('support-bundle-cancel', bundle_id)
+            assert cancelled == {'state': 'cancelled', 'id': bundle_id}
+            assert sequence.call('support-bundle-status', bundle_id) == cancelled
+            denied = sequence.call('support-bundle-open', bundle_id)
+            assert denied == cancelled, 'cancelled_export_grant_created'
         after = no_backup_names()
         assert before <= after and after - before <= {'support-bundles'}, 'diagnostics_initialized_identity_or_vpn'
         no_engine()
