@@ -16,6 +16,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
@@ -60,7 +63,7 @@ private fun chatError(e:Exception,queued:Boolean)=when(chatCode(e)) {
     "ACCESS_DENIED"->"Нет доступа к этому диалогу."
     "THROTTLED"->"Сервер занят. Повторим подключение позже."
     "BUSY"->"Клиент выполняет другую операцию. Повторим позже."
-    "MEDIA_UNSUPPORTED"->"Не удалось сжать видео. Выберите другой файл или отправьте оригинал до 25 МБ."
+    "MEDIA_UNSUPPORTED"->AttachmentProblem.UNSUPPORTED_MEDIA.message
     else->if(queued)"Сообщение сохранено на устройстве. Отправку можно повторить."
         else "Чат временно недоступен. Повторим подключение."
 }
@@ -81,6 +84,7 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
     var store by remember {mutableStateOf<ChatOutbox?>(null)}
     var admin by remember {mutableStateOf(false)}
     var conversation by remember {mutableStateOf("")}
+    var attachmentProblem by remember(generation, conversation) { mutableStateOf<AttachmentProblem?>(null) }
     var inbox by remember {mutableStateOf(emptyList<JSONObject>())}
     var messages by remember {mutableStateOf(emptyList<JSONObject>())}
     var peerRead by remember {mutableStateOf(0L)}
@@ -148,12 +152,24 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
     }
     fun prepare(uri:android.net.Uri,compress:Boolean) {run {
         require(files.size<4)
-        val prepared=ChatMedia.prepare(context,uri,compress) {status=it}
-        try {files=files+withContext(Dispatchers.IO) {
-            val owner=currentCoroutineContext()
-            requireNotNull(store).importFile(prepared.file,prepared.name,prepared.mime,prepared.kind) {owner.ensureActive()}
-        }}
-        finally {prepared.close()}
+        attachmentProblem = null
+        val previousStatus = status
+        val file = try {
+            ChatMedia.prepare(context,uri,compress) {status=it}.use { prepared ->
+                withContext(Dispatchers.IO) {
+                    val owner = currentCoroutineContext()
+                    requireNotNull(store).importFile(prepared.file,prepared.name,prepared.mime,prepared.kind) {owner.ensureActive()}
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            status = previousStatus
+            throw cancelled
+        } catch (error: Exception) {
+            attachmentProblem = AttachmentProblem.from(error) ?: throw error
+            status = previousStatus
+            return@run
+        }
+        files = files + file
         status="Файл подготовлен"
     }}
     val document=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->if(uri!=null)prepare(uri,false)}
@@ -266,6 +282,7 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
         if(client!=null && conversation.isNotEmpty()) {
             for(file in files)TextButton(onClick={run {withContext(Dispatchers.IO) {store!!.removeFile(file.getString("localId"))};files=files-file}},enabled=!busy) {Text("${file.getString("name")} - убрать")}
             OutlinedTextField(text,{if(ChatLimits.text(it))text=it},label={Text("Сообщение")},maxLines=4,enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("chat-text"))
+            attachmentProblem?.let { ChatAttachmentNotice(it) }
             Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                 TextButton(onClick={media.launch(arrayOf("image/*","video/*"))},enabled=!busy && files.size<4) {Text("Фото / видео")}
                 TextButton(onClick={document.launch(arrayOf("*/*"))},enabled=!busy && files.size<4) {Text("Файл")}
@@ -278,4 +295,9 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
         }
         if(busy || refreshRunning)TextButton(onClick={if(busy)operation?.cancel() else refreshNonce++}) {Text("Отменить операцию")}
     }
+}
+
+@Composable internal fun ChatAttachmentNotice(problem: AttachmentProblem) {
+    Text(problem.message, color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.testTag("chat-attachment-problem").semantics { liveRegion = LiveRegionMode.Polite })
 }

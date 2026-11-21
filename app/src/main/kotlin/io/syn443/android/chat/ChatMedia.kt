@@ -38,6 +38,9 @@ object ChatMedia {
         require(uri.scheme=="content")
         val raw=File(context.cacheDir,"chat-${ChatLimits.id()}.input")
         val output=File(context.cacheDir,"chat-${ChatLimits.id()}.output")
+        var transferred: File? = null
+        fun finish(file: File, name: String, mime: String, kind: String): PreparedMedia =
+            PreparedMedia(file, name, mime, kind).also { transferred = file }
         try {
             val metadata=withContext(Dispatchers.IO) {
                 val name=context.contentResolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use {if(it.moveToFirst())it.getString(0) else null}?:"attachment"
@@ -53,7 +56,7 @@ object ChatMedia {
                 safeName(name) to mime
             }
             val (name,mime)=metadata
-            if(!compress)return PreparedMedia(raw,name,when(mime) {
+            if(!compress)return finish(raw,name,when(mime) {
                 "application/pdf","application/zip","text/plain","image/jpeg","image/png","image/webp","video/mp4"->mime
                 else->"application/octet-stream"
             },"file")
@@ -72,7 +75,7 @@ object ChatMedia {
                     finally {bitmap.recycle()}
                 }
                 require(output.length() in 1..ChatLimits.file.toLong())
-                return PreparedMedia(output,name.substringBeforeLast('.',name)+".jpg","image/jpeg","photo")
+                return finish(output,name.substringBeforeLast('.',name)+".jpg","image/jpeg","photo")
             }
             require(mime.startsWith("video/"))
             val duration=withContext(Dispatchers.IO) {
@@ -99,7 +102,9 @@ object ChatMedia {
                             .addListener(object:Transformer.Listener {
                                 override fun onCompleted(composition:Composition,result:ExportResult) {if(cont.isActive)cont.resume(Unit)}
                                 override fun onError(composition:Composition,result:ExportResult,error:ExportException) {
-                                    if(cont.isActive)cont.resumeWithException(ChatFailure("MEDIA_UNSUPPORTED").apply {
+                                    val code = if (AttachmentProblem.from(error) == AttachmentProblem.STORAGE_FULL)
+                                        "MEDIA_STORAGE_FULL" else "MEDIA_UNSUPPORTED"
+                                    if(cont.isActive)cont.resumeWithException(ChatFailure(code).apply {
                                         // The UI keeps a fixed message; synthetic instrumentation
                                         // retains the codec cause instead of losing its failure stage.
                                         if(io.syn443.android.BuildConfig.DEBUG)initCause(error)
@@ -123,8 +128,10 @@ object ChatMedia {
                 } finally {monitor?.cancel();transformer?.cancel()}
             }}
             require(output.length() in 1..ChatLimits.file.toLong())
-            return PreparedMedia(output,name.substringBeforeLast('.',name)+".mp4","video/mp4","video")
-        } catch(e:Exception) {output.delete();raw.delete();throw e}
-        finally {if(output.exists())raw.delete()}
+            return finish(output,name.substringBeforeLast('.',name)+".mp4","video/mp4","video")
+        } finally {
+            if (raw != transferred) raw.delete()
+            if (output != transferred) output.delete()
+        }
     }
 }

@@ -80,6 +80,13 @@ if mode=="jvm":
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
+    required_storage_outcomes = {
+        ("io.syn443.android.AttachmentStorageFailureTest", "failedWritePreservesSourceAndReleasesScratchBeforeRetry"),
+        ("io.syn443.android.AttachmentStorageFailureTest", "boundedOutboxFullRollsBackPartialFileAndAllowsRetry"),
+        ("io.syn443.android.AttachmentStorageFailureTest", "localStorageAndUnsupportedCodecAreDistinctFromNetworkAndCancellation"),
+        ("io.syn443.android.ChatAttachmentNoticeTest", "composerExplainsLocalStorageFailureAndClearsItForRetry"),
+    }
+    assert required_storage_outcomes <= set(identities), "Missing attachment storage recovery outcomes"
     assert ("io.syn443.android.RuntimeHeapTest", "actualArtHeapSupportsTheMandatoryStorageAndUiSuite") in {
         (c.get("classname"),c.get("name")) for c in cases}, "Required actual ART heap case missing"
     assert {
