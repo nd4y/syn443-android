@@ -626,12 +626,13 @@ class CoverageEvidenceTest(unittest.TestCase):
         cases_from_source = re.findall(r'@Test\s+fun\s+(\w+)', (root /
             'app/src/androidTest/kotlin/io/syn443/android/PackagedProxyChainTest.kt').read_text(encoding='utf-8'))
         self.assertEqual(cases, {('io.syn443.android.PackagedProxyChainTest', method) for method in cases_from_source})
-        self.assertEqual(len(cases), 2)
+        self.assertEqual(len(cases), 3)
         gate = compile(ast.Module(body=[declaration, block], type_ignores=[]), '<packaged-chain>', 'exec')
-        exec(gate, {'mode':'emulator', 'identities':cases})
+        projection = ('io.syn443.android.RouteSnapshotTest', 'currentFailedProbeOnlyShowsKnownCauseForItsStage')
+        exec(gate, {'mode':'emulator', 'identities':cases | {projection}})
         for case in cases:
             with self.assertRaises(AssertionError):
-                exec(gate, {'mode':'emulator', 'identities':cases - {case} | {('other', case[1])}})
+                exec(gate, {'mode':'emulator', 'identities':cases - {case} | {('other', case[1]), projection}})
 
     def test_netbird_report_roots_require_each_actual_outcome_and_exact_sources(self):
         root = Path(__file__).resolve().parent.parent

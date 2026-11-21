@@ -1473,8 +1473,13 @@
     {
       "id": "CHECK-06",
       "text": "Отсутствие ICMP не дисквалифицирует HTTP/SSH сервис. Различаются name not found, timeout, refused, TLS mismatch, proxy auth failed, provider expired, policy blocked и unavailable. Причина связывается с конкретным слоем; сырой текст сторонней ошибки очищается. Unsupported method, stale/cancelled result и failed target predicate различаются; они не превращаются в глобальный blacklist профиля.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "native/bridge/route_checks_test.go",
+        "app/src/androidTest/kotlin/io/syn443/android/PackagedProxyChainTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSnapshotTest.kt",
+        "docs/TESTING.md"
+      ]
     },
     {
       "id": "CHECK-07",

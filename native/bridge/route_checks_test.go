@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/sagernet/sing-box/adapter"
 	M "github.com/sagernet/sing/common/metadata"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -59,6 +61,47 @@ func TestRouteTLSStrict204AndCertificateFailures(t *testing.T) {
 	code, _ = probeRoute(context.Background(), routeTestDial, routeCheck{Method: "tls", Target: server.URL})
 	if code != "tls_failed" {
 		t.Fatal("untrusted TLS accepted")
+	}
+}
+
+func TestRouteFailureCauseUsesTypesAndDropsPrivateText(t *testing.T) {
+	for _, tc := range []struct {
+		code, want string
+		err        error
+	}{
+		{"dial_failed", "dns_not_found", &net.DNSError{IsNotFound: true, Name: "private.invalid"}},
+		{"dial_failed", "dns_timeout", &net.DNSError{IsTimeout: true}},
+		{"dial_failed", "dns_failed", &net.DNSError{IsTemporary: true}},
+		{"dial_failed", "connection_refused", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}},
+		{"dial_failed", "timeout", context.DeadlineExceeded},
+		{"tls_failed", "timeout", context.DeadlineExceeded},
+		{"tls_failed", "certificate_name_mismatch", x509.HostnameError{Certificate: &x509.Certificate{}, Host: "private.invalid"}},
+		{"tls_failed", "certificate_untrusted", x509.UnknownAuthorityError{}},
+		{"tls_failed", "certificate_not_current", x509.CertificateInvalidError{Cert: &x509.Certificate{}, Reason: x509.Expired}},
+		{"dial_failed", "", errors.New("private.invalid: connection refused")},
+		{"tls_failed", "", syscall.ECONNREFUSED},
+	} {
+		var cause string
+		setRouteFailureCause(&cause, tc.code, fmt.Errorf("private diagnostic: %w", tc.err))
+		if cause != tc.want {
+			t.Errorf("%s: got %q, expected %q", tc.code, cause, tc.want)
+		}
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("untrusted TLS reached HTTP") }))
+	defer server.Close()
+	var cause string
+	code, complete := probeRouteWithDetail(context.Background(), routeTestDial, routeCheck{Method: "tls", Target: server.URL}, x509.NewCertPool(), bootMillis, &cause)
+	if code != "tls_failed" || !complete || cause != "certificate_untrusted" {
+		t.Fatal("real untrusted handshake lost its stage or cause")
+	}
+	now := int64(100)
+	dial := func(context.Context, string, M.Socksaddr) (net.Conn, error) {
+		now += 4000
+		return nil, syscall.ECONNREFUSED
+	}
+	code, complete = probeRouteWithDetail(context.Background(), dial, routeCheck{Method: "tcp", Target: "192.0.2.1:443"}, nil, func() int64 { return now }, &cause)
+	if complete || code != "check_timeout" || cause != "" {
+		t.Fatal("an expired probe retained a failure cause")
 	}
 }
 

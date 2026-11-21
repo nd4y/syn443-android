@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -48,6 +50,7 @@ type routeResult struct {
 	Complete         bool     `json:"complete"`
 	OK               bool     `json:"ok"`
 	Code             string   `json:"code"`
+	Cause            string   `json:"cause,omitempty"`
 	ElapsedMS        int64    `json:"elapsedMs"`
 	SampledElapsedMS int64    `json:"sampledElapsedMs"`
 	Path             []string `json:"path"`
@@ -472,6 +475,9 @@ func (r *routeRunner) runPlan(ctx context.Context, p routePlan) (result routeRes
 			result.CheckPlan = result.CheckPlan.unknown()
 		}
 		result.ElapsedMS = time.Since(start).Milliseconds()
+		if result.OK || !result.Complete {
+			result.Cause = ""
+		}
 		result.SampledElapsedMS = bootMillis()
 	}()
 	if programErr != nil {
@@ -508,7 +514,8 @@ func (r *routeRunner) runPlan(ctx context.Context, p routePlan) (result routeRes
 		evaluation := evaluateRouteCheckProfile(ctx, program.profile, bootMillis, current, func(checkContext context.Context, check routeCheck) routeCheckProbeResult {
 			observation := &privateProbeDialObservation{}
 			checkContext = context.WithValue(checkContext, privateProbeDialKey{}, observation)
-			code, complete := probeRoute(checkContext, func(dialContext context.Context, network string, target M.Socksaddr) (net.Conn, error) {
+			var cause string
+			code, complete := probeRouteWithDetail(checkContext, func(dialContext context.Context, network string, target M.Socksaddr) (net.Conn, error) {
 				if dialContext.Err() != nil || !current() {
 					return nil, errLeaseExpired
 				}
@@ -523,11 +530,14 @@ func (r *routeRunner) runPlan(ctx context.Context, p routePlan) (result routeRes
 					return conn, err
 				}
 				return &authorizedRouteConn{Conn: conn, allowed: current}, nil
-			}, check)
-			return routeCheckProbeResult{code: code, complete: complete, witness: observation.observedFailure()}
+			}, check, nil, bootMillis, &cause)
+			return routeCheckProbeResult{code: code, complete: complete, witness: observation.observedFailure(), cause: cause}
 		})
 		result.CheckPlan, result.Code = evaluation.report, evaluation.code
 		result.OK, result.Complete = evaluation.report.Outcome == checkTrue, evaluation.complete()
+		if evaluation.witness >= 0 {
+			result.Cause = evaluation.report.Leaves[evaluation.witness].cause
+		}
 		return
 	}
 	dial := func(c context.Context, n string, a M.Socksaddr) (net.Conn, error) {
@@ -548,7 +558,7 @@ func (r *routeRunner) runPlan(ctx context.Context, p routePlan) (result routeRes
 		return &authorizedRouteConn{Conn: conn, allowed: func() bool { return r.allowed() && routeBudgetCurrent(ctx) }}, nil
 	}
 	for _, c := range p.Checks {
-		code, complete := probeRoute(ctx, dial, c)
+		code, complete := probeRouteWithDetail(ctx, dial, c, nil, bootMillis, &result.Cause)
 		if code != "ok" {
 			result.OK = false
 			result.Complete = complete
@@ -571,6 +581,47 @@ func probeRouteWithRoots(parent context.Context, dial routeDial, c routeCheck, r
 	return probeRouteWithClock(parent, dial, c, roots, bootMillis)
 }
 func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, roots *x509.CertPool, clock func() int64) (code string, complete bool) {
+	return probeRouteWithDetail(parent, dial, c, roots, clock, nil)
+}
+
+// Report only typed causes observed by the dialer or the destination TLS check.
+// Error text may contain addresses, hostnames and credentials.
+func setRouteFailureCause(cause *string, stage string, err error) {
+	if cause == nil {
+		return
+	}
+	var dns *net.DNSError
+	var timeout net.Error
+	var host x509.HostnameError
+	var authority x509.UnknownAuthorityError
+	var invalid x509.CertificateInvalidError
+	switch {
+	case stage == "dial_failed" && errors.As(err, &dns):
+		switch {
+		case dns.IsTimeout:
+			*cause = "dns_timeout"
+		case dns.IsNotFound:
+			*cause = "dns_not_found"
+		default:
+			*cause = "dns_failed"
+		}
+	case stage == "dial_failed" && errors.Is(err, syscall.ECONNREFUSED):
+		*cause = "connection_refused"
+	case stage == "tls_failed" && errors.As(err, &host):
+		*cause = "certificate_name_mismatch"
+	case stage == "tls_failed" && errors.As(err, &authority):
+		*cause = "certificate_untrusted"
+	case stage == "tls_failed" && errors.As(err, &invalid) && invalid.Reason == x509.Expired:
+		*cause = "certificate_not_current"
+	case errors.As(err, &timeout) && timeout.Timeout():
+		*cause = "timeout"
+	}
+}
+
+func probeRouteWithDetail(parent context.Context, dial routeDial, c routeCheck, roots *x509.CertPool, clock func() int64, cause *string) (code string, complete bool) {
+	if cause != nil {
+		*cause = ""
+	}
 	started := clock()
 	if started < 0 || started == math.MaxInt64 {
 		return "probe_unavailable", false
@@ -580,6 +631,9 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 		if now < started || now-started > 3000 {
 			code = "check_timeout"
 			complete = false
+		}
+		if cause != nil && (!complete || code != "dial_failed" && code != "tls_failed") {
+			*cause = ""
 		}
 	}()
 	if !validRouteCheck(c) {
@@ -602,6 +656,7 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 		if parent.Err() != nil {
 			return "cancelled", false
 		}
+		setRouteFailureCause(cause, "dial_failed", err)
 		return "dial_failed", true
 	}
 	if conn == nil {
@@ -621,6 +676,7 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 	if c.Method == "tcp" {
 		if N.NeedHandshakeForWrite(conn) {
 			if _, err := conn.Write(nil); err != nil {
+				setRouteFailureCause(cause, "dial_failed", err)
 				return "dial_failed", true
 			}
 		}
@@ -633,6 +689,7 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 		// VLESS lazy streams must send their request before a server-first banner.
 		if N.NeedHandshakeForWrite(conn) {
 			if _, err := conn.Write(nil); err != nil {
+				setRouteFailureCause(cause, "dial_failed", err)
 				return "dial_failed", true
 			}
 		}
@@ -653,6 +710,7 @@ func probeRouteWithClock(parent context.Context, dial routeDial, c routeCheck, r
 		if parent.Err() != nil {
 			return "cancelled", false
 		}
+		setRouteFailureCause(cause, "tls_failed", err)
 		return "tls_failed", true
 	}
 	if ctx.Err() != nil {

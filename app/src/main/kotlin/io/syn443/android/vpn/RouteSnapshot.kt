@@ -8,6 +8,7 @@ import io.syn443.decision.FailoverAlgorithm
 import io.syn443.decision.ProbeVerdict
 import io.syn443.decision.VerifiedPathSample
 import io.syn443.recovery.RouteEvidence
+import io.syn443.recovery.RouteFailureCause
 import io.syn443.recovery.RouteObservation
 import io.syn443.recovery.RouteScope
 import io.syn443.recovery.RouteState
@@ -251,7 +252,8 @@ object RouteSnapshot {
             require(path.length()<=64 && (0 until path.length()).all {n->rows.any {it.id==path.getString(n)}})
             // First receipt time is retained across repeated heartbeat snapshots.
             if(receipts[id]!=pending) {
-                nextObservations=nextObservations+(id to RouteObservation(scope,sampled,complete,ok));nextCodes=nextCodes+(id to code);nextTimings=nextTimings+(id to r.getLong("elapsedMs"));nextReceipts=nextReceipts+(id to pending)
+                val cause = if (complete && !ok) RouteFailureCause.fromWire(code, r.optString("cause")) else null
+                nextObservations=nextObservations+(id to RouteObservation(scope,sampled,complete,ok,cause));nextCodes=nextCodes+(id to code);nextTimings=nextTimings+(id to r.getLong("elapsedMs"));nextReceipts=nextReceipts+(id to pending)
                 nextPaths=nextPaths+(id to path)
                 nextPlans=if(diagnostic!=null)nextPlans+(id to diagnostic) else nextPlans-id
             }
@@ -331,6 +333,9 @@ object RouteSnapshot {
                 .put("ageMs",if(sample!=null && sample.scope==scope && now>=sample.elapsedMs)now-sample.elapsedMs else JSONObject.NULL)
                 .put("latencyMs",if(sample?.scope==scope)timings[row.id] ?: JSONObject.NULL else JSONObject.NULL)
                 .also {value->
+                    if (state == RouteState.FAILED && scope == live && row.id !in queued) {
+                        sample?.cause?.let { value.put("cause", it.wire) }
+                    }
                     row.profile?.let {profile->value.put("checkPlan",if(on && ready && scope!=null && scope==live && sample?.scope==scope && row.id !in queued && state in setOf(RouteState.WORKING,RouteState.FAILED,RouteState.INCOMPLETE))
                         checkPlans[row.id]?.let {JSONObject(it.toString())} ?: RouteCheckPlans.unknown(profile) else RouteCheckPlans.unknown(profile))}
                     if(row.type=="syn443-adaptive") {

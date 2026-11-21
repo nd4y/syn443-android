@@ -990,9 +990,11 @@ if mode == "emulator":
 PACKAGED_CHAIN_REQUIRED = {
     ("io.syn443.android.PackagedProxyChainTest", "packagedHttpEntryCarriesVlessToBannerTarget"),
     ("io.syn443.android.PackagedProxyChainTest", "refusedHttpEntryNeverFallsBackToVlessOrTarget"),
+    ("io.syn443.android.PackagedProxyChainTest", "refusedTcpConnectionReportsItsCauseWithoutEndpointDetails"),
 }
 if mode == "emulator":
     assert PACKAGED_CHAIN_REQUIRED <= set(identities), "Missing packaged proxy chain outcomes"
+    assert ("io.syn443.android.RouteSnapshotTest", "currentFailedProbeOnlyShowsKnownCauseForItsStage") in identities
 
 JOURNAL_REQUIRED = {
     "observability": {

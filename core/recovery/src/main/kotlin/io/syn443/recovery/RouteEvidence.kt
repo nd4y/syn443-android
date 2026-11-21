@@ -2,7 +2,23 @@ package io.syn443.recovery
 
 /** Memory-only scope. No wall-clock timestamps can resurrect earlier evidence. */
 data class RouteScope(val intent: Long, val network: Long, val activation: Long, val engine: String, val config: String)
-data class RouteObservation(val scope: RouteScope, val elapsedMs: Long, val complete: Boolean, val ok: Boolean)
+data class RouteObservation(val scope: RouteScope, val elapsedMs: Long, val complete: Boolean, val ok: Boolean,
+                            val cause: RouteFailureCause? = null)
+
+enum class RouteFailureCause(val wire: String, private val reasons: Set<String>) {
+    DNS_NOT_FOUND("dns_not_found", setOf("dial_failed")),
+    DNS_TIMEOUT("dns_timeout", setOf("dial_failed")),
+    DNS_FAILED("dns_failed", setOf("dial_failed")),
+    CONNECTION_REFUSED("connection_refused", setOf("dial_failed")),
+    CERTIFICATE_NAME_MISMATCH("certificate_name_mismatch", setOf("tls_failed")),
+    CERTIFICATE_UNTRUSTED("certificate_untrusted", setOf("tls_failed")),
+    CERTIFICATE_NOT_CURRENT("certificate_not_current", setOf("tls_failed")),
+    TIMEOUT("timeout", setOf("dial_failed", "tls_failed"));
+
+    companion object {
+        fun fromWire(reason: String, value: String) = entries.find { it.wire == value && reason in it.reasons }
+    }
+}
 enum class RouteState { OFF, UNAVAILABLE, UNVERIFIED, CHECKING, WORKING, FAILED, STALE, INCOMPLETE }
 enum class RouteActivation { WAIT, READY, FAILED }
 object RouteEvidence {
