@@ -894,8 +894,13 @@
     {
       "id": "AUTO-01",
       "text": "Состояния управляющего автомата: Off, NeedsLogin, NeedsPermission, NeedsUnlock, NeedsAction, NoNetwork, Portal, Detecting, Connecting, Online, Degraded, Recovering, BlockedByPolicy. Сохранённое намерение пользователя и желаемая конфигурация отделены от фактической готовности соединения по REC-01; временная ошибка не переводит намерение в Off.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/device-runtime-observations.md",
+        "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RuntimeObservationDiskTest.kt"
+      ],
+      "remainingScope": "The home state and coarse runtime projection have explicit fixtures. Full controller transition coverage, mode detection and physical scenarios remain open."
     },
     {
       "id": "AUTO-02",
@@ -1966,8 +1971,13 @@
     {
       "id": "OWN-02",
       "text": "Пользователь видит одно короткое объяснение, доступность нужных функций и действие: повторить, войти в Wi-Fi/аккаунт, разблокировать, обновить, создать incident. Технические детали доступны отдельно. Status Online не показывается только потому, что VpnService запущен; неизвестная/устаревшая диагностика и partial access не скрываются.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/device-runtime-observations.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/VpnControls.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt"
+      ],
+      "remainingScope": "The home status distinguishes unconfirmed, limited, recovering and stopping states. Incident creation, update actions and physical acceptance of the complete one-button flow remain open."
     },
     {
       "id": "OWN-03",

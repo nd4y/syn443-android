@@ -157,21 +157,7 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
             false -> "VPN выключен"
             null -> "VPN"
         }, Modifier.testTag("vpn-intent"), style = MaterialTheme.typography.titleMedium)
-        val state = if (statusAvailable != true) {
-            if (statusAvailable == null) "Проверяем состояние VPN" else "Состояние VPN временно недоступно"
-        } else when (phase) {
-            "Online" -> if (status.optBoolean("engineActive")) "Работает" else "Проверяем состояние VPN"
-            "Degraded" -> "Частично работает"
-            "BlockedByPolicy" -> "Доступ ограничен политикой"
-            "NoNetwork" -> if(portal) "Войдите в сеть Wi-Fi" else "Ожидание сети"
-            "Recovering" -> "Восстанавливаем соединение"
-            "Connecting" -> "Подключаемся"
-            "NeedsPermission" -> "Нужно разрешение Android на VPN"
-            "NeedsAction" -> "Требуется действие пользователя"
-            "NeedsUnlock" -> "Нужно разблокировать телефон"
-            else -> if (accountPolicyBlocked) "Ожидаем конфигурацию от сервера" else "Отключён"
-        }
-        Text(state, Modifier.testTag("vpn-status").semantics { liveRegion = LiveRegionMode.Polite })
+        VpnStatusSummary(status, statusAvailable, accountPolicyBlocked)
         VpnPrimaryAction(
             desiredOn = desiredOn,
             connectEnabled = statusAvailable == true && !accountPolicyBlocked,
@@ -302,6 +288,39 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
             Button(onClick = { importer.launch(arrayOf("application/json", "text/plain")) }, enabled = statusAvailable == true && desiredOn == false && policy?.optBoolean("managed") != true) { Text("Импорт конфигурации движка") }
         }
     }
+}
+
+@Composable
+internal fun VpnStatusSummary(status: JSONObject, available: Boolean?, accountPolicyBlocked: Boolean) {
+    val known = status.optBoolean("engineStateKnown")
+    val active = status.optBoolean("engineActive")
+    val phase = status.optString("phase")
+    val checking = "Проверяем состояние VPN"
+    val label = when {
+        available == null -> checking
+        !available -> "Состояние VPN временно недоступно"
+        phase == "NeedsUnlock" -> "Нужно разблокировать телефон"
+        status.opt("desiredOn") == false -> when {
+            known && active -> "Останавливаем VPN"
+            !known -> checking
+            accountPolicyBlocked -> "Ожидаем конфигурацию от сервера"
+            else -> "Отключён"
+        }
+        status.opt("desiredOn") != true -> checking
+        else -> when (phase) {
+            "Online" -> if (known && active) "Работает" else checking
+            "Degraded" -> if (known && active) "Частично работает" else checking
+            "BlockedByPolicy", "Blocked" -> "Доступ ограничен политикой"
+            "NoNetwork" -> if (status.optString("reason") == "captive_portal") "Войдите в сеть Wi-Fi" else "Ожидание сети"
+            "Recovering" -> "Восстанавливаем соединение"
+            "Starting", "Connecting" -> "Подключаемся"
+            "NeedsPermission" -> "Нужно разрешение Android на VPN"
+            "NeedsAction" -> "Требуется действие пользователя"
+            "NeedsLogin" -> "Требуется вход в аккаунт"
+            else -> checking
+        }
+    }
+    Text(label, Modifier.testTag("vpn-status").semantics { liveRegion = LiveRegionMode.Polite })
 }
 
 @Composable
