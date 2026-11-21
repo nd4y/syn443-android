@@ -245,7 +245,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         if(running==null || ready==null) {nativeRunning=true;nativeReady=false;nativeScope="";return}
         nativeRunning=running
         if(nativeRunning && raw.optLong("workAgeMs",0)>35_000) {retireOwner=true;return}
-        val refreshHome = mode==NetworkMode.HOME_WIFI && raw.optLong("homeProofUntilBootMs",0)!=homeProofUntil
+        val home = mode == NetworkMode.HOME_WIFI
+        val refreshHome = home && (homeProofUntil <= now || safeInteger(raw,"homeProofUntilBootMs") != homeProofUntil)
         if(reportedPolicy!=policyScope || !ready || refreshHome) {
             nativeReady=false;nativeScope=""
             groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
@@ -395,6 +396,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val current= context ?: return
         if(retireOwner || !advanceClock(now))return
         if(drainingSince?.let {now-it>35_000}==true) {retireOwner=true;return}
+        if(mode == NetworkMode.HOME_WIFI && homeProofUntil <= now)return
         if(!nativeReady || nativeScope.isEmpty() || nativeRunning || drainingSince!=null || pending!=null || now-lastCommandAt<1000)return
         pendingAdmission?.let {
             if(now-it.startedAt<=12_000)return

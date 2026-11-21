@@ -112,6 +112,7 @@ if mode=="emulator":
     assert {
         ('io.syn443.android.PhysicalLinkDetailsTest', 'homeProofStatusRequiresCurrentWiFiObservation'),
         ('io.syn443.android.HomeWiFiProofTest', 'actualTLSRequiresBoundSocketTrustedHostnameAndMatchingLeafPin'),
+        ('io.syn443.android.ManagedAdaptiveRoutesTest', 'nativeHomeAdmissionNeedsTheExactLiveDeadlineAcrossRenewalAndExpiry'),
         ('io.syn443.android.HomeWiFiProofTest', 'staleHomeProofCannotCrossLinkAuthorityTimeOrRetryBudget'),
     } <= set(identities), "Missing signed home Wi-Fi proof outcomes"
     required_storage_outcomes = {
