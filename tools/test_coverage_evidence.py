@@ -629,10 +629,12 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual(len(cases), 3)
         gate = compile(ast.Module(body=[declaration, block], type_ignores=[]), '<packaged-chain>', 'exec')
         projection = ('io.syn443.android.RouteSnapshotTest', 'currentFailedProbeOnlyShowsKnownCauseForItsStage')
-        exec(gate, {'mode':'emulator', 'identities':cases | {projection}})
-        for case in cases:
+        display = ('io.syn443.android.RouteFailureLabelTest', 'routeScreenExplainsEachFailureAndClearsItAfterRecovery')
+        outcomes = cases | {projection, display}
+        exec(gate, {'mode':'emulator', 'identities':outcomes})
+        for case in outcomes:
             with self.assertRaises(AssertionError):
-                exec(gate, {'mode':'emulator', 'identities':cases - {case} | {('other', case[1]), projection}})
+                exec(gate, {'mode':'emulator', 'identities':outcomes - {case} | {('other', case[1])}})
 
     def test_netbird_report_roots_require_each_actual_outcome_and_exact_sources(self):
         root = Path(__file__).resolve().parent.parent
