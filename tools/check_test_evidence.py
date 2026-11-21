@@ -987,6 +987,13 @@ if mode == "emulator":
         methods = re.findall(r"@Test\s+fun\s+(\w+)", source)
         assert len(methods) == len(set(methods)) == len(expected) and set(methods) == expected, "NetBird report source inventory drift"
 
+PACKAGED_CHAIN_REQUIRED = {
+    ("io.syn443.android.PackagedProxyChainTest", "packagedHttpEntryCarriesVlessToBannerTarget"),
+    ("io.syn443.android.PackagedProxyChainTest", "refusedHttpEntryNeverFallsBackToVlessOrTarget"),
+}
+if mode == "emulator":
+    assert PACKAGED_CHAIN_REQUIRED <= set(identities), "Missing packaged proxy chain outcomes"
+
 JOURNAL_REQUIRED = {
     "observability": {
         "io.syn443.observability.StructuredEventTest": (

@@ -121,7 +121,8 @@
       "status": "partial",
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/private-path-construction.md"
+        "docs/private-path-construction.md",
+        "docs/TESTING.md#packaged-http-and-vless-chain"
       ],
       "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests.",
       "remainingScope": "Complete capabilities/version/SBOM/release/update and physical acceptance."
