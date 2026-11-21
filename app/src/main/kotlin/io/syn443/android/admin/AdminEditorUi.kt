@@ -28,7 +28,7 @@ internal class AdminEditorModel(
     init {
         require(device.isEmpty() || editorId.matches(device))
         require(privateDraftRevision in 0..EDITOR_MAX_INTEGER && desiredHeadRevision in 0..EDITOR_MAX_INTEGER && localRevision in 0..EDITOR_MAX_INTEGER)
-        require(pages.size<=64 && pages.all {it.length<=8192 && editorUnicode(it)})
+        require(pages.size<=EDITOR_MAX_PAGES && pages.all {it.length<=EDITOR_PAGE_SIZE && editorUnicode(it)})
         require(documentBinding.isEmpty() || editorBinding.matches(documentBinding))
         require(pages.isEmpty() || documentBinding.isNotEmpty())
         require(parents.size<=20)
@@ -96,4 +96,16 @@ internal fun editorUnicode(value:String):Boolean {
         at++
     }
     return true
+}
+
+internal const val EDITOR_PAGE_SIZE = 8192
+internal const val EDITOR_MAX_PAGES = 64
+
+/** Splitting changes the viewport only. The UTF-16 sequence sent on local save stays identical. */
+internal fun editorPageSplitPoint(value: String): Int? {
+    val middle = value.length / 2
+    val cut = if (middle in value.indices && value[middle].isLowSurrogate()) {
+        if (middle == 1) middle + 1 else middle - 1
+    } else middle
+    return cut.takeIf { it in 1 until value.length }
 }

@@ -27,6 +27,7 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
     val pages=remember(model.device,model.documentBinding) {model.pages.toMutableStateList()}
     var dirty by remember(model.device,model.documentBinding) {mutableStateOf(false)}
     var page by remember(model.device,model.documentBinding) {mutableIntStateOf(0)}
+    var pageInputError by remember(model.device,model.documentBinding,page) {mutableStateOf("")}
     var confirmation by remember(model.device,model.documentBinding) {mutableStateOf<EditorConfirmation?>(null)}
     val originalReviewDeadline=remember(model.reviewBinding) {model.reviewDeadlineElapsed}
     val reviewDocumentBinding=remember(model.reviewBinding) {model.documentBinding}
@@ -91,12 +92,42 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
                 TextButton(onClick={if(page<pages.lastIndex)page++},enabled=page<pages.lastIndex,modifier=Modifier.testTag("editor-page-next")) {Text("Следующая")}
             }}
             item {OutlinedTextField(value=pages[page],onValueChange={value->
-                if(editable && value.length<=8192 && editorUnicode(value) && value!=pages[page]) {
-                    pages[page]=value;confirmation=null;localError="";reviewInvalidated=true
-                    if(!dirty){dirty=true;actions.edited()}
+                if(editable) {
+                    pageInputError = when {
+                        value.length > EDITOR_PAGE_SIZE -> "Текст не поместился на странице. Вставьте его частями."
+                        !editorUnicode(value) -> "В тексте есть неполный символ. Повторите ввод."
+                        else -> ""
+                    }
+                    if(pageInputError.isEmpty() && value!=pages[page]) {
+                        pages[page]=value;confirmation=null;localError="";reviewInvalidated=true
+                        if(!dirty){dirty=true;actions.edited()}
+                    }
                 }
             },readOnly=!editable,modifier=Modifier.fillMaxWidth().testTag("editor-page-input"),
+                isError=pageInputError.isNotEmpty(),
+                supportingText=if(pageInputError.isEmpty()) null else {
+                    { Text(pageInputError,Modifier.testTag("editor-page-error")) }
+                },
                 label={Text("Страница предложения ${page+1}")},textStyle=MaterialTheme.typography.bodySmall.copy(fontFamily=FontFamily.Monospace),minLines=8,maxLines=16)}
+            if(editable && (pages[page].length == EDITOR_PAGE_SIZE || pageInputError.isNotEmpty()) && pages[page].length >= 2) {
+                val originalPage = pages[page]
+                val index = page
+                val split = editorPageSplitPoint(originalPage)
+                if (split != null && pages.size < EDITOR_MAX_PAGES) item {
+                    OutlinedButton(onClick={
+                        if (editorEditable(latestModel) && !editorBusy(latestModel) &&
+                            latestModel.documentBinding == model.documentBinding && page == index &&
+                            pages.getOrNull(index) == originalPage && pages.size < EDITOR_MAX_PAGES) {
+                            pages[index] = originalPage.substring(0, split)
+                            pages.add(index + 1, originalPage.substring(split))
+                            pageInputError = ""
+                        }
+                    },modifier=Modifier.testTag("editor-split-page")) {Text("Разделить страницу для ввода")}
+                } else if (pages.size == EDITOR_MAX_PAGES) item {
+                    Text("Достигнут предел в 64 страницы. Чтобы освободить место, сократите текст.",
+                        Modifier.testTag("editor-page-limit"))
+                }
+            }
             if(model.readOnly)item {Text("Для этой конфигурации доступно только чтение.",Modifier.testTag("editor-read-only"))}
             if(model.phase !in setOf(AdminEditorPhase.UNCERTAIN,AdminEditorPhase.CONFLICT,AdminEditorPhase.NEEDS_REAUTH,AdminEditorPhase.LIMITED,AdminEditorPhase.UNAVAILABLE)) {
                 item {Button(onClick={if(dirty && editable)actions.saveLocal(Collections.unmodifiableList(ArrayList(pages)))},
