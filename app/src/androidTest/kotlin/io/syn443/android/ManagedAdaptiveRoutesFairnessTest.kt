@@ -102,14 +102,14 @@ class ManagedAdaptiveRoutesFairnessTest {
             if (code=="check_failed") report.put("checkCode", "dial_failed").put("checkCompletedBootMs", now)
             controller.report(report, now, dispatch)
         }
-        fun verified(probe: JSONObject, now: Long): JSONObject {
+        fun verified(probe: JSONObject, now: Long, latency: Long = 20): JSONObject {
             val before = commands.size
-            controller.report(result(probe, "verified").put("probeMs", 20).put("receipt", Policy.hash(probe.getString("request"))), now, dispatch)
+            controller.report(result(probe, "verified").put("probeMs", latency).put("receipt", Policy.hash(probe.getString("request"))), now, dispatch)
             return commands.drop(before).single()
         }
-        fun selected(probe: JSONObject, now: Long) {
-            assertEquals("commit", verified(probe, now).getString("command"))
-            controller.report(result(probe, "selected").put("probeMs", 20).put("receipt", Policy.hash(probe.getString("request"))).put("groupSelected", true), now, dispatch)
+        fun selected(probe: JSONObject, now: Long, latency: Long = 20) {
+            assertEquals("commit", verified(probe, now, latency).getString("command"))
+            controller.report(result(probe, "selected").put("probeMs", latency).put("receipt", Policy.hash(probe.getString("request"))).put("groupSelected", true), now, dispatch)
         }
         fun rebind(now: Long) {
             scope = scope.copy(network=scope.network+1)

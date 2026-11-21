@@ -220,23 +220,41 @@ class AssignedPolicyRuntimeContinuityTest {
         AssignedPolicyContinuityFixture(config()).use { f ->
         ManagedAdaptiveRoutesFairnessTest.Harness(f.raw, f.binding()).use { h ->
             h.ready(1000)
-            val a=checkNotNull(h.tick(1000)); h.selected(a, 1000)
+            val a=checkNotNull(h.tick(1000)); h.selected(a, 1000, 100)
             val scope=h.policyScope
+            val current = checkNotNull(h.tick(241_000))
+            assertEquals(a.getJSONArray("hops").toString(), current.getJSONArray("hops").toString())
+            h.selected(current, 241_000, 100)
             f.renew(301_000); h.bind(f.binding(), 301_000)
             assertEquals(scope, h.policyScope)
-            val b=checkNotNull(h.tick(302_000)); assertEquals("hop-001", b.getJSONArray("hops").getString(0))
-            val commit=h.verified(b, 302_000); assertEquals("commit", commit.getString("command"))
+            val requests = mutableSetOf<String>()
+            for (at in listOf(302_000L, 307_000L)) {
+                val probe = checkNotNull(h.tick(at))
+                assertEquals("hop-001", probe.getJSONArray("hops").getString(0))
+                assertTrue(requests.add(probe.getString("request")))
+                val decision = h.verified(probe, at)
+                assertEquals("discard", decision.getString("command"))
+                val discarded = h.status().put("request", probe.getString("request")).put("group", probe.getString("group"))
+                    .put("hops", probe.getJSONArray("hops")).put("code", "discarded").put("groupSelected", true)
+                    .put("receipt", decision.getString("receipt")).put("probeMs", 20)
+                h.acknowledge(discarded, at)
+                assertEquals("hop-000", h.view().getJSONArray("routes").getJSONObject(0).getJSONArray("measuredPath").getString(0))
+            }
+            val b=checkNotNull(h.tick(312_000))
+            assertTrue(requests.add(b.getString("request")))
+            assertEquals("hop-001", b.getJSONArray("hops").getString(0))
+            val commit=h.verified(b, 312_000); assertEquals("commit", commit.getString("command"))
             assertEquals("hop-000", h.view().getJSONArray("routes").getJSONObject(0).getJSONArray("measuredPath").getString(0))
-            f.renew(303_000); h.bind(f.binding(), 303_000)
+            f.renew(313_000); h.bind(f.binding(), 313_000)
             assertEquals(scope, h.policyScope)
-            assertNull(h.tick(303_000)) // verified B remains pending its one native ACK.
+            assertNull(h.tick(313_000)) // verified B remains pending its one native ACK.
             val ack=h.status().put("request", b.getString("request")).put("group", b.getString("group"))
                 .put("hops", JSONArray(b.getJSONArray("hops").toString())).put("code", "selected").put("groupSelected", true)
                 .put("receipt", commit.getString("receipt")).put("probeMs", 20)
-            h.acknowledge(ack, 303_000)
+            h.acknowledge(ack, 313_000)
             assertEquals("hop-001", h.view().getJSONArray("routes").getJSONObject(0).getJSONArray("measuredPath").getString(0))
             val count=h.commands.size
-            h.acknowledge(ack, 303_000); assertNull(h.tick(304_000))
+            h.acknowledge(ack, 313_000); assertNull(h.tick(314_000))
             assertEquals(count, h.commands.size); assertTrue(h.view().getBoolean("requiredReady"))
             assertFalse(h.controller.requiresRetirement())
         }
