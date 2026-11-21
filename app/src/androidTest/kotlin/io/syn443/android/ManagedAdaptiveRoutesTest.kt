@@ -356,8 +356,8 @@ class ManagedAdaptiveRoutesTest {
         }
     }
 
-    @Test fun latencySwitchRequiresTwoFreshSignificantComparableSamples() {
-        for ((baseline, candidate) in listOf(100L to 79L, 60L to 44L)) {
+    @Test fun latencySwitchRequiresThreeFreshSignificantComparableSamples() {
+        for ((baseline, candidate) in listOf(100L to 80L, 60L to 44L)) {
             Harness(config()).use { h ->
                 val first = prepareHealthy(h, baseline)
                 val reserve = checkNotNull(h.tick(301000))
@@ -367,13 +367,18 @@ class ManagedAdaptiveRoutesTest {
                 val second = checkNotNull(h.tick(306000))
                 assertEquals(reserve.getJSONArray("hops").toString(), second.getJSONArray("hops").toString())
                 assertNotEquals(reserve.getString("request"), second.getString("request"))
-                h.selected(second, 306000, candidate)
+                assertEquals("discard",h.measured(second,306000,candidate).getString("command"))
+                h.report(h.result(second,"discarded",latency=candidate,selected=true),306000)
+                val third=checkNotNull(h.tick(311000))
+                assertEquals(second.getJSONArray("hops").toString(),third.getJSONArray("hops").toString())
+                assertNotEquals(second.getString("request"),third.getString("request"))
+                h.selected(third,311000,candidate)
                 val view = h.view().getJSONArray("routes").getJSONObject(0)
                 assertEquals(candidate, view.getLong("latencyMs"))
                 assertEquals(second.getJSONArray("hops").toString(), view.getJSONArray("measuredPath").toString())
             }
         }
-        for ((baseline, candidate) in listOf(100L to 80L, 60L to 45L)) {
+        for ((baseline, candidate) in listOf(100L to 81L, 60L to 45L)) {
             Harness(config()).use { h ->
                 val first = prepareHealthy(h, baseline)
                 val reserve = checkNotNull(h.tick(301000))
@@ -382,6 +387,39 @@ class ManagedAdaptiveRoutesTest {
                 val confirmation = checkNotNull(h.tick(306000))
                 assertEquals(first.getJSONArray("hops").toString(), confirmation.getJSONArray("hops").toString())
             }
+        }
+    }
+
+    @Test fun staleBaselineAndInterruptedCandidateKeepTheIncumbent() {
+        fun hops(probe:JSONObject)=probe.getJSONArray("hops").toString()
+        Harness(config()).use { h ->
+            val active=prepareHealthy(h)
+            // Waking from idle must measure the old route before exploring.
+            val check=checkNotNull(h.tick(501000))
+            assertEquals(hops(active),hops(check))
+            h.selected(check,501000,100)
+        }
+        Harness(config()).use { h ->
+            val active=prepareHealthy(h)
+            // Start within the baseline window and finish outside it.
+            val reserve=checkNotNull(h.tick(359000))
+            assertNotEquals(hops(active),hops(reserve))
+            assertEquals("discard",h.measured(reserve,362000,10).getString("command"))
+            h.report(h.result(reserve,"discarded",selected=true),362000)
+            val check=checkNotNull(h.tick(367000))
+            assertEquals(hops(active),hops(check))
+        }
+        Harness(config()).use { h ->
+            val active=prepareHealthy(h)
+            val reserve=checkNotNull(h.tick(301000))
+            assertEquals("discard",h.measured(reserve,301000,40).getString("command"))
+            h.report(h.result(reserve,"discarded",selected=true),301000)
+            val retry=checkNotNull(h.tick(306000))
+            assertEquals(hops(reserve),hops(retry))
+            h.report(h.result(retry,"probe_unavailable",selected=true),306000)
+            val check=checkNotNull(h.tick(311000))
+            assertEquals(hops(active),hops(check))
+            assertEquals(hops(active),h.view().getJSONArray("routes").getJSONObject(0).getJSONArray("measuredPath").toString())
         }
     }
 

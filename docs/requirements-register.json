@@ -951,8 +951,13 @@
     {
       "id": "AUTO-06",
       "text": "Начальные параметры для пилота: деградация после трёх релевантных ошибок из последних пяти проверок, минимум 60 секунд удержания исправного пути, три успешные проверки для возврата. Внутри сопоставимых классов стабильности и энергозатрат переключение ради latency допускается при улучшении не менее 20% и достаточной свежести результатов. Жёсткая потеря физической сети или нарушение обязательной политики обходят hold-down. Параметры входят в decision policy и уточняются испытаниями.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveRoutesTest.kt"
+      ],
+      "implementationScope": "The adaptive Android coordinator applies a sixty-second healthy-path hold, three independent successful measurements and a fresh comparable latency baseline. Confirmed failure and replacement use a separate recovery path.",
+      "remainingScope": "The rolling three-of-five degradation policy, remotely selectable thresholds, full comparison of energy and stability classes, and field validation remain open."
     },
     {
       "id": "AUTO-07",

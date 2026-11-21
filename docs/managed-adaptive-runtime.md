@@ -48,8 +48,10 @@ out-of-range coordinator clocks require actual host retirement.
 Initial recovery takes priority over maintenance. The coordinator bounds attempts
 to8/minute and128/hour across its groups and context rebinds. Healthy metered
 maintenance confirms the current route. Optional unmetered exploration requires
-adequate battery and no power-saving mode. A healthy path changes for latency
-only after two fresh comparable measurements improve by both20% and15ms. Native
+adequate battery and no power-saving mode. The active path stays selected for at least 60 seconds during voluntary optimization.
+A reserve must improve latency by at least 20% and more than 15 ms on three consecutive
+checks against a fresh baseline. A stale baseline schedules a check of the current path.
+An independently confirmed outage can use a freshly verified replacement immediately. Native
 `probeMs` excludes adapter construction time. These are local coordinator bounds,
 not a claim that all SDK/telemetry/diagnostic work already shares one governor.
 
