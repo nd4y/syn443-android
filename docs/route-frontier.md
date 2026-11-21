@@ -84,3 +84,14 @@ The client dials through the configured outbound, verifies TLS and checks the
 literal IPv4 or IPv6 address. Status keeps a mismatched address separate from
 an invalid response and omits both addresses. The result depends on the
 approved endpoint reporting the peer address correctly.
+
+## Sparse Wi-Fi recovery
+
+With no selected path, a page of 64 ineligible positions advances the cursor.
+The next CPU-only page becomes eligible after one second, then two, four, eight
+and at most sixteen seconds during a run of empty pages. Other due groups get
+their turn. A genuinely exhausted empty graph retains the ordinary idle delay.
+A pass containing only fenced paths waits for its earliest known retry deadline.
+The native probe budget, half-open checks and selection receipt still apply.
+The Android test fixture puts the sole Wi-Fi candidate at position 193 and checks
+that selection takes exactly one network probe and a current native receipt.

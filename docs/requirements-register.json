@@ -1306,8 +1306,12 @@
     {
       "id": "BAD-07",
       "text": "При нехватке кандидатов допускается ограниченный досрочный recheck самого перспективного transient-failed пути. Это не снимает policy/security block и не запускает массовый обход cooldown. Неизвестные кандидаты должны получить шанс до повторного многократного теста заведомо отказавших.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md#sparse-wi-fi-recovery"
+      ],
+      "implementationScope": "The adaptive client advances through untested eligible paths before rescanning fenced candidates. A fully fenced pass waits until its first retry deadline.",
+      "remainingScope": "A separately bounded early trial for an independently attributed transient path failure before its ordinary cooldown expires."
     },
     {
       "id": "BAD-08",
