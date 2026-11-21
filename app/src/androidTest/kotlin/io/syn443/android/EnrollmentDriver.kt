@@ -18,11 +18,21 @@ import javax.net.ssl.TrustManagerFactory
 /** Test APK only. Ordinary runs retain AndroidJUnitRunner; explicit fixture runs enroll by own UID. */
 class EnrollmentDriver:AndroidJUnitRunner() {
     private var fixtureArguments:Bundle?=null
+    private var observeCameraPermission = false
     override fun onCreate(args:Bundle?) {
+        observeCameraPermission = args?.getString("observeCameraPermission") == "true"
         fixtureArguments=args?.takeIf {it.containsKey("fixturePort")}
         super.onCreate(args)
     }
     override fun onStart() {
+        if (observeCameraPermission) {
+            val granted = targetContext.checkSelfPermission(android.Manifest.permission.CAMERA) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            finish(android.app.Activity.RESULT_OK, Bundle().apply {
+                putString("cameraPermission", if (granted) "granted" else "denied")
+            })
+            return
+        }
         if(fixtureArguments==null) {super.onStart();return}
         val arguments=checkNotNull(fixtureArguments)
         var stage="preflight"

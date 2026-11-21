@@ -121,8 +121,14 @@ adb -e uninstall io.syn443.android.test
 adb -e uninstall io.syn443.android
 adb -e install -r app/build/outputs/apk/debug/app-debug.apk
 adb -e install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb -e shell appops set io.syn443.android ACTIVATE_VPN allow
 python3 tools/run_invitation_camera_permission.py
+# Restore a fresh package, UID permissions and data for the VPN scenarios
+# after the real denial. Android 10 does not expose the newer flag-reset CLI.
+adb -e uninstall io.syn443.android.test
+adb -e uninstall io.syn443.android
+adb -e install -r app/build/outputs/apk/debug/app-debug.apk
+adb -e install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -e shell appops set io.syn443.android ACTIVATE_VPN allow
 # Fail early on the new OS scenarios. Missing old outcomes can never pass the
 # final evidence gate; successful runs still execute every previous scenario.
 if ! python3 tools/run_route_lifecycle.py; then
