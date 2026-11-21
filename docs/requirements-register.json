@@ -2022,8 +2022,8 @@
         "docs/support-chat.md#report-a-problem",
         "app/src/androidTest/kotlin/io/syn443/android/OfflineSupportIncidentTest.kt"
       ],
-      "implementationScope": "The phone previews a minimized incident with a short reference and an allowlisted state snapshot, saves it offline and sends the exact approved text to the authenticated owner conversation when chat reconnects.",
-      "remainingScope": "Cross-conversation administrator lookup by incident reference, a corroborated last-known-good engine and policy pair, and physical pilot acceptance."
+      "implementationScope": "The phone previews a minimized incident with a short reference and an allowlisted state snapshot, saves it offline and sends the exact approved text to the authenticated owner conversation when chat reconnects. The Android admin inbox can retrieve one exact short reference under the live server grant.",
+      "remainingScope": "A corroborated last-known-good engine and policy pair and physical pilot acceptance."
     },
     {
       "id": "OWN-04",

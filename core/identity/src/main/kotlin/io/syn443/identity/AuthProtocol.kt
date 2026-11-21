@@ -416,7 +416,7 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     /** One bounded chunk/operation; the controller rechecks the account before every call. */
     fun chat(action:String,body:String,current:SessionReply,scope:IdentityScope):String=checked {
         bound(current)
-        require(action in setOf("self","inbox","messages","send","read","uploads/begin","uploads/part","uploads/status","uploads/complete","uploads/cancel","download"))
+        require(action in setOf("self","inbox","incident/lookup","messages","send","read","uploads/begin","uploads/part","uploads/status","uploads/complete","uploads/cancel","download"))
         require(body.toByteArray(Charsets.UTF_8).size<=if(action=="uploads/part")360_448 else 32_768)
         require(Canonical.parse(body) is JsonObject)
         require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)

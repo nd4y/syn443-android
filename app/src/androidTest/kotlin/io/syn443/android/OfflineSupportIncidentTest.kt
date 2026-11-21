@@ -6,6 +6,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.core.app.ApplicationProvider
+import io.syn443.android.chat.AdminIncidentLookup
+import io.syn443.android.chat.incidentResult
 import io.syn443.android.chat.ChatLimits
 import io.syn443.android.chat.ChatOutbox
 import io.syn443.android.chat.IncidentPreview
@@ -84,6 +86,32 @@ class OfflineSupportIncidentTest {
             ChatOutbox.erase(context, name)
             context.deleteDatabase(File(context.noBackupFilesDir, "$name.db").path)
         }
+    }
+
+    @Test fun administratorLookupWillNotDisplayAWrongOrLateIncident() {
+        val reference = "SYN-0123456789ab"
+        val deferred = kotlinx.coroutines.CompletableDeferred<JSONObject>()
+        val started = java.util.concurrent.atomic.AtomicInteger()
+        fun result(ref:String) = JSONObject().put("reference",ref).put("state","found")
+            .put("report",JSONObject().put("text","Обращение $ref\nСлой сбоя - TLS").put("createdAt",1700000000))
+        assertThrows(Exception::class.java) { incidentResult(reference, result("SYN-111111111111")) }
+        assertThrows(Exception::class.java) { incidentResult(reference, result(reference).put("state","ambiguous")) }
+        compose.setContent { MaterialTheme { AdminIncidentLookup { started.incrementAndGet(); deferred.await() } } }
+        val field = compose.onNodeWithTag("incident-reference")
+        val submit = compose.onNodeWithTag("incident-find")
+        field.performTextReplacement(reference+"0")
+        submit.assertIsNotEnabled()
+        field.performTextReplacement(reference)
+        submit.performClick()
+        compose.waitUntil(5_000) { started.get() == 1 }
+        field.performTextReplacement("SYN-000000000001")
+        deferred.complete(result(reference))
+        compose.waitForIdle()
+        compose.onNodeWithTag("incident-result").assertDoesNotExist()
+        field.performTextReplacement(reference)
+        submit.performClick()
+        compose.onNodeWithTag("incident-result").assertTextContains("Слой сбоя - TLS",substring=true)
+        submit.assertIsEnabled()
     }
 
     @Test fun previewRequiresExplicitSubmissionAndAllowsCancelWithoutAnAccount() {

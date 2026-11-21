@@ -356,6 +356,9 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
             modifier=Modifier.testTag("chat-retry"),
         ) {Text("Повторить подключение")}
         Text("Сообщения доступны администраторам сервиса. Файлы до 25 МБ.",style=MaterialTheme.typography.bodySmall)
+        if (visible && admin && conversation.isEmpty()) client?.let { api -> key(api) {
+            AdminIncidentLookup { ref -> api.objectCall("incident/lookup", JSONObject().put("reference", ref)) }
+        } }
         if(admin) {
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 Button(onClick={selectConversation(""); run { if (!inbox.historical) refreshInbox(false) }},

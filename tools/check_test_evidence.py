@@ -119,6 +119,7 @@ if mode=="emulator":
     assert {("io.syn443.android.OfflineSupportIncidentTest", name) for name in (
         "snapshotOnlyContainsClosedFactsAndDropsObsoleteEngineEvidence",
         "encryptedOfflineReportSurvivesReopenAndOnlyBindsOnceToSelf",
+        "administratorLookupWillNotDisplayAWrongOrLateIncident",
         "previewRequiresExplicitSubmissionAndAllowsCancelWithoutAnAccount",
     )} <= set(identities), "Missing offline incident outcomes"
     assert {("io.syn443.android.ManagedNetworkModeTest", name) for name in (
