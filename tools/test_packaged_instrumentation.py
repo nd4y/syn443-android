@@ -1,4 +1,6 @@
 import copy
+from contextlib import redirect_stdout
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -21,6 +23,18 @@ END = 'INSTRUMENTATION_CODE: -1\n'
 
 
 class PackagedInstrumentationTest(unittest.TestCase):
+    def test_failure_location_contains_only_the_current_public_test_line(self):
+        stack = ('INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: private fixture message\n'
+                 '    at io.syn443.android.AnotherTest.other(AnotherTest.kt:92)\n'
+                 '    at io.syn443.android.ExampleTest.firstCase(ExampleTest.kt:93)\n'
+                 '    at io.syn443.android.ExampleTest.secondCase(Other.kt:94)\n'
+                 '    at io.syn443.android.ExampleTest.secondCase(ExampleTest.kt:42)\n')
+        log = io.StringIO()
+        with redirect_stdout(log):
+            suite = parse_run(START + PASS + SECOND + stack + event('secondCase', 2, -2) + END)
+        self.assertEqual(log.getvalue().splitlines(), ['failure: io.syn443.android.ExampleTest.secondCase', 'Test source line: 42'])
+        self.assertEqual(suite[1][0].get('message'), 'AndroidJUnitRunner status -2')
+
     def test_keeps_all_real_statuses(self):
         for code, expected in [(0, None), (-1, 'error'), (-2, 'failure'), (-3, 'skipped'), (-4, 'skipped')]:
             with self.subTest(code=code):
