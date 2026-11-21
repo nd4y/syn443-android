@@ -1420,8 +1420,13 @@
     {
       "id": "ROUTE-02",
       "text": "Панель и клиент предоставляют объяснение маршрута для введённого пользователем домена/IP или приложения: совпавшее правило, DNS, цепочка и exit. Тест запускается явно; история пользовательских доменов не собирается автоматически.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/LocalRouteExplanation.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManualRouteControl.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManualRouteExplanationTest.kt"
+      ],
+      "remainingScope": "Local manual evaluation identifies compiled rule positions, configured DNS and ordered static detours. Author rule IDs, live group member, observed exit and predicates that depend on native runtime state remain open."
     },
     {
       "id": "ROUTE-03",

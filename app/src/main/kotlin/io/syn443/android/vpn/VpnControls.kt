@@ -218,6 +218,18 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
             val overlay = status.optJSONObject("netbird")
             if (overlay != null) NetBirdControls(overlay) { method, arg -> command(method, arg) }
             RouteControls(status){method,arg->command(method,arg)}
+            if (visible && statusAvailable == true) {
+                key(status.optString("configRevision"), status.optLong("generation"), status.optLong("networkEpoch"),
+                    policy?.optString("source"), policy?.optString("phase"), policy?.optString("activeRevision"),
+                    policy?.optString("desiredRevision"), policy?.optString("activationGeneration")) {
+                    ManualRouteControl { query ->
+                        withContext(Dispatchers.IO) {
+                            context.contentResolver.call(controlUri, "route-explain", query, null)
+                                ?.takeIf { it.getBoolean("ok") }?.getString("description")
+                        }
+                    }
+                }
+            }
             Button(onClick = {
                 resourcesBusy = true
                 scope.launch {
