@@ -15,6 +15,8 @@ import time
 import xml.etree.ElementTree as ET
 from process_failure_evidence import FailureEvidence, MAX_COUNT, reverse_snapshot
 
+from recovery_slo import Campaign, DEADLINE_MS, RecoveryTimeout
+
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = 'io.syn443.android'
 URI = 'content://io.syn443.control'
@@ -90,7 +92,7 @@ def await_condition(predicate, timeout=110):
                 # No extra transport, probe or polling worker is introduced.
                 ACTIVE_OBSERVATION.sample()
         time.sleep(1)
-    raise AssertionError('Process recovery deadline exceeded')
+    raise RecoveryTimeout('Process recovery deadline exceeded')
 
 
 class Proxy(socketserver.BaseRequestHandler):
@@ -233,6 +235,7 @@ def main():
     global ACTIVE_OBSERVATION
     hardware = adb('shell', 'getprop', 'ro.hardware').decode().strip()
     assert hardware in ('ranchu', 'goldfish'), 'Refuse to overwrite a physical device configuration'
+    campaign = Campaign()
     suite = ET.Element('testsuite', name='SYN443 external process recovery')
     out = ROOT / 'app/build/outputs/androidTest-results/external/TEST-vpn-process.xml'
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -307,16 +310,28 @@ def main():
                 if name.startswith('twoHop'):
                     assert ingress.progress > 0 and proxy.progress > 0
                 elif name.startswith(('ingress', 'egress')):
-                    failed = ingress if name.startswith('ingress') else proxy
+                    hop = 'ingress' if name.startswith('ingress') else 'egress'
+                    failed = ingress if hop == 'ingress' else proxy
                     try:
                         failed.allowed = False
                         await_condition(lambda: call('status').get('phase') == 'Recovering', timeout=35)
                         assert call('status')['desiredOn'] and pid(':engine') == native
-                        progress = proxy.progress
+                        ingress_before, egress_before = ingress.progress, proxy.progress
+                        with campaign.measure(hop):
+                            failed.allowed = True
+                            await_condition(
+                                lambda: ingress.progress > ingress_before and proxy.progress > egress_before
+                                and call('status').get('phase') == 'Online',
+                                timeout=DEADLINE_MS / 1000,
+                            )
+                            state = call('status')
+                            assert state['phase'] == 'Online' and state['desiredOn']
+                            assert state['generation'] == generation and pid(':engine') == native
+                    except Exception:
+                        campaign.setup_failed(hop)
+                        raise
                     finally:
                         failed.allowed = True
-                    await_condition(lambda: call('status').get('phase') == 'Online' and proxy.progress > progress)
-                    assert pid(':engine') == native
                 elif name.startswith('ui'):
                     ui = pid('')
                     assert ui

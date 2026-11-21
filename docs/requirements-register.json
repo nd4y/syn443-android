@@ -2793,8 +2793,15 @@
     {
       "id": "ENG-07",
       "text": "Измерение SLO фиксирует class сценария до запуска, event start, наличие разрешённого пути, deadlines, denominator и percentile rule. Known-good handover считается от physical network usable, cold search - от фактов пригодной сети и начала полного плана; все timeout/ошибки остаются в отчёте. Нельзя постфактум переименовать неудачный known-good кейс в cold. Целевые p95 считают nearest-rank на объявленной выборке; заглушенный check endpoint и outage внешнего сервиса отражаются отдельно.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "tools/run_vpn_process_faults.py",
+        "tools/recovery_slo.py",
+        "tools/test_recovery_slo.py",
+        "docs/route-lifecycle.md#measuring-proxy-recovery-in-actions"
+      ],
+      "implementationScope": "The emulator records both predeclared proxy-hop restorations, their monotonic time to fresh two-hop traffic and original VPN state, all misses, and nearest-rank p95.",
+      "remainingScope": "Measure known-config start, physical Wi-Fi handover, cold discovery and emergency overlay under their separate eligibility rules and deadlines."
     },
     {
       "id": "ENG-08",
