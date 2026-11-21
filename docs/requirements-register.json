@@ -843,9 +843,13 @@
     {
       "id": "OVL-07",
       "text": "Общий UI/health API показывает provider, сеть, управление, data plane, маршруты и фактический путь в пределах capabilities. В 1.0 данные отдаёт только NetBird; planned provider возвращает not_implemented и не получает ложный Connected. Контракт проверяется синтетическими моделями без реальных подключений будущих систем.",
-      "status": "planned",
+      "status": "partial",
       "evidence": [
-        "docs/netbird-diagnostic-lifecycle.md"
+        "docs/netbird-diagnostic-lifecycle.md",
+        "app/src/androidTest/kotlin/io/syn443/android/NetBirdReportTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/NetBirdPagingUiTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/NetBirdProfileStateTest.kt",
+        "docs/implementation-status.md#common-probe-failure-and-netbird-status"
       ]
     },
     {
@@ -1532,8 +1536,12 @@
     {
       "id": "CHECK-07",
       "text": "Проба недоступного check-сервера не должна выводить все прокси из работы. Назначаются независимые endpoints и критичность проверок, используются пассивные признаки реального трафика без записи его содержимого. Недоступный сервер телеметрии не означает неисправный интернет.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveRoutesTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteCheckPlanTest.kt",
+        "docs/implementation-status.md#common-probe-failure-and-netbird-status"
+      ]
     },
     {
       "id": "CHK-01",
