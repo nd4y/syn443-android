@@ -216,6 +216,17 @@ def main():
         assert not after['desiredOn'] and not pid(':engine')
         print(case.get('name')+': passed',flush=True)
 
+        # The system settings UI belongs to this case. Finish it on the running
+        # image before either independent direct-boot scenario reboots Android.
+        case=new_case('actualAlwaysOnLockdownRespectsNewerStop')
+        prepare();open_policy();toggle('Always-on VPN',True);policy_set=True;toggle('Block connections without VPN',True)
+        await_condition(lambda:call('status').get('osPolicy',{}).get('alwaysOn') and call('status').get('osPolicy',{}).get('lockdown'),40)
+        stop();before=call('status');time.sleep(8)
+        assert not pid(':engine') and not call('status')['desiredOn'] and call('status')['generation']==before['generation']
+        toggle('Block connections without VPN',False);toggle('Always-on VPN',False);policy_set=False
+        adb('shell','input','keyevent','KEYCODE_BACK');assert not call('status')['desiredOn']
+        print(case.get('name')+': passed',flush=True)
+
         case=new_case('rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles')
         prepare();before=call('status')
         adb('shell','input','keyevent','KEYCODE_HOME')
@@ -262,15 +273,6 @@ def main():
         reboot()
         observe_until = time.monotonic() + 5
         await_condition(lambda: off_after_reboot(before) and time.monotonic() >= observe_until, 30)
-        print(case.get('name')+': passed',flush=True)
-
-        case=new_case('actualAlwaysOnLockdownRespectsNewerStop')
-        prepare();open_policy();toggle('Always-on VPN',True);policy_set=True;toggle('Block connections without VPN',True)
-        await_condition(lambda:call('status').get('osPolicy',{}).get('alwaysOn') and call('status').get('osPolicy',{}).get('lockdown'),40)
-        stop();before=call('status');time.sleep(8)
-        assert not pid(':engine') and not call('status')['desiredOn'] and call('status')['generation']==before['generation']
-        toggle('Block connections without VPN',False);toggle('Always-on VPN',False);policy_set=False
-        adb('shell','input','keyevent','KEYCODE_BACK');assert not call('status')['desiredOn']
         print(case.get('name')+': passed',flush=True)
 
         case=new_case('forceStopThenPackageUpdateCannotResumeWithoutUserConnect')

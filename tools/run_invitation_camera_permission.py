@@ -19,10 +19,12 @@ def find_node(predicate):
 
 def main():
     assert adb('shell', 'getprop', 'ro.hardware').strip() in (b'ranchu', b'goldfish')
-    camera = 'android.permission.CAMERA'
-    def is_denied():
-        return re.search(rb'(?m)^\s*android\.permission\.CAMERA: granted=false\b', adb('shell', 'dumpsys', 'package', PACKAGE))
-    assert is_denied(), 'Expected a fresh emulator installation without camera permission'
+    def require_denied():
+        report = adb('shell', 'am', 'instrument', '-w', '-e', 'observeCameraPermission', 'true',
+                     PACKAGE + '.test/io.syn443.android.EnrollmentDriver')
+        assert re.findall(rb'(?m)^INSTRUMENTATION_RESULT: cameraPermission=(\w+)\s*$', report) == [b'denied']
+        assert re.findall(rb'(?m)^INSTRUMENTATION_CODE: (-?\d+)\s*$', report) == [b'-1']
+    require_denied()
     adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
     adb('shell', 'wm', 'dismiss-keyguard')
     adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.EnrollmentActivity')
@@ -35,11 +37,10 @@ def main():
         tap(prompt)
         find_node(label('QR из фото'))
         find_node(lambda n: n.get('package') == PACKAGE and n.get('class') == 'android.widget.EditText')
-        assert is_denied()
         assert b'EnrollmentActivity' in adb('shell', 'dumpsys', 'activity', 'top')
     finally:
         adb('shell', 'input', 'keyevent', 'KEYCODE_BACK')
-        adb('shell', 'pm', 'clear-permission-flags', PACKAGE, camera, 'user-set', 'user-fixed')
+    require_denied()
     suite = ET.Element('testsuite', name='InvitationCameraPermission', tests='1', failures='0')
     ET.SubElement(suite, 'testcase', classname='io.syn443.android.InvitationCameraPermission', name='systemDenialReturnsToEnrollmentWithImageAndPaste')
     path = ROOT / 'app/build/outputs/androidTest-results/external/TEST-invitation-camera-permission.xml'
