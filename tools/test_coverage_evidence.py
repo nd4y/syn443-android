@@ -235,14 +235,14 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual(1, len(declarations))
         required = ast.literal_eval(declarations[0].value)
         expected = set()
-        for name, count in [('ManagedAdaptiveSearchStatusTest', 6), ('RouteSearchStatusTest', 4)]:
+        for name, count in [('ManagedAdaptiveSearchStatusTest', 6), ('RouteSearchStatusTest', 5)]:
             path = root / 'app/src/androidTest/kotlin/io/syn443/android' / (name + '.kt')
             methods = re.findall(r'@Test\s+fun\s+(\w+)', path.read_text(encoding='utf-8'))
             self.assertEqual(count, len(methods))
             self.assertEqual(count, len(set(methods)))
             expected.update(('io.syn443.android.' + name, method) for method in methods)
-        self.assertEqual(10, len(required))
-        self.assertEqual(10, len(set(required)))
+        self.assertEqual(11, len(required))
+        self.assertEqual(11, len(set(required)))
         self.assertEqual(expected, set(required))
         self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=524\n')
         self.assertRegex(source, r'elif mode=="identity":\n(?:    [^\n]*\n)*?    minimum=249\n')
@@ -262,7 +262,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         admission = compile(ast.fix_missing_locations(ast.Module(body=guard.body[:3], type_ignores=[])), '<check-plan-admission>', 'exec')
         for mode, floor, folder, classes in [
             ('policy', 31, 'core/policy/src/test/kotlin/io/syn443/policy', {'RouteCheckProfileTest': 8, 'RouteCheckPlanPolicyTest': 3}),
-            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 9}),
+            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 10}),
         ]:
             expected = set()
             for classname, count in classes.items():
