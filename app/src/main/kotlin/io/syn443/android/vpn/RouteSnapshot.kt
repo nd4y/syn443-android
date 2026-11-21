@@ -48,6 +48,7 @@ object RouteSnapshot {
     private fun transientDial(code:String?, observation:RouteObservation) =
         code=="dial_failed" && observation.cause in transientCauses
     private var failoverAdmission:Pair<FailoverAlgorithm,FailoverAdmission>?=null
+    private var failoverShadow:FailoverShadow?=null
     private var batchSequence=0L
     private var completedReceipt=""
     private var confirmingFailure=false
@@ -148,7 +149,7 @@ object RouteSnapshot {
     }
 
     @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();searchScope=null;searches=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();checkPlans=emptyMap();lastStarted=-60_000;activationAttempt=null
-        completedReceipt="";reserveRecovery=null;failoverAdmission=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false}
+        completedReceipt="";reserveRecovery=null;failoverAdmission=null;failoverShadow=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
         return rows.any {it.configured()} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
@@ -323,11 +324,19 @@ object RouteSnapshot {
         // does not itself count as an independent path failure.
         confirmingFailure=verdict==ProbeVerdict.CONFIRMED_PATH_FAILURE || measuredFailure && skippedMeteredReserves
         val context=failoverContext(scope,algorithm)
-        val admission=failoverAdmission?.takeIf {it.first==algorithm}?.second ?: FailoverAdmission(context,plan.intent,plan.members.toSet(),comparison,
-            rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)},algorithm)
-            .also {failoverAdmission=algorithm to it}
-        val choice=admission.decide(context,batchSequence,receipt,now,selected.tag,
-            VerifiedPathSample(selected.tag,plan.intent,receipt,comparison,groupSample.elapsedMs,verdict,timings[group.id] ?: 0),reserves)
+        fun evaluator(version:FailoverAlgorithm) = FailoverAdmission(failoverContext(scope,version),plan.intent,plan.members.toSet(),comparison,
+            rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)},version)
+        val compare=algorithm==FailoverAlgorithm.CONFIRMED && !trackReserveFailures
+        if (!compare) failoverShadow=null
+        val admission=failoverAdmission?.takeIf {it.first==algorithm}?.second ?: evaluator(algorithm).also {
+            failoverAdmission=algorithm to it
+            if (compare) failoverShadow=FailoverShadow(failoverContext(scope,FailoverAlgorithm.BASELINE),
+                evaluator(FailoverAlgorithm.BASELINE))
+        }
+        val active=VerifiedPathSample(selected.tag,plan.intent,receipt,comparison,groupSample.elapsedMs,verdict,timings[group.id] ?: 0)
+        val choice=admission.decide(context,batchSequence,receipt,now,selected.tag,active,reserves)
+        if (admission.consumed(batchSequence))
+            failoverShadow?.observe(batchSequence,receipt,now,selected.tag,active,reserves,choice)
         reserveRecovery = if (trackReserveFailures && measuredFailure && transientDial(codes[group.id],groupSample) &&
             reserves.none { it.verdict==ProbeVerdict.VERIFIED } && admission.earlyReserve(context,selected.tag,now)!=null)
             ReserveRecoveryHint(selected.tag,groupSample.elapsedMs) else null
@@ -376,7 +385,9 @@ object RouteSnapshot {
                     }
                 }
         }
-        return JSONObject().put("routes",JSONArray(values)).put("running",pending.isNotEmpty()).put("requiredReady",RouteEvidence.requiredReady(values.map {it.getBoolean("required") to RouteState.valueOf(it.getString("state").uppercase(java.util.Locale.ROOT))}))
+        return JSONObject().put("routes",JSONArray(values)).put("running",pending.isNotEmpty()).put("requiredReady",RouteEvidence.requiredReady(values.map {it.getBoolean("required") to RouteState.valueOf(it.getString("state").uppercase(java.util.Locale.ROOT))})).also { result ->
+            if (on && ready && scope!=null && scope==live) failoverShadow?.status()?.let {result.put("decisionShadow",it)}
+        }
     }
 }
 /** Read-only search progress. These values never authorize a route or packets. */

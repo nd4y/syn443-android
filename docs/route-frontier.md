@@ -112,3 +112,18 @@ retry deadline wins, followed by energy class and stable ID. A decision context
 can admit at most one such trial in five minutes. The trial lasts fifteen seconds
 and owns exactly the next batch. Until a fresh in-scope success arrives the
 original cooldown remains in force. Normal switch confirmations still apply.
+
+## On-device failover comparison
+
+When a signed internal Wi-Fi selector runs the three-confirmation algorithm with
+the ordinary probe plan, the client evaluates the two-confirmation baseline on
+the very same completed batches. Each evaluator starts at the beginning of the
+same route context. Both receive the actual selected member, sample times,
+verdicts and receipt. Only the deployed algorithm can issue a native command.
+
+Route diagnostics show the number of distinct batches compared and whether
+the decisions still agree. The first difference ends comparison for that context.
+Later traffic describes only what happened under the live choice. A change of
+network, engine or activation discards the comparison. Turning on reserve probe
+cooldown excludes the plan from this comparison. The local report contains only
+the two public algorithm revisions, a count and an outcome.

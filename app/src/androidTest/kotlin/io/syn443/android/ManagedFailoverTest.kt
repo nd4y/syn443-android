@@ -30,6 +30,12 @@ class ManagedFailoverTest {
     @Test fun conservativeRevisionRequiresThirdCurrentRouteBatch() =
         assertSelection(FailoverAlgorithm.CONFIRMED)
 
+    @Test fun referenceDivergenceIsCountedOnceAndNeverSwitchesTheLiveSelector() =
+        assertSelection(FailoverAlgorithm.CONFIRMED, compare = true)
+
+    @Test fun differentProbePlanKeepsLiveFailoverWithoutAShadowReport() =
+        assertSelection(FailoverAlgorithm.CONFIRMED, compare = true, reserveCooldown = true)
+
     @Test fun failoverMembersMustMatchSelectorHTTPMethodAndStatus() {
         val engine = JSONObject(config)
         val rows = engine.getJSONArray("route_checks")
@@ -90,7 +96,7 @@ class ManagedFailoverTest {
         } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
     }
 
-    private fun assertSelection(algorithm: FailoverAlgorithm) {
+    private fun assertSelection(algorithm: FailoverAlgorithm, compare:Boolean=false, reserveCooldown:Boolean=false) {
         EngineConfig.validate(config)
         val scope=RouteScope(10,20,30,"synthetic-engine",Policy.hash(config))
         RouteSnapshot.configure(config,scope.config)
@@ -108,21 +114,40 @@ class ManagedFailoverTest {
             return request
         }
         try {
-            repeat(algorithm.confirmations - 1) {
+            repeat(algorithm.confirmations - 1) { index ->
                 batch()
-                assertNull(RouteSnapshot.failoverAdvice(scope, algorithm = algorithm))
+                assertNull(RouteSnapshot.failoverAdvice(scope, reserveCooldown, algorithm))
                 assertTrue(RouteSnapshot.confirmingFailover(scope))
-                assertNull(RouteSnapshot.failoverAdvice(scope, algorithm = algorithm))
+                assertNull(RouteSnapshot.failoverAdvice(scope, reserveCooldown, algorithm))
+                if (compare) {
+                    val status=RouteSnapshot.read(true,true,scope)
+                    assertFalse(status.getBoolean("running"))
+                    val report=status.optJSONObject("decisionShadow")
+                    if(reserveCooldown) assertNull(report) else {
+                        val observed=checkNotNull(report)
+                        assertEquals(setOf("liveRevision","referenceRevision","outcome","comparedBatches"),observed.keys().asSequence().toSet())
+                        assertEquals(algorithm.revision,observed.getString("liveRevision"))
+                        assertEquals(FailoverAlgorithm.BASELINE.revision,observed.getString("referenceRevision"))
+                        assertEquals((index+1).toLong(),observed.getLong("comparedBatches"))
+                        assertEquals(if(index==0)"agree" else "reference_only",observed.getString("outcome"))
+                    }
+                }
             }
             val receipt=batch()
-            val command=checkNotNull(RouteSnapshot.failoverAdvice(scope, algorithm = algorithm))
+            val command=checkNotNull(RouteSnapshot.failoverAdvice(scope, reserveCooldown, algorithm))
             assertEquals(receipt,command.receipt);assertEquals("route-2",command.checkId)
             assertEquals("internal",command.group);assertEquals("primary",command.previous);assertEquals("reserve",command.candidate)
             val primary=RouteSnapshot.read(true,true,scope).getJSONArray("routes").getJSONObject(0)
+            if(compare && !reserveCooldown) {
+                assertEquals(2L,RouteSnapshot.read(true,true,scope).getJSONObject("decisionShadow").getLong("comparedBatches"))
+                assertFalse(RouteSnapshot.read(false,true,scope).has("decisionShadow"))
+                assertFalse(RouteSnapshot.read(true,false,scope).has("decisionShadow"))
+            }
             assertEquals("quarantined",primary.getString("selectionState"))
             assertTrue(primary.getLong("retryInMs") in 1L..36_000L)
             val changed=scope.copy(network=21)
             RouteSnapshot.owner(changed)
+            assertFalse(RouteSnapshot.read(true,true,changed).has("decisionShadow"))
             assertNull(RouteSnapshot.failoverAdvice(scope));assertNull(RouteSnapshot.failoverAdvice(changed))
         } finally {RouteSnapshot.owner(null);RouteSnapshot.configure(null,"")}
     }

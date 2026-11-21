@@ -137,6 +137,9 @@ class FailoverAdmission(
         return id
     }
 
+    @Synchronized
+    fun consumed(sequence: Long): Boolean = sequence > 0 && sequence == lastSequence
+
     /** A repeated heartbeat cannot count the same batch as two failures. */
     @Synchronized
     fun decide(

@@ -1375,8 +1375,12 @@
     {
       "id": "RLP-06",
       "text": "Перед rollout выполняются static validation и replay/simulation на сценарных trace. Shadow evaluation оценивает другую policy на тех же фактах, но не меняет маршруты, не запускает дополнительные сетевые пробы и не вмешивается в рабочее соединение. Отличающиеся probe plans отдельно испытываются на пилотах в своём бюджете.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md#on-device-failover-comparison"
+      ],
+      "implementationScope": "The negotiated conservative internal Wi-Fi algorithm compares completed measurements with its baseline in memory. Route diagnostics report how many paired batches agreed before a difference. Only the live algorithm can schedule probes or switch.",
+      "remainingScope": "Additional decision policies, aggregate fleet reporting, and automatic prepublication validation and replay gates."
     },
     {
       "id": "RLP-07",
