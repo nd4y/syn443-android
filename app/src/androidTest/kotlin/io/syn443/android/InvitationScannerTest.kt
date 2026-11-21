@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.zxing.BarcodeFormat
+import com.google.zxing.DecodeHintType
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.qrcode.QRCodeWriter
 import io.syn443.identity.BootstrapTrust
@@ -37,7 +38,7 @@ class InvitationScannerTest {
         }
         val frame = RGBLuminanceSource(qr.width, qr.height, pixels)
         for (source in listOf(frame, frame.invert())) {
-            val decoder = invitationQrDecoder().createDecoder(emptyMap())
+            val decoder = invitationQrDecoder().createDecoder(emptyMap<DecodeHintType, Any>())
             val decoded = decoder.decode(source) ?: decoder.decode(source)
             assertEquals(link, scannedInvitation(decoded?.text))
         }
