@@ -110,3 +110,14 @@ The complete dialer package is now included in the mandatory upstream race gate,
 with generated loopback TCP/UDP tests and an actual two-Box HTTP-path regression.
 Patch application and byte readback were checked against the exact pinned source;
 compiled acceptance is pending Actions.
+
+## Packaged XHTTP stream-one check
+
+Android instrumentation starts an independent TLS and HTTP/2 peer on an
+ephemeral loopback port. The packaged JNI engine uses a fresh VLESS identity,
+the test certificate and the stream-one transport. The peer reads the requested
+identity, TCP command and loopback destination before forwarding a banner from
+the target. The recorded request must use TLS, HTTP/2 and the configured path.
+Repeating the check with a different server name must fail before any further
+request or connection to the target. The test requires no VPN permission or
+configuration change. External provider and cellular paths have separate checks.

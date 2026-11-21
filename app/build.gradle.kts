@@ -88,6 +88,8 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.7.0")
     // Compose UI 1.12.1 transitively requests Espresso 3.5.0, incompatible with API 37.
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver3:5.5.1")
+    androidTestImplementation("com.squareup.okhttp3:okhttp-tls:5.5.1")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
 

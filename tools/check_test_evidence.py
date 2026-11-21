@@ -1009,6 +1009,7 @@ PACKAGED_CHAIN_REQUIRED = {
     ("io.syn443.android.PackagedProxyChainTest", "refusedHttpEntryNeverFallsBackToVlessOrTarget"),
     ("io.syn443.android.PackagedProxyChainTest", "refusedTcpConnectionReportsItsCauseWithoutEndpointDetails"),
     ("io.syn443.android.PackagedProxyChainTest", "packagedHTTPSStatusChecksExactResponseAndRequiresTLS"),
+    ("io.syn443.android.PackagedProxyChainTest", "packagedXhttpStreamOneCarriesVlessOverTlsHttp2AndRejectsWrongName"),
 }
 if mode == "emulator":
     assert PACKAGED_CHAIN_REQUIRED <= set(identities), "Missing packaged proxy chain outcomes"
