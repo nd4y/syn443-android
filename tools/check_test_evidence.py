@@ -830,7 +830,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
               ('io.syn443.android.RouteCheckPlanTest',
                'unknownCancelledAndForeignDiagnosticNeverBecomeFailedProxyOrWorkingRoute'),
               ('io.syn443.android.RouteCheckPlanTest',
-               'legacyArraysAndEnrollmentAdvertisementStayUnchangedWhenEvaluatorIsImplemented'),
+               'legacyArraysRemainCompatibleWhenNewEnrollmentsAdvertiseNamedChecks'),
               ('io.syn443.android.RouteCheckPlanTest', 'readOnlyPlanLabelsAreFiniteAndRecompositionDoesNotDispatch'),
               ('io.syn443.android.RouteCheckPlanTest',
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}

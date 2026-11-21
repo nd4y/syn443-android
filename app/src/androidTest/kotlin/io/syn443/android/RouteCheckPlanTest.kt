@@ -154,9 +154,10 @@ class RouteCheckPlanTest {
         assertEquals("cancelled",view(scope).getJSONObject("checkPlan").getJSONArray("leaves").getJSONObject(0).getString("code"))
         assertFalse(RouteSnapshot.read(true,true,scope).getBoolean("requiredReady"))
     }
-    @Test fun legacyArraysAndEnrollmentAdvertisementStayUnchangedWhenEvaluatorIsImplemented() {
+    @Test fun legacyArraysRemainCompatibleWhenNewEnrollmentsAdvertiseNamedChecks() {
         assertTrue(Policy.ROUTE_CHECK_PLAN in Policy.capabilities)
-        assertFalse(Policy.ROUTE_CHECK_PLAN in IdentityOperation.supportedCapabilities)
+        assertTrue(Policy.ROUTE_CHECK_PLAN in IdentityOperation.supportedCapabilities)
+        assertFalse(Policy.ROUTE_CHECK_PLAN in IdentityOperation.requiredCapabilities)
         val config=config();val row=row(config);row.remove("profile")
         val checks=JSONArray().put(JSONObject().put("method","tcp").put("target","a.example.invalid:443"))
         row.put("checks",checks)
