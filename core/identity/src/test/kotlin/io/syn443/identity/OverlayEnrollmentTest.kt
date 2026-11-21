@@ -162,6 +162,12 @@ class OverlayEnrollmentTest {
         assertEquals(expected,Identity.objectJSON(claim.body).getValue("capabilities"))
         assertTrue(IdentityOperation.supportedCapabilities.containsAll(IdentityOperation.requiredCapabilities))
         assertTrue("overlay.credentials.v1" in IdentityOperation.supportedCapabilities)
+        val routeCapabilities = io.syn443.policy.Policy.capabilities.filter { it.startsWith("route.") }
+        assertTrue(io.syn443.policy.Policy.ROUTE_CHECK_PLAN in routeCapabilities)
+        for (body in listOf(enroll.body, claim.body)) {
+            val advertised = Identity.objectJSON(body).getValue("capabilities") as kotlinx.serialization.json.JsonArray
+            assertTrue(advertised.map { (it as kotlinx.serialization.json.JsonPrimitive).content }.containsAll(routeCapabilities))
+        }
         val old=kotlinx.serialization.json.JsonArray(IdentityOperation.requiredCapabilities.map{ kotlinx.serialization.json.JsonPrimitive(it) })
         val oldEnrollBody=Canonical.encode(kotlinx.serialization.json.JsonObject(Identity.objectJSON(enroll.body)+("capabilities" to old)))
         val oldClaimBody=Canonical.encode(kotlinx.serialization.json.JsonObject(Identity.objectJSON(claim.body)+("capabilities" to old)))
