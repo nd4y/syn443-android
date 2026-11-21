@@ -147,6 +147,15 @@ native network binding and does not advance the recovery budget. JVM cases
 cover ranking, loss and the distinction between capability and path changes.
 Physical handover and the four-mode policy matrix require separate acceptance.
 
+When Android selects an Ethernet or other unrecognized physical underlay,
+the adaptive runtime uses a distinct local `UNKNOWN` mode. Only entry hops
+declared in all four signed network modes qualify. Both the Kotlin planner
+and the native selector apply this rule to the first hop, retain the path's
+existing exit and capability requirements, and require new evidence on the
+new physical network. An empty set of eligible paths leaves the affected
+group unavailable. The signed graph schema still accepts four declaration
+values. Absence of a physical network continues to suspend probing.
+
 ### Route report delivery
 
 The host publishes a route batch as soon as it is admitted, then reads its

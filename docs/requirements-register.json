@@ -886,10 +886,13 @@
       "text": "В сети с одновременными Wi-Fi/LTE кандидат привязывается к конкретной физической Android Network. Измерения и выбранный путь не смешиваются между сетями. Неизвестные транспорты, например Ethernet, получают отдельное состояние unknown и безопасную политику обычной сети.",
       "status": "partial",
       "evidence": [
-        "docs/route-lifecycle.md#physical-network-preference"
+        "docs/route-lifecycle.md#physical-network-preference",
+        "native/bridge/private_adaptive_hub_test.go",
+        "core/decision/src/test/kotlin/io/syn443/decision/RouteGraphTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveRoutesTest.kt"
       ],
-      "implementationScope": "Physical network handles, selected-owner stickiness and probe epoch fences for handle, link, validation and metering changes.",
-      "remainingScope": "Full unknown-transport policy, actual multi-transport handover and per-mode routing."
+      "implementationScope": "Physical network handles and probe epoch fences. An unknown physical underlay permits adaptive entry only where every signed mode allows the entry. Its native owner requires a fresh path proof.",
+      "remainingScope": "Physical Ethernet and multi-transport handover, home confirmation and restricted-cellular detection."
     },
     {
       "id": "AUTO-01",

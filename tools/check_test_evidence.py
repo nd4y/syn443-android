@@ -418,6 +418,9 @@ ADAPTIVE_REQUIRED = {'emulator': [('io.syn443.android.AdaptiveEngineConfigTest',
 if mode in ADAPTIVE_REQUIRED:
     if mode == 'emulator':
         ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'currentCheckFailureRequiresFreshBoundReplacementAndMonotonicTime'))
+        ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'otherPhysicalTransportStartsIndependentAdaptiveSearchAndRetiresWifiProof'))
+    else:
+        ADAPTIVE_REQUIRED[mode].append(('io.syn443.decision.RouteGraphTest', 'unknownUnderlayRequiresAllDeclaredModesForHintsGraphAndEnumeration'))
     assert set(ADAPTIVE_REQUIRED[mode]) <= {(c.get("classname"),c.get("name")) for c in cases}, "Missing actual managed adaptive outcome"
 
 

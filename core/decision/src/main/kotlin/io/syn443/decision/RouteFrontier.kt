@@ -3,7 +3,19 @@ package io.syn443.decision
 import java.security.MessageDigest
 import java.nio.ByteBuffer
 
-enum class NetworkMode { HOME_WIFI, WIFI, CELLULAR_RESTRICTED, CELLULAR }
+enum class NetworkMode {
+    HOME_WIFI, WIFI, CELLULAR_RESTRICTED, CELLULAR, UNKNOWN;
+
+    /** UNKNOWN describes a local underlay. It cannot be granted by a signed hop. */
+    internal fun allowsEntry(allowed: Set<NetworkMode>): Boolean =
+        if (this == UNKNOWN) allowed.containsAll(policyModes) else this in allowed
+
+    companion object {
+        val policyModes: List<NetworkMode> = java.util.Collections.unmodifiableList(
+            listOf(HOME_WIFI, WIFI, CELLULAR_RESTRICTED, CELLULAR)
+        )
+    }
+}
 enum class ExitClass {
     RU, NON_RU, INTERNAL;
 
@@ -20,7 +32,10 @@ data class RouteHop(
     val features: Set<PathFeature>,
     val publicCandidate: Boolean = false,
 ) {
-    init { require(!publicCandidate || exit == null) }
+    init {
+        require(!publicCandidate || exit == null)
+        require(NetworkMode.UNKNOWN !in entryModes)
+    }
 
     /** Candidate eligibility only; a public declaration is never exit proof. */
     internal fun declaresExit(intent: ExitClass): Boolean =
@@ -214,7 +229,7 @@ class RouteFrontier(
     private fun eligible(path: List<String>): Boolean {
         if (path.toSet().size != path.size) return false
         val head = byId[path.first()] ?: return false
-        if (mode !in head.entryModes || byId[path.last()]?.declaresExit(intent) != true) return false
+        if (!mode.allowsEntry(head.entryModes) || byId[path.last()]?.declaresExit(intent) != true) return false
         return path.all { byId[it]?.features?.containsAll(required) == true } &&
             path.zipWithNext().all { byEdge[it]?.containsAll(required) == true }
     }

@@ -41,6 +41,26 @@ class RouteGraphTest {
         assertNull(graph.groupInfo("unknown"))
         assertEquals("RouteGroupInfo([redacted])",info.toString())
     }
+
+    @Test fun unknownUnderlayRequiresAllDeclaredModesForHintsGraphAndEnumeration() {
+        val vector = fixture().getValue("validCases").jsonArray.map { it.jsonObject }
+            .first { it.getValue("name").jsonPrimitive.content == "public-candidate-shared-exit-class" }
+        val template = vector.getValue("graph").toString()
+        val modes = NetworkMode.policyModes.map { it.name }
+        val before = JsonArray(modes.map(::JsonPrimitive)).toString()
+        val path = listOf("public")
+        assertTrue(template.contains(before))
+        for (allowed in listOf(modes, emptyList()) + modes.map { missing -> modes - missing }) {
+            val names = JsonArray(allowed.map(::JsonPrimitive)).toString()
+            val graph = RouteGraph.decode(template.replace(before, names).toByteArray(), path)
+            val universal = allowed == modes
+            assertEquals(universal, graph.isDeclaredPath("foreign", NetworkMode.UNKNOWN, path))
+            assertFalse(graph.isDeclaredPath("inside", NetworkMode.UNKNOWN, path))
+            val found = enumerate(graph.frontier("foreign", context, NetworkMode.UNKNOWN, listOf(path), 100, 600_000))
+            assertEquals(if (universal) listOf(path) else emptyList(), found.map { it.hops })
+        }
+        rejected(template.replace(before, """["UNKNOWN"]""").toByteArray(), path)
+    }
     private val context = Context(1, 2, "policy", "algorithm", 3, "a".repeat(64))
     private fun fixture(): JsonObject = Decision.json.parseToJsonElement(
         requireNotNull(javaClass.getResourceAsStream("/route-graph-vectors.json")).use {
