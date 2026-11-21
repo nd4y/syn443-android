@@ -110,7 +110,7 @@ func newPrivatePathSelectorProgram(p *privatePathPool, scope, group string, prog
 
 func (s *privatePathSelector) validLocked() bool {
 	p := s.pool
-	return !s.closed && !p.closed && p.ctx.Err() == nil && privateManagedLease(p.lease) && p.scope == s.scope && p.selectors[s.group] == s
+	return !s.closed && !p.closed && p.ctx.Err() == nil && privateManagedLease(p.lease) && p.homeCurrent() && p.scope == s.scope && p.selectors[s.group] == s
 }
 
 // Synchronous admission on an owned caller worker: one probe for the entire

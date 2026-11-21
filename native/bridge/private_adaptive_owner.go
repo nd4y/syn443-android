@@ -145,7 +145,7 @@ func (o *privateAdaptiveOwner) currentLocked() bool {
 	p := o.hub.pool
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return !o.hub.closed && o.hub.homeCurrentLocked() && o.hub.scope == o.scope && o.hub.mode == o.mode && !p.closed && p.ctx.Err() == nil &&
+	return !o.hub.closed && p.homeCurrent() && o.hub.scope == o.scope && o.hub.mode == o.mode && !p.closed && p.ctx.Err() == nil &&
 		p.scope == o.scope && privateManagedLease(p.lease)
 }
 

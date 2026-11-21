@@ -654,9 +654,37 @@ func TestExpiredHomeProofBlocksNewAdaptiveTrafficAtTheActualNativeDial(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer conn.Close()
 	privateAdaptiveEcho(t, conn, "verified-home")
-	conn.Close()
+	// Renewing on the same physical scope keeps a live TCP connection usable.
+	oldUntil := until
+	until += 1000
+	if !h.setHomeDeadline(scope, "HOME_WIFI", until) {
+		t.Fatal("valid renewal refused")
+	}
+	clock.Store(oldUntil)
+	h.expireHome(scope, oldUntil)
+	privateAdaptiveEcho(t, conn, "still-authorized")
+	blocked, err := h.dialTCP("inside", context.Background(), "tcp", M.ParseSocksaddr(address))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocked.Close()
+	result := make(chan error, 1)
+	go func() { var buf [1]byte; _, err := blocked.Read(buf[:]); result <- err }()
 	clock.Store(until)
+	if n, err := conn.Write([]byte("expired")); n != 0 || err != errPrivatePath {
+		t.Fatal("established home flow still writable", n, err)
+	}
+	h.expireHome(scope, until)
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("expired read delivered data")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked home read survived shared expiry")
+	}
 	if h.setHomeDeadline(scope, "HOME_WIFI", until+1000) {
 		t.Fatal("expired proof revived the previous selection")
 	}
