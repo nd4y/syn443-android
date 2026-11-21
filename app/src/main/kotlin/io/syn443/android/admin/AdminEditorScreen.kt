@@ -3,7 +3,6 @@ package io.syn443.android.admin
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -12,9 +11,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -48,6 +44,14 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
     LaunchedEffect(model.operationBinding,model.canSeal,model.busy) {if(model.canSeal && !model.busy)sealSubmitted=false}
     val activeBusy=editorBusy(model)
     val editable=editorEditable(model) && !activeBusy && pages.isNotEmpty()
+    fun splitPage(index: Int, original: String, split: Int) {
+        if (!editorEditable(latestModel) || editorBusy(latestModel) ||
+            latestModel.documentBinding != model.documentBinding || index != page ||
+            pages.getOrNull(index) != original || pages.size >= EDITOR_MAX_PAGES) return
+        pages[index] = original.substring(0, split)
+        pages.add(index + 1, original.substring(split))
+        pageInputError = ""
+    }
     fun proceed(target:String) {when(target){"WEB"->latestActions.web();"LOGIN"->latestActions.login();else->latestActions.back()}}
     fun navigate(target:String) {
         if(dirty){leaveTarget=target;leaveConfirmation=true} else proceed(target)
@@ -65,7 +69,8 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
             expired=true
         }
     }
-    EditorPageLayout(pageInputError) {
+    LazyColumn(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal=20.dp).testTag("editor-content"),
+        verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(vertical=20.dp)) {
         item {Text("Редактор конфигурации",Modifier.testTag("editor-title"),style=MaterialTheme.typography.headlineMedium)}
         item {TextButton(onClick={navigate("BACK")},enabled=!activeBusy,
             modifier=Modifier.testTag("editor-back")) {Text("К устройствам")}}
@@ -114,15 +119,7 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
                 val index = page
                 val split = editorPageSplitPoint(originalPage)
                 if (split != null && pages.size < EDITOR_MAX_PAGES) item {
-                    OutlinedButton(onClick={
-                        if (editorEditable(latestModel) && !editorBusy(latestModel) &&
-                            latestModel.documentBinding == model.documentBinding && page == index &&
-                            pages.getOrNull(index) == originalPage && pages.size < EDITOR_MAX_PAGES) {
-                            pages[index] = originalPage.substring(0, split)
-                            pages.add(index + 1, originalPage.substring(split))
-                            pageInputError = ""
-                        }
-                    },modifier=Modifier.testTag("editor-split-page")) {Text("Разделить страницу для ввода")}
+                    OutlinedButton(onClick={splitPage(index,originalPage,split)},modifier=Modifier.testTag("editor-split-page")) {Text("Разделить страницу для ввода")}
                 } else if (pages.size == EDITOR_MAX_PAGES) item {
                     Text("Достигнут предел в 64 страницы. Чтобы освободить место, сократите текст.",
                         Modifier.testTag("editor-page-limit"))
@@ -173,6 +170,27 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
             TextButton(onClick={closeConfirmation=true},enabled=!activeBusy,modifier=Modifier.testTag("editor-close")) {Text("Закрыть локальную копию")}
         }
     }
+    if (pageInputError.isNotEmpty() && editable) {
+        val index = page
+        val original = pages[index]
+        val split = if (pages.size < EDITOR_MAX_PAGES) editorPageSplitPoint(original) else null
+        AlertDialog(
+            onDismissRequest = { pageInputError = "" },
+            title = { Text("Ввод на странице") },
+            text = { Text(pageInputError, Modifier.testTag("editor-page-error")) },
+            confirmButton = {
+                if (split != null) TextButton(
+                    onClick = { splitPage(index, original, split) },
+                    modifier = Modifier.testTag("editor-error-split"),
+                ) { Text("Разделить страницу") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pageInputError = "" }, modifier = Modifier.testTag("editor-error-dismiss")) {
+                    Text("Вернуться к вводу")
+                }
+            },
+        )
+    }
     if(leaveConfirmation)AlertDialog(onDismissRequest={leaveConfirmation=false},
         title={Text("Оставить несохранённый ввод?")},text={Text("Изменения после последнего локального сохранения будут потеряны. Сохранённый черновик останется на устройстве.")},
         confirmButton={TextButton(onClick={if(!editorBusy(latestModel)){leaveConfirmation=false;proceed(leaveTarget)}},
@@ -214,28 +232,6 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
                 if(allowed){reviewSubmitted=true;latestActions.publish(captured.binding,captured.deadline)} else localError="REVIEW_EXPIRED"
             },enabled=valid,modifier=Modifier.testTag("editor-confirm-publish")) {Text("Опубликовать желаемую конфигурацию")}},
             dismissButton={TextButton(onClick={confirmation=null},modifier=Modifier.testTag("editor-confirm-cancel")) {Text("Отмена")}})
-    }
-}
-
-@Composable
-private fun EditorPageLayout(inputError: String, content: LazyListScope.() -> Unit) {
-    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp)) {
-        if (inputError.isNotEmpty()) {
-            Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer) {
-                Text(
-                    inputError,
-                    modifier = Modifier.padding(12.dp).testTag("editor-page-error")
-                        .semantics { liveRegion = LiveRegionMode.Polite },
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
-            }
-        }
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().weight(1f).testTag("editor-content"),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(vertical = 20.dp),
-            content = content,
-        )
     }
 }
 

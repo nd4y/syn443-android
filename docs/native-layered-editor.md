@@ -83,3 +83,5 @@ pending bytes remain owned until exact reconciliation; a checked server
 operation-ledger/nonmutation-receipt protocol is still needed to safely release
 otherwise unknown outcomes. This comparison slice does not close that gap or
 claim completion of M3 or the full specification.
+
+If a page rejects a paste, the field keeps its previous text. The editor shows the reason in a dialog above the keyboard. The administrator can return to editing or split the existing page at a complete Unicode scalar. Splitting leaves the reviewed content intact.
