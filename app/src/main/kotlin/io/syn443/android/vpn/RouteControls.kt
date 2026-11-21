@@ -20,6 +20,17 @@ import org.json.JSONObject
         Text("Маршруты",Modifier.testTag("routes-title"))
         val health=status.optJSONObject("routeHealth")
         val routes=health?.optJSONArray("routes")
+        health?.optJSONObject("decisionShadow")?.let { comparison ->
+            val result=when(comparison.optString("outcome")) {
+                "agree" -> "решения совпадают"
+                "reference_only" -> "базовый алгоритм предложил переключение раньше"
+                "live_only" -> "активный алгоритм предложил переключение раньше"
+                "different_reserve" -> "алгоритмы выбрали разные резервные маршруты"
+                else -> null
+            }
+            if(result!=null) Text("Сравнение с базовым алгоритмом · серий проверок ${comparison.optLong("comparedBatches")} · $result",
+                Modifier.testTag("route-decision-shadow"))
+        }
         if(routes==null || routes.length()==0)Text("Список маршрутов ещё не получен")
         if(routes!=null)for(i in 0 until routes.length()) {
             val row=routes.getJSONObject(i)

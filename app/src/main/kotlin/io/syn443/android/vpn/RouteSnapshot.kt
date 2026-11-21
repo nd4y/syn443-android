@@ -42,7 +42,13 @@ object RouteSnapshot {
     private var revision = ""
     private var activationAttempt:Pair<RouteScope,Long>?=null
     private var failover:ManagedFailoverPlan?=null
+    private data class ReserveRecoveryHint(val selected: String, val observedAt: Long)
+    private var reserveRecovery: ReserveRecoveryHint? = null
+    private val transientCauses = setOf(RouteFailureCause.CONNECTION_REFUSED, RouteFailureCause.DNS_TIMEOUT, RouteFailureCause.TIMEOUT)
+    private fun transientDial(code:String?, observation:RouteObservation) =
+        code=="dial_failed" && observation.cause in transientCauses
     private var failoverAdmission:Pair<FailoverAlgorithm,FailoverAdmission>?=null
+    private var failoverShadow:FailoverShadow?=null
     private var batchSequence=0L
     private var completedReceipt=""
     private var confirmingFailure=false
@@ -143,7 +149,7 @@ object RouteSnapshot {
     }
 
     @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();searchScope=null;searches=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();checkPlans=emptyMap();lastStarted=-60_000;activationAttempt=null
-        completedReceipt="";failoverAdmission=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false}
+        completedReceipt="";reserveRecovery=null;failoverAdmission=null;failoverShadow=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
         return rows.any {it.configured()} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
@@ -222,9 +228,15 @@ object RouteSnapshot {
         val admission=failoverAdmission?.takeIf {deferCoolingReserves && only==null && live==scope}
         val omittedReserves = if (meteredMaintenance && only==null && live==scope &&
             !force && !firstValidated && !confirmingFailure) failover?.members.orEmpty() else emptyList()
+        val early = reserveRecovery?.takeIf { now-it.observedAt in 0L until 15_000 }?.let { hint ->
+            admission?.let { (algorithm,state) ->
+                state.beginEarlyReserve(failoverContext(scope,algorithm),hint.selected,batchSequence+1,now)
+            }
+        }
+        reserveRecovery=null
         val selected=rows.filter {row->
             (only==null || row.id==only) && row.configured() &&
-                (row.required || row.tag !in omittedReserves &&
+                (row.required || row.tag==early || row.tag !in omittedReserves &&
                     admission?.let {(algorithm, state)->state.deferReserveProbe(failoverContext(scope,algorithm),row.tag,now)}!=true)
         }
         if(selected.isEmpty())return null
@@ -272,7 +284,7 @@ object RouteSnapshot {
         }
         return true
     }
-    @Synchronized fun cancelled(resetInterval:Boolean=false){pending="";queued=emptySet();current=null;completedReceipt="";confirmingFailure=false;skippedMeteredReserves=false;if(resetInterval)lastStarted=-60_000}
+    @Synchronized fun cancelled(resetInterval:Boolean=false){pending="";queued=emptySet();current=null;completedReceipt="";reserveRecovery=null;confirmingFailure=false;skippedMeteredReserves=false;if(resetInterval)lastStarted=-60_000}
     @Synchronized internal fun confirmingFailover(scope:RouteScope):Boolean=live==scope && confirmingFailure
     @Synchronized internal fun hasManagedFailover(scope:RouteScope):Boolean=live==scope && failover!=null && completedReceipt.isNotEmpty()
     @Synchronized internal fun failoverAdvice(scope:RouteScope,trackReserveFailures:Boolean=false,
@@ -298,7 +310,8 @@ object RouteSnapshot {
                 trackReserveFailures && codes[row.id] in completedProbeFailures -> ProbeVerdict.CONFIRMED_PATH_FAILURE
                 else -> return@mapNotNull null
             }
-            VerifiedPathSample(row.tag,plan.intent,receipt,comparison,sample.elapsedMs,verdict,timings[row.id] ?: 0)
+            VerifiedPathSample(row.tag,plan.intent,receipt,comparison,sample.elapsedMs,verdict,timings[row.id] ?: 0,
+                transientTransportFailure=transientDial(codes[row.id],sample))
         }
         val measuredFailure=groupSample.complete && codes[group.id] in completedProbeFailures &&
             now-groupSample.elapsedMs in 0L until 15_000
@@ -311,11 +324,24 @@ object RouteSnapshot {
         // does not itself count as an independent path failure.
         confirmingFailure=verdict==ProbeVerdict.CONFIRMED_PATH_FAILURE || measuredFailure && skippedMeteredReserves
         val context=failoverContext(scope,algorithm)
-        val admission=failoverAdmission?.takeIf {it.first==algorithm}?.second ?: FailoverAdmission(context,plan.intent,plan.members.toSet(),comparison,
-            rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)},algorithm)
-            .also {failoverAdmission=algorithm to it}
-        val choice=admission.decide(context,batchSequence,receipt,now,selected.tag,
-            VerifiedPathSample(selected.tag,plan.intent,receipt,comparison,groupSample.elapsedMs,verdict,timings[group.id] ?: 0),reserves) ?: return null
+        fun evaluator(version:FailoverAlgorithm) = FailoverAdmission(failoverContext(scope,version),plan.intent,plan.members.toSet(),comparison,
+            rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)},version)
+        val compare=algorithm==FailoverAlgorithm.CONFIRMED && !trackReserveFailures
+        if (!compare) failoverShadow=null
+        val admission=failoverAdmission?.takeIf {it.first==algorithm}?.second ?: evaluator(algorithm).also {
+            failoverAdmission=algorithm to it
+            if (compare) failoverShadow=FailoverShadow(failoverContext(scope,FailoverAlgorithm.BASELINE),
+                evaluator(FailoverAlgorithm.BASELINE))
+        }
+        val active=VerifiedPathSample(selected.tag,plan.intent,receipt,comparison,groupSample.elapsedMs,verdict,timings[group.id] ?: 0)
+        val choice=admission.decide(context,batchSequence,receipt,now,selected.tag,active,reserves)
+        if (admission.consumed(batchSequence))
+            failoverShadow?.observe(batchSequence,receipt,now,selected.tag,active,reserves,choice)
+        reserveRecovery = if (trackReserveFailures && measuredFailure && transientDial(codes[group.id],groupSample) &&
+            reserves.none { it.verdict==ProbeVerdict.VERIFIED } && admission.earlyReserve(context,selected.tag,now)!=null)
+            ReserveRecoveryHint(selected.tag,groupSample.elapsedMs) else null
+        if(reserveRecovery!=null)confirmingFailure=true
+        if(choice==null)return null
         val candidate=rows.singleOrNull {it.tag==choice.candidate} ?: return null
         return FailoverCommand(choice.receipt,candidate.id,group.tag,choice.previous,choice.candidate)
     }
@@ -359,7 +385,9 @@ object RouteSnapshot {
                     }
                 }
         }
-        return JSONObject().put("routes",JSONArray(values)).put("running",pending.isNotEmpty()).put("requiredReady",RouteEvidence.requiredReady(values.map {it.getBoolean("required") to RouteState.valueOf(it.getString("state").uppercase(java.util.Locale.ROOT))}))
+        return JSONObject().put("routes",JSONArray(values)).put("running",pending.isNotEmpty()).put("requiredReady",RouteEvidence.requiredReady(values.map {it.getBoolean("required") to RouteState.valueOf(it.getString("state").uppercase(java.util.Locale.ROOT))})).also { result ->
+            if (on && ready && scope!=null && scope==live) failoverShadow?.status()?.let {result.put("decisionShadow",it)}
+        }
     }
 }
 /** Read-only search progress. These values never authorize a route or packets. */

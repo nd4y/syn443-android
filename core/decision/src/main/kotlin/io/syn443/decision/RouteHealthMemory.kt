@@ -15,7 +15,7 @@ data class PathHealth(val readiness: PathReadiness, val retryAtMs: Long? = null)
  * arbitrary destination, for example, is not a confirmed path failure.
  */
 class RouteHealthMemory(private var context: Context) {
-    private data class Trial(val attempt: Long, val untilMs: Long)
+    private data class Trial(val attempt: Long, val untilMs: Long, val early: Boolean = false)
     private data class Entry(
         val attempt: Long,
         val observedAtMs: Long,
@@ -80,6 +80,24 @@ class RouteHealthMemory(private var context: Context) {
         return true
     }
 
+    /** One early probe per existing fence. A trial does not remove or shorten the fence. */
+    @Synchronized
+    internal fun beginEarlyRetry(current: Context, key: PathHealthKey, attempt: Long, nowMs: Long): Boolean {
+        if (current != context || !validKey(key) || attempt !in 1..Decision.MAX_TIME || !advanceClock(nowMs)) return false
+        val entry = table[key] ?: return false
+        val retry = entry.retryAtMs ?: return false
+        if (entry.requiresChange || entry.trial != null || nowMs >= retry || attempt <= entry.attempt) return false
+        table[key] = entry.copy(trial = Trial(attempt, nowMs + 15_000, early = true))
+        return true
+    }
+
+    @Synchronized
+    internal fun ownsEarlySample(current: Context, key: PathHealthKey, attempt: Long, sampled: Long, nowMs: Long): Boolean {
+        if (current != context || !validKey(key) || !advanceClock(nowMs)) return false
+        val trial = table[key]?.trial ?: return false
+        return trial.early && trial.attempt == attempt && sampled in trial.untilMs - 15_000..nowMs && nowMs < trial.untilMs
+    }
+
     /** False means the result was not admitted and must not affect ranking. */
     @Synchronized
     fun record(current: Context, key: PathHealthKey, attempt: Long, nowMs: Long, verdict: ProbeVerdict): Boolean {
@@ -127,8 +145,8 @@ class RouteHealthMemory(private var context: Context) {
         val retry = entry.retryAtMs
         val trial = entry.trial
         return when {
-            retry != null && nowMs < retry -> PathHealth(PathReadiness.QUARANTINED, retry)
             trial != null && nowMs < trial.untilMs -> PathHealth(PathReadiness.HALF_OPEN, trial.untilMs)
+            retry != null && nowMs < retry -> PathHealth(PathReadiness.QUARANTINED, retry)
             retry != null || nowMs - entry.observedAtMs >= 120_000 -> PathHealth(PathReadiness.REVALIDATE, retry)
             entry.failures > 0 -> PathHealth(PathReadiness.SUSPECT)
             else -> PathHealth(PathReadiness.VERIFIED)

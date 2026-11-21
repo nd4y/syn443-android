@@ -1308,10 +1308,11 @@
       "text": "При нехватке кандидатов допускается ограниченный досрочный recheck самого перспективного transient-failed пути. Это не снимает policy/security block и не запускает массовый обход cooldown. Неизвестные кандидаты должны получить шанс до повторного многократного теста заведомо отказавших.",
       "status": "partial",
       "evidence": [
-        "docs/route-frontier.md#sparse-wi-fi-recovery"
+        "docs/route-frontier.md#sparse-wi-fi-recovery",
+        "docs/route-frontier.md#transient-reserve-recovery-on-internal-wi-fi"
       ],
-      "implementationScope": "The adaptive client advances through untested eligible paths before rescanning fenced candidates. A fully fenced pass waits until its first retry deadline.",
-      "remainingScope": "A separately bounded early trial for an independently attributed transient path failure before its ordinary cooldown expires."
+      "implementationScope": "The adaptive client advances through untested eligible paths before rescanning fenced candidates. A fully fenced pass waits until its first retry deadline. A managed internal Wi-Fi selector admits one early reserve check per five minutes if its independently corroborated failures were transient and all ordinary alternatives are fenced.",
+      "remainingScope": "Equivalent early-trial admission for arbitrary adaptive multi-hop search groups and other supported network contexts."
     },
     {
       "id": "BAD-08",
@@ -1374,8 +1375,12 @@
     {
       "id": "RLP-06",
       "text": "Перед rollout выполняются static validation и replay/simulation на сценарных trace. Shadow evaluation оценивает другую policy на тех же фактах, но не меняет маршруты, не запускает дополнительные сетевые пробы и не вмешивается в рабочее соединение. Отличающиеся probe plans отдельно испытываются на пилотах в своём бюджете.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-frontier.md#on-device-failover-comparison"
+      ],
+      "implementationScope": "The negotiated conservative internal Wi-Fi algorithm compares completed measurements with its baseline in memory. Route diagnostics report how many paired batches agreed before a difference. Only the live algorithm can schedule probes or switch.",
+      "remainingScope": "Additional decision policies, aggregate fleet reporting, and automatic prepublication validation and replay gates."
     },
     {
       "id": "RLP-07",

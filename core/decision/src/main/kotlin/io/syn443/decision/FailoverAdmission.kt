@@ -8,6 +8,7 @@ data class VerifiedPathSample(
     val sampledAtMs: Long,
     val verdict: ProbeVerdict,
     val latencyMs: Long,
+    val transientTransportFailure: Boolean = false,
 )
 
 data class FailoverChoice(val previous: String, val candidate: String, val receipt: String)
@@ -40,6 +41,9 @@ class FailoverAdmission(
     private data class Success(val at: Long, val streak: Int)
     private val success = mutableMapOf<String, Success>()
     private val health = RouteHealthMemory(context)
+    private data class TransientFailures(val observedAt: Long, val count: Int)
+    private val transient = mutableMapOf<String, TransientFailures>()
+    private var nextEarlyTrial = 0L
     private var lastSequence = 0L
     private var lastClock = 0L
     private var lastFailureAt = 0L
@@ -66,13 +70,22 @@ class FailoverAdmission(
         val key = PathHealthKey(sample.pathId, exitClass, metricGroup)
         val before = health.view(context, key, nowMs)
         when (before.readiness) {
-            PathReadiness.CONFIG_CHANGE_REQUIRED, PathReadiness.QUARANTINED, PathReadiness.HALF_OPEN -> return false
+            PathReadiness.CONFIG_CHANGE_REQUIRED, PathReadiness.QUARANTINED -> return false
+            PathReadiness.HALF_OPEN -> if (!health.ownsEarlySample(context, key, sequence, sample.sampledAtMs, nowMs)) return false
             PathReadiness.REVALIDATE -> before.retryAtMs?.let { retryAt ->
                 if (sample.sampledAtMs < retryAt || !health.beginRetry(context, key, sequence, nowMs)) return false
             }
             else -> Unit
         }
-        return health.record(context, key, sequence, nowMs, sample.verdict)
+        if (!health.record(context, key, sequence, nowMs, sample.verdict)) return false
+        if (sample.verdict == ProbeVerdict.CONFIRMED_PATH_FAILURE && sample.transientTransportFailure) {
+            val previous = transient[sample.pathId]
+            val count = if (previous != null && nowMs - previous.observedAt < 120_000) 2 else 1
+            transient[sample.pathId] = TransientFailures(nowMs, count)
+        } else {
+            transient.remove(sample.pathId)
+        }
+        return true
     }
 
     @Synchronized
@@ -92,6 +105,41 @@ class FailoverAdmission(
         }
     }
 
+    /** A trial is a diagnostic opportunity on an authorized reserve, never a switch choice.
+     * An ordinary or unknown reserve always receives its normal probe first. */
+    @Synchronized
+    fun earlyReserve(current: Context, selected: String, nowMs: Long): String? {
+        if (current != context || selected !in members || nowMs < nextEarlyTrial || nowMs < lastClock) return null
+        val candidates = mutableListOf<Pair<String, Long>>()
+        for (id in members - selected) {
+            val key = PathHealthKey(id, exitClass, metricGroup)
+            val state = health.view(context, key, nowMs)
+            when (state.readiness) {
+                PathReadiness.CONFIG_CHANGE_REQUIRED -> continue
+                PathReadiness.HALF_OPEN -> return null
+                PathReadiness.QUARANTINED -> {
+                    val failures = transient[id] ?: continue
+                    if (failures.count >= 2 && nowMs - failures.observedAt >= 10_000)
+                        candidates += id to checkNotNull(state.retryAtMs)
+                }
+                else -> return null
+            }
+        }
+        return candidates.minWithOrNull(compareBy({ it.second }, { energy[it.first] ?: 2 }, { it.first }))?.first
+    }
+
+    @Synchronized
+    fun beginEarlyReserve(current: Context, selected: String, sequence: Long, nowMs: Long): String? {
+        if (sequence != lastSequence + 1) return null
+        val id = earlyReserve(current, selected, nowMs) ?: return null
+        if (!health.beginEarlyRetry(context, PathHealthKey(id, exitClass, metricGroup), sequence, nowMs)) return null
+        nextEarlyTrial = nowMs + 300_000
+        return id
+    }
+
+    @Synchronized
+    fun consumed(sequence: Long): Boolean = sequence > 0 && sequence == lastSequence
+
     /** A repeated heartbeat cannot count the same batch as two failures. */
     @Synchronized
     fun decide(
@@ -110,27 +158,21 @@ class FailoverAdmission(
             reserves.map { it.pathId }.toSet().size != reserves.size) return null
         lastSequence = sequence
         lastClock = nowMs
-        val verified = mutableListOf<VerifiedPathSample>()
-        val observedReserve = reserves.any { it.verdict == ProbeVerdict.VERIFIED }
-        for (sample in listOf(active) + reserves) {
-            if (sample.verdict !in setOf(ProbeVerdict.VERIFIED, ProbeVerdict.CONFIRMED_PATH_FAILURE,
-                    ProbeVerdict.PATH_AUTH_OR_CONFIGURATION)) continue
-            // A successful comparator must be a different member in this
-            // batch. When every route fails, preserve the existing memory.
-            if (sample.verdict == ProbeVerdict.CONFIRMED_PATH_FAILURE &&
-                !observedReserve && (sample.pathId == selected || active.verdict != ProbeVerdict.VERIFIED)) continue
-            if (!track(sample, sequence, nowMs)) continue
-            when (sample.verdict) {
-                ProbeVerdict.VERIFIED -> {
-                    val old = success[sample.pathId]
-                    val streak = if (old != null && nowMs - old.at < 120_000) (old.streak + 1).coerceAtMost(5) else 1
-                    success[sample.pathId] = Success(nowMs, streak)
-                    if (sample.pathId != selected) verified += sample
-                }
-                ProbeVerdict.CONFIRMED_PATH_FAILURE, ProbeVerdict.PATH_AUTH_OR_CONFIGURATION -> success.remove(sample.pathId)
-                else -> Unit
-            }
+        val samples = listOf(active) + reserves
+        val accepted = samples.filter { it.verdict == ProbeVerdict.VERIFIED && track(it, sequence, nowMs) }
+        for (sample in accepted) {
+            val old = success[sample.pathId]
+            val streak = if (old != null && nowMs - old.at < 120_000) (old.streak + 1).coerceAtMost(5) else 1
+            success[sample.pathId] = Success(nowMs, streak)
         }
+        for (sample in samples) {
+            // Only a fresh, admitted success on a different member attributes
+            // a transient failure. An old half-open sample cannot penalize the incumbent.
+            if (sample.verdict == ProbeVerdict.CONFIRMED_PATH_FAILURE && accepted.isEmpty()) continue
+            if (sample.verdict !in setOf(ProbeVerdict.CONFIRMED_PATH_FAILURE, ProbeVerdict.PATH_AUTH_OR_CONFIGURATION)) continue
+            if (track(sample, sequence, nowMs)) success.remove(sample.pathId)
+        }
+        val verified = accepted.filter { it.pathId != selected }
         if (active.verdict != ProbeVerdict.CONFIRMED_PATH_FAILURE || verified.isEmpty()) {
             // No evidence that one specific path failed and an eligible
             // replacement works and is eligible. Keep the current selection.
