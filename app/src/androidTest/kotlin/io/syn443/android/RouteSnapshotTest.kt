@@ -17,6 +17,29 @@ class RouteSnapshotTest {
     private fun report(request:String,ok:Boolean,running:Boolean=false)=JSONObject().put("request",JSONObject(request).getString("request")).put("running",running).put("results",org.json.JSONArray()
         .put(JSONObject().put("id","route-1").put("complete",true).put("ok",ok).put("code",if(ok)"ok" else "dial_failed").put("elapsedMs",5).put("sampledElapsedMs",android.os.SystemClock.elapsedRealtime()).put("path",org.json.JSONArray().put("route-1")))
         .put(JSONObject().put("id","route-2").put("complete",true).put("ok",false).put("code","ssh_banner_mismatch").put("elapsedMs",8).put("sampledElapsedMs",android.os.SystemClock.elapsedRealtime()).put("path",org.json.JSONArray().put("route-2")))).toString()
+    @Test fun terminalOmissionAndDeadlineClearOnlyMissingMeasurements() {
+        for (deadline in listOf(false, true)) {
+            setup()
+            val first = checkNotNull(RouteSnapshot.request(scope))
+            assertTrue(RouteSnapshot.update(scope, report(first, true)))
+            val retry = checkNotNull(RouteSnapshot.request(scope, force = true))
+            val partial = JSONObject(report(retry, true, running = true))
+            partial.getJSONArray("results").remove(1)
+            assertTrue(RouteSnapshot.update(scope, partial.toString()))
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (!deadline) assertTrue(RouteSnapshot.update(scope, partial.put("running", false).toString()))
+            val snapshot = RouteSnapshot.readAt(true, true, scope, if (deadline) now + 35_001 else now)
+            assertFalse(snapshot.getBoolean("running"))
+            val routes = snapshot.getJSONArray("routes")
+            assertEquals(5, routes.getJSONObject(0).getLong("latencyMs"))
+            assertEquals(1, routes.getJSONObject(0).getJSONArray("measuredPath").length())
+            val missing = routes.getJSONObject(1)
+            assertEquals("incomplete", missing.getString("state"))
+            assertEquals("cancelled", missing.getString("reason"))
+            assertTrue(missing.isNull("latencyMs"))
+            assertEquals(0, missing.getJSONArray("measuredPath").length())
+        }
+    }
     @Test fun independentRoutesKeepOptionalFailureAndUnconfiguredUnknown() {
         setup();val request=checkNotNull(RouteSnapshot.request(scope));assertTrue(RouteSnapshot.update(scope,report(request,true)))
         val view=RouteSnapshot.read(true,true,scope);val rows=view.getJSONArray("routes")

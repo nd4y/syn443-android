@@ -1491,6 +1491,9 @@
         "native/bridge/route_checks_test.go",
         "app/src/androidTest/kotlin/io/syn443/android/PackagedProxyChainTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/RouteSnapshotTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteCheckPlanTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSearchStatusTest.kt",
+        "docs/route-lifecycle.md#reading-route-measurements",
         "docs/TESTING.md"
       ]
     },

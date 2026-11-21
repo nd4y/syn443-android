@@ -80,6 +80,11 @@ if mode=="jvm":
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
+    assert {
+        ("io.syn443.android.RouteSnapshotTest", "terminalOmissionAndDeadlineClearOnlyMissingMeasurements"),
+        ("io.syn443.android.RouteCheckPlanTest", "canceledBatchClearsEarlierSuccessfulLeafOutcomes"),
+        ("io.syn443.android.RouteSearchStatusTest", "failedOrExpiredPathAndAbsentLatencyHaveDistinctLabels"),
+    } <= set(identities), "Missing route measurement consistency outcomes"
     assert {("io.syn443.android.InvitationScannerTest", name) for name in (
         "liveDecoderRecognizesBothPolaritiesAndRejectsForeignPayloads",
         "validCameraResultOnlyEnablesLocalInvitationReview",

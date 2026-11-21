@@ -186,7 +186,7 @@ object RouteSnapshot {
         val now=SystemClock.elapsedRealtime()
         observations=observations+(row.id to RouteObservation(scope,now,ok || code=="exit_mismatch" || code=="check_failed",ok))
         codes=codes+(row.id to code)
-        if(latency!=null && latency in 0..30_000)timings=timings+(row.id to latency)
+        timings = if (latency != null && latency in 0..30_000) timings + (row.id to latency) else timings - row.id
         measuredPaths=measuredPaths+(row.id to JSONArray(hops.take(4)))
         val projection=row.profile?.let {RouteCheckPlans.projection(checkPlan,it,if(ok)"TRUE" else if(code=="probe_unavailable")"UNKNOWN" else "FALSE")}
         checkPlans=if(projection!=null)checkPlans+(row.id to projection) else checkPlans-row.id
@@ -278,11 +278,20 @@ object RouteSnapshot {
         }
         observations=nextObservations;codes=nextCodes;timings=nextTimings;receipts=nextReceipts;measuredPaths=nextPaths;checkPlans=nextPlans
         if(!running) {
-            for(id in queued-seen) {observations=observations+(id to RouteObservation(scope,now,false,false));codes=codes+(id to "cancelled")}
+            for (id in queued - seen) recordMissingResult(id, scope, now)
             completedReceipt=pending
             pending="";queued=emptySet()
         }
         return true
+    }
+    /** A canceled measurement has its own timestamp but no path, duration or leaf results. */
+    private fun recordMissingResult(id: String, scope: RouteScope, now: Long) {
+        observations = observations + (id to RouteObservation(scope, now, false, false))
+        codes = codes + (id to "cancelled")
+        timings = timings - id
+        measuredPaths = measuredPaths - id
+        checkPlans = checkPlans - id
+        receipts = receipts - id
     }
     @Synchronized fun cancelled(resetInterval:Boolean=false){pending="";queued=emptySet();current=null;completedReceipt="";reserveRecovery=null;confirmingFailure=false;skippedMeteredReserves=false;if(resetInterval)lastStarted=-60_000}
     @Synchronized internal fun confirmingFailover(scope:RouteScope):Boolean=live==scope && confirmingFailure
@@ -352,7 +361,7 @@ object RouteSnapshot {
     @Synchronized internal fun readAt(on:Boolean,ready:Boolean,scope:RouteScope?,now:Long):JSONObject {
         require(now>=0)
         if(pending.isNotEmpty() && now-startedAt>=35_000) {
-            current?.let {s->for(id in queued) if(receipts[id]!=pending) {observations=observations+(id to RouteObservation(s,now,false,false));codes=codes+(id to "cancelled")}}
+            current?.let { scope -> for (id in queued) if (receipts[id] != pending) recordMissingResult(id, scope, now) }
             pending="";queued=emptySet()
         }
         val values=rows.map {row->

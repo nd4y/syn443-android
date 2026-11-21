@@ -68,9 +68,21 @@ import org.json.JSONObject
                 "quarantined"->Text("Временно исключён из выбора. Повторная проверка через ${(row.getLong("retryInMs")+999)/1000} с")
                 "revalidate","half_open"->Text("Для возврата в выбор нужна новая успешная проверка")
             }
-            if(!row.isNull("ageMs"))Text("Возраст проверки: ${row.getLong("ageMs")/1000} с; время: ${row.optLong("latencyMs")} мс")
+            if (!row.isNull("ageMs")) {
+                val age = row.getLong("ageMs") / 1000
+                val duration = if (row.isNull("latencyMs")) "длительность неизвестна" else "длительность ${row.getLong("latencyMs")} мс"
+                Text("Возраст проверки ${age} с · $duration", Modifier.testTag("route-${i+1}-timing"))
+            }
             val path=row.optJSONArray("measuredPath")
-            if(path!=null && path.length()>0)Text("Проверенный путь: "+(0 until path.length()).joinToString(" → "){path.getString(it)})
+            if (path != null && path.length() > 0) {
+                val title = when (row.getString("state")) {
+                    "working" -> "Проверенный путь"
+                    "failed", "incomplete" -> "Путь последней попытки"
+                    else -> "Путь предыдущей проверки"
+                }
+                Text(title + " · " + (0 until path.length()).joinToString(" → ") { path.getString(it) },
+                    Modifier.testTag("route-${i+1}-path"))
+            }
             val reason=row.optString("reason")
             if(reason !in setOf("ok","not_checked")){
                 val cause=RouteFailureCause.fromWire(reason,row.optString("cause"))
@@ -98,6 +110,10 @@ internal fun routeFailureLabel(reason: String, cause: RouteFailureCause?): Strin
     null -> when (reason) {
         "dial_failed" -> "Не удалось установить соединение"
         "tls_failed" -> "Не удалось установить защищённое соединение TLS"
+        "exit_country_mismatch" -> "Страна выхода не соответствует назначенному классу"
+        "exit_mismatch" -> "Выход не соответствует назначенной проверке"
+        "exit_ip_mismatch" -> "IP-адрес выхода отличается от ожидаемого"
+        "exit_evidence_invalid" -> "Сервис проверки вернул некорректные сведения о выходе"
         else -> "Причина: $reason"
     }
 }
