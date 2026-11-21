@@ -425,6 +425,7 @@ if mode in ADAPTIVE_REQUIRED:
         ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'otherPhysicalTransportStartsIndependentAdaptiveSearchAndRetiresWifiProof'))
         ADAPTIVE_REQUIRED[mode].extend([
             ('io.syn443.android.ManagedAdaptiveRoutesTest', 'manualGroupRecheckKeepsOtherHealthyGroupsOnTheirOriginalCadence'),
+            ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'halfOpenAcknowledgementsRespectTheOriginalTrialDeadline'),
         ])
     assert set(ADAPTIVE_REQUIRED[mode]) <= {(c.get("classname"),c.get("name")) for c in cases}, "Missing actual managed adaptive outcome"
 

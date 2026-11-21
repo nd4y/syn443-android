@@ -50,6 +50,7 @@ PATH_REQUIRED = {
     'TestPrivateSelectionBlockedGroupCloseCannotBlockOtherFlowWithdrawal',
     'TestPrivateAdaptiveHubRealTwoHopCommitDrainAndRebuild',
     'TestUnknownUnderlayRequiresUniversalEntryAndFreshRealPayloadProof',
+    'TestHalfOpenDeadlineRemainsBoundThroughActualNativeSelection',
     'TestPrivateAdaptiveHubStrictPlansModesReceiptsAndFreshness',
     'TestPrivateAdaptiveHubBoundedCacheRetainsActualOwnership',
     'TestPrivateAdaptiveHubBusyAndStopRequireActualOwnerExit',

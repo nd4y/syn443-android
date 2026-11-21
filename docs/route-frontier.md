@@ -127,3 +127,9 @@ Later traffic describes only what happened under the live choice. A change of
 network, engine or activation discards the comparison. Turning on reserve probe
 cooldown excludes the plan from this comparison. The local report contains only
 the two public algorithm revisions, a count and an outcome.
+
+## Expiry of a quarantined path's retry
+
+An adaptive path with a completed cooldown gets one exclusive retry window. The coordinator sends the original monotonic deadline with that attempt. The native worker uses it to bound both the network measurement and the later selection under the selector lock. A delayed commit cannot renew the window. The native selector continues to use its previous permitted path when the attempt expires.
+
+A delayed verification is discarded. If an acknowledgement of a previously sent commit arrives too late to reconcile the controller's state, the controller withdraws the affected owner's route evidence and recovers under the normal lifecycle. Ordinary route probes retain their existing budgets. The hosted checks exercise the deadline immediately before, at and after expiry over a real two-hop connection.

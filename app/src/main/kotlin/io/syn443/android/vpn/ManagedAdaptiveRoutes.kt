@@ -31,7 +31,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         var search:AdaptiveSearchState=AdaptiveSearchState.WAITING_CONTEXT)
     private data class Pending(val request:String,val group:String,val path:PlannedPath,val attempt:Long,val startedAt:Long,
         val nativeEpoch:Long,val nativeScope:String,var action:String="probe",var latency:Long=0,var receipt:String="",var retries:Int=0,
-         var recovery:CurrentFailure?=null,var checkPlan:JSONObject?=null)
+         var recovery:CurrentFailure?=null,var checkPlan:JSONObject?=null,var retryUntil:Long?=null)
     private data class PendingAdmission(val request:String,val group:String,val path:PlannedPath,val attempt:Long,
         val startedAt:Long,val context:Context,val scope:RouteScope?,val mode:NetworkMode,
         val nativeEpoch:Long,val nativeScope:String,val leaseDeadlineElapsed:Long?,val explore:Boolean,
@@ -273,10 +273,18 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val hops=raw.optJSONArray("hops") ?: return
         if(raw.optString("group")!=work.group || (0 until hops.length()).map {hops.optString(it)}!=work.path.hops)return
         val currentScope=checkNotNull(routeScope)
+        // A delayed native frame must not revive a half-open attempt or its earlier selection.
+        val retryExpired=work.retryUntil?.let {now>=it} == true
+        if(retryExpired && code=="selected" && raw.optBoolean("groupSelected") &&
+            work.receipt.isNotEmpty() && raw.optString("receipt")==work.receipt) {
+            retireOwner=true
+            RouteSnapshot.adaptiveOwnerChanged(currentScope,wire.groupTags().values.toSet())
+            return
+        }
         if(code=="verified" && work.action!="probe") {
             if(raw.optString("receipt")!=work.receipt)return
             if(now-lastCommandAt>=1000) {
-                if(work.retries>=3)work.action="discard"
+                if(retryExpired || work.retries>=3)work.action="discard"
                 if(work.retries>=6) {retireOwner=true;return}
                 work.retries++
                 send(frame(work.action).put("request",work.request).put("receipt",work.receipt),now,dispatch)
@@ -289,6 +297,11 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             val elapsed=raw.optLong("probeMs",-1);if(elapsed !in 0..11999)return
             work.latency=elapsed
             work.receipt=receipt
+            if(retryExpired) {
+                work.action="discard"
+                send(frame("discard").put("request",work.request).put("receipt",receipt),now,dispatch)
+                return
+            }
             work.checkPlan=RouteSnapshot.adaptiveDiagnostic(currentScope,wire.groupTags().getValue(work.group),raw.optJSONObject("checkPlan"),"TRUE")
             val same=group.current?.id==work.path.id
             if(same) {group.failure=null;group.recheckFailed=false}
@@ -502,8 +515,11 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val at=admissionTime(work,result,now) ?: return
         if(at>latest)return
         // Take retry ownership only after durable admission and local fences.
-        if(health.readiness==PathReadiness.REVALIDATE && health.retryAtMs!=null &&
-            !checkNotNull(memory).beginRetry(work.context,key(work.group,work.path),work.attempt,at))return
+        if(health.readiness==PathReadiness.REVALIDATE && health.retryAtMs!=null) {
+            val until=checkNotNull(memory).acquireRetry(work.context,key(work.group,work.path),work.attempt,at) ?: return
+            next.retryUntil=until
+            command.put("retryUntilBootMs",until)
+        }
         pending=next
         val handedOff=try {work.handoff(command,latest)}catch(_:Exception) {false}
         if(!handedOff) {
