@@ -80,6 +80,12 @@ if mode=="jvm":
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
+    assert {("io.syn443.android.InvitationScannerTest", name) for name in (
+        "liveDecoderRecognizesBothPolaritiesAndRejectsForeignPayloads",
+        "validCameraResultOnlyEnablesLocalInvitationReview",
+        "canceledScannerKeepsPasteAndImageAvailable",
+    )} <= set(identities), "Missing in-app invitation scanner outcomes"
+    assert ("InvitationCameraPermission", "systemDenialReturnsToEnrollmentWithImageAndPaste") in identities
     assert {("io.syn443.android.NetBirdProfileStateTest", name) for name in (
         "runningProfileEvidenceRequiresAReadyCurrentOwnerAndSuppressesRetiredRows",
         "profileWithoutNetBirdHasOneExplanationAndConfiguredModuleKeepsItsControls",

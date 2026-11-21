@@ -14,7 +14,7 @@ import java.io.File
 class EnrollmentQrTest {
     @Test fun qrImageReturnsOnlyASyntacticallyBoundedInvitation(){
         val context=InstrumentationRegistry.getInstrumentation().targetContext
-        val directory=File(context.cacheDir,"enrollment-camera").apply {mkdirs()}
+        val directory=File(context.cacheDir,"chat-test").apply {mkdirs()}
         val file=File(directory,"qr-test.png")
         val code=Identity.random()
         val link="syn443://enroll/v1?service=service-a&origin=https%3A%2F%2Fapi.example.invalid&code=$code&bootstrap=x.y.z"
@@ -23,7 +23,7 @@ class EnrollmentQrTest {
         val bitmap=Bitmap.createBitmap(pixels,matrix.width,matrix.height,Bitmap.Config.ARGB_8888)
         try {
             file.outputStream().use {assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,it))}
-            val uri=FileProvider.getUriForFile(context,"io.syn443.android.enrollment.files",file)
+            val uri=FileProvider.getUriForFile(context,"io.syn443.chat.fixture",file)
             assertEquals(link,InvitationQr.decode(context,uri))
             file.writeBytes(byteArrayOf(1,2,3));try {InvitationQr.decode(context,uri);fail("invalid image decoded")}catch(_:Exception){}
             try {InvitationQr.decode(context,Uri.parse("https://api.example.invalid/qr"));fail("remote image accepted")}catch(_:IllegalArgumentException){}

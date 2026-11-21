@@ -1,10 +1,14 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <application
         android:allowBackup="false"
         android:fullBackupContent="false"
@@ -30,9 +34,8 @@
                 <data android:path="/syn443/enroll" />
             </intent-filter>
         </activity>
-        <provider android:name=".EnrollmentFileProvider" android:authorities="io.syn443.android.enrollment.files" android:exported="false" android:grantUriPermissions="true">
-            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/enrollment_camera_paths" />
-        </provider>
+        <activity android:name=".InvitationScannerActivity" android:exported="false" />
+        <activity android:name="com.journeyapps.barcodescanner.CaptureActivity" tools:node="remove" />
         <activity android:name=".chat.SupportActivity" android:exported="false" />
         <activity android:name=".support.DiagnosticsActivity" android:exported="false" />
         <activity android:name=".admin.AdminActivity" android:exported="false" />
