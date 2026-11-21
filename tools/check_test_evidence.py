@@ -80,6 +80,10 @@ if mode=="jvm":
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
+    assert {("io.syn443.android.PhysicalLinkDetailsTest", name) for name in (
+        "familyFactsExcludeLinkLocalAndKeepAddressAndDefaultRouteSeparate",
+        "lostPhysicalLinkRemovesFamilyFactsFromVisibleDiagnostics",
+    )} <= set(identities), "Missing physical link diagnostic outcomes"
     required_storage_outcomes = {
         ("io.syn443.android.AttachmentStorageFailureTest", "failedWritePreservesSourceAndReleasesScratchBeforeRetry"),
         ("io.syn443.android.AttachmentStorageFailureTest", "boundedOutboxFullRollsBackPartialFileAndAllowsRetry"),
@@ -1009,6 +1013,7 @@ PACKAGED_CHAIN_REQUIRED = {
     ("io.syn443.android.PackagedProxyChainTest", "refusedHttpEntryNeverFallsBackToVlessOrTarget"),
     ("io.syn443.android.PackagedProxyChainTest", "refusedTcpConnectionReportsItsCauseWithoutEndpointDetails"),
     ("io.syn443.android.PackagedProxyChainTest", "packagedHTTPSStatusChecksExactResponseAndRequiresTLS"),
+    ("io.syn443.android.PackagedProxyChainTest", "packagedXhttpStreamOneCarriesVlessOverTlsHttp2AndRejectsWrongName"),
 }
 if mode == "emulator":
     assert PACKAGED_CHAIN_REQUIRED <= set(identities), "Missing packaged proxy chain outcomes"

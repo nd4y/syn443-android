@@ -848,9 +848,10 @@
       "text": "Вид транспортной сети и её пригодность - отдельные признаки. LTE/5G не означает наличие белых списков. Ошибка одного сайта не является достаточным основанием для смены режима.",
       "status": "partial",
       "evidence": [
-        "docs/route-lifecycle.md#physical-network-preference"
+        "docs/route-lifecycle.md#physical-network-preference",
+        "docs/route-lifecycle.md#physical-ip-families"
       ],
-      "implementationScope": "Local physical candidate ranking separates platform validation and captive state from the transport.",
+      "implementationScope": "Local physical candidate ranking separates platform validation and captive state from the transport. Local diagnostics report IPv4 and IPv6 address and default route presence for the selected physical link.",
       "remainingScope": "Evidence-backed service modes, independent reachability checks and physical cross-mode acceptance."
     },
     {

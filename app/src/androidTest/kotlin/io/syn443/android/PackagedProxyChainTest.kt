@@ -11,6 +11,12 @@ import android.os.CancellationSignal
 import androidx.test.platform.app.InstrumentationRegistry
 import bridge.Bridge
 import bridge.Protector
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.SocketHandler
+import okhttp3.tls.HandshakeCertificates
+import okhttp3.tls.HeldCertificate
+import okio.buffer
 import java.io.DataInputStream
 import java.io.File
 import java.net.InetAddress
@@ -64,14 +70,17 @@ class PackagedProxyChainTest {
     }
 
     private fun expectVless(socket: Socket, port: Int) {
-        val data = DataInputStream(socket.getInputStream())
+        expectVless(DataInputStream(socket.getInputStream()), port)
+    }
+
+    private fun expectVless(data: DataInputStream, port: Int) {
         assertEquals(0, data.readUnsignedByte())
         assertEquals(uuid, UUID(data.readLong(), data.readLong()))
         assertEquals(0, data.readUnsignedByte()) // No flow extensions.
         assertEquals(1, data.readUnsignedByte()) // TCP.
         assertEquals(port, data.readUnsignedShort())
         assertEquals(1, data.readUnsignedByte()) // IPv4.
-        assertArrayEquals(loopback.address, bytes(socket, 4))
+        assertArrayEquals(loopback.address, ByteArray(4).also(data::readFully))
     }
 
     private fun result(entry: Int, exit: Int, target: Int): JSONObject {
@@ -169,6 +178,68 @@ class PackagedProxyChainTest {
                 assertTrue(status.getBoolean("ok"))
             } finally {
                 workers.shutdownNow()
+            }
+        }
+    }
+
+    @Test fun packagedXhttpStreamOneCarriesVlessOverTlsHttp2AndRejectsWrongName() {
+        val serverName = "wire.example.invalid"
+        val identity = HeldCertificate.Builder().addSubjectAlternativeName(serverName).build()
+        val tls = HandshakeCertificates.Builder().heldCertificate(identity).build()
+        listener().use { target ->
+            val executor = Executors.newSingleThreadExecutor()
+            try {
+                val peer = executor.submit {
+                    target.accept().use { it.getOutputStream().write(banner) }
+                }
+                MockWebServer().use { server ->
+                    server.useHttps(tls.sslSocketFactory())
+                    val served = CompletableFuture<Unit>()
+                    server.enqueue(MockResponse.Builder().removeHeader("Content-Length").socketHandler(object : SocketHandler {
+                        override fun handle(socket: okio.Socket) {
+                            try {
+                                socket.source.timeout().timeout(5, TimeUnit.SECONDS)
+                                val request = socket.source.buffer().inputStream()
+                                expectVless(DataInputStream(request), target.localPort)
+                                localSocket(target.localPort).use { endpoint ->
+                                    socket.sink.buffer().use { it.write(byteArrayOf(0, 0)).write(bytes(endpoint, banner.size)) }
+                                }
+                                served.complete(Unit)
+                            } catch (failure: Throwable) {
+                                served.completeExceptionally(failure)
+                                socket.cancel()
+                            }
+                        }
+                    }).build())
+                    server.start(loopback, 0)
+                    fun probe(name: String): JSONObject {
+                        val certificate = JSONObject.quote(identity.certificatePem())
+                        val config = """{"log":{"disabled":true},"inbounds":[],"outbounds":[
+                            {"type":"vless","tag":"exit","server":"127.0.0.1","server_port":${server.port},"uuid":"$uuid",
+                             "tls":{"enabled":true,"server_name":"$name","certificate":[$certificate],"alpn":["h2"]},
+                             "transport":{"type":"xhttp","mode":"stream-one","path":"/fixture"}}],"route":{"final":"exit"}}"""
+                        val request = """{"request":"packaged-proxy","routes":[{"id":"server","outbound":"exit",
+                            "checks":[{"method":"ssh_banner","target":"127.0.0.1:${target.localPort}"}]}]}"""
+                        return completedCheck(config, request, listOf("route-1"))
+                    }
+                    val success = probe(serverName)
+                    assertTrue(success.getBoolean("ok"))
+                    assertEquals("ok", success.getString("code"))
+                    served.get(5, TimeUnit.SECONDS)
+                    peer.get(5, TimeUnit.SECONDS)
+                    val request = checkNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+                    assertEquals("HTTP/2", request.version)
+                    assertEquals("POST", request.method)
+                    assertEquals("/fixture", request.url.encodedPath.trimEnd('/'))
+                    assertNotNull(request.handshake)
+                    server.enqueue(MockResponse(code = 403))
+                    assertFalse(probe("wrong.example.invalid").getBoolean("ok"))
+                    assertEquals(1, server.requestCount)
+                    target.soTimeout = 300
+                    assertThrows(SocketTimeoutException::class.java) { target.accept().close() }
+                }
+            } finally {
+                executor.shutdownNow()
             }
         }
     }

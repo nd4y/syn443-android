@@ -164,6 +164,10 @@ class TunnelService : VpnService() {
     internal fun ownsReadyEngine(generation: Long): Boolean =
         ready && !retiring && !destroyed && token != null && boundGeneration == generation
 
+    @Volatile private var selectedLinkReport: PhysicalLinkReport? = null
+    internal fun physicalLinkReport(generation: Long, networkEpoch: Long) =
+        if (ownsReadyEngine(generation)) selectedLinkReport?.forStatus(networkEpoch) else null
+
     private var registered = false
     private var foreground = false
     private var notificationText = ""
@@ -177,6 +181,7 @@ class TunnelService : VpnService() {
     private class NetworkObservation {
         var candidate: PhysicalCandidate? = null
         var linkSignature: String? = null
+        var families: PhysicalLinkFamilies? = null
     }
     private val networkObservations = linkedMapOf<Network, NetworkObservation>()
     private var probeContext: PhysicalProbeContext? = null // RAM only. Never log link properties.
@@ -202,6 +207,7 @@ class TunnelService : VpnService() {
         override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
             val observation = networkObservations[network] ?: return
             observation.linkSignature = properties.interfaceName?.let { properties.toString() }
+            observation.families = PhysicalLinkFamilies.observe(properties)
             refreshNetwork()
         }
     }
@@ -346,6 +352,9 @@ class TunnelService : VpnService() {
             networkWaitReason=waiting
             network = selected
             epoch++
+            selectedLinkReport = if (selected != null && context != null)
+                networkObservations[selected]?.families?.let { PhysicalLinkReport(epoch, context.network.transport, it) }
+                else null
             internetHealthy=false
             pendingFailover = null
             RouteSnapshot.cancelled(true)

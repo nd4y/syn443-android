@@ -412,6 +412,7 @@ class ControlProvider : ContentProvider() {
             val result = store.read()
             if (method == "status") {
                 LifecycleAccess.engineStatus(context,result)
+                result.put("physicalLink", LifecycleAccess.physicalLink(result) ?: org.json.JSONObject.NULL)
                 result.put("localConfigControl",io.syn443.android.BuildConfig.DEBUG)
                 if (result.optString("reason") == "policy_waiting_restart_budget" && result.optBoolean("desiredOn")) {
                     result.put("policyRetryAt", Recovery.replacementReadyAt(store.checkpoint(result), System.currentTimeMillis()))
