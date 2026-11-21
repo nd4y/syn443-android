@@ -3,6 +3,7 @@ package io.syn443.android.admin
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -20,7 +21,6 @@ import kotlinx.coroutines.delay
 import java.util.Collections
 
 /** Presentation only. No RPC, JSON parsing, storage, OAuth or VPN action. */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions,elapsed:()->Long={SystemClock.elapsedRealtime()}) {
     val latestModel by rememberUpdatedState(model)
@@ -65,15 +65,7 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
             expired=true
         }
     }
-    LazyColumn(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal=20.dp).testTag("editor-content"),
-        verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(vertical=20.dp)) {
-        if (pageInputError.isNotEmpty()) stickyHeader(key="input-error") {
-            Surface(Modifier.fillMaxWidth(), color=MaterialTheme.colorScheme.errorContainer) {
-                Text(pageInputError,
-                    modifier=Modifier.padding(12.dp).testTag("editor-page-error").semantics { liveRegion=LiveRegionMode.Polite },
-                    color=MaterialTheme.colorScheme.onErrorContainer)
-            }
-        }
+    EditorPageLayout(pageInputError) {
         item {Text("Редактор конфигурации",Modifier.testTag("editor-title"),style=MaterialTheme.typography.headlineMedium)}
         item {TextButton(onClick={navigate("BACK")},enabled=!activeBusy,
             modifier=Modifier.testTag("editor-back")) {Text("К устройствам")}}
@@ -222,6 +214,28 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
                 if(allowed){reviewSubmitted=true;latestActions.publish(captured.binding,captured.deadline)} else localError="REVIEW_EXPIRED"
             },enabled=valid,modifier=Modifier.testTag("editor-confirm-publish")) {Text("Опубликовать желаемую конфигурацию")}},
             dismissButton={TextButton(onClick={confirmation=null},modifier=Modifier.testTag("editor-confirm-cancel")) {Text("Отмена")}})
+    }
+}
+
+@Composable
+private fun EditorPageLayout(inputError: String, content: LazyListScope.() -> Unit) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp)) {
+        if (inputError.isNotEmpty()) {
+            Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.errorContainer) {
+                Text(
+                    inputError,
+                    modifier = Modifier.padding(12.dp).testTag("editor-page-error")
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().weight(1f).testTag("editor-content"),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(vertical = 20.dp),
+            content = content,
+        )
     }
 }
 
