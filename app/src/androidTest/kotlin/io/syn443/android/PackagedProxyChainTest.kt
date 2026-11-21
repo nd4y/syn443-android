@@ -2,6 +2,13 @@ package io.syn443.android
 
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.net.ConnectivityManager
+import android.net.DnsResolver
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.os.Bundle
+import android.os.CancellationSignal
+import androidx.test.platform.app.InstrumentationRegistry
 import bridge.Bridge
 import bridge.Protector
 import java.io.DataInputStream
@@ -12,6 +19,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import org.json.JSONObject
@@ -78,10 +86,27 @@ class PackagedProxyChainTest {
         return completedCheck(config, request, listOf("route-2", "route-1"))
     }
 
-    private fun completedCheck(config: String, request: String, expectedPath: List<String>): JSONObject {
+    private fun completedCheck(config: String, request: String, expectedPath: List<String>, wifi: Network? = null): JSONObject {
         val protector = object : Protector {
-            override fun protect(socket: Int) { check(socket >= 0) }
-            override fun exchangeDNS(query: ByteArray): ByteArray = error("unexpected DNS")
+            override fun protect(socket: Int) {
+                check(socket >= 0)
+                wifi?.let { network -> ParcelFileDescriptor.fromFd(socket).use { network.bindSocket(it.fileDescriptor) } }
+            }
+            override fun exchangeDNS(query: ByteArray): ByteArray {
+                val network = checkNotNull(wifi) { "unexpected DNS" }
+                val answer = CompletableFuture<ByteArray>()
+                val cancel = CancellationSignal()
+                try {
+                    DnsResolver.getInstance().rawQuery(network, query, DnsResolver.FLAG_NO_RETRY,
+                        java.util.concurrent.Executor { it.run() }, cancel, object : DnsResolver.Callback<ByteArray> {
+                            override fun onAnswer(response: ByteArray, rcode: Int) { answer.complete(response) }
+                            override fun onError(error: DnsResolver.DnsException) { answer.completeExceptionally(error) }
+                        })
+                    return answer.get(3, TimeUnit.SECONDS)
+                } finally {
+                    cancel.cancel()
+                }
+            }
             override fun physicalInterfaces(): String = "[]"
         }
         ParcelFileDescriptor.open(File("/dev/null"), ParcelFileDescriptor.MODE_READ_WRITE).use { fd ->
@@ -159,6 +184,54 @@ class PackagedProxyChainTest {
             assertEquals("connection_refused", status.getString("cause"))
             assertFalse(status.toString().contains("127.0.0.1"))
         }
+    }
+
+    @Test fun packagedHTTPSStatusChecksExactResponseAndRequiresTLS() {
+        val config = """{"log":{"disabled":true},"inbounds":[],"outbounds":[{"type":"direct","tag":"local"}],
+            "dns":{"servers":[{"type":"local","tag":"physical"}],"final":"physical","strategy":"prefer_ipv4"},
+            "route":{"final":"local","default_domain_resolver":"physical"}}"""
+        fun check(target: String, verb: String, status: Int, network: Network? = null): JSONObject {
+            val quoted = JSONObject.quote(target)
+            val request = """{"request":"packaged-proxy","routes":[{"id":"server","outbound":"local",
+                "checks":[{"method":"https_status","target":$quoted,"http_method":"$verb","expected_status":$status}]}]}"""
+            return completedCheck(config, request, listOf("route-1"), network)
+        }
+        listener().use { plain ->
+            val worker = Executors.newSingleThreadExecutor()
+            try {
+                val serve = worker.submit { plain.accept().use { it.getOutputStream().write("HTTP/1.1 200 OK\r\n\r\n".toByteArray()) } }
+                val result = check("https://127.0.0.1:${plain.localPort}/", "GET", 200)
+                serve.get(8, TimeUnit.SECONDS)
+                assertFalse(result.getBoolean("ok"))
+                assertEquals("tls_failed", result.getString("code"))
+            } finally {
+                worker.shutdownNow()
+            }
+        }
+
+        // An explicitly supplied endpoint exercises real Wi-Fi in device acceptance.
+        val args = InstrumentationRegistry.getArguments()
+        val target = args.getString("httpsStatusTarget") ?: return
+        val uri = java.net.URI(target)
+        require(uri.scheme == "https" && uri.host != null && uri.userInfo == null && uri.fragment == null)
+        val status = checkNotNull(args.getString("httpsStatusExpected")?.toIntOrNull())
+        require(status in 200..599)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val cm = instrumentation.targetContext.getSystemService(ConnectivityManager::class.java)
+        val wifi = checkNotNull(cm.activeNetwork)
+        val caps = checkNotNull(cm.getNetworkCapabilities(wifi))
+        assertTrue(caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))
+        assertTrue(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN))
+        for (verb in listOf("GET", "HEAD")) {
+            val result = check(target, verb, status, wifi)
+            assertEquals("ok", result.getString("code"))
+            assertTrue(result.getBoolean("ok"))
+        }
+        val wrong = check(target, "GET", if (status == 599) 598 else 599, wifi)
+        assertEquals("http_response_mismatch", wrong.getString("code"))
+        assertFalse(wrong.getBoolean("ok"))
+        assertEquals(wifi, cm.activeNetwork)
+        instrumentation.sendStatus(0, Bundle().apply { putString("httpsStatusWiFi", "GET_HEAD_MATCH_AND_MISMATCH") })
     }
 
     @Test fun refusedHttpEntryNeverFallsBackToVlessOrTarget() {

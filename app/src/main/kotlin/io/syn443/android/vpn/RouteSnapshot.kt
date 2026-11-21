@@ -47,8 +47,8 @@ object RouteSnapshot {
     private var completedReceipt=""
     private var confirmingFailure=false
     private var skippedMeteredReserves=false
-    private val methods=setOf("tcp","tls","https_204","ssh_banner","https_exit_ip","https_exit_country")
-    private val tlsMethods=setOf("tls","https_204","https_exit_ip","https_exit_country")
+    private val methods=setOf("tcp","tls","https_204","ssh_banner","https_exit_ip","https_exit_country","https_status")
+    private val tlsMethods=setOf("tls","https_204","https_exit_ip","https_exit_country","https_status")
     private val ipv4Literal=Regex("(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}")
     private val ipv6Literal=Regex("[0-9a-fA-F:.]{2,45}")
     private var measuredPaths=emptyMap<String,JSONArray>()
@@ -84,11 +84,17 @@ object RouteSnapshot {
                 val fields=when(method) {
                     "https_exit_ip" -> setOf("method","target","expected_ip")
                     "https_exit_country" -> setOf("method","target","expected_exit_class")
+                    "https_status" -> setOf("method","target","http_method","expected_status")
                     else -> setOf("method","target")
                 }
                 require(check.keys().asSequence().toSet()==fields)
                 if(method=="https_exit_ip")require(validExitIP(check.get("expected_ip")))
                 if(method=="https_exit_country")require(check.get("expected_exit_class") in setOf("RU","NON_RU"))
+                if(method=="https_status") {
+                    require(check.get("http_method") in setOf("GET", "HEAD"))
+                    val status = check.get("expected_status") as? Int
+                    require(status != null && status in 200..599)
+                }
                 require(method in methods && target.length in 1..2048)
                 val uri=if(method in tlsMethods) URI(target) else URI("tcp://$target")
                 require(uri.host!=null && uri.userInfo==null && uri.fragment==null)
