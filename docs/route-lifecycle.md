@@ -218,3 +218,12 @@ The local `status.physicalLink` field contains only the transport and four
 booleans. VPN stop, service replacement or a different network epoch invalidates
 the observation. An unavailable observation appears as pending. Reading this
 view creates no network traffic and does not request location permission.
+
+### Reading route measurements
+
+The duration and hop list belong to the reported check. If a batch ends or
+times out without a result for a route, its duration becomes unknown and its
+previous path and check-plan results are cleared. A duration of zero means
+that the current measurement completed within one millisecond. The route
+screen labels failed attempts and historical paths separately from successful
+checks. An exit-country mismatch identifies a failed country condition.

@@ -186,7 +186,7 @@ object RouteSnapshot {
         val now=SystemClock.elapsedRealtime()
         observations=observations+(row.id to RouteObservation(scope,now,ok || code=="exit_mismatch" || code=="check_failed",ok))
         codes=codes+(row.id to code)
-        if(latency!=null && latency in 0..30_000)timings=timings+(row.id to latency)
+        timings = if (latency != null && latency in 0..30_000) timings + (row.id to latency) else timings - row.id
         measuredPaths=measuredPaths+(row.id to JSONArray(hops.take(4)))
         val projection=row.profile?.let {RouteCheckPlans.projection(checkPlan,it,if(ok)"TRUE" else if(code=="probe_unavailable")"UNKNOWN" else "FALSE")}
         checkPlans=if(projection!=null)checkPlans+(row.id to projection) else checkPlans-row.id
@@ -210,8 +210,15 @@ object RouteSnapshot {
         })
     }
     @Synchronized fun accepts(only:String?)=rows.any {(only==null || it.id==only) && it.configured()}
-    @Synchronized fun view(status:JSONObject):JSONObject = read(status.optBoolean("desiredOn"),status.optBoolean("engineActive") && live!=null,
-        live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch")))
+    @Synchronized fun view(status:JSONObject):JSONObject {
+        val scope = live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch"))
+        val on = status.optBoolean("desiredOn")
+        val ready = status.optBoolean("engineActive") && live != null
+        return read(on,ready,scope).also { report ->
+            if (on && ready && scope != null && scope == live && scope.config == revision &&
+                revision == status.optString("configRevision")) report.put("measurementRevision", revision)
+        }
+    }
     private fun failoverContext(scope:RouteScope, algorithm:FailoverAlgorithm) =
         Context(scope.network,scope.activation,"active",algorithm.revision,scope.intent,scope.config)
 
@@ -278,11 +285,20 @@ object RouteSnapshot {
         }
         observations=nextObservations;codes=nextCodes;timings=nextTimings;receipts=nextReceipts;measuredPaths=nextPaths;checkPlans=nextPlans
         if(!running) {
-            for(id in queued-seen) {observations=observations+(id to RouteObservation(scope,now,false,false));codes=codes+(id to "cancelled")}
+            for (id in queued - seen) recordMissingResult(id, scope, now)
             completedReceipt=pending
             pending="";queued=emptySet()
         }
         return true
+    }
+    /** A canceled measurement has its own timestamp but no path, duration or leaf results. */
+    private fun recordMissingResult(id: String, scope: RouteScope, now: Long) {
+        observations = observations + (id to RouteObservation(scope, now, false, false))
+        codes = codes + (id to "cancelled")
+        timings = timings - id
+        measuredPaths = measuredPaths - id
+        checkPlans = checkPlans - id
+        receipts = receipts - id
     }
     @Synchronized fun cancelled(resetInterval:Boolean=false){pending="";queued=emptySet();current=null;completedReceipt="";reserveRecovery=null;confirmingFailure=false;skippedMeteredReserves=false;if(resetInterval)lastStarted=-60_000}
     @Synchronized internal fun confirmingFailover(scope:RouteScope):Boolean=live==scope && confirmingFailure
@@ -352,7 +368,7 @@ object RouteSnapshot {
     @Synchronized internal fun readAt(on:Boolean,ready:Boolean,scope:RouteScope?,now:Long):JSONObject {
         require(now>=0)
         if(pending.isNotEmpty() && now-startedAt>=35_000) {
-            current?.let {s->for(id in queued) if(receipts[id]!=pending) {observations=observations+(id to RouteObservation(s,now,false,false));codes=codes+(id to "cancelled")}}
+            current?.let { scope -> for (id in queued) if (receipts[id] != pending) recordMissingResult(id, scope, now) }
             pending="";queued=emptySet()
         }
         val values=rows.map {row->
@@ -360,6 +376,7 @@ object RouteSnapshot {
             val state=if(scope==null) {if(on) RouteState.UNAVAILABLE else RouteState.OFF} else RouteEvidence.classify(on,ready,scope,sample,row.id in queued,now)
             JSONObject().put("id",row.id).put("label",row.tag.take(80)).put("type",row.type).put("required",row.required).put("state",state.name.lowercase(java.util.Locale.ROOT))
                 .put("configured",row.configured()).put("chain",JSONArray(row.chain)).put("routingRules",row.rules)
+                .put("checkPending",row.id in queued)
                 .put("measuredPath",if(sample?.scope==scope)measuredPaths[row.id] ?: JSONArray() else JSONArray())
                 .put("reason",if(sample?.scope==scope)codes[row.id] ?: "not_checked" else "not_checked")
                 .put("ageMs",if(sample!=null && sample.scope==scope && now>=sample.elapsedMs)now-sample.elapsedMs else JSONObject.NULL)

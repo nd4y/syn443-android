@@ -80,6 +80,25 @@ if mode=="jvm":
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
+    assert ("io.syn443.android.VpnLifecycleTest",
+            "defaultVpnRoutesCaptureBothFamiliesAndExplicitIpv6DenialPreservesIpv4") in identities, "Missing dual-stack VPN policy outcome"
+    assert {("io.syn443.android.ManualRouteExplanationTest", name) for name in (
+        "explainsCompiledPathAndDnsWithoutReturningTheTarget",
+        "selectedProxyMeasurementRequiresSuccessfulCurrentOwnerAndConfig",
+        "adaptiveExplanationNeedsCommittedPathAndUsesEntryToExitGraphOrder",
+        "openFormRetiresRuntimeEvidenceWithoutResendingTheEnteredTarget",
+        "unknownPredicatesNeverClaimAFinalAndLiteralsUseNoDns",
+        "onlyExplicitRequestsRunAndEditedOrDismissedInputsLeaveNoResult",
+    )} <= set(identities), "Missing local route explanation outcomes"
+    assert {
+        ("io.syn443.android.RouteSnapshotTest", "terminalOmissionAndDeadlineClearOnlyMissingMeasurements"),
+    } <= set(identities), "Missing route measurement consistency outcomes"
+    assert {("io.syn443.android.InvitationScannerTest", name) for name in (
+        "liveDecoderRecognizesBothPolaritiesAndRejectsForeignPayloads",
+        "validCameraResultOnlyEnablesLocalInvitationReview",
+        "canceledScannerKeepsPasteAndImageAvailable",
+    )} <= set(identities), "Missing in-app invitation scanner outcomes"
+    assert ("io.syn443.android.InvitationCameraPermission", "systemDenialReturnsToEnrollmentWithImageAndPaste") in identities
     assert {("io.syn443.android.NetBirdProfileStateTest", name) for name in (
         "runningProfileEvidenceRequiresAReadyCurrentOwnerAndSuppressesRetiredRows",
         "profileWithoutNetBirdHasOneExplanationAndConfiguredModuleKeepsItsControls",
@@ -745,6 +764,7 @@ ADAPTIVE_SEARCH_REQUIRED = [
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'sixteenGroupProjectionIsClosedBoundedAndFailuresStayGroupLocal'),
     ('io.syn443.android.RouteSearchStatusTest', 'verifiedProjectionJoinsExactExistingTtlScopeReadinessAndFutureSampleGuards'),
     ('io.syn443.android.RouteSearchStatusTest', 'diagnosticProjectionCannotAuthorizeRequiredReadinessOrActivation'),
+    ('io.syn443.android.RouteSearchStatusTest', 'failedOrExpiredPathAndAbsentLatencyHaveDistinctLabels'),
     ('io.syn443.android.RouteSearchStatusTest', 'copiedSixteenGroupProjectionRejectsOverflowForeignScopeAndClearsOnInvalidate'),
     ('io.syn443.android.RouteSearchStatusTest', 'finiteSearchLabelsNeverClaimNoRoutesAndRecompositionDispatchesNothing'),
 ]
@@ -771,7 +791,8 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
              'countryAndIpLeavesKeepIndependentCapabilitiesAndCannotHideInAlternatives'),
             ('io.syn443.policy.RouteCheckPlanPolicyTest',
              'legacySignedBytesRemainOpaqueAndNullDuplicateCaseOrMixedProfileCannotDowngrade')],
- 'emulator': [('io.syn443.android.RouteCheckPlanTest',
+ 'emulator': [('io.syn443.android.RouteCheckPlanTest', 'canceledBatchClearsEarlierSuccessfulLeafOutcomes'),
+              ('io.syn443.android.RouteCheckPlanTest',
                'ordinaryRequestOwnsWholeProfileAndNeverFlattensOrBorrowsMutatedInput'),
               ('io.syn443.android.RouteCheckPlanTest',
                'originalDuplicateNumericNullAndMixedProfileFieldsFailBeforeActivation'),
@@ -789,7 +810,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
 if mode in CHECK_PLAN_REQUIRED:
     required = set(CHECK_PLAN_REQUIRED[mode])
-    assert len(required) == (11 if mode == "policy" else 9)
+    assert len(required) == (11 if mode == "policy" else 10)
     assert required <= set(identities), "Missing exact closed check-plan, policy or passive projection outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/policy/src/test/kotlin/io/syn443/policy" if mode == "policy" else "app/src/androidTest/kotlin/io/syn443/android"

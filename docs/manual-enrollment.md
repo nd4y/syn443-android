@@ -1,14 +1,16 @@
 # Manual managed enrollment
 
-Version0.9.0 adds syn443://enroll/v1, pasted links, QR images and full-resolution
-camera capture. Incoming content is preview-only. The controller verifies the
+Open a `syn443://enroll/v1` link, paste it, import a QR image, or select
+**Сканировать QR** to scan inside SYN443. Only the scanner requests camera
+access. Closing it or declining access leaves the link and image controls
+available. The controller verifies the
 signed service descriptor locally against installation-trust.json and stored
 service floors, then shows service/origin before the user explicitly confirms.
 No key, code or network request is sent by preview. QR content cannot install a
 root, execute a command or publish an administrative setting. The image decoder
 has16MiB/32-megapixel bounds and uses only content URIs selected by the user.
-Temporary camera images stay in one private cache subdirectory and are removed
-after decoding/cancellation. The Activity clears its incoming URI, excludes itself
+The scanner decodes preview frames in memory and releases the camera when it
+leaves the foreground. An accepted QR fills the review field. The Activity clears its incoming URI, excludes itself
 from recents and protects its window; invitation strings redact their contents.
 
 BootstrapTrustStore owns an AtomicFile/AES-GCM/no-backup journal with distinct
@@ -49,8 +51,8 @@ evidence described in [the acceptance note](manual-enrollment-acceptance.md).
 Later changes need their own exact-source verification.
 This implementation is not evidence that all M2/M3 requirements are complete.
 
-QR decoding uses the exact ZXing core3.5.4 artifact from Maven Central
-(https://repo.maven.apache.org/maven2/com/google/zxing/core/3.5.4/).
+The scanner uses ZXing core 3.5.4 and the camera preview from
+[ZXing Android Embedded 4.3.0](https://github.com/journeyapps/zxing-android-embedded/tree/v4.3.0).
 
 The closed invitation-openapi.json contract is byte-identical to control plane.
 Required test-name checks and independent JaCoCo class inventory prevent missing

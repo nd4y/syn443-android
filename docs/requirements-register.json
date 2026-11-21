@@ -697,8 +697,13 @@
     {
       "id": "PROTO-03",
       "text": "IPv4 интернет-трафик обязателен. Для IPv6 первая версия должна либо обеспечивать проверенный путь, либо явно блокировать его в политике; нельзя допускать незаметный прямой обход VPN. NetBird IPv6 не является обязательным для 1.0.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/TunnelService.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/VpnLifecycleTest.kt",
+        "tools/check_test_evidence.py"
+      ],
+      "remainingScope": "Android captures both default routes. The hosted scenario exercises an IPv6-wide block and a subsequent allowed proxy path with distinct IPv4 and IPv6 application traffic. Real dual-stack underlay and broader leak acceptance remain open."
     },
     {
       "id": "PROTO-04",
@@ -1420,14 +1425,26 @@
     {
       "id": "ROUTE-02",
       "text": "Панель и клиент предоставляют объяснение маршрута для введённого пользователем домена/IP или приложения: совпавшее правило, DNS, цепочка и exit. Тест запускается явно; история пользовательских доменов не собирается автоматически.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/LocalRouteExplanation.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManualRouteAnswer.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManualRouteControl.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManualRouteExplanationTest.kt"
+      ],
+      "remainingScope": "The phone explains compiled rules, DNS and static detours. A successful current probe can identify a selected proxy chain and its logical exit, with a separate confirmed adaptive graph path. Authored rule IDs, independent public egress address evidence and native-only predicates remain open."
     },
     {
       "id": "ROUTE-03",
       "text": "Внутренние зоны имеют назначенный резолвер и запрет публичного fallback. Публичные bootstrap-резолверы и резолверы через туннель разделены. FakeIP допустим только как явная политика с исключениями для внутренних зон.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "native/bridge/split_dns_wire_test.go",
+        "native/bridge/dns_wire_test.go",
+        "native/engine-netbird/dns_test.go"
+      ],
+      "implementationScope": "The embedded DNS router sends internal requests only to the assigned test resolver. Loopback witnesses check application delivery through an HTTP proxy, A/AAAA, NXDOMAIN, SERVFAIL, silence, unrelated public names and recovery.",
+      "remainingScope": "Physical managed-overlay DNS and application acceptance; bootstrap, FakeIP exclusions and device fail policy coverage remain separate."
     },
     {
       "id": "ROUTE-04",
@@ -1491,6 +1508,9 @@
         "native/bridge/route_checks_test.go",
         "app/src/androidTest/kotlin/io/syn443/android/PackagedProxyChainTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/RouteSnapshotTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteCheckPlanTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSearchStatusTest.kt",
+        "docs/route-lifecycle.md#reading-route-measurements",
         "docs/TESTING.md"
       ]
     },
@@ -2393,8 +2413,15 @@
     {
       "id": "BOOT-06",
       "text": "Приложение обрабатывает `syn443://enroll` через Android deep links, собственный QR-сканер и явную вставку ссылки. QR содержит ровно ту же версионированную ссылку; отдельного несовместимого QR-формата нет. Другие пользовательские URI-схемы и прежние алиасы не поддерживаются. Камера запрашивается только при сканировании; при отказе остаются ссылка и вставка.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md",
+        "app/src/main/kotlin/io/syn443/android/InvitationScannerActivity.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/InvitationScannerTest.kt",
+        "tools/run_invitation_camera_permission.py"
+      ],
+      "implementationScope": "Local QR decoding, URI and paste share the invitation preview. Camera access is requested on an explicit scan. Cancellation and denial preserve manual enrollment.",
+      "remainingScope": "Verify an optical read of a newly issued invitation on a clean physical device and the full claim, pairing and policy delivery flow."
     },
     {
       "id": "BOOT-07",
@@ -2808,8 +2835,14 @@
     {
       "id": "AC15",
       "specRow": " Внутренние DNS и назначенный ресурс | DNS, TCP и прикладной запрос проходят; при отказе DNS не утекает публично |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "native/bridge/split_dns_wire_test.go",
+        "native/bridge/dns_wire_test.go",
+        "native/engine-netbird/dns_test.go"
+      ],
+      "implementationScope": "The embedded DNS router sends internal requests only to the assigned test resolver. Loopback witnesses check application delivery through an HTTP proxy, A/AAAA, NXDOMAIN, SERVFAIL, silence, unrelated public names and recovery.",
+      "remainingScope": "Physical managed-overlay DNS and application acceptance; bootstrap, FakeIP exclusions and device fail policy coverage remain separate."
     },
     {
       "id": "AC16",
@@ -2916,8 +2949,15 @@
     {
       "id": "AC33",
       "specRow": " Ссылка/QR при холодном и тёплом запуске, камера запрещена | Ссылка syn443:// и QR с ней ведут в одинаковую привязку, вставка работает, Keycloak не запрашивается |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md",
+        "app/src/main/kotlin/io/syn443/android/InvitationScannerActivity.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/InvitationScannerTest.kt",
+        "tools/run_invitation_camera_permission.py"
+      ],
+      "implementationScope": "Local QR decoding, URI and paste share the invitation preview. Camera access is requested on an explicit scan. Cancellation and denial preserve manual enrollment.",
+      "remainingScope": "Verify an optical read of a newly issued invitation on a clean physical device and the full claim, pairing and policy delivery flow."
     },
     {
       "id": "AC34",
