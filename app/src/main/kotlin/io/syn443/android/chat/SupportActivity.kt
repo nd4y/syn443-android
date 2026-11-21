@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
@@ -89,7 +90,7 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
     var messages by remember {mutableStateOf(ChatMessageWindow())}
     var peerRead by remember {mutableStateOf(0L)}
     var pending by remember {mutableStateOf(emptyList<Pair<String,JSONObject>>())}
-    var text by remember {mutableStateOf("")}
+    var text by remember { mutableStateOf(TextFieldValue()) }
     var files by remember {mutableStateOf(emptyList<JSONObject>())}
     var status by remember {mutableStateOf("Подключение к поддержке")}
     var nextAttempt by remember {mutableStateOf(0L)}
@@ -202,12 +203,12 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
                 val login=withContext(Dispatchers.IO) {JSONObject(context.contentResolver.call("content://io.syn443.control".toUri(),"auth-status",null,null)?.getString("json")?:"{}")}
                 val next=login.optLong("generation",-1)
                 if(login.optString("phase") !in setOf("PROVISIONING","POLICY_CACHED","REFRESHING")) {
-                    generation= -1;client=null;store=null;selectConversation("");inbox=ChatInboxWindow();files=emptyList();text="";admin=false
+                    generation= -1;client=null;store=null;selectConversation("");inbox=ChatInboxWindow();files=emptyList();text=TextFieldValue();admin=false
                     refreshGate=ChatRefreshGate();connectionProblem=false;manualRefresh=false
                     status="Для чата войдите в SYN443 на главном экране."
                 } else {
                     if(generation!=next) {
-                        selectConversation("");files=emptyList();text="";inbox=ChatInboxWindow();admin=false
+                        selectConversation("");files=emptyList();text=TextFieldValue();inbox=ChatInboxWindow();admin=false
                         client=null;store=null;generation=next;refreshGate=ChatRefreshGate()
                     }
                     val gate=refreshGate
@@ -226,7 +227,7 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
                             pending=currentDrafts(withContext(Dispatchers.IO) {requireNotNull(store).drafts()})
                             val own=requireNotNull(client).objectCall("self")
                             val permittedAdmin=own.getBoolean("admin")
-                            if(admin && !permittedAdmin) {selectConversation("");inbox=ChatInboxWindow();files=emptyList();text=""}
+                            if(admin && !permittedAdmin) {selectConversation("");inbox=ChatInboxWindow();files=emptyList();text=TextFieldValue()}
                             admin=permittedAdmin
                             if(!admin)conversation=own.getJSONObject("conversation").getString("id")
                             if(admin && conversation.isEmpty() && !inbox.historical) refreshInbox(false)
@@ -268,7 +269,7 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
         if(admin) {
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 Button(onClick={selectConversation(""); run { if (!inbox.historical) refreshInbox(false) }},
-                    enabled=conversation.isNotEmpty() && !busy && !refreshRunning && text.isBlank() && files.isEmpty()) {Text("Все диалоги")}
+                    enabled=conversation.isNotEmpty() && !busy && !refreshRunning && text.text.isBlank() && text.composition == null && files.isEmpty()) {Text("Все диалоги")}
                 Text("Администратор")
             }
         }
@@ -306,19 +307,54 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
         }
         if(client!=null && conversation.isNotEmpty()) {
             for(file in files)TextButton(onClick={run {withContext(Dispatchers.IO) {store!!.removeFile(file.getString("localId"))};files=files-file}},enabled=!busy) {Text("${file.getString("name")} - убрать")}
-            OutlinedTextField(text,{if(ChatLimits.text(it))text=it},label={Text("Сообщение")},maxLines=4,enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("chat-text"))
             attachmentProblem?.let { ChatAttachmentNotice(it) }
-            Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                TextButton(onClick={media.launch(arrayOf("image/*","video/*"))},enabled=!busy && files.size<4) {Text("Фото / видео")}
-                TextButton(onClick={document.launch(arrayOf("*/*"))},enabled=!busy && files.size<4) {Text("Файл")}
-                Button(onClick={run {
-                    val id=ChatLimits.id();val draft=JSONObject().put("conversation",conversation).put("text",text).put("files",JSONArray(files))
-                    withContext(Dispatchers.IO) {requireNotNull(store).saveDraft(id,draft)}
-                    text="";files=emptyList();pending=currentDrafts(withContext(Dispatchers.IO) {store!!.drafts()});sendPending(id)
-                }},enabled=!busy && (text.isNotBlank() || files.isNotEmpty()),modifier=Modifier.testTag("chat-send")) {Text("Отправить")}
-            }
+            ChatComposer(text, { text = it }, busy, files.size,
+                pickMedia = { media.launch(arrayOf("image/*","video/*")) },
+                pickDocument = { document.launch(arrayOf("*/*")) },
+                send = { message ->
+                    val selected = conversation
+                    val owner = generation
+                    val attachments = files.toList()
+                    run {
+                        if (conversation != selected || generation != owner || text.composition != null ||
+                            text.text != message || files != attachments) return@run
+                        val id = ChatLimits.id()
+                        val draft = JSONObject().put("conversation",selected).put("text",message).put("files",JSONArray(attachments))
+                        withContext(Dispatchers.IO) { requireNotNull(store).saveDraft(id,draft) }
+                        text = TextFieldValue(); files = emptyList()
+                        pending = currentDrafts(withContext(Dispatchers.IO) { requireNotNull(store).drafts() })
+                        sendPending(id)
+                    }
+                })
         }
         if(busy || refreshRunning)TextButton(onClick={if(busy)operation?.cancel() else refreshNonce++}) {Text("Отменить операцию")}
+    }
+}
+
+@Composable
+internal fun ChatComposer(
+    value: TextFieldValue, change: (TextFieldValue) -> Unit, busy: Boolean, fileCount: Int,
+    pickMedia: () -> Unit, pickDocument: () -> Unit, send: (String) -> Unit,
+) {
+    val valid = ChatLimits.text(value.text)
+    val composing = value.composition != null
+    OutlinedTextField(
+        value, { if (it.text.length <= ChatLimits.maxTextUnits) change(it) },
+        label = { Text("Сообщение") }, maxLines = 4, enabled = !busy,
+        isError = !composing && !valid,
+        supportingText = if (!composing && !valid) {
+            { Text("Проверьте символы и сократите сообщение до 4096 символов.") }
+        } else null,
+        modifier = Modifier.fillMaxWidth().testTag("chat-text"),
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        TextButton(onClick = pickMedia, enabled = !busy && fileCount < 4) { Text("Фото / видео") }
+        TextButton(onClick = pickDocument, enabled = !busy && fileCount < 4) { Text("Файл") }
+        Button(
+            onClick = { send(value.text) },
+            enabled = !busy && !composing && valid && (value.text.isNotBlank() || fileCount > 0),
+            modifier = Modifier.testTag("chat-send"),
+        ) { Text("Отправить") }
     }
 }
 

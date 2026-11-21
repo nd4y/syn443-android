@@ -15,7 +15,21 @@ object ChatLimits {
     const val chunk=256*1024
     fun id()=UUID.randomUUID().toString().replace("-","")
     fun hash(bytes:ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {"%02x".format(it)}
-    fun text(value:String):Boolean=value.codePointCount(0,value.length)<=4096 && value.toByteArray().size<=16384 && '\u0000' !in value
+    const val maxTextPoints = 4096
+    const val maxTextUnits = maxTextPoints * 2
+
+    fun text(value: String): Boolean {
+        if (value.length > maxTextUnits) return false
+        var index = 0
+        var points = 0
+        while (index < value.length) {
+            val scalar = value.codePointAt(index)
+            if (scalar == 0 || scalar in 0xd800..0xdfff || ++points > maxTextPoints) return false
+            index += Character.charCount(scalar)
+        }
+        // Each Unicode scalar needs at most four UTF-8 bytes (16,384 in total).
+        return true
+    }
 }
 
 /** No credentials cross Binder. Cancellation closes only this operation, never the VPN. */

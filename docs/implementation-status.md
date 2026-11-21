@@ -320,3 +320,7 @@ DEBUG worker diagnostics remain available; unrelated changes are not called its 
 All builds run in GitHub Actions. Physical USB/Wi-Fi and privacy/cleanup evidence
 remain separate. No production secret, provider URL, identity file or raw device
 log belongs in source, fixtures, Issues, Actions artifacts or releases.
+
+### Android chat composition and encrypted outbox
+
+The shared user and administrator composer keeps the IME composition range. A message or attachment can enter the outbox only after composition ends and the user activates Send. The outbox checks Unicode before encoding or changing an existing draft. Instrumentation covers the button, Enter during composition and SQL reopen after rejected malformed and oversized replacements.

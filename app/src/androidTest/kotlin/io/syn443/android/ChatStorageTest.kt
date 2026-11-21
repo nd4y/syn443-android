@@ -93,6 +93,25 @@ class ChatStorageTest {
             assertEquals(listOf(second),store.drafts().map {it.first})
         }
     }
+    @Test fun invalidUnicodeCannotReplaceOrCreateEncryptedChatDrafts() = fixture { name ->
+        val saved = ChatLimits.id()
+        val fresh = ChatLimits.id()
+        val text = "🚀".repeat(4095) + "\uFFFD"
+        ChatOutbox(context, 1, name).use { store ->
+            store.saveDraft(saved, draft().put("text", text))
+            for (invalid in listOf("\uD800", "x\uDC00", "\uD800x", "a\u0000b", text + "z")) {
+                for (id in listOf(saved, fresh)) {
+                    assertThrows(IllegalArgumentException::class.java) {
+                        store.saveDraft(id, draft().put("text", invalid))
+                    }
+                }
+            }
+        }
+        ChatOutbox(context, 1, name).use { store ->
+            assertEquals(text, store.draft(saved)?.getString("text"))
+            assertNull(store.draft(fresh))
+        }
+    }
     @Test fun chatSqlOutboxPersistsCiphertextAndFencesAccountGeneration()=fixture {name->
         val id=ChatLimits.id()
         ChatOutbox(context,7,name).use {it.saveDraft(id,draft())}

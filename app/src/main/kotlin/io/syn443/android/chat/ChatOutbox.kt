@@ -80,10 +80,13 @@ class ChatOutbox(context:Context,private val generation:Long,private val namespa
         return if(decrypt)c.doFinal(bytes,12,bytes.size-12) else c.iv+c.doFinal(bytes)
     }
     fun saveDraft(id:String,body:JSONObject) {
-        require(wireId.matches(id) && body.toString().toByteArray().size<=32768)
+        val message = body.opt("text") as? String
+        require(wireId.matches(id) && message != null && ChatLimits.text(message))
+        val encoded = body.toString().toByteArray(Charsets.UTF_8)
+        require(encoded.size <= 32768)
         val count=db.rawQuery("SELECT count(*) FROM drafts",null).use {it.moveToFirst();it.getInt(0)}
         require(count<8 || draft(id)!=null)
-        db.insertWithOnConflict("drafts",null,ContentValues().apply {put("id",id);put("generation",generation);put("body",crypt("draft/$id",body.toString().toByteArray()))},SQLiteDatabase.CONFLICT_REPLACE).also {check(it!=-1L)}
+        db.insertWithOnConflict("drafts",null,ContentValues().apply {put("id",id);put("generation",generation);put("body",crypt("draft/$id",encoded))},SQLiteDatabase.CONFLICT_REPLACE).also {check(it!=-1L)}
     }
     fun draft(id:String):JSONObject?=db.rawQuery("SELECT body FROM drafts WHERE id=? AND generation=?",arrayOf(id,generation.toString())).use {
         if(it.moveToFirst())JSONObject(crypt("draft/$id",it.getBlob(0),true).toString(Charsets.UTF_8)) else null

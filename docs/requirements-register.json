@@ -2184,7 +2184,8 @@
         "docs/support-chat.md",
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "app/src/androidTest/kotlin/io/syn443/android/ChatComposerTest.kt"
       ],
       "text": "Лимит одного готового вложения равен25MiB (26 214 400 байт); UI называет его «25 МБ». Допускается до4 вложений в сообщении. Текст ограничен4096 Unicode code points и16384 UTF-8 байтами. Сервер повторно проверяет размеры, число частей, порядок, общий SHA-256 и фактический тип; client-side проверка не является границей безопасности."
     },
@@ -2285,7 +2286,8 @@
         "docs/support-chat.md",
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "app/src/androidTest/kotlin/io/syn443/android/ChatComposerTest.kt"
       ],
       "text": "В Android администратора и веб-панели есть список диалогов, непрочитанное, история с пагинацией, поле ответа, выбор/отмена файла и download. На телефоне пользователя есть свой диалог, состояние связи и ошибки повторной отправки. Нельзя отправить сообщение нажатием Enter во время ввода составного текста; действие отправки явно подтверждается кнопкой."
     },
