@@ -9,7 +9,7 @@ from run_packaged_instrumentation import verify_apks
 
 root = Path(__file__).resolve().parents[1]
 manifest = json.loads((Path(os.environ["RUNNER_TEMP"])/"build-manifest.json").read_bytes())
-verify_apks(root, manifest, "adabc548cae353d93bec6e8b07a3ca97fb31a9d3", 44918106866, 1)
+verify_apks(root, manifest, "d8d80829e98d9eff92b48a3771a2ae7c1163faec", 44932680946, 1)
 adb = ["adb", "-e"]
 assert re.fullmatch(rb"emulator-\d+",subprocess.check_output(adb+["get-serialno"]).strip())
 assert subprocess.check_output(adb+["emu","avd","name"]).splitlines()==[b"syn443-ci",b"OK"]
@@ -20,10 +20,11 @@ subprocess.run(adb+["install","-r",str(root/"app/build/outputs/apk/androidTest/d
 method="splittingFullPagePreservesUnicodeAndReviewUntilContentChanges"
 out=subprocess.check_output(adb+["shell","am","instrument","-w","-r","-e","listener",
     "io.syn443.android.NetBirdTestProgress,io.syn443.android.DiagnosticBundleTestProgress",
+    "-e", "class", "io.syn443.android.AdminEditorUiTest#"+method,
     "io.syn443.android.test/io.syn443.android.EnrollmentDriver"],timeout=1200).decode("utf-8","replace")
 assert len(out)<8*1024*1024 and method in out
 if re.search(r"OK \([1-9]\d+ tests\)",out):
-    print("The original complete packaged instrumentation suite passed.")
+    print("The selected packaged instrumentation case passed in isolation.")
 else:
     assert re.search(r"(?m)^INSTRUMENTATION_STATUS_CODE: -(1|2)\s*$",out)
     lines=re.findall(r"(?m)^\s*at io\.syn443\.android\.AdminEditorUiTest(?:\$[\w$]+)?\.[\w$<>]+\(AdminEditorUiTest\.kt:([1-9]\d{0,3})\)\s*$",out)
@@ -31,3 +32,15 @@ else:
     print("Original synthetic test failed at test source line(s):",",".join(dict.fromkeys(lines)))
     for marker in ("Failed to assert", "No node found", "not enabled", "EditableText", "editor-page-error", "editor-split-page", "editor-publish", "editor-save-local"):
         if marker in out: print("Static diagnostic marker:",marker)
+
+    for label,pattern in {
+        "assert-displayed":r"assertIsDisplayed|is not displayed|not displayed",
+        "missing-node":r"did not find any node|found 0 nodes|No node found|could not find any|found no nodes",
+        "multiple-nodes":r"found [2-9] nodes|Found [2-9] nodes",
+        "unexpected-text":r"assertTextEquals|hasText",
+        "unexpected-count":r"expected:<|Assert\.assertEquals",
+        "focus":r"request focus|obtain focus",
+    }.items():
+        if re.search(pattern,out,re.IGNORECASE):print("Fixed diagnostic:",label)
+    for marker in ("editor-page-input","editor-page-error","editor-content"):
+        print("Known selector in generated exception:",marker,marker in out)
