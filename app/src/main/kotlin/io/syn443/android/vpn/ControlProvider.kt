@@ -70,10 +70,17 @@ class ControlProvider : ContentProvider() {
                 val query = LocalRouteQuery.parse(arg)
                 val store = StateStore.get(context)
                 val raw = checkNotNull(store.config())
-                val result = LocalRouteExplanation.describe(raw, query)
+                var selected: String? = null
+                val result = LocalRouteExplanation.describe(raw, query) { selected = it }
+                val revision = io.syn443.policy.Policy.hash(raw)
                 // A revocation or replacement concurrent with evaluation invalidates the answer.
                 require(store.config() == raw)
-                return Bundle().apply { putBoolean("ok", true); putString("description", result) }
+                return Bundle().apply {
+                    putBoolean("ok", true)
+                    putString("description", result)
+                    putString("outbound", selected)
+                    putString("revision", revision)
+                }
             }
             initializeUnlocked()
             val store = StateStore.get(context)

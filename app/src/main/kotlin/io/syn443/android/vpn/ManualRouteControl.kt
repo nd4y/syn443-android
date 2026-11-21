@@ -31,7 +31,7 @@ private val fields = listOf("domain" to "Домен", "address" to "IP-адре�
     "network" to "Транспорт (TCP или UDP)", "port" to "Порт", "dnsType" to "Тип запроса DNS")
 
 @Composable
-internal fun ManualRouteControl(explain: suspend (String) -> String?) {
+internal fun ManualRouteControl(health: JSONObject? = null, explain: suspend (String) -> ManualRouteAnswer?) {
     var open by remember { mutableStateOf(false) }
     TextButton(onClick = { open = true }, modifier = Modifier.testTag("manual-route-open")) {
         Text("Объяснить маршрут")
@@ -43,7 +43,7 @@ internal fun ManualRouteControl(explain: suspend (String) -> String?) {
         title = { Text("Проверка правил на устройстве") },
         text = {
             CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
-                ManualRouteFields(explain)
+                ManualRouteFields(health, explain)
             }
         },
         confirmButton = { TextButton(onClick = { open = false }) { Text("Закрыть") } },
@@ -51,10 +51,10 @@ internal fun ManualRouteControl(explain: suspend (String) -> String?) {
 }
 
 @Composable
-private fun ManualRouteFields(explain: suspend (String) -> String?) {
+private fun ManualRouteFields(health: JSONObject?, explain: suspend (String) -> ManualRouteAnswer?) {
     val inputs = remember { mutableStateMapOf<String, String>() }
     var generation by remember { mutableLongStateOf(0) }
-    var result by remember { mutableStateOf("") }
+    var result by remember { mutableStateOf<ManualRouteAnswer?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()),
@@ -67,7 +67,7 @@ private fun ManualRouteFields(explain: suspend (String) -> String?) {
                     if (value.length <= 255) {
                         inputs[key] = value
                         generation++
-                        result = ""
+                        result = null
                     }
                 },
                 label = { Text(label) }, singleLine = true,
@@ -80,18 +80,18 @@ private fun ManualRouteFields(explain: suspend (String) -> String?) {
             inputs.forEach { (key, value) -> if (value.isNotBlank()) query.put(key, value.trim()) }
             val raw = query.toString()
             if (runCatching { LocalRouteQuery.parse(raw) }.isFailure) {
-                result = "Проверьте введённые значения."
+                result = ManualRouteAnswer("Проверьте введённые значения.")
             } else {
                 val ticket = generation
                 busy = true
                 scope.launch {
                     try {
                         val answer = explain(raw)
-                        if (ticket == generation) result = answer ?: "Разрешённая конфигурация недоступна."
+                        if (ticket == generation) result = answer ?: ManualRouteAnswer("Разрешённая конфигурация недоступна.")
                     } catch (e: CancellationException) {
                         throw e
                     } catch (_: Exception) {
-                        if (ticket == generation) result = "Не удалось проверить конфигурацию."
+                        if (ticket == generation) result = ManualRouteAnswer("Не удалось проверить конфигурацию.")
                     } finally {
                         busy = false
                     }
@@ -99,6 +99,10 @@ private fun ManualRouteFields(explain: suspend (String) -> String?) {
             }
         }, enabled = !busy && listOf("domain", "address", "application").any { !inputs[it].isNullOrBlank() },
             modifier = Modifier.testTag("manual-route-run")) { Text(if (busy) "Проверяем…" else "Проверить") }
-        if (result.isNotEmpty()) Text(result, Modifier.testTag("manual-route-result").semantics { liveRegion = LiveRegionMode.Polite })
+        result?.let { answer ->
+            Text(answer.description, Modifier.testTag("manual-route-result").semantics { liveRegion = LiveRegionMode.Polite })
+            if (answer.outbound != null) Text(answer.measurement(health) ?: "Для этого маршрута нет свежего подтверждённого пути.",
+                Modifier.testTag("manual-route-measurement"))
+        }
     }
 }

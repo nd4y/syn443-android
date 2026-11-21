@@ -222,10 +222,12 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
                 key(status.optString("configRevision"), status.optLong("generation"), status.optLong("networkEpoch"),
                     policy?.optString("source"), policy?.optString("phase"), policy?.optString("activeRevision"),
                     policy?.optString("desiredRevision"), policy?.optString("activationGeneration")) {
-                    ManualRouteControl { query ->
+                    ManualRouteControl(status.optJSONObject("routeHealth")) { query ->
                         withContext(Dispatchers.IO) {
                             context.contentResolver.call(controlUri, "route-explain", query, null)
-                                ?.takeIf { it.getBoolean("ok") }?.getString("description")
+                                ?.takeIf { it.getBoolean("ok") }?.let { reply ->
+                                    reply.getString("description")?.let { ManualRouteAnswer(it, reply.getString("outbound"), reply.getString("revision")) }
+                                }
                         }
                     }
                 }

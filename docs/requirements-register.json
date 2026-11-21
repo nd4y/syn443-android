@@ -1423,10 +1423,11 @@
       "status": "partial",
       "evidence": [
         "app/src/main/kotlin/io/syn443/android/vpn/LocalRouteExplanation.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManualRouteAnswer.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/ManualRouteControl.kt",
         "app/src/androidTest/kotlin/io/syn443/android/ManualRouteExplanationTest.kt"
       ],
-      "remainingScope": "Local manual evaluation identifies compiled rule positions, configured DNS and ordered static detours. Author rule IDs, live group member, observed exit and predicates that depend on native runtime state remain open."
+      "remainingScope": "The phone explains compiled rules, DNS and static detours. A successful current probe can identify a selected proxy chain and its logical exit, with a separate confirmed adaptive graph path. Authored rule IDs, independent public egress address evidence and native-only predicates remain open."
     },
     {
       "id": "ROUTE-03",

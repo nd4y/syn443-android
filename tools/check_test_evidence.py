@@ -82,6 +82,9 @@ if mode=="jvm":
 if mode=="emulator":
     assert {("io.syn443.android.ManualRouteExplanationTest", name) for name in (
         "explainsCompiledPathAndDnsWithoutReturningTheTarget",
+        "selectedProxyMeasurementRequiresSuccessfulCurrentOwnerAndConfig",
+        "adaptiveExplanationNeedsCommittedPathAndUsesEntryToExitGraphOrder",
+        "openFormRetiresRuntimeEvidenceWithoutResendingTheEnteredTarget",
         "unknownPredicatesNeverClaimAFinalAndLiteralsUseNoDns",
         "onlyExplicitRequestsRunAndEditedOrDismissedInputsLeaveNoResult",
     )} <= set(identities), "Missing local route explanation outcomes"
