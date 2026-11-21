@@ -765,7 +765,7 @@
         "docs/overlay-credential-retry.md",
         "docs/netbird-report-views.md"
       ],
-      "implementationScope": "Direct-first SDK/strict VLESS detour, local identity and bounded roster/probes. The new bounded report source preserves explicit connection facts, unknown fields, counts, partial coverage and correlated read-only UI/ADB pages; closed view commands never start probes.",
+      "implementationScope": "Direct-first SDK and strict VLESS detour, local identity and bounded peer probes. UI and ADB distinguish a running profile without NetBird from a configured or unobserved connection. Reports preserve known connection facts, unknown fields, peer counts and partial coverage. Paging a report does not start a probe.",
       "remainingScope": "Managed peer credentials/retirement, DNS conflicts and full cellular matrix. Full ICE detail, last-handshake/traffic presentation and assigned-resource availability, real large-roster checks, plus exact new Actions/main/phone acceptance remain open. A bounded report fix is not a tunnel crash RCA."
     },
     {
