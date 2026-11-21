@@ -110,6 +110,9 @@ func newPrivatePathPool(parent context.Context, scope string, capacity int, leas
 // Called before and after flow I/O as well as while admitting a new route.
 // Reading the deadline requires no hub lock while an individual flow owns the pool.
 func (p *privatePathPool) homeCurrent() bool {
+	if p == nil {
+		return false
+	}
 	deadline := p.homeUntilBootMS.Load()
 	if deadline == 0 {
 		return true
