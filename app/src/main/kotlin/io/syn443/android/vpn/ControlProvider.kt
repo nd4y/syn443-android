@@ -382,7 +382,16 @@ class ControlProvider : ContentProvider() {
                     require(checkpoint.desiredOn && LifecycleAccess.ownsReadyEngine(checkpoint.generation))
                     require(arg==null || (method=="routes-check" && Regex("route-[1-9][0-9]?").matches(arg)))
                     require(method!="routes-check" || RouteSnapshot.accepts(arg))
-                    context.startService(Intent(context,TunnelService::class.java).setAction(method).also {if(arg!=null)it.putExtra("routeId",arg)})
+                    val command=Intent(context,TunnelService::class.java).setAction(method)
+                    if(arg!=null) {
+                        val displayed=if(extras==null || extras.isEmpty) null else {
+                            require(extras.keySet()==setOf("checkContext"))
+                            requireNotNull(extras.getString("checkContext"))
+                        }
+                        val stamp=requireNotNull(RouteSnapshot.captureManualCheck(arg,checkpoint.generation,displayed))
+                        command.putExtra("routeId",arg).putExtra("checkContext",stamp)
+                    }
+                    context.startService(command)
                 }
                 "fault-ui", "fault-controller" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller == 2000)

@@ -236,3 +236,9 @@ previous path and check-plan results are cleared. A duration of zero means
 that the current measurement completed within one millisecond. The route
 screen labels failed attempts and historical paths separately from successful
 checks. An exit-country mismatch identifies a failed country condition.
+
+## Checking one route
+
+In an active VPN, the route diagnostic screen offers a check on each supported row. The equivalent ADB command is `routes-check --route route-2`. The action applies to the displayed configuration, VPN session and physical network. If these change, refresh the list and select the route again.
+
+For a managed adaptive route the scheduler queues the selected group. Repeated requests before the next eligible check coalesce. Other groups keep their deadlines and the usual capacity, cooldown and energy limits still apply. The button confirms submission. A route's status changes when the engine supplies measurement evidence. Retrieving cooldown details does not change the scheduler's clock.

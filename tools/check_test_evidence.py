@@ -79,6 +79,7 @@ if mode=="jvm":
         "stabilityThenEnergyTakePriorityOverLatency",
         "evidenceFromAnotherExitCannotAuthorizeAReplacementOrAdvanceFailureCount",
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
+        "diagnosticCooldownDoesNotMoveTheAdmissionClockOrOpenTheFence",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
     assert ("io.syn443.android.VpnLifecycleTest",
@@ -422,6 +423,10 @@ if mode in ADAPTIVE_REQUIRED:
     if mode == 'emulator':
         ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'currentCheckFailureRequiresFreshBoundReplacementAndMonotonicTime'))
         ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'otherPhysicalTransportStartsIndependentAdaptiveSearchAndRetiresWifiProof'))
+        ADAPTIVE_REQUIRED[mode].extend([
+            ('io.syn443.android.ManagedAdaptiveRoutesTest', 'manualGroupRecheckKeepsOtherHealthyGroupsOnTheirOriginalCadence'),
+            ('io.syn443.android.RouteSearchStatusTest', 'singleRouteControlKeepsItsRowAndRejectsAReplacedNetworkOrConfiguration'),
+        ])
     assert set(ADAPTIVE_REQUIRED[mode]) <= {(c.get("classname"),c.get("name")) for c in cases}, "Missing actual managed adaptive outcome"
 
 

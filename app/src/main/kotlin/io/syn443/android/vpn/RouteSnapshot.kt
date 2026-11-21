@@ -40,6 +40,9 @@ object RouteSnapshot {
     private var lastStarted = -60_000L
     private var queued = emptySet<String>()
     private var revision = ""
+    private var adaptiveConfig = false
+    private var manualContext: String? = null
+    private fun Row.individuallyCheckable() = configured() && (!adaptiveConfig || type=="syn443-adaptive")
     private var activationAttempt:Pair<RouteScope,Long>?=null
     private var failover:ManagedFailoverPlan?=null
     private data class ReserveRecoveryHint(val selected: String, val observedAt: Long)
@@ -135,6 +138,7 @@ object RouteSnapshot {
             Row(checkNotNull(tags[tag]),tag,o.getString("type"),p?.optBoolean("required")==true,checks,profile,chain,
                 (0 until rules.length()).count {rules.optJSONObject(it)?.optString("outbound")==tag} + if(route?.optString("final")==tag) 1 else 0)
         }
+        adaptiveConfig=config.has("adaptive_routes")
         revision=hash;invalidate()
     }
     /** Only the active configuration's concrete checks can authorize a native switch. */
@@ -149,7 +153,7 @@ object RouteSnapshot {
     }
 
     @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();searchScope=null;searches=emptyMap();codes=emptyMap();timings=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();checkPlans=emptyMap();lastStarted=-60_000;activationAttempt=null
-        completedReceipt="";reserveRecovery=null;failoverAdmission=null;failoverShadow=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false}
+        completedReceipt="";reserveRecovery=null;failoverAdmission=null;failoverShadow=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false;manualContext=null}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
         return rows.any {it.configured()} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
@@ -210,11 +214,22 @@ object RouteSnapshot {
         })
     }
     @Synchronized fun accepts(only:String?)=rows.any {(only==null || it.id==only) && it.configured()}
+    private fun checkContext() = manualContext ?: UUID.randomUUID().toString().also { manualContext=it }
+    @Synchronized internal fun captureManualCheck(id:String, generation:Long, displayed:String?):String? {
+        val scope=live ?: return null
+        if(scope.intent!=generation || scope.config!=revision || rows.none {it.id==id && it.individuallyCheckable()}) return null
+        return checkContext().takeIf { displayed==null || displayed==it }
+    }
+    @Synchronized internal fun resolveManualCheck(scope:RouteScope, id:String, stamp:String?):String? {
+        if(scope!=live || scope.config!=revision || stamp==null || stamp!=manualContext) return null
+        return rows.singleOrNull {it.id==id && it.individuallyCheckable()}?.tag
+    }
     @Synchronized fun view(status:JSONObject):JSONObject {
         val scope = live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch"))
         val on = status.optBoolean("desiredOn")
         val ready = status.optBoolean("engineActive") && live != null
-        return read(on,ready,scope).also { report ->
+        val sameConfig = status.optString("configRevision") == revision
+        return readAt(on,ready,scope,SystemClock.elapsedRealtime(),sameConfig).also { report ->
             if (on && ready && scope != null && scope == live && scope.config == revision &&
                 revision == status.optString("configRevision")) report.put("measurementRevision", revision)
         }
@@ -365,8 +380,9 @@ object RouteSnapshot {
         return readAt(on,ready,scope,SystemClock.elapsedRealtime())
     }
     /** Internal deterministic test seam. Production callers cannot supply a clock. */
-    @Synchronized internal fun readAt(on:Boolean,ready:Boolean,scope:RouteScope?,now:Long):JSONObject {
+    @Synchronized internal fun readAt(on:Boolean,ready:Boolean,scope:RouteScope?,now:Long,sameConfig:Boolean=true):JSONObject {
         require(now>=0)
+        val currentSnapshot=on && ready && scope!=null && scope==live && scope.config==revision && sameConfig
         if(pending.isNotEmpty() && now-startedAt>=35_000) {
             current?.let { scope -> for (id in queued) if (receipts[id] != pending) recordMissingResult(id, scope, now) }
             pending="";queued=emptySet()
@@ -376,6 +392,7 @@ object RouteSnapshot {
             val state=if(scope==null) {if(on) RouteState.UNAVAILABLE else RouteState.OFF} else RouteEvidence.classify(on,ready,scope,sample,row.id in queued,now)
             JSONObject().put("id",row.id).put("label",row.tag.take(80)).put("type",row.type).put("required",row.required).put("state",state.name.lowercase(java.util.Locale.ROOT))
                 .put("configured",row.configured()).put("chain",JSONArray(row.chain)).put("routingRules",row.rules)
+                .put("individualCheck",currentSnapshot && row.individuallyCheckable())
                 .put("checkPending",row.id in queued)
                 .put("measuredPath",if(sample?.scope==scope)measuredPaths[row.id] ?: JSONArray() else JSONArray())
                 .put("reason",if(sample?.scope==scope)codes[row.id] ?: "not_checked" else "not_checked")
@@ -396,13 +413,15 @@ object RouteSnapshot {
                             AdaptiveSearchState.SEARCH_INCOMPLETE else search
                         value.put("search",JSONObject().put("state",visible.name))
                     }
-                    if(scope!=null && scope==live)failoverAdmission?.second?.cooldown(row.tag,now)?.let {cooldown->
+                    if(currentSnapshot)failoverAdmission?.second?.cooldown(row.tag,now)?.let {cooldown->
                         value.put("selectionState",cooldown.readiness.name.lowercase(java.util.Locale.ROOT))
                             .put("retryInMs",(checkNotNull(cooldown.retryAtMs)-now).coerceAtLeast(0))
                     }
                 }
         }
         return JSONObject().put("routes",JSONArray(values)).put("running",pending.isNotEmpty()).put("requiredReady",RouteEvidence.requiredReady(values.map {it.getBoolean("required") to RouteState.valueOf(it.getString("state").uppercase(java.util.Locale.ROOT))})).also { result ->
+            if(currentSnapshot && rows.any {it.individuallyCheckable()})
+                result.put("checkContext",checkContext())
             if (on && ready && scope!=null && scope==live) failoverShadow?.status()?.let {result.put("decisionShadow",it)}
         }
     }

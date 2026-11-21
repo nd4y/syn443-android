@@ -278,6 +278,24 @@ class ManagedAdaptiveRoutesTest {
             assertEquals(9, h.starts().size)
         }
     }
+    @Test fun manualGroupRecheckKeepsOtherHealthyGroupsOnTheirOriginalCadence() {
+        Harness(config(groupCount=2,choices=1)).use {h->
+            h.ready()
+            h.selected(checkNotNull(h.tick(1000)),1000)
+            h.selected(checkNotNull(h.tick(6000)),6000)
+            val original=h.scope
+            assertFalse(h.controller.requestGroupCheck(original.copy(network=original.network+1),"managed-00"))
+            assertFalse(h.controller.requestGroupCheck(original,"missing"))
+            repeat(3) {assertTrue(h.controller.requestGroupCheck(original,"managed-00"))}
+            assertEquals(2,h.starts().size)
+            assertNull(h.tick(6500,false,false))
+            val chosen=checkNotNull(h.tick(11000,false,false))
+            assertEquals("group-00",chosen.getString("group"))
+            h.selected(chosen,11000)
+            assertNull(h.tick(16000,false,false))
+            assertEquals(3,h.starts().size)
+        }
+    }
 
     @Test fun hourBudgetSurvivesContextRebindAndForce() {
         Harness(config(choices = 1)).use { h ->

@@ -1,9 +1,16 @@
 package io.syn443.android
 
 import android.os.SystemClock
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import io.syn443.android.vpn.AdaptiveSearchState
@@ -31,6 +38,47 @@ class RouteSearchStatusTest {
     private fun row(scope:RouteScope,now:Long=SystemClock.elapsedRealtime(),ready:Boolean=true)=
         RouteSnapshot.readAt(true,ready,scope,now).getJSONArray("routes").getJSONObject(0)
     private fun search(value:JSONObject)=value.getJSONObject("search").getString("state")
+
+    @Test fun singleRouteControlKeepsItsRowAndRejectsAReplacedNetworkOrConfiguration() {
+        val scope=configure(2)
+        val report=RouteSnapshot.read(true,true,scope)
+        val stamp=report.getString("checkContext")
+        assertEquals(stamp,RouteSnapshot.captureManualCheck("route-2",scope.intent,null))
+        assertEquals(stamp,RouteSnapshot.captureManualCheck("route-2",scope.intent,stamp))
+        assertEquals("managed-01",RouteSnapshot.resolveManualCheck(scope,"route-2",stamp))
+        assertNull(RouteSnapshot.captureManualCheck("route-8",scope.intent,stamp))
+        assertNull(RouteSnapshot.captureManualCheck("route-2",scope.intent+1,stamp))
+        assertNull(RouteSnapshot.resolveManualCheck(scope.copy(config="other"),"route-2",stamp))
+        val status=JSONObject().put("desiredOn",true).put("engineActive",true).put("generation",scope.intent).put("networkEpoch",scope.network)
+        assertFalse(RouteSnapshot.view(status.put("configRevision","old")).has("checkContext"))
+        assertEquals(stamp,RouteSnapshot.view(status.put("configRevision",scope.config)).getString("checkContext"))
+        val model=mutableStateOf(JSONObject().put("desiredOn",true).put("engineActive",true).put("routeHealth",report))
+        val commands=mutableListOf<Pair<String,String?>>()
+        compose.setContent {
+            MaterialTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    RouteControls(model.value) {action,arg->commands.add(action to arg)}
+                }
+            }
+        }
+        compose.onNodeWithTag("route-2-check").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals(listOf("routes-check" to "route-2"),commands)
+            model.value=JSONObject(model.value.toString()).also {it.getJSONObject("routeHealth").put("running",true)}
+        }
+        compose.onNodeWithTag("route-2-check").assertIsNotEnabled()
+        val next=scope.copy(network=scope.network+1)
+        RouteSnapshot.owner(next)
+        assertNull(RouteSnapshot.captureManualCheck("route-2",next.intent,stamp))
+        assertNull(RouteSnapshot.resolveManualCheck(next,"route-2",stamp))
+        assertNull(RouteSnapshot.resolveManualCheck(scope,"route-2",stamp))
+        assertFalse(RouteSnapshot.read(false,true,next).has("checkContext"))
+        assertFalse(RouteSnapshot.read(true,false,next).getJSONArray("routes").getJSONObject(1).getBoolean("individualCheck"))
+        val nextStamp=checkNotNull(RouteSnapshot.captureManualCheck("route-2",next.intent,null))
+        assertNotEquals(stamp,nextStamp)
+        RouteSnapshot.invalidate()
+        assertNull(RouteSnapshot.resolveManualCheck(next,"route-2",nextStamp))
+    }
 
     @Test fun verifiedProjectionJoinsExactExistingTtlScopeReadinessAndFutureSampleGuards() {
         val scope=configure()

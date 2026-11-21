@@ -1343,8 +1343,14 @@
     {
       "id": "BAD-10",
       "text": "В UI/ADB видны временно исключённые кандидаты, контекст, причина, оставшийся срок и evidence freshness. Администратор может запросить единичную повторную проверку или сбросить локальные оценки; действие не снимает серверный запрет и не включает прямой обход.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedAdaptiveRoutes.kt",
+        "core/decision/src/main/kotlin/io/syn443/decision/FailoverAdmission.kt"
+      ],
+      "implementationScope": "The Android UI and ADB can request one configured route in the current VPN session. Adaptive groups retain shared budgets and sibling schedules. The current failover selector exposes a read-only remaining cooldown.",
+      "remainingScope": "Full per-candidate attribution and evidence freshness for all route engines, and administrator reset of local assessments."
     },
     {
       "id": "RLP-01",

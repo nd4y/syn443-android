@@ -145,6 +145,12 @@ class ManagedFailoverTest {
             }
             assertEquals("quarantined",primary.getString("selectionState"))
             assertTrue(primary.getLong("retryInMs") in 1L..36_000L)
+            for (status in listOf(RouteSnapshot.read(false,true,scope), RouteSnapshot.read(true,false,scope),
+                RouteSnapshot.read(true,true,scope.copy(network=21)))) {
+                val hidden=status.getJSONArray("routes").getJSONObject(0)
+                assertFalse(hidden.has("selectionState"))
+                assertFalse(hidden.has("retryInMs"))
+            }
             val changed=scope.copy(network=21)
             RouteSnapshot.owner(changed)
             assertFalse(RouteSnapshot.read(true,true,changed).has("decisionShadow"))

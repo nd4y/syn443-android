@@ -58,10 +58,16 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
+    val displayedCheckContext=status.optJSONObject("routeHealth")?.optString("checkContext").orEmpty()
     fun command(method: String, arg: String? = null): Bundle? {
-        val result = runCatching { context.contentResolver.call(controlUri, method, arg, null) }.getOrNull()
+        val extras=if(method=="routes-check" && arg!=null) Bundle().apply {putString("checkContext",displayedCheckContext)} else null
+        val result = runCatching { context.contentResolver.call(controlUri, method, arg, extras) }.getOrNull()
         val accepted = result?.takeIf { it.getBoolean("ok") }
-        message = if (accepted != null) "" else "Не удалось выполнить команду"
+        message = when {
+            accepted == null -> "Не удалось выполнить команду"
+            method == "routes-check" && arg != null -> "Запрошена проверка маршрута"
+            else -> ""
+        }
         return accepted
     }
     fun updateIntent(reply: Bundle) {

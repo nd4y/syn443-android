@@ -41,8 +41,10 @@ class RouteHealthMemory(private var context: Context) {
 
     private fun validKey(key: PathHealthKey) = Decision.validId(key.pathId) && Decision.validId(key.metricGroup)
 
+    private fun acceptsTime(nowMs: Long) = nowMs in clock..(Decision.MAX_TIME - 720_000)
+
     private fun advanceClock(nowMs: Long): Boolean {
-        if (nowMs !in clock..(Decision.MAX_TIME - 720_000)) return false
+        if (!acceptsTime(nowMs)) return false
         clock = nowMs
         return true
     }
@@ -140,6 +142,17 @@ class RouteHealthMemory(private var context: Context) {
     @Synchronized
     fun view(current: Context, key: PathHealthKey, nowMs: Long): PathHealth {
         if (current != context || !validKey(key) || !advanceClock(nowMs)) return PathHealth(PathReadiness.NO_EVIDENCE)
+        return snapshot(key, nowMs)
+    }
+
+    /** A diagnostics read must not move the admission clock past an in-flight measurement. */
+    @Synchronized
+    internal fun inspect(current: Context, key: PathHealthKey, nowMs: Long): PathHealth {
+        if (current != context || !validKey(key) || !acceptsTime(nowMs)) return PathHealth(PathReadiness.NO_EVIDENCE)
+        return snapshot(key, nowMs)
+    }
+
+    private fun snapshot(key: PathHealthKey, nowMs: Long): PathHealth {
         val entry = table[key] ?: return PathHealth(PathReadiness.NO_EVIDENCE)
         if (entry.requiresChange) return PathHealth(PathReadiness.CONFIG_CHANGE_REQUIRED)
         val retry = entry.retryAtMs
