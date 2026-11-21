@@ -110,13 +110,15 @@ result=0
 # failed instrumentation run cannot satisfy the mandatory evidence gate anyway.
 # Bound the owning host invocation, without pretending interruption stops JNI.
 # A deadline fails this harness; it never proceeds to the external scenarios.
-if ! timeout --signal=TERM --kill-after=20s 20m ./gradlew :app:connectedDebugAndroidTest --info --stacktrace --max-workers=1 '-Pandroid.testInstrumentationRunnerArguments.listener=io.syn443.android.NetBirdTestProgress,io.syn443.android.DiagnosticBundleTestProgress' '-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8'; then
+adb -e install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+if ! timeout --signal=TERM --kill-after=20s 20m python3 tools/run_packaged_instrumentation.py run; then
   python3 tools/print_emulator_reports.py || true
   exit 1
 fi
 restore_instrumentation_display
-# The Gradle runner uninstalls both APKs when its suite ends. External enrollment
-# also needs its own-UID driver, which exists exclusively in the test APK.
+# The external suite starts from a fresh installation of the same APKs.
+adb -e uninstall io.syn443.android.test
+adb -e uninstall io.syn443.android
 adb -e install -r app/build/outputs/apk/debug/app-debug.apk
 adb -e install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb -e shell appops set io.syn443.android ACTIVATE_VPN allow
