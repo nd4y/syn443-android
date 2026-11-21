@@ -115,13 +115,13 @@ if ! timeout --signal=TERM --kill-after=20s 20m python3 tools/run_packaged_instr
   python3 tools/print_emulator_reports.py || true
   exit 1
 fi
-restore_instrumentation_display
 # The external suite starts from a fresh installation of the same APKs.
 adb -e uninstall io.syn443.android.test
 adb -e uninstall io.syn443.android
 adb -e install -r app/build/outputs/apk/debug/app-debug.apk
 adb -e install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 python3 tools/run_invitation_camera_permission.py
+restore_instrumentation_display
 # Restore a fresh package, UID permissions and data for the VPN scenarios
 # after the real denial. Android 10 does not expose the newer flag-reset CLI.
 adb -e uninstall io.syn443.android.test
