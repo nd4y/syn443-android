@@ -60,7 +60,7 @@ class RouteGraph private constructor(
         val group = groups[groupID] ?: return false
         if (path.size !in 1..4 || path.toSet().size != path.size) return false
         val head = hopByID[path.first()] ?: return false
-        if (mode !in head.entryModes || hopByID[path.last()]?.declaresExit(group.intent) != true) return false
+        if (!mode.allowsEntry(head.entryModes) || hopByID[path.last()]?.declaresExit(group.intent) != true) return false
         if (path.any { hopByID[it]?.features?.containsAll(group.features) != true } ||
             path.zipWithNext().any { edgeByPair[it]?.containsAll(group.features) != true }) return false
         return group.templates.any { id ->

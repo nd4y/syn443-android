@@ -886,16 +886,24 @@
       "text": "В сети с одновременными Wi-Fi/LTE кандидат привязывается к конкретной физической Android Network. Измерения и выбранный путь не смешиваются между сетями. Неизвестные транспорты, например Ethernet, получают отдельное состояние unknown и безопасную политику обычной сети.",
       "status": "partial",
       "evidence": [
-        "docs/route-lifecycle.md#physical-network-preference"
+        "docs/route-lifecycle.md#physical-network-preference",
+        "native/bridge/private_adaptive_hub_test.go",
+        "core/decision/src/test/kotlin/io/syn443/decision/RouteGraphTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveRoutesTest.kt"
       ],
-      "implementationScope": "Physical network handles, selected-owner stickiness and probe epoch fences for handle, link, validation and metering changes.",
-      "remainingScope": "Full unknown-transport policy, actual multi-transport handover and per-mode routing."
+      "implementationScope": "Physical network handles and probe epoch fences. An unknown physical underlay permits adaptive entry only where every signed mode allows the entry. Its native owner requires a fresh path proof.",
+      "remainingScope": "Physical Ethernet and multi-transport handover, home confirmation and restricted-cellular detection."
     },
     {
       "id": "AUTO-01",
       "text": "Состояния управляющего автомата: Off, NeedsLogin, NeedsPermission, NeedsUnlock, NeedsAction, NoNetwork, Portal, Detecting, Connecting, Online, Degraded, Recovering, BlockedByPolicy. Сохранённое намерение пользователя и желаемая конфигурация отделены от фактической готовности соединения по REC-01; временная ошибка не переводит намерение в Off.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/device-runtime-observations.md",
+        "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RuntimeObservationDiskTest.kt"
+      ],
+      "remainingScope": "The home state and coarse runtime projection have explicit fixtures. Full controller transition coverage, mode detection and physical scenarios remain open."
     },
     {
       "id": "AUTO-02",
@@ -1335,8 +1343,14 @@
     {
       "id": "BAD-10",
       "text": "В UI/ADB видны временно исключённые кандидаты, контекст, причина, оставшийся срок и evidence freshness. Администратор может запросить единичную повторную проверку или сбросить локальные оценки; действие не снимает серверный запрет и не включает прямой обход.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-lifecycle.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedAdaptiveRoutes.kt",
+        "core/decision/src/main/kotlin/io/syn443/decision/FailoverAdmission.kt"
+      ],
+      "implementationScope": "The Android UI and ADB can request one configured route in the current VPN session. Adaptive groups retain shared budgets and sibling schedules. The current failover selector exposes a read-only remaining cooldown.",
+      "remainingScope": "Full per-candidate attribution and evidence freshness for all route engines, and administrator reset of local assessments."
     },
     {
       "id": "RLP-01",
@@ -1855,38 +1869,67 @@
     {
       "id": "EDIT-01",
       "text": "У администратора на телефоне есть полноценный редактор управляемой конфигурации: профили, источники и назначения, DNS, маршруты, цепочки, балансеры, четыре режима, автоматика, проверки, логи/телеметрия, параметры встроенных движков и разрешённые UI-настройки. Он покрывает ту же модель и валидацию, что и веб-панель.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/admin/AdminEditorScreen.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdminEditorUiTest.kt"
+      ],
+      "remainingScope": "The phone can edit a layered proposal for an already assigned device. Typed field editors covering the entire web schema and initial assignment remain open."
     },
     {
       "id": "EDIT-02",
       "text": "Редактор начинает с текущей серверной ревизии, сохраняет baseRevision и локальный черновик отдельно от active config. Для каждого поля видны значение, источник наследования, область изменения и право редактирования. Статус «есть неопубликованные правки» сохраняется после закрытия приложения.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/AdminEditorStore.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/AdminEditorCoordinator.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdminEditorCoordinatorTest.kt"
+      ],
+      "remainingScope": "The encrypted local draft retains its base, revisions and protected parents. Per-field inherited origin, scope and edit permission in the main editing view remain open."
     },
     {
       "id": "EDIT-03",
       "text": "Есть три разные команды: «Сохранить черновик», «Проверить и применить на этом телефоне», «Опубликовать на сервер». Локальный тест не меняет сервер и чужие устройства. Предварительный локальный тест рекомендуется, но не обязателен для загрузки серверного черновика.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/AdminEditorCoordinator.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdminEditorCoordinatorTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdminEditorUiTest.kt"
+      ],
+      "remainingScope": "Local save, private server draft, server validation/preview and confirmed publication are separate actions. Activation of a temporary trial policy only on the administrator phone remains open."
     },
     {
       "id": "EDIT-04",
       "text": "Публикация предлагает адресата: это устройство, пользователь со всеми его устройствами, выбранная группа либо общий шаблон. По умолчанию выбрано текущее устройство. Видны diff, затронутые объекты и число адресатов; широкая область не выбирается молча.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/admin/AdminEditorScreen.kt",
+        "app/src/main/kotlin/io/syn443/android/admin/AdminComparisonScreen.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdminComparisonUiTest.kt"
+      ],
+      "remainingScope": "The assigned device has explicit recipients and a review before publication. A native target picker with the impact of user, group and template scopes remains open."
     },
     {
       "id": "EDIT-05",
       "text": "По источнику поля сервер формирует правку соответствующего слоя политики. Нельзя загрузить плоский effective config поверх всех шаблонов: это уничтожило бы наследование. Когда требуется повысить локальную правку до шаблона, администратор явно выбирает переносимые поля; локальные счётчики, identity files и права конкретного устройства не переносятся.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "core/identity/src/main/kotlin/io/syn443/identity/AdminLayerControl.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/AdminEditorCoordinator.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdminEditorCoordinatorTest.kt"
+      ],
+      "remainingScope": "Local edits preserve protected parent and permission layers. Explicit promotion of selected fields to a broader template with a private-dependency preview remains open."
     },
     {
       "id": "EDIT-06",
       "text": "Перед записью сервер повторно проверяет полномочия, expectedRevision, ссылки, capabilities и актуальность исходных snapshot подписок. Изменившаяся серверная версия возвращает конфликт с тройным сравнением base/local/server. Можно перебазировать независимые изменения; конфликт одного поля требует выбора, скрытого last-write-wins нет.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "core/identity/src/main/kotlin/io/syn443/identity/AdminLayerComparison.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/AdminEditorCoordinator.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdminComparisonRouteTest.kt"
+      ],
+      "remainingScope": "The client compares base, local and current data, asks for conflict choices and rechecks the remote and local revision before saving a rebase. Physical end-to-end acceptance with real authorization and a concurrent policy writer remains open."
     },
     {
       "id": "EDIT-07",
@@ -1937,8 +1980,13 @@
     {
       "id": "OWN-02",
       "text": "Пользователь видит одно короткое объяснение, доступность нужных функций и действие: повторить, войти в Wi-Fi/аккаунт, разблокировать, обновить, создать incident. Технические детали доступны отдельно. Status Online не показывается только потому, что VpnService запущен; неизвестная/устаревшая диагностика и partial access не скрываются.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/device-runtime-observations.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/VpnControls.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt"
+      ],
+      "remainingScope": "The home status distinguishes unconfirmed, limited, recovering and stopping states. Incident creation, update actions and physical acceptance of the complete one-button flow remain open."
     },
     {
       "id": "OWN-03",
@@ -2146,6 +2194,7 @@
         "docs/support-chat.md",
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
+        "app/src/main/kotlin/io/syn443/android/chat/ChatOutbox.kt",
         "docs/implementation-status.md#evidence-index-and-register-semantics"
       ],
       "text": "Отправка использует постоянный clientMessageId и идемпотентную фиксацию. Повтор после потери ответа возвращает то же сообщение; тот же ID с другим содержимым отклоняется. Порядок задаёт серверная последовательность внутри диалога, а не часы телефона. Состояния UI: подготовка, очередь, отправляется, отправлено, прочитано, ошибка; получение сервером не обозначается как прочтение."

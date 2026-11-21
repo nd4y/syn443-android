@@ -11,12 +11,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import java.util.Collections
 
 /** Presentation only. No RPC, JSON parsing, storage, OAuth or VPN action. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions,elapsed:()->Long={SystemClock.elapsedRealtime()}) {
     val latestModel by rememberUpdatedState(model)
@@ -27,6 +31,7 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
     val pages=remember(model.device,model.documentBinding) {model.pages.toMutableStateList()}
     var dirty by remember(model.device,model.documentBinding) {mutableStateOf(false)}
     var page by remember(model.device,model.documentBinding) {mutableIntStateOf(0)}
+    var pageInputError by remember(model.device,model.documentBinding,page) {mutableStateOf("")}
     var confirmation by remember(model.device,model.documentBinding) {mutableStateOf<EditorConfirmation?>(null)}
     val originalReviewDeadline=remember(model.reviewBinding) {model.reviewDeadlineElapsed}
     val reviewDocumentBinding=remember(model.reviewBinding) {model.documentBinding}
@@ -62,6 +67,13 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
     }
     LazyColumn(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal=20.dp).testTag("editor-content"),
         verticalArrangement=Arrangement.spacedBy(12.dp),contentPadding=PaddingValues(vertical=20.dp)) {
+        if (pageInputError.isNotEmpty()) stickyHeader(key="input-error") {
+            Surface(Modifier.fillMaxWidth(), color=MaterialTheme.colorScheme.errorContainer) {
+                Text(pageInputError,
+                    modifier=Modifier.padding(12.dp).testTag("editor-page-error").semantics { liveRegion=LiveRegionMode.Polite },
+                    color=MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
         item {Text("Редактор конфигурации",Modifier.testTag("editor-title"),style=MaterialTheme.typography.headlineMedium)}
         item {TextButton(onClick={navigate("BACK")},enabled=!activeBusy,
             modifier=Modifier.testTag("editor-back")) {Text("К устройствам")}}
@@ -91,12 +103,39 @@ internal fun AdminEditorScreen(model:AdminEditorModel,actions:AdminEditorActions
                 TextButton(onClick={if(page<pages.lastIndex)page++},enabled=page<pages.lastIndex,modifier=Modifier.testTag("editor-page-next")) {Text("Следующая")}
             }}
             item {OutlinedTextField(value=pages[page],onValueChange={value->
-                if(editable && value.length<=8192 && editorUnicode(value) && value!=pages[page]) {
-                    pages[page]=value;confirmation=null;localError="";reviewInvalidated=true
-                    if(!dirty){dirty=true;actions.edited()}
+                if(editable && value!=pages[page]) {
+                    pageInputError = when {
+                        value.length > EDITOR_PAGE_SIZE -> "Текст не поместился на странице. Вставьте его частями."
+                        !editorUnicode(value) -> "В тексте есть неполный символ. Повторите ввод."
+                        else -> ""
+                    }
+                    if(pageInputError.isEmpty()) {
+                        pages[page]=value;confirmation=null;localError="";reviewInvalidated=true
+                        if(!dirty){dirty=true;actions.edited()}
+                    }
                 }
             },readOnly=!editable,modifier=Modifier.fillMaxWidth().testTag("editor-page-input"),
+                isError=pageInputError.isNotEmpty(),
                 label={Text("Страница предложения ${page+1}")},textStyle=MaterialTheme.typography.bodySmall.copy(fontFamily=FontFamily.Monospace),minLines=8,maxLines=16)}
+            if(editable && (pages[page].length == EDITOR_PAGE_SIZE || pageInputError.isNotEmpty()) && pages[page].length >= 2) {
+                val originalPage = pages[page]
+                val index = page
+                val split = editorPageSplitPoint(originalPage)
+                if (split != null && pages.size < EDITOR_MAX_PAGES) item {
+                    OutlinedButton(onClick={
+                        if (editorEditable(latestModel) && !editorBusy(latestModel) &&
+                            latestModel.documentBinding == model.documentBinding && page == index &&
+                            pages.getOrNull(index) == originalPage && pages.size < EDITOR_MAX_PAGES) {
+                            pages[index] = originalPage.substring(0, split)
+                            pages.add(index + 1, originalPage.substring(split))
+                            pageInputError = ""
+                        }
+                    },modifier=Modifier.testTag("editor-split-page")) {Text("Разделить страницу для ввода")}
+                } else if (pages.size == EDITOR_MAX_PAGES) item {
+                    Text("Достигнут предел в 64 страницы. Чтобы освободить место, сократите текст.",
+                        Modifier.testTag("editor-page-limit"))
+                }
+            }
             if(model.readOnly)item {Text("Для этой конфигурации доступно только чтение.",Modifier.testTag("editor-read-only"))}
             if(model.phase !in setOf(AdminEditorPhase.UNCERTAIN,AdminEditorPhase.CONFLICT,AdminEditorPhase.NEEDS_REAUTH,AdminEditorPhase.LIMITED,AdminEditorPhase.UNAVAILABLE)) {
                 item {Button(onClick={if(dirty && editable)actions.saveLocal(Collections.unmodifiableList(ArrayList(pages)))},

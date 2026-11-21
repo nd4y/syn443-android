@@ -147,6 +147,15 @@ native network binding and does not advance the recovery budget. JVM cases
 cover ranking, loss and the distinction between capability and path changes.
 Physical handover and the four-mode policy matrix require separate acceptance.
 
+When Android selects an Ethernet or other unrecognized physical underlay,
+the adaptive runtime uses a distinct local `UNKNOWN` mode. Only entry hops
+declared in all four signed network modes qualify. Both the Kotlin planner
+and the native selector apply this rule to the first hop, retain the path's
+existing exit and capability requirements, and require new evidence on the
+new physical network. An empty set of eligible paths leaves the affected
+group unavailable. The signed graph schema still accepts four declaration
+values. Absence of a physical network continues to suspend probing.
+
 ### Route report delivery
 
 The host publishes a route batch as soon as it is admitted, then reads its
@@ -227,3 +236,9 @@ previous path and check-plan results are cleared. A duration of zero means
 that the current measurement completed within one millisecond. The route
 screen labels failed attempts and historical paths separately from successful
 checks. An exit-country mismatch identifies a failed country condition.
+
+## Checking one route
+
+In an active VPN, the route diagnostic screen offers a check on each supported row. The equivalent ADB command is `routes-check --route route-2`. The action applies to the displayed configuration, VPN session and physical network. If these change, refresh the list and select the route again.
+
+For a managed adaptive route the scheduler queues the selected group. Repeated requests before the next eligible check coalesce. Other groups keep their deadlines and the usual capacity, cooldown and energy limits still apply. The button confirms submission. A route's status changes when the engine supplies measurement evidence. Retrieving cooldown details does not change the scheduler's clock.

@@ -2,10 +2,12 @@ package io.syn443.android
 
 import io.syn443.android.vpn.ManagedAdaptiveRoutes
 import io.syn443.android.vpn.RouteSnapshot
+import io.syn443.android.vpn.adaptiveNetworkMode
 import io.syn443.decision.Decision
 import io.syn443.decision.NetworkMode
 import io.syn443.policy.Policy
 import io.syn443.recovery.RouteScope
+import io.syn443.recovery.PhysicalTransport
 import java.io.Closeable
 import java.util.Base64
 import kotlinx.serialization.json.*
@@ -26,7 +28,7 @@ class ManagedAdaptiveRoutesTest {
     private fun b64(raw: String) = Base64.getUrlEncoder().withoutPadding().encodeToString(raw.toByteArray())
     private fun config(groupCount: Int = 1, choices: Int = 2): String {
         val ids = (0 until choices).map { "hop-%02d".format(it) }
-        val modes = JSONArray(NetworkMode.entries.map { it.name })
+        val modes = JSONArray(NetworkMode.policyModes.map { it.name })
         val catalogue = JSONObject()
         val hops = JSONArray()
         for ((i, id) in ids.withIndex()) {
@@ -109,6 +111,31 @@ class ManagedAdaptiveRoutesTest {
             h.selected(confirmation, now, latency)
         }
         return initial
+    }
+
+    @Test fun otherPhysicalTransportStartsIndependentAdaptiveSearchAndRetiresWifiProof() {
+        val other = PhysicalTransport.OTHER.adaptiveNetworkMode()
+        assertEquals(NetworkMode.UNKNOWN, other)
+        assertEquals(NetworkMode.WIFI, PhysicalTransport.WIFI.adaptiveNetworkMode())
+        assertEquals(NetworkMode.CELLULAR, PhysicalTransport.CELLULAR.adaptiveNetworkMode())
+        Harness(config(choices = 1)).use { h ->
+            h.ready()
+            val old = checkNotNull(h.tick(1000))
+            val previous = h.result(old, "verified", latency = 10)
+            val previousScope = h.policyScope
+            h.rebind(h.scope.copy(network = h.scope.network + 1), mode = other)
+            assertNotEquals(previousScope, h.policyScope)
+            assertEquals("UNKNOWN", JSONObject(h.controller.controlFrame()).getString("mode"))
+            h.report(previous, 2000)
+            assertFalse(h.commands.any { it.optString("command") == "commit" })
+            assertFalse(h.view().getBoolean("requiredReady"))
+            h.epoch++
+            h.nativeScope = Policy.hash("synthetic-other-physical-owner")
+            h.ready(13000)
+            val fresh = checkNotNull(h.tick(13000))
+            h.selected(fresh, 13200, 30)
+            assertTrue(h.view().getBoolean("requiredReady"))
+        }
     }
 
     @Test fun contextEpochAndNewEngineFenceRejectStaleReports() {
@@ -249,6 +276,24 @@ class ManagedAdaptiveRoutesTest {
             assertNull(h.tick(41000)); assertNull(h.tick(60000))
             assertEquals("group-01", checkNotNull(h.tick(61000)).getString("group"))
             assertEquals(9, h.starts().size)
+        }
+    }
+    @Test fun manualGroupRecheckKeepsOtherHealthyGroupsOnTheirOriginalCadence() {
+        Harness(config(groupCount=2,choices=1)).use {h->
+            h.ready()
+            h.selected(checkNotNull(h.tick(1000)),1000)
+            h.selected(checkNotNull(h.tick(6000)),6000)
+            val original=h.scope
+            assertFalse(h.controller.requestGroupCheck(original.copy(network=original.network+1),"managed-00"))
+            assertFalse(h.controller.requestGroupCheck(original,"missing"))
+            repeat(3) {assertTrue(h.controller.requestGroupCheck(original,"managed-00"))}
+            assertEquals(2,h.starts().size)
+            assertNull(h.tick(6500,false,false))
+            val chosen=checkNotNull(h.tick(11000,false,false))
+            assertEquals("group-00",chosen.getString("group"))
+            h.selected(chosen,11000)
+            assertNull(h.tick(16000,false,false))
+            assertEquals(3,h.starts().size)
         }
     }
 

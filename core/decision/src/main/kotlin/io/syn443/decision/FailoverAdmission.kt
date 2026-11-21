@@ -91,7 +91,7 @@ class FailoverAdmission(
     @Synchronized
     fun cooldown(pathId: String, nowMs: Long): PathHealth? {
         if (pathId !in members) return null
-        return health.view(context, PathHealthKey(pathId, exitClass, metricGroup), nowMs)
+        return health.inspect(context, PathHealthKey(pathId, exitClass, metricGroup), nowMs)
             .takeIf { it.retryAtMs != null }
     }
 

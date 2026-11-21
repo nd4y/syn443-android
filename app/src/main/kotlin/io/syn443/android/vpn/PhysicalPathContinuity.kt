@@ -1,6 +1,14 @@
 package io.syn443.android.vpn
 
+import io.syn443.decision.NetworkMode
 import io.syn443.recovery.PhysicalProbeContext
+import io.syn443.recovery.PhysicalTransport
+
+internal fun PhysicalTransport.adaptiveNetworkMode(): NetworkMode = when (this) {
+    PhysicalTransport.WIFI -> NetworkMode.WIFI
+    PhysicalTransport.CELLULAR -> NetworkMode.CELLULAR
+    PhysicalTransport.OTHER -> NetworkMode.UNKNOWN
+}
 
 /** Process-local negative-history hint only. No path data, authority, equality
  * override, serialization or readiness belongs to this identity token. */

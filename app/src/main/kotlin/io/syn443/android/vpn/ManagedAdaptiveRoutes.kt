@@ -534,6 +534,14 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         } finally {publishSearch()}
     }
     fun force() {groups.values.forEach {it.nextAt=0;it.forceCheck=it.current!=null}}
+    fun requestGroupCheck(scope:RouteScope, tag:String):Boolean {
+        if(scope!=routeScope || retireOwner) return false
+        val id=wire.groupTags().entries.singleOrNull {it.value==tag}?.key ?: return false
+        val group=groups.getValue(id)
+        group.nextAt=0
+        group.forceCheck=group.current!=null
+        return true
+    }
     fun requiresRetirement()=retireOwner
     override fun toString()="ManagedAdaptiveRoutes([redacted])"
     companion object {

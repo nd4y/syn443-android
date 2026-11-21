@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -88,6 +89,11 @@ import org.json.JSONObject
                 val cause=RouteFailureCause.fromWire(reason,row.optString("cause"))
                 Text(routeFailureLabel(reason,cause),Modifier.testTag("route-${i+1}-reason"))
             }
+            if(row.optBoolean("individualCheck")) TextButton(
+                enabled=health?.optBoolean("running")!=true && status.optBoolean("desiredOn") && status.optBoolean("engineActive"),
+                onClick={command("routes-check",row.getString("id"))},
+                modifier=Modifier.testTag("route-${i+1}-check"),
+            ) {Text("Проверить этот маршрут")}
         }
         val enabled=status.optBoolean("desiredOn") && status.optBoolean("engineActive") && routes!=null && (0 until routes.length()).any {routes.getJSONObject(it).optBoolean("configured")}
         Button(onClick={command("routes-check",null)},enabled=enabled && health?.optBoolean("running")!=true,modifier=Modifier.testTag("routes-check")){Text("Проверить маршруты")}

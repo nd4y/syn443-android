@@ -26,6 +26,73 @@ class ChatStorageTest {
         val name=name();try {block(name)} finally {ChatOutbox.erase(context,name);context.deleteDatabase(File(context.noBackupFilesDir,"$name.db").path)}
     }
     private fun draft()=JSONObject().put("conversation","a".repeat(32)).put("text","synthetic confidential message").put("files",JSONArray())
+    @Test fun sendReceiptPreservesPendingBytesAcrossWrongRepliesAndStorageFailure()=fixture {name->
+        val id=ChatLimits.id()
+        val another=ChatLimits.id()
+        val remoteIds=listOf("f".repeat(32),"1".repeat(32))
+        val source=File.createTempFile("chat-receipt-", ".txt", context.cacheDir)
+        try {
+            val files=ChatOutbox(context,1,name).use {store->
+                val imported=listOf("first","second").map {value->
+                    source.writeText(value)
+                    store.importFile(source,"$value.txt","text/plain","file")
+                }
+                store.saveDraft(id,draft().put("files",JSONArray(imported)))
+                store.saveDraft(another,draft().put("conversation","b".repeat(32)))
+                imported
+            }
+            fun receipt():JSONObject {
+                val attached=JSONArray()
+                for(i in files.indices.reversed()) {
+                    val file=JSONObject(files[i].toString())
+                    file.remove("clientId");file.remove("localId")
+                    attached.put(file.put("id",remoteIds[i]))
+                }
+                return JSONObject().put("id","c".repeat(32)).put("clientId",id).put("sequence",7L)
+                    .put("conversation",draft().getString("conversation")).put("text",draft().getString("text")).put("attachments",attached)
+            }
+            val missingFile=receipt().put("attachments",JSONArray())
+            val wrongHash=receipt().apply {getJSONArray("attachments").getJSONObject(1).put("sha256","0".repeat(64))}
+            val duplicate=receipt().apply {getJSONArray("attachments").getJSONObject(0).put("id",remoteIds[0])}
+            ChatOutbox(context,1,name).use {store->
+                for(bad in listOf(JSONObject(),receipt().put("id",""),receipt().put("clientId",another),
+                    receipt().put("conversation","b".repeat(32)),receipt().put("text","changed"),receipt().put("sequence",0),
+                    receipt().put("sequence","7"),missingFile,wrongHash,duplicate)) {
+                    assertEquals("INVALID_REPLY",assertThrows(ChatFailure::class.java){store.acknowledgeSent(id,remoteIds,bad)}.code)
+                }
+                val path=File(context.noBackupFilesDir,"$name.db").path
+                android.database.sqlite.SQLiteDatabase.openDatabase(path,null,android.database.sqlite.SQLiteDatabase.OPEN_READWRITE).use {sql->
+                    sql.execSQL("CREATE TRIGGER fail_cleanup BEFORE DELETE ON files BEGIN SELECT RAISE(ABORT,'synthetic'); END")
+                    try {assertThrows(android.database.sqlite.SQLiteException::class.java){store.acknowledgeSent(id,remoteIds,receipt())}}
+                    finally {sql.execSQL("DROP TRIGGER fail_cleanup")}
+                }
+            }
+            ChatOutbox(context,1,name).use {store->
+                assertEquals(setOf(id,another),store.drafts().map { it.first }.toSet())
+                assertEquals(listOf("first","second"),files.map {store.chunk(it.getString("localId"),0).toString(Charsets.UTF_8)})
+                store.acknowledgeSent(id,remoteIds,receipt())
+                assertNull(store.draft(id))
+                for(file in files) assertTrue(runCatching {store.chunk(file.getString("localId"),0)}.isFailure)
+                assertNotNull(store.draft(another))
+            }
+        } finally {source.delete()}
+    }
+    @Test fun visiblePendingMessagesStayInTheSelectedConversationUntilAcknowledged()=fixture {name->
+        val selected="a".repeat(32);val other="b".repeat(32)
+        val first=ChatLimits.id();val second=ChatLimits.id()
+        ChatOutbox(context,1,name).use {store->
+            store.saveDraft(first,draft().put("conversation",selected))
+            store.saveDraft(second,draft().put("conversation",other))
+            assertEquals(listOf(first),pendingInConversation(store.drafts(),selected).map {it.first})
+            assertEquals(listOf(second),pendingInConversation(store.drafts(),other).map {it.first})
+            assertTrue(pendingInConversation(store.drafts(),"").isEmpty())
+            val reply=JSONObject().put("id","e".repeat(32)).put("clientId",first).put("sequence",1)
+                .put("conversation",selected).put("text",draft().getString("text")).put("attachments",JSONArray())
+            store.acknowledgeSent(first,emptyList(),reply)
+            assertTrue(pendingInConversation(store.drafts(),selected).isEmpty())
+            assertEquals(listOf(second),store.drafts().map {it.first})
+        }
+    }
     @Test fun chatSqlOutboxPersistsCiphertextAndFencesAccountGeneration()=fixture {name->
         val id=ChatLimits.id()
         ChatOutbox(context,7,name).use {it.saveDraft(id,draft())}

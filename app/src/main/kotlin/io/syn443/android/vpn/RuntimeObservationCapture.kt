@@ -9,11 +9,11 @@ internal object RuntimeObservationCapture {
         val active=known && status.optBoolean("engineActive")
         val phase=when(status.optString("phase")) {
             "Online"->if(known && active && revision>0)"online" else "unknown"
-            "Starting"->"starting"
+            "Starting","Connecting"->"starting"
             "Recovering","Degraded"->"recovering"
             "NoNetwork"->"no_network"
             "Off"->if(known && !active)"off" else "unknown"
-            "Blocked","NeedsUnlock"->"blocked"
+            "Blocked","BlockedByPolicy","NeedsUnlock"->"blocked"
             else->"unknown"
         }
         return RuntimeObservation.Report(1,1,build,phase,revision,known,active,network,time).also {it.validate()}
