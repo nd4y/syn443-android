@@ -3,6 +3,9 @@ import os
 from pathlib import Path
 import tempfile
 import traceback
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "candidate-release" / "tools"))
 
 import run_support_bundle_smoke as smoke
 from syn443ctl import Device
@@ -68,3 +71,15 @@ if __name__ == "__main__":
     print("samples", 8, "failures", failures, flush=True)
     if failures:
         raise SystemExit(1)
+    device = Device(smoke.adb("get-serialno").stdout.decode().strip(), 10)
+    sequence = smoke.SupportDeadline(device)
+    with device.bundle_connection() as held:
+        assert held
+        current = smoke.support_collect(sequence)["id"]
+        smoke.support_wait(sequence, current)
+        grant = sequence.call("support-bundle-open", current)["grant"]
+    assert smoke.adb("shell", "am", "force-stop", smoke.PACKAGE).returncode == 0
+    assert sequence.call("support-bundle-read", grant + ":0") == {"state": "not_found"}
+    assert sequence.call("support-bundle-status", current) == {"state": "not_found", "id": current}
+    smoke.no_engine()
+    print("Old grant denied after actual provider process termination", flush=True)

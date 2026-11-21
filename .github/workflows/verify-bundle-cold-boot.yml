@@ -17,15 +17,20 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 59435db187d782766ef99e5b7dc8ceef65bb42dd
+          path: candidate-release
+          persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          run-id: 44848731615
+          run-id: 44853772786
           name: syn443-prototype-debug-apks
           path: ${{ runner.temp }}/bundle-apks
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          run-id: 44848731615
+          run-id: 44853772786
           name: syn443-build-manifest
           path: ${{ runner.temp }}/bundle-manifest
           github-token: ${{ github.token }}
@@ -36,8 +41,8 @@ jobs:
         run: |
           set -euo pipefail
           manifest="$RUNNER_TEMP/bundle-manifest/build-manifest.json"
-          test "$(jq -r .sourceCommit "$manifest")" = baea4667c5ede2f9bd21cfc3b723b99e29dc604b
-          test "$(jq -r .actionsRun "$manifest")" = 44848731615
+          test "$(jq -r .sourceCommit "$manifest")" = 59435db187d782766ef99e5b7dc8ceef65bb42dd
+          test "$(jq -r .actionsRun "$manifest")" = 44853772786
           test "$(sha256sum "$RUNNER_TEMP/bundle-apks/debug/app-debug.apk" | cut -d' ' -f1)" = "$(jq -r '.artifacts["app/build/outputs/apk/debug/app-debug.apk"].sha256' "$manifest")"
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
