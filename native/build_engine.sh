@@ -40,6 +40,7 @@ cp -R "$root/native/routegraph" "$work/"
 cp "$root"/native/bridge/*.go "$root"/native/bridge/go.mod "$root"/native/bridge/go.sum "$work/bridge/"
 mkdir -p "$work/bridge/testdata"
 cp "$root/contracts/v1/route-check-profile-v2-vectors.json" "$work/bridge/testdata/route-check-profile-v2-vectors.json"
+cp "$root/contracts/v1/https-status-check-vectors.json" "$work/bridge/testdata/https-status-check-vectors.json"
 cd "$work/bridge"
 export GOMAXPROCS="${GOMAXPROCS:-2}" GOFLAGS="-p=1" GOTOOLCHAIN=local
 export GOMEMLIMIT="${GOMEMLIMIT:-1400MiB}" GOGC="${GOGC:-50}"

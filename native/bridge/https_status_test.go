@@ -14,7 +14,7 @@ import (
 )
 
 func TestHTTPSStatusSharedWireAndPortability(t *testing.T) {
-	raw, err := os.ReadFile("../../contracts/v1/https-status-check-vectors.json")
+	raw, err := os.ReadFile("testdata/https-status-check-vectors.json")
 	var vectors struct{ Valid, Invalid []json.RawMessage }
 	if err != nil || json.Unmarshal(raw, &vectors) != nil || len(vectors.Valid) != 3 || len(vectors.Invalid) != 12 {
 		t.Fatal("missing HTTPS status contract")
