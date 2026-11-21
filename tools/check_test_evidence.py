@@ -87,6 +87,12 @@ if mode=="emulator":
         ("io.syn443.android.ChatAttachmentNoticeTest", "composerExplainsLocalStorageFailureAndClearsItForRetry"),
     }
     assert required_storage_outcomes <= set(identities), "Missing attachment storage recovery outcomes"
+    history_cases = {
+        "equalTimestampInboxPagesReachEveryConversationAndReturnToFirst",
+        "deepMessagesNavigateBothDirectionsWithoutPollingOrSkippingHistory",
+        "archiveButtonsReturnToLatestOrMoveOnePageAndRespectBusyState",
+    }
+    assert {("io.syn443.android.ChatHistoryWindowTest", name) for name in history_cases} <= set(identities), "Missing mobile chat navigation outcomes"
     assert ("io.syn443.android.RuntimeHeapTest", "actualArtHeapSupportsTheMandatoryStorageAndUiSuite") in {
         (c.get("classname"),c.get("name")) for c in cases}, "Required actual ART heap case missing"
     assert {
