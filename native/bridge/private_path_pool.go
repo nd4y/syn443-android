@@ -22,26 +22,27 @@ const privateGroupLimit = 16
 // runtime, and its configured adapter count is reserved for that lifetime.
 // The resolver is an independently authorized immutable catalogue snapshot.
 type privatePathPool struct {
-	mu           sync.Mutex
-	ctx          context.Context
-	cancel       context.CancelFunc
-	stopParent   func() bool
-	lease        *leaseGuard
-	scope        string
-	configured   int
-	capacity     int
-	used         int
-	holds        int
-	operations   int
-	probing      bool
-	selectors    map[string]*privatePathSelector
-	building     bool
-	closed       bool
-	queueClosed  bool
-	next         uint64
-	entries      map[uint64]*privatePoolEntry
-	retire       chan *privatePoolEntry
-	workerExited chan struct{}
+	mu              sync.Mutex
+	ctx             context.Context
+	cancel          context.CancelFunc
+	stopParent      func() bool
+	lease           *leaseGuard
+	homeUntilBootMS atomic.Int64 // 0 ordinary network; -1 home scope awaiting proof
+	scope           string
+	configured      int
+	capacity        int
+	used            int
+	holds           int
+	operations      int
+	probing         bool
+	selectors       map[string]*privatePathSelector
+	building        bool
+	closed          bool
+	queueClosed     bool
+	next            uint64
+	entries         map[uint64]*privatePoolEntry
+	retire          chan *privatePoolEntry
+	workerExited    chan struct{}
 }
 
 type privatePoolEntry struct {
@@ -104,6 +105,20 @@ func newPrivatePathPool(parent context.Context, scope string, capacity int, leas
 	}
 	p.mu.Unlock()
 	return p, nil
+}
+
+// Called before and after flow I/O as well as while admitting a new route.
+// Reading the deadline requires no hub lock while an individual flow owns the pool.
+func (p *privatePathPool) homeCurrent() bool {
+	if p == nil {
+		return false
+	}
+	deadline := p.homeUntilBootMS.Load()
+	if deadline == 0 {
+		return true
+	}
+	now := p.lease.clock()
+	return deadline > 0 && now >= 0 && now < deadline && deadline-now <= 180_000
 }
 
 func (p *privatePathPool) snapshot() privatePoolSnapshot {

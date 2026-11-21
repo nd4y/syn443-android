@@ -113,6 +113,33 @@ class ManagedAdaptiveRoutesTest {
         return initial
     }
 
+    @Test fun nativeHomeAdmissionNeedsTheExactLiveDeadlineAcrossRenewalAndExpiry() {
+        Harness(config(choices = 1), NetworkMode.HOME_WIFI).use { h ->
+            h.controller.homeProofUntil = 5_000
+            h.report(h.status(), 1_000)
+            val configure = h.commands.single()
+            assertEquals("configure", configure.getString("command"))
+            assertEquals("HOME_WIFI", configure.getString("mode"))
+            assertEquals(5_000L, configure.getLong("homeProofUntilBootMs"))
+            h.report(h.status().put("homeProofUntilBootMs", "5000"), 2_000)
+            assertEquals(2, h.commands.size)
+            assertNull(h.tick(2_000))
+            h.controller.homeProofUntil = 8_000
+            h.report(h.status().put("homeProofUntilBootMs", 5_000L), 3_000)
+            assertEquals(8_000L, h.commands.last().getLong("homeProofUntilBootMs"))
+            h.report(h.status().put("homeProofUntilBootMs", 8_000L), 4_000)
+            assertNull(h.tick(8_000))
+            h.report(h.status().put("homeProofUntilBootMs", 8_000L), 8_001)
+            assertTrue(h.starts().isEmpty())
+            assertEquals(3, h.commands.size)
+        }
+        Harness(config(choices = 1), NetworkMode.HOME_WIFI).use { h ->
+            h.controller.homeProofUntil = 5_000
+            h.report(h.status().put("homeProofUntilBootMs", 5_000L), 1_000)
+            assertNotNull(h.tick(1_000))
+        }
+    }
+
     @Test fun otherPhysicalTransportStartsIndependentAdaptiveSearchAndRetiresWifiProof() {
         val other = PhysicalTransport.OTHER.adaptiveNetworkMode()
         assertEquals(NetworkMode.UNKNOWN, other)

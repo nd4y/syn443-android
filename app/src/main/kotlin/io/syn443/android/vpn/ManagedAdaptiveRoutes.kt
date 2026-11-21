@@ -41,6 +41,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private var context:Context?=null
     private var routeScope:RouteScope?=null
     private var memory:RouteHealthMemory?=null
+    var homeProofUntil=0L
     private var mode=NetworkMode.WIFI
     private var policyScope=""
     private var nativeEpoch=0L
@@ -244,11 +245,20 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         if(running==null || ready==null) {nativeRunning=true;nativeReady=false;nativeScope="";return}
         nativeRunning=running
         if(nativeRunning && raw.optLong("workAgeMs",0)>35_000) {retireOwner=true;return}
-        if(reportedPolicy!=policyScope || !ready) {
+        val home = mode == NetworkMode.HOME_WIFI
+        val refreshHome = home && (homeProofUntil <= now || safeInteger(raw,"homeProofUntilBootMs") != homeProofUntil)
+        if(reportedPolicy!=policyScope || !ready || refreshHome) {
             nativeReady=false;nativeScope=""
             groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
-            if(now-lastCommandAt>=1000)send(JSONObject().put("command","configure").put("schemaVersion",1)
-                .put("nativeEpoch",epoch).put("scope",policyScope).put("mode",mode.name),now,dispatch)
+            if(now-lastCommandAt>=1000) {
+                val command = JSONObject().put("command","configure").put("schemaVersion",1)
+                    .put("nativeEpoch",epoch).put("scope",policyScope).put("mode",mode.name)
+                if(mode==NetworkMode.HOME_WIFI) {
+                    if(homeProofUntil<=now)return
+                    command.put("homeProofUntilBootMs",homeProofUntil)
+                }
+                send(command,now,dispatch)
+            }
             return
         }
         nativeReady=true;nativeScope=scope
@@ -386,6 +396,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val current= context ?: return
         if(retireOwner || !advanceClock(now))return
         if(drainingSince?.let {now-it>35_000}==true) {retireOwner=true;return}
+        if(mode == NetworkMode.HOME_WIFI && homeProofUntil <= now)return
         if(!nativeReady || nativeScope.isEmpty() || nativeRunning || drainingSince!=null || pending!=null || now-lastCommandAt<1000)return
         pendingAdmission?.let {
             if(now-it.startedAt<=12_000)return

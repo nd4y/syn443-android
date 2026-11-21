@@ -26,6 +26,7 @@ type privateAdaptiveHub struct {
 	programs     map[string]*routeCheckProgram
 	groups       map[string]*privatePathSelector
 	cache        map[string]*privatePathCandidate
+	homeTimer    *time.Timer
 	scope, mode  string
 	busy, closed bool
 	cancel       context.CancelFunc
@@ -117,6 +118,9 @@ func newPrivateAdaptiveHubWithPrograms(c *privatePathCatalogue, metadata []byte,
 		return nil, errPrivatePath
 	}
 	h := &privateAdaptiveHub{graph: g, catalogue: c, create: c.create, pool: p, checks: owned, programs: programs, scope: scope, mode: mode, cache: map[string]*privatePathCandidate{}}
+	if mode == "HOME_WIFI" {
+		p.homeUntilBootMS.Store(-1)
+	}
 	if !h.makeGroupsLocked() {
 		p.Close()
 		return nil, errPrivatePath
@@ -150,7 +154,7 @@ func (h *privateAdaptiveHub) prepareProbe(work context.Context, group string, pa
 	}
 	path = append([]string(nil), path...)
 	h.mu.Lock()
-	if h.closed || h.busy || h.receipt != nil || !h.graph.Allows(group, h.mode, path) {
+	if h.closed || !h.pool.homeCurrent() || h.busy || h.receipt != nil || !h.graph.Allows(group, h.mode, path) {
 		h.mu.Unlock()
 		return nil, errPrivatePath
 	}
@@ -285,7 +289,7 @@ func (h *privateAdaptiveHub) discard(r *privateAdaptiveReceipt) bool {
 func (h *privateAdaptiveHub) commit(r *privateAdaptiveReceipt, graceMS int64) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.closed || h.busy || r == nil || h.receipt != r || r.hub != h || r.scope != h.scope || r.mode != h.mode {
+	if h.closed || !h.pool.homeCurrent() || h.busy || r == nil || h.receipt != r || r.hub != h || r.scope != h.scope || r.mode != h.mode {
 		return false
 	}
 	h.receipt = nil // One attempt, even if the native proof expired.
@@ -293,15 +297,76 @@ func (h *privateAdaptiveHub) commit(r *privateAdaptiveReceipt, graceMS int64) bo
 	return s != nil && s.selectVerified(r.proof, graceMS)
 }
 
+// One timer for all paths and open sockets in this home-network scope.
+func (h *privateAdaptiveHub) expireHome(scope string, deadline int64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	p := h.pool
+	if h.closed || h.scope != scope || h.mode != "HOME_WIFI" || deadline != p.homeUntilBootMS.Load() {
+		return
+	}
+	now := p.lease.clock()
+	if now >= 0 && now < deadline && deadline-now <= 180_000 {
+		h.homeTimer.Reset(time.Duration(deadline-now) * time.Millisecond)
+		return
+	}
+	if h.cancel != nil {
+		h.cancel()
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, e := range p.entries {
+		if e.scope == scope {
+			e.cancel()
+			p.enqueueLocked(e)
+		}
+	}
+}
+
+func (h *privateAdaptiveHub) setHomeDeadline(scope, mode string, deadline int64) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed || h.scope != scope || h.mode != mode {
+		return false
+	}
+	if mode != "HOME_WIFI" {
+		return deadline == 0
+	}
+	now := h.pool.lease.clock()
+	previous := h.pool.homeUntilBootMS.Load()
+	if now < 0 || deadline <= now || deadline-now > 180_000 || previous > 0 && now >= previous {
+		return false
+	}
+	if deadline != previous {
+		h.pool.homeUntilBootMS.Store(deadline)
+		if h.homeTimer != nil {
+			h.homeTimer.Stop()
+		}
+		h.homeTimer = time.AfterFunc(time.Duration(deadline-now)*time.Millisecond, func() { h.expireHome(scope, deadline) })
+	}
+	return true
+}
+
 func (h *privateAdaptiveHub) dialTCP(group string, parent context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	h.mu.Lock()
-	s := h.groups[group]
-	closed := h.closed
+	s, scope := h.groups[group], h.scope
+	allowed := !h.closed && h.pool.homeCurrent()
 	h.mu.Unlock()
-	if closed || s == nil {
+	if !allowed || s == nil {
 		return nil, errPrivatePath
 	}
-	return s.dialTCP(parent, network, destination)
+	conn, err := s.dialTCP(parent, network, destination)
+	if err != nil {
+		return nil, err
+	}
+	h.mu.Lock()
+	current := !h.closed && h.scope == scope && h.pool.homeCurrent()
+	h.mu.Unlock()
+	if !current {
+		conn.Close()
+		return nil, errPrivatePath
+	}
+	return conn, nil
 }
 
 // scope is the full locally computed authority binding. It is never a mode
@@ -324,6 +389,15 @@ func (h *privateAdaptiveHub) changeScope(scope, mode string) bool {
 	for _, s := range h.groups {
 		s.Close()
 	}
+	if h.homeTimer != nil {
+		h.homeTimer.Stop()
+		h.homeTimer = nil
+	}
+	if mode == "HOME_WIFI" {
+		h.pool.homeUntilBootMS.Store(-1)
+	} else {
+		h.pool.homeUntilBootMS.Store(0)
+	}
 	h.scope, h.mode, h.receipt = scope, mode, nil
 	h.cache = map[string]*privatePathCandidate{}
 	if !h.makeGroupsLocked() {
@@ -341,6 +415,10 @@ func (h *privateAdaptiveHub) Close() {
 		return
 	}
 	h.closed, h.receipt = true, nil
+	if h.homeTimer != nil {
+		h.homeTimer.Stop()
+		h.homeTimer = nil
+	}
 	if h.cancel != nil {
 		h.cancel()
 	}

@@ -19,6 +19,14 @@ internal fun PhysicalLinkDetails(link: JSONObject?) {
         return
     }
     Text("Сеть подключения VPN - $transport", Modifier.testTag("physical-link-transport"))
+    if (link.optString("transport")=="WIFI") {
+        val home=when(link.optString("homeProof")) {
+            "verified" -> "Домашний узел подтверждён по TLS"
+            "unconfirmed" -> "Домашний узел не подтверждён"
+            else -> null
+        }
+        if(home!=null)Text(home, Modifier.testTag("physical-home-proof"))
+    }
     for ((family, prefix) in listOf("IPv4" to "ipv4", "IPv6" to "ipv6")) {
         val address = link.opt(prefix + "Address") as? Boolean
         val route = link.opt(prefix + "Default") as? Boolean

@@ -109,6 +109,12 @@ if mode=="emulator":
         "familyFactsExcludeLinkLocalAndKeepAddressAndDefaultRouteSeparate",
         "lostPhysicalLinkRemovesFamilyFactsFromVisibleDiagnostics",
     )} <= set(identities), "Missing physical link diagnostic outcomes"
+    assert {
+        ('io.syn443.android.PhysicalLinkDetailsTest', 'homeProofStatusRequiresCurrentWiFiObservation'),
+        ('io.syn443.android.HomeWiFiProofTest', 'actualTLSRequiresBoundSocketTrustedHostnameAndMatchingLeafPin'),
+        ('io.syn443.android.ManagedAdaptiveRoutesTest', 'nativeHomeAdmissionNeedsTheExactLiveDeadlineAcrossRenewalAndExpiry'),
+        ('io.syn443.android.HomeWiFiProofTest', 'staleHomeProofCannotCrossLinkAuthorityTimeOrRetryBudget'),
+    } <= set(identities), "Missing signed home Wi-Fi proof outcomes"
     required_storage_outcomes = {
         ("io.syn443.android.AttachmentStorageFailureTest", "failedWritePreservesSourceAndReleasesScratchBeforeRetry"),
         ("io.syn443.android.AttachmentStorageFailureTest", "boundedOutboxFullRollsBackPartialFileAndAllowsRetry"),
