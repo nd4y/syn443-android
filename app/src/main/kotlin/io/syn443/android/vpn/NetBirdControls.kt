@@ -23,6 +23,10 @@ private data class NetBirdViewRequest(val id: String, val page: Int) {
  * diagnostics or reads the provider SDK from the UI. */
 @Composable
 internal fun NetBirdControls(overlay: JSONObject, command: (String, String?) -> Unit) {
+    if (overlay.opt("configuredInRunningProfile") == false && overlay.opt("active") != true) {
+        Text("В текущей конфигурации VPN нет NetBird", Modifier.testTag("netbird-profile-absent"))
+        return
+    }
     val model = NetBirdPresentation.read(overlay)
     var peerPending by remember { mutableStateOf<NetBirdViewRequest?>(null) }
     var diagnosticPending by remember { mutableStateOf<NetBirdViewRequest?>(null) }

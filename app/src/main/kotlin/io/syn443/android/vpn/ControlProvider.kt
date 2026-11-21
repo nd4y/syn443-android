@@ -418,7 +418,8 @@ class ControlProvider : ContentProvider() {
                     result.put("policyRetryAt", Recovery.replacementReadyAt(store.checkpoint(result), System.currentTimeMillis()))
                 }
                 val os=LifecycleAccess.policy(context)
-                result.put("netbird", OverlaySnapshot.read()).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",os)
+                val overlay = OverlaySnapshot.forStatus(result.optLong("generation", -1), result.opt("desiredOn") == true, result.opt("engineActive") == true)
+                result.put("netbird", overlay).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",os)
                 result.put("policyChecks",PolicyChecks.view(result.optLong("generation"),result.optLong("networkEpoch"),
                     result.getJSONObject("policy").optLong("activationGeneration"),result.optBoolean("engineActive")))
                 // Legacy fields must not expose the old persisted sample as current.
