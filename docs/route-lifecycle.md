@@ -204,3 +204,17 @@ message under lockdown. The app never opens a bypass socket or changes
 Android lockdown. Unknown reachability without Android's captive flag is
 not treated as a portal or as a restricted cellular mode. A real portal
 and lockdown still need separate acceptance.
+
+### Physical IP families
+
+Open **Маршруты и диагностика** while connected to see the transport that carries
+the VPN. For IPv4 and IPv6, the screen separately shows whether Android reported
+a non-link-local unicast address and a default route on that physical link. A
+private address counts. The result describes the selected link itself. Proving
+that a remote service responds still requires a route check.
+
+The controller derives these flags from existing Android network callbacks.
+The local `status.physicalLink` field contains only the transport and four
+booleans. VPN stop, service replacement or a different network epoch invalidates
+the observation. An unavailable observation appears as pending. Reading this
+view creates no network traffic and does not request location permission.

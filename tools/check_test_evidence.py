@@ -80,6 +80,10 @@ if mode=="jvm":
         "optionalReserveIsDeferredOnlyAfterIndependentFailuresAgainstHealthyComparator",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required failover admission cases missing"
 if mode=="emulator":
+    assert {("io.syn443.android.PhysicalLinkDetailsTest", name) for name in (
+        "familyFactsExcludeLinkLocalAndKeepAddressAndDefaultRouteSeparate",
+        "lostPhysicalLinkRemovesFamilyFactsFromVisibleDiagnostics",
+    )} <= set(identities), "Missing physical link diagnostic outcomes"
     required_storage_outcomes = {
         ("io.syn443.android.AttachmentStorageFailureTest", "failedWritePreservesSourceAndReleasesScratchBeforeRetry"),
         ("io.syn443.android.AttachmentStorageFailureTest", "boundedOutboxFullRollsBackPartialFileAndAllowsRetry"),

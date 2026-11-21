@@ -29,6 +29,10 @@ object LifecycleAccess {
     }
     internal fun ownsReadyEngine(generation: Long): Boolean = service?.get()?.ownsReadyEngine(generation) == true
 
+    internal fun physicalLink(status: JSONObject): JSONObject? =
+        if (status.optBoolean("desiredOn")) service?.get()?.physicalLinkReport(
+            status.optLong("generation", -1), status.optLong("networkEpoch", -1)) else null
+
     fun engineStatus(status:JSONObject,engineReady:Boolean,processPresent:Boolean?):JSONObject {
         // A newly attached controller can still be waiting for an old owner or
         // a restart budget. Only the current engine handshake is positive evidence.
