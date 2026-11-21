@@ -615,3 +615,55 @@ func TestPrivateAdaptiveHubBusyAndStopRequireActualOwnerExit(t *testing.T) {
 		}
 	})
 }
+
+func TestExpiredHomeProofBlocksNewAdaptiveTrafficAtTheActualNativeDial(t *testing.T) {
+	c, metadata, plans, paths, address := privateAdaptiveOneHopInputs(t, 1)
+	var graph map[string]json.RawMessage
+	if err := json.Unmarshal(metadata, &graph); err != nil {
+		t.Fatal(err)
+	}
+	var hops []map[string]any
+	if err := json.Unmarshal(graph["hops"], &hops); err != nil {
+		t.Fatal(err)
+	}
+	for _, hop := range hops {
+		hop["entryModes"] = []string{"HOME_WIFI"}
+	}
+	graph["hops"] = privateAdaptiveMarshal(t, hops)
+	h, clock := privateAdaptiveNewHub(t, c, privateAdaptiveMarshal(t, graph), plans, 4)
+	scope := strings.Repeat("b", 64)
+	if !h.changeScope(scope, "HOME_WIFI") {
+		t.Fatal("scope not replaced")
+	}
+	until := clock.Load() + 15_000
+	if h.setHomeDeadline(scope, "HOME_WIFI", clock.Load()+180_001) || h.setHomeDeadline(scope, "HOME_WIFI", clock.Load()) ||
+		h.setHomeDeadline(strings.Repeat("c", 64), "HOME_WIFI", until) {
+		t.Fatal("invalid home proof accepted")
+	}
+	if result, e := h.prepareProbe(context.Background(), "inside", paths[0]); result != nil || e != errPrivatePath {
+		t.Fatal("unauthorized home probe")
+	}
+	if !h.setHomeDeadline(scope, "HOME_WIFI", until) {
+		t.Fatal("fresh home proof not applied")
+	}
+	receipt, err := h.prepareProbe(context.Background(), "inside", paths[0])
+	if err != nil || !h.commit(receipt, 1000) {
+		t.Fatal("route did not pass", err)
+	}
+	conn, err := h.dialTCP("inside", context.Background(), "tcp", M.ParseSocksaddr(address))
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateAdaptiveEcho(t, conn, "verified-home")
+	conn.Close()
+	clock.Store(until)
+	if h.setHomeDeadline(scope, "HOME_WIFI", until+1000) {
+		t.Fatal("expired proof revived the previous selection")
+	}
+	if conn, e := h.dialTCP("inside", context.Background(), "tcp", M.ParseSocksaddr(address)); conn != nil || e != errPrivatePath {
+		t.Fatal("expired home route served a new connection")
+	}
+	if got, e := h.prepareProbe(context.Background(), "inside", paths[0]); got != nil || e != errPrivatePath {
+		t.Fatal("expired home proof earned route evidence")
+	}
+}

@@ -239,11 +239,24 @@ func (e *Runtime) AdaptiveCommand(raw string) bool {
 	scope, _ := f["scope"].(string)
 	switch command {
 	case "configure":
-		if len(f) != 5 || f["schemaVersion"] != json.Number("1") {
+		mode, _ := f["mode"].(string)
+		var deadline int64
+		if mode == "HOME_WIFI" {
+			value, ok := f["homeProofUntilBootMs"].(json.Number)
+			if !ok || len(f) != 6 {
+				return false
+			}
+			deadline, err = value.Int64()
+			if err != nil || deadline <= 0 {
+				return false
+			}
+		} else if len(f) != 5 {
 			return false
 		}
-		mode, _ := f["mode"].(string)
-		return e.adaptive.configure(uint64(epoch), scope, mode)
+		if f["schemaVersion"] != json.Number("1") {
+			return false
+		}
+		return e.adaptive.configureHomeDeadline(uint64(epoch), scope, mode, deadline)
 	case "start":
 		var retryUntil int64
 		if value, present := f["retryUntilBootMs"]; present {

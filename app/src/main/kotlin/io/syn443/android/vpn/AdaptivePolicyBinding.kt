@@ -8,6 +8,7 @@ internal class AdaptivePolicyBinding(
     val semanticAuthority: String,
     val leaseDeadlineElapsed: Long,
     internal val boot: Int,
+    val homeProof: io.syn443.policy.HomeWiFiProof? = null,
 ) {
     init {
         require(revision in 1..9_007_199_254_740_991L && contentHash.matches(Regex("[a-f0-9]{64}")) &&

@@ -330,3 +330,15 @@ The shared user and administrator composer keeps the IME composition range. A me
 A failed check at the same destination on both the active and reserve paths leaves both eligible for another attempt. The coordinator needs a fresh, independently verified and selected replacement before attributing a failure to the previous path. A cancelled or unavailable check has its own status. This covers the shared-target case in CHECK-07. Wider correlation across independently managed health services still needs acceptance.
 
 The Android NetBird screen distinguishes a reported connection from missing evidence, limits the peer list to the current owner, and shows the reported direct or proxy path. The OVL-07 register entry covers this NetBird view. The generic status surface for future overlay providers remains open. [Protected source and emulator checks](https://github.com/nd4y/syn443-android/actions/runs/44923778498)
+
+## Assigned home Wi-Fi TLS checks
+
+An adaptive policy with `network.home-proof.v1` can nominate one private
+TLS service. On an eligible Wi-Fi network the client binds its TCP socket
+before connecting to the assigned IP. The handshake requires the ordinary
+certificate chain, the assigned DNS name and the leaf public-key pin.
+The client sends no application request. A successful handshake admits
+home-specific graph entries for up to three minutes and the policy lease
+may shorten that time. Unconfirmed Wi-Fi keeps its ordinary route choices.
+New native TCP dials and route probes recheck the monotonic deadline.
+The status panel shows the result for the current network and engine.

@@ -17,19 +17,20 @@ import (
 // declaration evidence only. The catalogue, lease, context and actual native
 // check receipt must all agree before a group gains data-path authority.
 type privateAdaptiveHub struct {
-	mu           sync.Mutex // hub -> pool is the only nested lock order; no I/O under mu
-	graph        *routegraph.Graph
-	catalogue    *privatePathCatalogue
-	create       func(context.Context, string, string, string) (adapter.Outbound, error) // compiled owner callback, never wire data
-	pool         *privatePathPool
-	checks       map[string][]routeCheck
-	programs     map[string]*routeCheckProgram
-	groups       map[string]*privatePathSelector
-	cache        map[string]*privatePathCandidate
-	scope, mode  string
-	busy, closed bool
-	cancel       context.CancelFunc
-	receipt      *privateAdaptiveReceipt
+	mu              sync.Mutex // hub -> pool is the only nested lock order; no I/O under mu
+	graph           *routegraph.Graph
+	catalogue       *privatePathCatalogue
+	create          func(context.Context, string, string, string) (adapter.Outbound, error) // compiled owner callback, never wire data
+	pool            *privatePathPool
+	checks          map[string][]routeCheck
+	programs        map[string]*routeCheckProgram
+	groups          map[string]*privatePathSelector
+	cache           map[string]*privatePathCandidate
+	homeUntilBootMS int64
+	scope, mode     string
+	busy, closed    bool
+	cancel          context.CancelFunc
+	receipt         *privateAdaptiveReceipt
 }
 
 type privateAdaptiveReceipt struct {
@@ -150,7 +151,7 @@ func (h *privateAdaptiveHub) prepareProbe(work context.Context, group string, pa
 	}
 	path = append([]string(nil), path...)
 	h.mu.Lock()
-	if h.closed || h.busy || h.receipt != nil || !h.graph.Allows(group, h.mode, path) {
+	if h.closed || !h.homeCurrentLocked() || h.busy || h.receipt != nil || !h.graph.Allows(group, h.mode, path) {
 		h.mu.Unlock()
 		return nil, errPrivatePath
 	}
@@ -285,7 +286,7 @@ func (h *privateAdaptiveHub) discard(r *privateAdaptiveReceipt) bool {
 func (h *privateAdaptiveHub) commit(r *privateAdaptiveReceipt, graceMS int64) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.closed || h.busy || r == nil || h.receipt != r || r.hub != h || r.scope != h.scope || r.mode != h.mode {
+	if h.closed || !h.homeCurrentLocked() || h.busy || r == nil || h.receipt != r || r.hub != h || r.scope != h.scope || r.mode != h.mode {
 		return false
 	}
 	h.receipt = nil // One attempt, even if the native proof expired.
@@ -293,15 +294,51 @@ func (h *privateAdaptiveHub) commit(r *privateAdaptiveReceipt, graceMS int64) bo
 	return s != nil && s.selectVerified(r.proof, graceMS)
 }
 
+func (h *privateAdaptiveHub) homeCurrentLocked() bool {
+	if h.mode != "HOME_WIFI" {
+		return true
+	}
+	now := h.pool.lease.clock()
+	return now >= 0 && now < h.homeUntilBootMS && h.homeUntilBootMS-now <= 180_000
+}
+
+func (h *privateAdaptiveHub) setHomeDeadline(scope, mode string, deadline int64) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed || h.scope != scope || h.mode != mode {
+		return false
+	}
+	if mode != "HOME_WIFI" {
+		return deadline == 0
+	}
+	now := h.pool.lease.clock()
+	if now < 0 || deadline <= now || deadline-now > 180_000 || h.homeUntilBootMS > 0 && now >= h.homeUntilBootMS {
+		return false
+	}
+	h.homeUntilBootMS = deadline
+	return true
+}
+
 func (h *privateAdaptiveHub) dialTCP(group string, parent context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	h.mu.Lock()
-	s := h.groups[group]
-	closed := h.closed
+	s, scope := h.groups[group], h.scope
+	allowed := !h.closed && h.homeCurrentLocked()
 	h.mu.Unlock()
-	if closed || s == nil {
+	if !allowed || s == nil {
 		return nil, errPrivatePath
 	}
-	return s.dialTCP(parent, network, destination)
+	conn, err := s.dialTCP(parent, network, destination)
+	if err != nil {
+		return nil, err
+	}
+	h.mu.Lock()
+	current := !h.closed && h.scope == scope && h.homeCurrentLocked()
+	h.mu.Unlock()
+	if !current {
+		conn.Close()
+		return nil, errPrivatePath
+	}
+	return conn, nil
 }
 
 // scope is the full locally computed authority binding. It is never a mode
@@ -324,6 +361,7 @@ func (h *privateAdaptiveHub) changeScope(scope, mode string) bool {
 	for _, s := range h.groups {
 		s.Close()
 	}
+	h.homeUntilBootMS = 0
 	h.scope, h.mode, h.receipt = scope, mode, nil
 	h.cache = map[string]*privatePathCandidate{}
 	if !h.makeGroupsLocked() {

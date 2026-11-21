@@ -41,6 +41,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private var context:Context?=null
     private var routeScope:RouteScope?=null
     private var memory:RouteHealthMemory?=null
+    var homeProofUntil=0L
     private var mode=NetworkMode.WIFI
     private var policyScope=""
     private var nativeEpoch=0L
@@ -244,11 +245,19 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         if(running==null || ready==null) {nativeRunning=true;nativeReady=false;nativeScope="";return}
         nativeRunning=running
         if(nativeRunning && raw.optLong("workAgeMs",0)>35_000) {retireOwner=true;return}
-        if(reportedPolicy!=policyScope || !ready) {
+        val refreshHome = mode==NetworkMode.HOME_WIFI && raw.optLong("homeProofUntilBootMs",0)!=homeProofUntil
+        if(reportedPolicy!=policyScope || !ready || refreshHome) {
             nativeReady=false;nativeScope=""
             groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
-            if(now-lastCommandAt>=1000)send(JSONObject().put("command","configure").put("schemaVersion",1)
-                .put("nativeEpoch",epoch).put("scope",policyScope).put("mode",mode.name),now,dispatch)
+            if(now-lastCommandAt>=1000) {
+                val command = JSONObject().put("command","configure").put("schemaVersion",1)
+                    .put("nativeEpoch",epoch).put("scope",policyScope).put("mode",mode.name)
+                if(mode==NetworkMode.HOME_WIFI) {
+                    if(homeProofUntil<=now)return
+                    command.put("homeProofUntilBootMs",homeProofUntil)
+                }
+                send(command,now,dispatch)
+            }
             return
         }
         nativeReady=true;nativeScope=scope

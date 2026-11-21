@@ -106,4 +106,21 @@ class AdaptivePolicyTest {
         rejected { verify(combined.copy(requiredCapabilities = combined.requiredCapabilities - Policy.ROUTE_EXIT_COUNTRY)) }
         rejected { verify(combined.copy(requiredCapabilities = combined.requiredCapabilities - Policy.ROUTE_EXIT_IP)) }
     }
+
+    @Test fun signedHomeProofRequiresExactCapabilityPrivateAddressAndCanonicalLeafPin() {
+        val addr=listOf(10,51,1,3).joinToString(".")
+        val pin=enc(ByteArray(32) { it.toByte() })
+        val fields="""{"hostname":"node.example.invalid","address":"$addr","port":443,"spkiSha256":"$pin"}"""
+        fun engineWith(fields:String)=engine().replaceFirst("{","""{"home_proof":$fields,""")
+        val base=payload(engineWith(fields))
+        assertThrows(IllegalArgumentException::class.java) { verify(base) }
+        val issued=base.copy(requiredCapabilities=base.requiredCapabilities+Policy.HOME_WIFI_PROOF)
+        assertEquals(addr,verify(issued).homeProof?.socketAddress()?.hostAddress)
+        assertThrows(IllegalArgumentException::class.java){verify(withEngine(issued,engine()))}
+        for(invalid in listOf(fields.replace(addr,"::1"),fields.replace(addr,"192.0.2.12"),
+            fields.replace(addr,"name.example.invalid"),fields.replace("node.example.invalid","*.example.invalid"),
+            fields.replace(pin,pin+"="),fields.replace("443","65536"),fields.replaceFirst("{","""{"command":"no","""))){
+            assertThrows(IllegalArgumentException::class.java){verify(withEngine(issued,engineWith(invalid)))}
+        }
+    }
 }

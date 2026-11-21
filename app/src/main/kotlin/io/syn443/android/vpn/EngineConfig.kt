@@ -53,7 +53,11 @@ object EngineConfig {
         }
         val value = JSONObject(raw)
         if (RouteCheckPlans.hasProfiles(value)) io.syn443.policy.RouteCheckProfiles.inspectEngine(raw)
-        require(value.keys().asSequence().all { it in setOf("outbounds", "dns", "route", "route_checks", "route_failover", "adaptive_routes") }) { "unsupported root field" }
+        require(value.keys().asSequence().all { it in setOf("outbounds", "dns", "route", "route_checks", "route_failover", "adaptive_routes", "home_proof") }) { "unsupported root field" }
+        if(value.has("home_proof")) {
+            require(value.has("adaptive_routes"))
+            io.syn443.policy.HomeWiFiProof.parse(Decision.json.parseToJsonElement(raw).jsonObject.getValue("home_proof"))
+        }
         val adaptive = if (value.has("adaptive_routes")) {
             require(utf8Bytes(raw) <= 262144)
             require(value.get("adaptive_routes") is JSONObject)
@@ -336,6 +340,7 @@ object EngineConfig {
         val checks = value.optJSONArray("route_checks")
         val hasProfiles = checks != null && (0 until checks.length()).any { checks.getJSONObject(it).has("profile") }
         if (!adaptive && !hasProfiles) value.remove("route_checks")
+        value.remove("home_proof")
         value.remove("route_failover")
         value.put("log", JSONObject().put("disabled", true))
         val outbounds = value.getJSONArray("outbounds")

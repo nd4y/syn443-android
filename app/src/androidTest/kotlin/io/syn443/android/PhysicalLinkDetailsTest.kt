@@ -49,4 +49,14 @@ class PhysicalLinkDetailsTest {
         compose.onNodeWithTag("physical-link-ipv6").assertDoesNotExist()
         compose.onNodeWithTag("physical-link-pending").assertExists()
     }
+    @Test fun homeProofStatusRequiresCurrentWiFiObservation() {
+        val current=mutableStateOf<org.json.JSONObject?>(org.json.JSONObject().put("transport","WIFI").put("homeProof","verified"))
+        compose.setContent { Column { PhysicalLinkDetails(current.value) } }
+        compose.onNodeWithTag("physical-home-proof").assertTextContains("подтверждён по TLS",substring=true)
+        compose.runOnIdle { current.value=org.json.JSONObject().put("transport","WIFI").put("homeProof","unconfirmed") }
+        compose.onNodeWithTag("physical-home-proof").assertTextContains("не подтверждён",substring=true)
+        compose.runOnIdle { current.value=org.json.JSONObject().put("transport","OTHER").put("homeProof","verified") }
+        compose.onNodeWithTag("physical-home-proof").assertDoesNotExist()
+        compose.runOnIdle { current.value=null };compose.onNodeWithTag("physical-home-proof").assertDoesNotExist()
+    }
 }
