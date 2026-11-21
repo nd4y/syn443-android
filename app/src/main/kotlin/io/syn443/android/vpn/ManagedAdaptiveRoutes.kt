@@ -42,6 +42,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private var routeScope:RouteScope?=null
     private var memory:RouteHealthMemory?=null
     var homeProofUntil=0L
+    var modeOverrideUntil=0L
     private var mode=NetworkMode.WIFI
     private var policyScope=""
     private var nativeEpoch=0L
@@ -247,7 +248,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         if(nativeRunning && raw.optLong("workAgeMs",0)>35_000) {retireOwner=true;return}
         val home = mode == NetworkMode.HOME_WIFI
         val refreshHome = home && (homeProofUntil <= now || safeInteger(raw,"homeProofUntilBootMs") != homeProofUntil)
-        if(reportedPolicy!=policyScope || !ready || refreshHome) {
+        val refreshOverride=!home && modeOverrideUntil>0 && (modeOverrideUntil<=now || safeInteger(raw,"modeUntilBootMs")!=modeOverrideUntil)
+        if(reportedPolicy!=policyScope || !ready || refreshHome || refreshOverride) {
             nativeReady=false;nativeScope=""
             groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
             if(now-lastCommandAt>=1000) {
@@ -256,6 +258,9 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 if(mode==NetworkMode.HOME_WIFI) {
                     if(homeProofUntil<=now)return
                     command.put("homeProofUntilBootMs",homeProofUntil)
+                } else if(modeOverrideUntil>0) {
+                    if(modeOverrideUntil<=now)return
+                    command.put("modeUntilBootMs",modeOverrideUntil)
                 }
                 send(command,now,dispatch)
             }

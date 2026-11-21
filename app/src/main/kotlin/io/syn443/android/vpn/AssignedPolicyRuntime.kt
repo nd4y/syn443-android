@@ -62,7 +62,7 @@ internal class AssignedPolicyRuntime(private val boot:()->Int,private val elapse
                 val roots=Canonical.encode(JsonObject(payload.bootstrap.roots.mapValues {JsonPrimitive(it.value)}))
                 Policy.hash("syn443/adaptive-strict-envelope/v1\n"+value.envelope+"\n"+login.authority+"\n"+roots)
             }
-            return AdaptivePolicyBinding(value.payload.revision,value.payload.contentHash,authority,deadline,currentBoot,value.homeProof)
+            return AdaptivePolicyBinding(value.payload.revision,value.payload.contentHash,authority,deadline,currentBoot,value.homeProof,value.modeSelection)
         }
         val candidateBinding=binding(candidate,candidateDeadline)
         val permitBinding=permit?.let {binding(it.authorized(login,state,currentBoot,now),it.deadlineElapsed)}

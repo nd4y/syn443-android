@@ -164,6 +164,9 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
             null -> "VPN"
         }, Modifier.testTag("vpn-intent"), style = MaterialTheme.typography.titleMedium)
         VpnStatusSummary(status, statusAvailable, accountPolicyBlocked)
+        if (statusAvailable==true && desiredOn==true) NetworkModeControls(status.optJSONObject("physicalLink")?.optJSONObject("modeSelection")) { stamp, mode, minutes ->
+            command("network-mode","$stamp|$mode|$minutes")
+        }
         VpnPrimaryAction(
             desiredOn = desiredOn,
             connectEnabled = statusAvailable == true && !accountPolicyBlocked,

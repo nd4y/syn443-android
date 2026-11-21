@@ -38,7 +38,7 @@ func (f *privateFlowOwner) valid() bool {
 
 func (f *privateFlowOwner) validLocked(p *privatePathPool, e *privatePoolEntry) bool {
 	p.expireDrainsLocked()
-	return !f.closed.Load() && !f.hold.closed.Load() && !p.closed && p.ctx.Err() == nil && privateManagedLease(p.lease) && p.homeCurrent() && p.entries[e.id] == e && p.scope == e.scope && !e.queued && e.path.ctx.Err() == nil
+	return !f.closed.Load() && !f.hold.closed.Load() && !p.closed && p.ctx.Err() == nil && privateManagedLease(p.lease) && p.modeCurrent() && p.entries[e.id] == e && p.scope == e.scope && !e.queued && e.path.ctx.Err() == nil
 }
 func (f *privateFlowOwner) begin() bool {
 	p, e := f.hold.pool, f.hold.entry

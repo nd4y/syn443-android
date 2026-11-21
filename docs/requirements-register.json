@@ -866,14 +866,24 @@
     {
       "id": "MODE-02",
       "text": "Предлагаемый приоритет: временный ручной override, явно назначенная политика устройства, автоматическое определение. Ручной override виден на главном экране и действует до выбранного пользователем срока или изменения сети. Администратор задаёт разрешённые режимы и право override.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedNetworkMode.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/NetworkModeControls.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedNetworkModeTest.kt",
+        "native/bridge/private_adaptive_hub_test.go"
+      ]
     },
     {
       "id": "MODE-03",
       "text": "SSID/BSSID используются локально только как селекторы home-кандидата. Дополнительные домашние маршруты активируются после TLS/challenge проверки назначенного endpoint через выбранную физическую Android Network без overlay/прокси. Проверка подтверждает endpoint/путь, но не доверенность Wi-Fi: общий direct bypass, plaintext credentials или ослабление TLS автоматически не разрешаются. Требования шифрования первого участка сохраняются; исключение возможно лишь отдельным административным target/context-scoped risk grant с описанным риском. При сомнении действует обычная Wi-Fi политика. Сырые SSID/BSSID не отправляются серверу.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/HomeWiFiHandshake.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/HomeWiFiMonitor.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/HomeWiFiProofTest.kt",
+        "native/bridge/private_adaptive_hub_test.go"
+      ]
     },
     {
       "id": "MODE-04",
@@ -2617,8 +2627,12 @@
     {
       "id": "SEC-02",
       "text": "Домашний endpoint подтверждается по MODE-03 через физическую сеть без overlay. Его ответ не доказывает безопасность Wi-Fi и не снимает transport/egress constraints. Risk grant может разрешить только конкретное явно описанное исключение; он не возникает из SSID/BSSID, ping или успешного TLS к публичному домашнему серверу. Идентичность endpoint и grant обновляются подписанной политикой; evil twin не получает более широких прав автоматически.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/HomeWiFiHandshake.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/HomeWiFiProofTest.kt",
+        "core/policy/src/test/kotlin/io/syn443/policy/AdaptivePolicyTest.kt"
+      ]
     },
     {
       "id": "SEC-03",

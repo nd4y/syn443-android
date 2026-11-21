@@ -33,6 +33,8 @@ object LifecycleAccess {
         if (status.optBoolean("desiredOn")) service?.get()?.physicalLinkReport(
             status.optLong("generation", -1), status.optLong("networkEpoch", -1)) else null
 
+    internal fun requestNetworkMode(stamp:String,mode:String,minutes:Int) = service?.get()?.requestNetworkMode(stamp,mode,minutes)==true
+
     fun engineStatus(status:JSONObject,engineReady:Boolean,processPresent:Boolean?):JSONObject {
         // A newly attached controller can still be waiting for an old owner or
         // a restart budget. Only the current engine handshake is positive evidence.

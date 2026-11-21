@@ -115,6 +115,11 @@ if mode=="emulator":
         ('io.syn443.android.ManagedAdaptiveRoutesTest', 'nativeHomeAdmissionNeedsTheExactLiveDeadlineAcrossRenewalAndExpiry'),
         ('io.syn443.android.HomeWiFiProofTest', 'staleHomeProofCannotCrossLinkAuthorityTimeOrRetryBudget'),
     } <= set(identities), "Missing signed home Wi-Fi proof outcomes"
+    assert {("io.syn443.android.ManagedNetworkModeTest", name) for name in (
+        "userChoicePrecedesAssignmentAndExpiresAtTheExactMonotonicBoundary",
+        "changedPhysicalNetworkAuthorityOrExpiredLeaseRetireTheChoiceAndItsCommands",
+        "screenShowsAssignedSourceAndAcceptsOnlyThePermittedDurationAndMode",
+    )} <= set(identities), "Missing managed network mode outcomes"
     required_storage_outcomes = {
         ("io.syn443.android.AttachmentStorageFailureTest", "failedWritePreservesSourceAndReleasesScratchBeforeRetry"),
         ("io.syn443.android.AttachmentStorageFailureTest", "boundedOutboxFullRollsBackPartialFileAndAllowsRetry"),

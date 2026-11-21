@@ -23,7 +23,7 @@ import java.util.Base64
     val requiredCapabilities: List<String>, val algorithmRevision: String,
     val engineConfigB64: String, val contentHash: String, val activation: Gate, val operation: String = "configure",
     @EncodeDefault(EncodeDefault.Mode.NEVER) val keyThumbprint: String = "")
-data class Verified(val envelope: String, val payload: Payload, val engineConfig: String, val homeProof:HomeWiFiProof?=null)
+data class Verified(val envelope: String, val payload: Payload, val engineConfig: String, val homeProof:HomeWiFiProof?=null, val modeSelection:NetworkModePolicy?=null)
 enum class Preparation { WAIT, REVOKE_OWNER, BEGIN_WITHOUT_BASELINE, CHECK_BASELINE }
 @Serializable data class Journal(val phase: String = "idle", val desired: String? = null,
     val active: String? = null, val lastGood: String? = null, val candidate: String? = null,
@@ -123,6 +123,7 @@ object Policy {
     const val RESERVE_PROBE_COOLDOWN = "route.reserve-cooldown.v1"
     const val ROUTE_EXIT_IP = "route.exit-ip.v1"
     const val ROUTE_EXIT_COUNTRY = "route.exit-country.v1"
+    const val NETWORK_MODE_SELECTION = "network.mode-selection.v1"
     const val HOME_WIFI_PROOF = "network.home-proof.v1"
     const val ROUTE_HTTPS_STATUS = "route.https-status.v1"
     const val ROUTE_CHECK_PLAN = "route.check-plan.v2"
@@ -131,7 +132,7 @@ object Policy {
     const val BASELINE_ALGORITHM = "m1-local-v1"
     const val CONFIRMED_ALGORITHM = "m4-confirmed-v1"
     const val ADAPTIVE_ALGORITHM = "m4-graph-tcp-v1"
-    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1", RESERVE_PROBE_COOLDOWN, ROUTE_EXIT_IP, ROUTE_EXIT_COUNTRY, ROUTE_DECISION, ROUTE_ADAPTIVE_TCP, ROUTE_CHECK_PLAN, ROUTE_HTTPS_STATUS, HOME_WIFI_PROOF)
+    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1", RESERVE_PROBE_COOLDOWN, ROUTE_EXIT_IP, ROUTE_EXIT_COUNTRY, ROUTE_DECISION, ROUTE_ADAPTIVE_TCP, ROUTE_CHECK_PLAN, ROUTE_HTTPS_STATUS, HOME_WIFI_PROOF, NETWORK_MODE_SELECTION)
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     fun decode64(value: String): ByteArray {
         require(value.matches(Regex("[A-Za-z0-9_-]+")))
@@ -191,6 +192,9 @@ object Policy {
         require((decisionVariant || adaptiveVariant) == (ROUTE_DECISION in p.requiredCapabilities))
         val hasAdaptive = engineConfig?.containsKey("adaptive_routes") == true
         require(hasAdaptive == adaptiveVariant && hasAdaptive == (ROUTE_ADAPTIVE_TCP in p.requiredCapabilities))
+        val modeSelection = engineConfig?.get("network_mode")?.let { NetworkModePolicy.parse(it,engineConfig.containsKey("home_proof")) }
+        require((modeSelection!=null)==(NETWORK_MODE_SELECTION in p.requiredCapabilities))
+        if(modeSelection!=null) require(adaptiveVariant && p.schemaVersion==2 && p.operation=="configure")
         val homeProof = engineConfig?.get("home_proof")?.let { HomeWiFiProof.parse(it) }
         require((homeProof!=null) == (HOME_WIFI_PROOF in p.requiredCapabilities))
         if (homeProof!=null) require(adaptiveVariant && p.schemaVersion==2 && p.operation=="configure")
@@ -232,7 +236,7 @@ object Policy {
                 else -> error("unsupported_check")
             }
         }
-        return Verified(raw, p, engine, homeProof)
+        return Verified(raw, p, engine, homeProof, modeSelection)
     }
     fun verifyBound(raw:String,keys:Map<String,String>,device:String,ownThumbprint:String,now:Long):Verified =
         verify(raw,keys,device,now).also {require(it.payload.schemaVersion==2 && it.payload.keyThumbprint==ownThumbprint)}

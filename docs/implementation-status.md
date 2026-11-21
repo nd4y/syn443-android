@@ -342,3 +342,13 @@ home-specific graph entries for up to three minutes and the policy lease
 may shorten that time. Unconfirmed Wi-Fi keeps its ordinary route choices.
 New native TCP dials and route probes recheck the monotonic deadline.
 The status panel shows the result for the current network and engine.
+
+## Assigned and temporary network mode
+
+On the main VPN screen a running adaptive profile shows its current mode and
+whether it was detected, assigned by the administrator or selected manually.
+When permitted, choose a mode and duration in minutes. The same dialog can
+cancel the temporary choice. Network replacement, policy withdrawal and time
+expiry retire a previous choice. A home mode requires a fresh TLS proof on
+the current Wi-Fi even when explicitly selected. A mode selection grants no
+additional direct egress. Physical deployment and acceptance are separate.
