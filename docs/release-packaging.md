@@ -2,6 +2,8 @@
 
 The `jvm-and-apk` job in GitHub Actions builds the normal Android release variant and uploads `syn443-unsigned-release-input`. The archive contains `app-release-unsigned.apk` and `inventory.json`. Use the Actions run and source commit to identify a candidate.
 
+Push and pull request builds are generic. A manual release build inherits the same explicitly public installation profile and link host as the normal first-run bootstrap. The existing public-profile gate validates this input before either APK is built.
+
 The job decodes the packaged manifest, compares its application version with the Android Gradle Plugin output, checks the supported SDK and verifies that the VPN still requires Android's system permission. It checks that the release control provider is private and that debug-only components, backup, instrumentation and default cleartext access are disabled. It also checks APK alignment and ELF load segments for 16 KiB pages, runtime assets, both native ABIs and equality of the engine library bytes with the input AAR. Privacy and secret scans precede upload.
 
 The inventory records APK size, SHA-256, package, version, supported SDK, native library digests and the engine and shared-contract lock hashes. The independent release signer takes these exact bytes as input. Signing changes the APK digest. The final distribution manifest must identify the signed file and its signer before an update is offered to users. This artifact is intended for the signing stage. The emulator suite continues to consume its own debug instrumentation packages.

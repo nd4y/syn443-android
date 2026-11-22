@@ -1,4 +1,4 @@
-"""Describe the unpersonalized release build passed to an independent signer."""
+"""Describe the Android release build passed to an independent signer."""
 
 import argparse
 import json

@@ -193,8 +193,6 @@ jobs:
       - name: Assemble and inspect the unsigned release for independent signing
         env:
           SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
-          SYN443_INSTALLATION_PROFILE: ''
-          SYN443_ENROLLMENT_LINK_HOST: ''
         run: |
           set -euo pipefail
           ./gradlew :app:assembleRelease --stacktrace
