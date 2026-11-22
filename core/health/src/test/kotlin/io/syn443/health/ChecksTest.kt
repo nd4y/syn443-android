@@ -48,6 +48,15 @@ class ChecksTest {
             }
         }
     }
+    @Test fun dnsResultsRequireAFailedResolutionAndNeverSurviveCancellation() {
+        for(kind in DnsResult.entries) {
+            val resolved=result(Probe { _,scope -> scope.enter(Stage.RESOLVE); throw ProbeDnsException(kind) })
+            assertEquals(CheckObservation(Outcome.FAIL,Failure.DNS,Stage.RESOLVE,kind),resolved.observations.single())
+            val otherStage=result(Probe { _,scope -> scope.enter(Stage.CONNECT); throw ProbeDnsException(kind) })
+            assertNull(otherStage.observations.single().dnsResult)
+            assertThrows(IllegalArgumentException::class.java) { CheckObservation(Outcome.CANCELLED,Failure.DNS,Stage.RESOLVE,kind) }
+        }
+    }
     @Test fun checksNeverStartedDoNotInheritAStageOrNetworkFailure() {
         ProbePool().use { pool ->
             val cancelled = CheckJob(pool, Probe { _, _ -> error("must_not_run") })

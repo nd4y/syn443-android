@@ -8,10 +8,15 @@ import java.util.concurrent.atomic.AtomicReference
 
 enum class Outcome { PASS, FAIL, UNAVAILABLE, CANCELLED, DEADLINE }
 enum class Failure { DNS, TLS, EOF, TIMEOUT, TRANSPORT, WORKER_REJECTED, WORKER_START_TIMEOUT }
+enum class DnsResult { NXDOMAIN, SERVFAIL, REFUSED, NO_ADDRESSES, OTHER_RCODE, RESOLVER_ERROR }
+class ProbeDnsException(val result:DnsResult): java.net.UnknownHostException()
 /** Fixed vocabulary only: never contains an endpoint, exception message or response bytes. */
 enum class Stage { QUEUED, RESOLVE, CONNECT, TLS, REQUEST, RESPONSE }
 /** Positional diagnostic only. No check identifier, target, exception or response is retained. */
-data class CheckObservation(val outcome: Outcome, val failure: Failure? = null, val stage: Stage? = null)
+data class CheckObservation(val outcome: Outcome, val failure: Failure? = null, val stage: Stage? = null,
+    val dnsResult: DnsResult? = null) {
+    init { require(dnsResult == null || (outcome == Outcome.FAIL && failure == Failure.DNS && stage == Stage.RESOLVE)) }
+}
 data class Batch(val outcomes: List<Outcome>, val observations: List<CheckObservation> = emptyList()) {
     init { require(observations.isEmpty() || observations.map { it.outcome } == outcomes) }
     val complete: Boolean get() = outcomes.all { it == Outcome.PASS || it == Outcome.FAIL }
@@ -112,6 +117,7 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
         val scope = ProbeScope(); active.set(scope)
         if (cancelled.get()) { scope.cancel(); active.compareAndSet(scope, null); return CheckObservation(Outcome.CANCELLED) }
         var checkFailure: Failure? = null
+        var dnsResult: DnsResult? = null
         fun failed(value: Failure) { checkFailure = value; failure = value; failureStage = scope.stage }
         var future: Future<Boolean>? = null
         val outcome = try {
@@ -141,6 +147,7 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
                 Outcome.UNAVAILABLE
             } else Outcome.FAIL
         } catch (error: ExecutionException) {
+            if (scope.stage == Stage.RESOLVE) dnsResult = (error.cause as? ProbeDnsException)?.result
             failed(when (error.cause) {
                 is java.net.UnknownHostException -> Failure.DNS
                 is javax.net.ssl.SSLException -> Failure.TLS
@@ -154,6 +161,7 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
             (future as? Runnable)?.let { pool.executor.remove(it) }
             active.compareAndSet(scope, null); pending.compareAndSet(future, null)
         }
-        return CheckObservation(outcome, checkFailure, if (scope.started) scope.stage else null)
+        return CheckObservation(outcome, checkFailure, if (scope.started) scope.stage else null,
+            dnsResult.takeIf { outcome == Outcome.FAIL })
     }
 }

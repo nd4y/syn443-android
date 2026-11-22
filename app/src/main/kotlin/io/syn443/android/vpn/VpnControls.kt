@@ -212,6 +212,9 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
         ) { Text(if (detailsOpen) "Скрыть диагностику" else "Маршруты и диагностика") }
         if (detailsOpen) {
             if (statusAvailable == true && desiredOn == true) PhysicalLinkDetails(status.optJSONObject("physicalLink"))
+            if (statusAvailable == true && desiredOn == true) {
+                for (detail in internetDnsFailures(status.optJSONObject("internetChecks"))) Text(detail)
+            }
             if (status.optBoolean("testHealth")) Text("ТЕСТОВЫЙ СТЕНД: синтетический HTTP, проверка TLS не выполняется")
             if (status.optString("reason").isNotEmpty()) Text("Диагностика: " + status.optString("reason"))
             if (policy?.optBoolean("managed") == true) {

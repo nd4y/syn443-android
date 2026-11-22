@@ -195,6 +195,7 @@ if mode=="policy":
 if mode=="health":
     assert {('io.syn443.health.ChecksTest',name) for name in {
         'positionalDiagnosticsKeepEachFailureSeparateFromLaterSuccessOrMismatch',
+        'dnsResultsRequireAFailedResolutionAndNeverSurviveCancellation',
         'checksNeverStartedDoNotInheritAStageOrNetworkFailure',
         'oneAdmissionRetryUsesFreedCapacityAndRunsTheProbeOnlyOnce'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required per-check diagnostic cases missing'
     required={('io.syn443.health.AddressFallbackTest',name) for name in {
@@ -298,6 +299,7 @@ if mode=="emulator":
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'logoutAfterAccessExpiryRotatesOnlyInRamRevokesAndErasesTheProtectedSession',
         'lostLogoutRefreshKeepsRecoveryTombstoneWithoutRestoringSecretsOrRetryingEnrollment'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android expired-session retirement cases missing'
+    assert ('io.syn443.android.HealthChecksTest','platformDnsResponsesReachOnlyCurrentInternetDiagnostics') in identities, 'Missing DNS health outcome'
     assert ('io.syn443.android.HealthChecksTest','androidDnsRetainsBoundedDistinctAddressesForFallbackAndStillCancelsQuery') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android DNS fallback case missing'
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'expiredRefreshFamilyRequiresLoginWithoutContactingTheServer',
@@ -1009,6 +1011,7 @@ SUPPORT_BUNDLE_REQUIRED = {'io.syn443.android.DiagnosticArchiveTest': ['storedAr
                                              'truncatedAndProjectionOnlyComponentsNeverClaimComplete',
                                              'namesSizesAndDiagnosticsCannotEscapeOrEchoInputs'],
  'io.syn443.android.DiagnosticProjectionTest': ['knownSnapshotsProjectOnlyFixedPublicFields',
+    'internetDnsProjectionExportsOnlyObservedCategories',
                                                 'nestedSecretsLabelsTargetsAndFreeTextNeverReachComponents',
                                                 'incorrectBooleanAndNumericTypesStayUnknownRatherThanFalseOrZero',
                                                 'eventsKeepOnlyLast64OrderedAllowlistedRecords',
@@ -1047,7 +1050,7 @@ SUPPORT_BUNDLE_EXTERNAL_REQUIRED = ('io.syn443.android.SupportBundleProtocolTest
 if mode == "emulator":
     required = {(owner, name) for owner, names in SUPPORT_BUNDLE_REQUIRED.items() for name in names}
     required.add(SUPPORT_BUNDLE_EXTERNAL_REQUIRED)
-    assert len(required) == 46, "Duplicate support bundle requirement"
+    assert len(required) == 47, "Duplicate support bundle requirement"
     assert required <= set(identities), "Missing exact offline support archive outcomes"
     for owner, expected in SUPPORT_BUNDLE_REQUIRED.items():
         path = root / "app/src/androidTest/kotlin/io/syn443/android" / (owner.rsplit(".", 1)[1] + ".kt")

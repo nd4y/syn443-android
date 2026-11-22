@@ -1537,8 +1537,16 @@
     {
       "id": "ROUTE-04",
       "text": "DNS cache и health cache учитывают сеть, путь и ревизию. NXDOMAIN, timeout и TLS failure различаются. После смены сети старый ответ не должен закреплять неисправный маршрут.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/AndroidProbeResolver.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/PolicyCheckSnapshot.kt",
+        "app/src/main/kotlin/io/syn443/android/support/DiagnosticProjection.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/HealthChecksTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/DiagnosticProjectionTest.kt"
+      ],
+      "implementationScope": "Android distinguishes platform-reported NXDOMAIN, SERVFAIL, REFUSED, NOERROR without addresses, other response codes, resolver errors and deadline expiry. The current Internet health result is scoped to its VPN generation, network and policy activation. Support export retains fixed counts.",
+      "remainingScope": "DNS cache ownership and in-flight requests across selector changes, production route timing and raw protocol metrics remain to be verified."
     },
     {
       "id": "ROUTE-05",
@@ -1785,8 +1793,16 @@
     {
       "id": "TEL-04",
       "text": "Протокольные метрики: время DNS/TCP/TLS/proxy handshake/first byte/full response; rcode; потери по проверкам; классы HTTP/TLS ошибок; повторные попытки; смена upstream; P2P/relay; разрывы и время восстановления. Производительность XHTTP/gRPC/SSH учитывается отдельно по типу транспорта.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/AndroidProbeResolver.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/PolicyCheckSnapshot.kt",
+        "app/src/main/kotlin/io/syn443/android/support/DiagnosticProjection.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/HealthChecksTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/DiagnosticProjectionTest.kt"
+      ],
+      "implementationScope": "Android distinguishes platform-reported NXDOMAIN, SERVFAIL, REFUSED, NOERROR without addresses, other response codes, resolver errors and deadline expiry. The current Internet health result is scoped to its VPN generation, network and policy activation. Support export retains fixed counts.",
+      "remainingScope": "DNS cache ownership and in-flight requests across selector changes, production route timing and raw protocol metrics remain to be verified."
     },
     {
       "id": "TEL-05",
