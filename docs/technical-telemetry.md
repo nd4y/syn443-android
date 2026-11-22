@@ -28,6 +28,12 @@ This pilot does not provide full probe metrics, compressed delivery, the
 shared traffic budget, background uploads while Off, analysis or operator
 dashboards. Device/server end-to-end acceptance remains separate.
 
+The hosted enrolled rollback scenario enables telemetry for its disposable
+test identity. The fixture verifies the actual authenticated request body,
+acknowledges its event IDs in order and measures the interval until it sees
+the rollback. The emulator must retain its enrollment and return online
+through the previous managed route.
+
 ## Managed adaptive reselection
 
 Build 128 records a managed adaptive route change after the native engine

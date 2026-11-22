@@ -84,6 +84,13 @@ class EnrollmentDriver:AndroidJUnitRunner() {
             val registered=await {it.getString("phase")=="POLICY_CACHED" && !it.getBoolean("busy")}
             stage="candidate_validated"
             check(registered.getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+            if (arguments.getString("fixtureTelemetry") == "true") {
+                require(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+                stage="telemetry_consent"
+                check(registered.getBoolean("telemetryAvailable") && !registered.getBoolean("telemetryEnabled"))
+                call("auth-telemetry", registered.getLong("generation").toString() + ":true")
+                check(status().getBoolean("telemetryEnabled"))
+            }
             check(!JSONObject(checkNotNull(call("status").getString("json"))).getBoolean("desiredOn"))
         }.isSuccess
         finish(if(ok)-1 else 0,Bundle().apply {

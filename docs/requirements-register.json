@@ -1840,7 +1840,8 @@
         "docs/technical-telemetry.md",
         "app/src/main/kotlin/io/syn443/android/vpn/TelemetryCapture.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
-        "app/src/androidTest/kotlin/io/syn443/android/TechnicalTelemetryDiskTest.kt"
+        "app/src/androidTest/kotlin/io/syn443/android/TechnicalTelemetryDiskTest.kt",
+        "tools/run_enrolled_vpn.py"
       ],
       "implementationScope": "Foreground supervisor on validated unmetered Wi-Fi. Ordinary deliveries are five minutes apart. New critical or full batches may use a one-minute floor, with durable same-prefix retry suppression.",
       "remainingScope": "Android WorkManager while Off and end-to-end acceptance against an enrolled telemetry service."

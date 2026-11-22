@@ -48,18 +48,20 @@ def main():
         nonlocal fixture
         if fixture:
             adb('reverse','--remove','tcp:'+str(fixture.server.server_port));fixture.close();fixture=None
-    def setup(pending=False):
+    def setup(pending=False,telemetry=False):
         nonlocal fixture
         logout();close_fixture();call('policy-test-reset');call('test-reset')
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
         fixture=Fixture(config);fixture_port=fixture.server.server_port
+        fixture.telemetry_enabled=telemetry
         fixture.pending_policy_requests=1 if pending else 0
         adb('reverse','tcp:'+str(fixture_port),'tcp:'+str(fixture_port))
         data=json.dumps(fixture.bootstrap(),separators=(',',':')).encode()
         subprocess.run(['adb','-e','shell','-T','run-as',PACKAGE,'dd','of=no_backup/operator-identity.json'],input=data,capture_output=True,check=True,timeout=15)
         call('auth-bootstrap-file');await_condition(lambda:call('auth-status').get('configured') and not call('auth-status').get('busy'),20)
         driver=subprocess.run(['adb','-e','shell','am','instrument','-w','-e','fixturePort',str(fixture_port),'-e','fixtureCa',fixture.ca,
+            *(['-e','fixtureTelemetry','true'] if telemetry else []),
             PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=75)
         result=driver.stdout.decode()
         if driver.returncode or 'synthetic_enrollment_verified' not in result or 'INSTRUMENTATION_CODE: -1' not in result:
@@ -84,7 +86,8 @@ def main():
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
             try:
-                setup(name=='enrolledPendingAssignmentRetriesWhileVisible');before=proxy.progress;generation=call('auth-status')['generation']
+                setup(name=='enrolledPendingAssignmentRetriesWhileVisible',telemetry=name=='enrolledCandidateRegressionRollsBack')
+                before=proxy.progress;generation=call('auth-status')['generation']
                 if name=='enrolledPendingAssignmentRetriesWhileVisible':
                     assert fixture.policy_requests>=2 and fixture.registrations==1
                     assert call('status')['policy']['activeRevision']==1
@@ -104,11 +107,19 @@ def main():
                     await_condition(lambda:call('auth-status').get('generation')==generation and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert fixture.registrations==1
                 elif name=='enrolledCandidateRegressionRollsBack':
+                    await_condition(lambda:bool(fixture.telemetry_receipts),330)
+                    first_received=fixture.telemetry_receipts[0][0]
+                    assert all(('policy','rolled_back') not in events for _,events in fixture.telemetry_receipts)
                     broken=copy.deepcopy(config);broken['outbounds'][0]['server_port']=1;fixture.config=broken;fixture.revision=2
                     call('policy-refresh')
                     await_condition(lambda:call('status').get('policy',{}).get('phase')=='rolled_back' and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert call('status')['policy']['activeRevision']==1
                     await_condition(lambda:observed_report(2,'rolled_back',1),45)
+                    await_condition(lambda:any(('policy','rolled_back') in events for _,events in fixture.telemetry_receipts),180)
+                    received=next(at for at,events in fixture.telemetry_receipts if ('policy','rolled_back') in events)
+                    assert 0<received-first_received<300, 'critical rollback missed the regular upload interval'
+                    assert fixture.registrations==1 and call('auth-status')['generation']==generation
+                    assert call('status')['phase']=='Online' and proxy.progress>before
                 elif name in ('enrolledAssignedRoutesCommitWithOptionalFailure','enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet','enrolledStopFencesPendingCandidateRouteSuccess'):
                     changed=copy.deepcopy(config)
                     changed['outbounds'].append({'type':'http','tag':'unavailable-route','server':'127.0.0.1','server_port':1})
