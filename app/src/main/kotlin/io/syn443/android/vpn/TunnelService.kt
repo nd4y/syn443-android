@@ -920,6 +920,7 @@ class TunnelService : VpnService() {
                     phase("BlockedByPolicy","health_policy_not_authorized",generation)
                     return@post
                 }
+                PolicyChecks.recordInternet(result,generation,currentEpoch,activation)
                 if (!result.complete) { internetHealthy=false;phase("Recovering", "health_check_" + checkNotNull(result.incompleteOutcome).name.lowercase(java.util.Locale.ROOT), generation); return@post }
                 if (ok) {
                     internetHealthy=true

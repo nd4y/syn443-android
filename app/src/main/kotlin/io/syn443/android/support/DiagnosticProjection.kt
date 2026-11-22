@@ -30,6 +30,7 @@ object DiagnosticProjection {
     private val version = Regex("[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}(?:-[a-z][a-z0-9-]{0,63})?")
     private val routeStates = RouteState.entries.map { it.name.lowercase(Locale.ROOT) }.toSet()
     private val outcomes = Outcome.entries.map { it.name }.toSet()
+    private val dnsKinds = io.syn443.health.DnsResult.entries.map { it.name }.toSet()
     private val peerStates = setOf("connected", "connecting", "disconnected", "unknown")
     private val resultStates = setOf("queued", "checking", "reply", "no_reply", "cancelled", "invalid_target", "unknown", "limit")
     private val diagnosticStates = setOf("idle", "preparing", "running", "completed", "partial", "cancelled", "unavailable", "no_peers")
@@ -108,13 +109,27 @@ object DiagnosticProjection {
         }
         return bytes(DiagnosticArchive.Name.EVENTS, output.toString().toByteArray(Charsets.UTF_8))
     }
-    private fun checkProjection(source: JSONObject): JSONObject = document().also { value ->
+    private fun checkProjection(source: JSONObject): JSONObject = checkBatch(source).also { value ->
+        source.optJSONObject("internet")?.let(::checkBatch)?.takeIf { it.length()>1 }?.let { value.put("internet",it) }
+    }
+    private fun checkBatch(source: JSONObject): JSONObject = document().also { value ->
         booleans(source, value, "current")
         numbers(source, value, "ageMs")
         (source.opt("lastBatch") as? JSONObject)?.let { batch ->
             val safe = JSONObject()
             numbers(batch, safe, "sampledElapsedMs", "intentGeneration", "networkEpoch", "activationGeneration")
             counts(batch.opt("checks"), "outcome", outcomes)?.let { safe.put("counts", it) }
+            val rows = batch.optJSONArray("checks")
+            if (rows != null) {
+                val dns = JSONObject()
+                for (index in 0 until minOf(rows.length(),8)) {
+                    val row=rows.optJSONObject(index) ?: continue
+                    if(row.opt("outcome")!="FAIL" || row.opt("stage")!="RESOLVE" || row.opt("failure")!="DNS")continue
+                    val kind=known(row,"dnsResult",dnsKinds) ?: continue
+                    dns.put(kind,dns.optInt(kind)+1)
+                }
+                if (dns.length()>0) safe.put("dnsResults",dns)
+            }
             if (safe.length() > 0) value.put("lastBatch", safe)
         }
     }

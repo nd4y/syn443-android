@@ -191,6 +191,7 @@ if mode=="policy":
 if mode=="health":
     assert {('io.syn443.health.ChecksTest',name) for name in {
         'positionalDiagnosticsKeepEachFailureSeparateFromLaterSuccessOrMismatch',
+        'dnsResultsRequireAFailedResolutionAndNeverSurviveCancellation',
         'checksNeverStartedDoNotInheritAStageOrNetworkFailure',
         'oneAdmissionRetryUsesFreedCapacityAndRunsTheProbeOnlyOnce'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required per-check diagnostic cases missing'
     required={('io.syn443.health.AddressFallbackTest',name) for name in {
@@ -294,6 +295,8 @@ if mode=="emulator":
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'logoutAfterAccessExpiryRotatesOnlyInRamRevokesAndErasesTheProtectedSession',
         'lostLogoutRefreshKeepsRecoveryTombstoneWithoutRestoringSecretsOrRetryingEnrollment'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android expired-session retirement cases missing'
+    assert {('io.syn443.android.HealthChecksTest','platformDnsResponsesReachOnlyCurrentInternetDiagnostics'),
+            ('io.syn443.android.DiagnosticProjectionTest','internetDnsProjectionExportsOnlyObservedCategories')} <= set(identities), 'Missing DNS health and support projection outcomes'
     assert ('io.syn443.android.HealthChecksTest','androidDnsRetainsBoundedDistinctAddressesForFallbackAndStillCancelsQuery') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android DNS fallback case missing'
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'expiredRefreshFamilyRequiresLoginWithoutContactingTheServer',
