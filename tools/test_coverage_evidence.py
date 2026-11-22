@@ -537,7 +537,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         complete = compile(ast.fix_missing_locations(ast.Module(body=guard.body, type_ignores=[])), '<continuity-source>', 'exec')
         for mode, floor, folder, owner, count in [
             ('jvm', 21, 'core/decision/src/test/kotlin/io/syn443/decision', 'io.syn443.decision.RouteHealthContinuityTest', 3),
-            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', 'io.syn443.android.AdaptivePathContinuityTest', 6),
+            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', 'io.syn443.android.AdaptivePathContinuityTest', 8),
         ]:
             path = root / folder / (owner.rsplit('.', 1)[1] + '.kt')
             original = path.read_text(encoding='utf-8')

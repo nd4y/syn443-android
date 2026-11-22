@@ -1226,7 +1226,10 @@
       "text": "Цикл: определить networkEpoch/режим и активную policy; классифицировать требуемые назначения; взять разрешённые свежие last-known-good; проверить жёсткие ограничения и cache; сформировать shortlist; выполнить минимальный необходимый probe plan; сравнить кандидатов; закрепить основной/резерв; наблюдать и при деградации расширять поиск.",
       "status": "partial",
       "evidence": [
-        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms"
+        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedAdaptiveRoutes.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdaptivePathContinuityTest.kt",
+        "docs/implementation-status.md#rechecking-the-last-working-route"
       ],
       "remainingScope": "Local adaptive TCP admission and passive recheck source only. Exact Actions/native race/Android/device acceptance, common SDK/diagnostic/telemetry governor, broader modes and failure correlation remain separate requirements."
     },
@@ -1244,7 +1247,10 @@
       "status": "partial",
       "evidence": [
         "docs/route-frontier.md",
-        "docs/private-path-construction.md#fresh-proof-selection"
+        "docs/private-path-construction.md#fresh-proof-selection",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedAdaptiveRoutes.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdaptivePathContinuityTest.kt",
+        "docs/implementation-status.md#rechecking-the-last-working-route"
       ]
     },
     {
