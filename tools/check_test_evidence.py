@@ -97,6 +97,7 @@ if mode=="emulator":
     } <= set(identities), "Missing route measurement consistency outcomes"
     assert {("io.syn443.android.InvitationScannerTest", name) for name in (
         "liveDecoderRecognizesBothPolaritiesAndRejectsForeignPayloads",
+        "liveCameraReadsCleanFrameWhenTheOrdinaryFinderCannotLocateItsThirdMarker",
         "validCameraResultOnlyEnablesLocalInvitationReview",
         "canceledScannerKeepsPasteAndImageAvailable",
     )} <= set(identities), "Missing in-app invitation scanner outcomes"
