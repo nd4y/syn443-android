@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import zipfile
 
-from verify_signed_apk import verify
+from verify_signed_apk import require_alignment, verify
 
 
 def run(command):
@@ -67,9 +67,21 @@ def exercise(unsigned, inventory, apksigner):
         signed_different = work / "different-signed.apk"
         sign(different, signed_different)
         rejected(signed_different, expected, pin, "APK entry list changed")
+        # The layout check uses ZIP offsets, independently of ELF contents or the signing key.
+        unaligned = work / "unaligned-fixture.zip"
+        with zipfile.ZipFile(unaligned, "w") as archive:
+            archive.writestr("lib/arm64-v8a/libfixture.so", b"synthetic layout fixture")
+        try:
+            require_alignment(apksigner, unaligned)
+        except ValueError as error:
+            if str(error) != "APK ZIP alignment check failed":
+                raise
+        else:
+            raise AssertionError("SDK accepted an unaligned native library")
     return {"schemaVersion": 1, "sourceCommit": record["sourceCommit"], "versionCode": record["apk"]["versionCode"],
             "kind": "synthetic-signing-acceptance", "passed": ["signed-release", "modified-input-digest",
-            "wrong-certificate", "unsigned-apk", "different-payload-with-valid-signature"]}
+            "wrong-certificate", "unsigned-apk", "different-payload-with-valid-signature",
+            "signed-apk-alignment", "unaligned-native-library"]}
 
 
 if __name__ == "__main__":
@@ -81,4 +93,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     result = exercise(args.unsigned, args.inventory, args.apksigner)
     args.receipt.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print("Signed release and four independent rejection cases verified")
+    print("Signed release identity, content and 16 KiB archive alignment verified")

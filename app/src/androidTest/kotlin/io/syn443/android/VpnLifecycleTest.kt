@@ -265,30 +265,32 @@ class VpnLifecycleTest {
         Thread.sleep(1_500)
         assertFalse(status().getBoolean("desiredOn"))
     }
-    @Test fun defaultVpnRoutesCaptureBothFamiliesAndExplicitIpv6DenialPreservesIpv4() {
+    private fun awaitOwnedDefaultRoutes() = await {
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
         val tunnelAddress = InetAddresses.parseNumericAddress("fd00:443::1")
-        fun awaitOwnedDefaultRoutes() = await {
-            val active = connectivity.activeNetwork ?: return@await false
-            val caps = connectivity.getNetworkCapabilities(active) ?: return@await false
-            val link = connectivity.getLinkProperties(active) ?: return@await false
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
-                link.linkAddresses.any { it.address == tunnelAddress } &&
-                link.routes.any { it.isDefaultRoute && it.destination.address is Inet4Address } &&
-                link.routes.any { it.isDefaultRoute && it.destination.address is Inet6Address }
-        }
-        fun request(address: String): String? = Socket().use { socket ->
-            socket.soTimeout = 3_000
-            socket.connect(InetSocketAddress(InetAddresses.parseNumericAddress(address), 80), 3_000)
-            socket.getOutputStream().write("GET /generate_204 HTTP/1.1\r\nHost: fixture.invalid\r\nConnection: close\r\n\r\n".toByteArray())
-            socket.getInputStream().bufferedReader().readLine()
-        }
+        val active = connectivity.activeNetwork ?: return@await false
+        val caps = connectivity.getNetworkCapabilities(active) ?: return@await false
+        val link = connectivity.getLinkProperties(active) ?: return@await false
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+            link.linkAddresses.any { it.address == tunnelAddress } &&
+            link.routes.any { it.isDefaultRoute && it.destination.address is Inet4Address } &&
+            link.routes.any { it.isDefaultRoute && it.destination.address is Inet6Address }
+    }
+
+    private fun requestFixture(address: String): String? = Socket().use { socket ->
+        socket.soTimeout = 3_000
+        socket.connect(InetSocketAddress(InetAddresses.parseNumericAddress(address), 80), 3_000)
+        socket.getOutputStream().write("GET /generate_204 HTTP/1.1\r\nHost: fixture.invalid\r\nConnection: close\r\n\r\n".toByteArray())
+        socket.getInputStream().bufferedReader().readLine()
+    }
+
+    @Test fun defaultVpnRoutesCaptureBothFamiliesAndExplicitIpv6DenialPreservesIpv4() {
         importProxyPolicy(blockIpv6 = true)
         connect()
         awaitOwnedDefaultRoutes()
-        val blockedResponse = try { request("2001:db8::443") } catch (_: IOException) { null }
+        val blockedResponse = try { requestFixture("2001:db8::443") } catch (_: IOException) { null }
         assertNull("Blocked IPv6 produced an application response", blockedResponse)
-        assertEquals("HTTP/1.1 204 No Content", request("203.0.113.43"))
+        assertEquals("HTTP/1.1 204 No Content", requestFixture("203.0.113.43"))
         assertEquals(0, ipv6ApplicationRequests.get())
         assertEquals(1, ipv4ApplicationRequests.get())
 
@@ -297,16 +299,25 @@ class VpnLifecycleTest {
         importProxyPolicy(blockIpv6 = false)
         connect()
         awaitOwnedDefaultRoutes()
-        assertEquals("HTTP/1.1 204 No Content", request("2001:db8::443"))
-        assertEquals("HTTP/1.1 204 No Content", request("203.0.113.43"))
+        assertEquals("HTTP/1.1 204 No Content", requestFixture("2001:db8::443"))
+        assertEquals("HTTP/1.1 204 No Content", requestFixture("203.0.113.43"))
         assertEquals(1, ipv6ApplicationRequests.get())
         assertEquals(2, ipv4ApplicationRequests.get())
     }
     @Test fun unavailableOptionalOverlayDoesNotBlockVpnOrLeakPrivateRoute() {
+        // Prove the default proxy would serve both exact destinations if a rule fell through.
+        connect()
+        awaitOwnedDefaultRoutes()
+        assertEquals("HTTP/1.1 204 No Content", requestFixture("203.0.113.43"))
+        assertEquals("HTTP/1.1 204 No Content", requestFixture("2001:db8::443"))
+        assertEquals(1, ipv4ApplicationRequests.get())
+        assertEquals(1, ipv6ApplicationRequests.get())
+        call("disconnect")
+        await { stoppedForFixture() }
         val config = """{"outbounds":[
             {"type":"http","tag":"test-proxy","server":"127.0.0.1","server_port":${server.localPort}},
             {"type":"netbird","tag":"overlay","management_url":"https://example.invalid","setup_key":"","state_directory":"/rejected-import-path"}],
-            "route":{"rules":[{"ip_cidr":["198.51.100.0/24"],"outbound":"overlay"}],"final":"test-proxy"}}"""
+            "route":{"rules":[{"ip_cidr":["203.0.113.43/32","2001:db8::443/128"],"outbound":"overlay"}],"final":"test-proxy"}}"""
         val rendered = JSONObject(io.syn443.android.vpn.EngineConfig.render(config, context.noBackupFilesDir))
             .getJSONArray("outbounds").getJSONObject(1)
         assertTrue(rendered.getString("state_directory").startsWith(context.noBackupFilesDir.absolutePath + "/netbird/"))
@@ -315,11 +326,17 @@ class VpnLifecycleTest {
         connect()
         val native = pid()
         await { status().optJSONObject("netbird")?.optString("reason") == "enrollment_required" }
-        // No identity or fallback may be constructed without enrollment.
-        val began = android.os.SystemClock.elapsedRealtime()
-        assertTrue(runCatching { Socket().use { it.connect(java.net.InetSocketAddress("198.51.100.7", 443), 3_000) } }.isFailure)
-        assertTrue(android.os.SystemClock.elapsedRealtime() - began < 5_000)
+        awaitOwnedDefaultRoutes()
+        for (target in listOf("203.0.113.43", "2001:db8::443")) {
+            val began = android.os.SystemClock.elapsedRealtime()
+            val response = try { requestFixture(target) } catch (_: IOException) { null }
+            assertNull("Unavailable overlay returned an application response", response)
+            assertTrue(android.os.SystemClock.elapsedRealtime() - began < 5_000)
+        }
+        assertEquals("HTTP/1.1 204 No Content", requestFixture("203.0.113.10"))
         Thread.sleep(11_000)
+        assertEquals("Private IPv4 reached the default proxy", 1, ipv4ApplicationRequests.get())
+        assertEquals("Private IPv6 reached the default proxy", 1, ipv6ApplicationRequests.get())
         assertEquals(native, pid())
         assertEquals("Online", status().optString("phase"))
         assertTrue(tunnels.get() >= 2)

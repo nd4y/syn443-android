@@ -25,10 +25,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.zxing.BarcodeFormat
-import com.google.zxing.client.android.Intents
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.ReaderException
+import com.google.zxing.Result
+import com.google.zxing.qrcode.QRCodeReader
 import com.journeyapps.barcodescanner.BarcodeView
 import com.journeyapps.barcodescanner.CameraPreview
-import com.journeyapps.barcodescanner.DefaultDecoderFactory
+import com.journeyapps.barcodescanner.DecoderFactory
+import com.journeyapps.barcodescanner.MixedDecoder
 import io.syn443.identity.BootstrapTrust
 
 internal fun scannedInvitation(text: String?): String? {
@@ -36,8 +42,29 @@ internal fun scannedInvitation(text: String?): String? {
     return text.takeIf { runCatching { BootstrapTrust.parse(it) }.isSuccess }
 }
 
-internal fun invitationQrDecoder() =
-    DefaultDecoderFactory(listOf(BarcodeFormat.QR_CODE), null, null, Intents.Scan.MIXED_SCAN)
+internal fun invitationQrDecoder() = DecoderFactory { baseHints ->
+    val detector = MultiFormatReader().apply {
+        setHints(baseHints + mapOf(
+            DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),
+            DecodeHintType.TRY_HARDER to true
+        ))
+    }
+    object : MixedDecoder(detector) {
+        private val cleanReader = QRCodeReader()
+        private val cleanHints = mapOf(DecodeHintType.PURE_BARCODE to true)
+
+        override fun decode(bitmap: BinaryBitmap): Result? {
+            super.decode(bitmap)?.let { return it }
+            // Reuse the same cropped, binarized frame and its current polarity.
+            // A flat QR can still be sampled when the finder detector misses it.
+            return try {
+                cleanReader.decode(bitmap, cleanHints)
+            } catch (_: ReaderException) {
+                null
+            }
+        }
+    }
+}
 
 class InvitationScannerActivity : ComponentActivity() {
     companion object {

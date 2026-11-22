@@ -15,7 +15,12 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.zxing.BarcodeFormat
+import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
+import com.google.zxing.EncodeHintType
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.NotFoundException
+import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.qrcode.QRCodeWriter
 import io.syn443.identity.BootstrapTrust
@@ -28,23 +33,53 @@ class InvitationScannerTest {
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
-    private fun invitation() = "syn443://enroll/v1?service=service-a&origin=https%3A%2F%2Fapi.example.invalid&code=${Identity.random()}&bootstrap=x.y.z"
+    private fun invitation(code:String=Identity.random()) = "syn443://enroll/v1?service=service-a&origin=https%3A%2F%2Fapi.example.invalid&code=$code&bootstrap=x.y.z"
+
+    private fun frame(link:String,mask:Int,missingFinder:Boolean=false):RGBLuminanceSource {
+        val margin=4
+        val raw=QRCodeWriter().encode(link,BarcodeFormat.QR_CODE,0,0,mapOf(
+            EncodeHintType.QR_VERSION to 8,EncodeHintType.QR_MASK_PATTERN to mask,EncodeHintType.MARGIN to margin))
+        val scale=8
+        val width=raw.width*scale
+        val pixels=IntArray(width*width) { i->
+            val x=i%width/scale;val y=i/width/scale
+            val covered=missingFinder && y in margin until margin+7 &&
+                x in raw.width-margin-7 until raw.width-margin
+            if(!covered && raw[x,y])Color.BLACK else Color.WHITE
+        }
+        return RGBLuminanceSource(width,width,pixels)
+    }
+
+    private fun readBoth(frame:RGBLuminanceSource,link:String) {
+        assertEquals(link,scannedInvitation(link))
+        for(source in listOf(frame,frame.invert())) {
+            val decoder=invitationQrDecoder().createDecoder(emptyMap<DecodeHintType,Any>())
+            val decoded=decoder.decode(source) ?: decoder.decode(source)
+            assertEquals(link,scannedInvitation(decoded?.text))
+        }
+    }
 
     @Test fun liveDecoderRecognizesBothPolaritiesAndRejectsForeignPayloads() {
-        val link = invitation()
-        val qr = QRCodeWriter().encode(link, BarcodeFormat.QR_CODE, 640, 640)
-        val pixels = IntArray(qr.width * qr.height) { index ->
-            if (qr[index % qr.width, index / qr.width]) Color.BLACK else Color.WHITE
+        for(mask in 0..7) {
+            val code=Identity.encode(ByteArray(32) { ((mask+1)*(it+1)).toByte() })
+            val link=invitation(code)
+            readBoth(frame(link,mask),link)
         }
-        val frame = RGBLuminanceSource(qr.width, qr.height, pixels)
-        for (source in listOf(frame, frame.invert())) {
-            val decoder = invitationQrDecoder().createDecoder(emptyMap<DecodeHintType, Any>())
-            val decoded = decoder.decode(source) ?: decoder.decode(source)
-            assertEquals(link, scannedInvitation(decoded?.text))
-        }
+        val link=invitation()
         assertNull(scannedInvitation("https://foreign.example.invalid"))
         assertNull(scannedInvitation(link + "&code=duplicate"))
         assertNull(scannedInvitation("x".repeat(BootstrapTrust.MAX_LINK + 1)))
+    }
+
+    @Test fun liveCameraReadsCleanFrameWhenTheOrdinaryFinderCannotLocateItsThirdMarker() {
+        val link=invitation(Identity.encode(ByteArray(32) {it.toByte()}))
+        val source=frame(link,3,missingFinder=true)
+        val usual=MultiFormatReader()
+        assertThrows(NotFoundException::class.java) {
+            usual.decode(BinaryBitmap(HybridBinarizer(source)),mapOf(
+                DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),DecodeHintType.TRY_HARDER to true))
+        }
+        readBoth(source,link)
     }
 
     private fun withScannerReply(code: Int, data: Intent?, check: () -> Unit) {

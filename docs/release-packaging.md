@@ -18,6 +18,6 @@ python3 tools/verify_signed_apk.py --unsigned app-release-unsigned.apk --signed 
   --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner"
 ```
 
-The tool checks the SDK signature and signer, then compares the name, size, compression method and bytes of every original APK entry. The receipt includes the digest and size of the final signed file. Use a v2/v3 signing block with v1 signing disabled for this release workflow. A certificate rotation needs the independently approved successor pin. Distribution still requires a signed release manifest and Android's user installation flow.
+The tool checks the SDK signature and signer, then compares the name, size, compression method and bytes of every original APK entry. It then runs the SDK alignment check on the same signed snapshot. The uncompressed native libraries must have 16 KiB ZIP alignment. Supply the `apksigner` path from an Android SDK Build Tools installation containing `zipalign`. The receipt includes the digest and size of the final signed file. Use a v2/v3 signing block with v1 signing disabled for this release workflow. A certificate rotation needs the independently approved successor pin. Distribution still requires a signed release manifest and Android's user installation flow.
 
 GitHub Actions signs a normal release with a temporary test identity to exercise these checks. The public evidence records only the source, version and scenario results. The test key and test-signed APK are removed with the temporary directory.

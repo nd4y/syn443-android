@@ -4,7 +4,7 @@ import unittest
 import warnings
 import zipfile
 
-from verify_signed_apk import compare_payloads, signer_digest, verify
+from verify_signed_apk import compare_payloads, require_alignment, signer_digest, verify
 from unittest.mock import patch
 from subprocess import CompletedProcess
 
@@ -47,6 +47,22 @@ class SignedApkTest(unittest.TestCase):
                 else:
                     with self.assertRaises(ValueError):
                         signer_digest("apksigner", self.root)
+
+    def test_sdk_checks_the_final_snapshot_in_read_only_mode(self):
+        import os
+        signer = self.root / ("apksigner.bat" if os.name == "nt" else "apksigner")
+        aligner = self.root / ("zipalign.exe" if os.name == "nt" else "zipalign")
+        candidate = self.root / "candidate.apk"
+        for code in (0, 1):
+            with self.subTest(code=code), patch("verify_signed_apk.subprocess.run",
+                    return_value=CompletedProcess([], code, b"", b"")) as run:
+                if code:
+                    with self.assertRaisesRegex(ValueError, "ZIP alignment"):
+                        require_alignment(signer, candidate)
+                else:
+                    require_alignment(signer, candidate)
+                run.assert_called_once_with([str(aligner), "-c", "-P", "16", "4", str(candidate)],
+                                            capture_output=True, timeout=120)
 
     def test_invalid_expectations_are_rejected_before_file_access(self):
         missing = self.root / "missing"
