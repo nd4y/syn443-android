@@ -332,7 +332,7 @@ if mode=="emulator":
         "assignedActivationCannotReusePriorScopeOrIncompleteRouteProof",
         "enrolledAssignedRoutesCommitWithOptionalFailure",
         "enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet",
-        "enrolledStopFencesPendingCandidateRouteSuccess","enrolledVersionUpgradeRetainsBindingPolicyAndRealTun"}
+        "enrolledStopFencesPendingCandidateRouteSuccess","enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn","enrolledVersionUpgradeRetainsBindingPolicyAndRealTun"}
     live_engine_required={"savedEngineCheckpointCannotClaimAnUnownedLiveProcess"}
     route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
     assert ("io.syn443.android.LoginControllerTest", "cachedPolicyRefreshUsesTheSignedDeadlineOrFiveMinuteLimit") in {(c.get("classname"),c.get("name")) for c in cases}, "Signed refresh deadline coverage missing"

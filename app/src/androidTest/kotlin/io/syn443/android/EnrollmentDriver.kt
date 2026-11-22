@@ -19,12 +19,20 @@ import javax.net.ssl.TrustManagerFactory
 class EnrollmentDriver:AndroidJUnitRunner() {
     private var fixtureArguments:Bundle?=null
     private var observeCameraPermission = false
+    private var stopWithTelemetry = false
     override fun onCreate(args:Bundle?) {
+        stopWithTelemetry = args?.getString("fixtureStopWithTelemetry") == "true"
         observeCameraPermission = args?.getString("observeCameraPermission") == "true"
         fixtureArguments=args?.takeIf {it.containsKey("fixturePort")}
         super.onCreate(args)
     }
     override fun onStart() {
+        if (stopWithTelemetry) {
+            check(BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+            val result = runCatching { StoppedTelemetryFixture.optInStopAndLocateJob(targetContext) }.getOrNull()
+            finish(if (result == null) 0 else -1, result ?: Bundle())
+            return
+        }
         if (observeCameraPermission) {
             val granted = targetContext.checkSelfPermission(android.Manifest.permission.CAMERA) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -84,6 +92,13 @@ class EnrollmentDriver:AndroidJUnitRunner() {
             val registered=await {it.getString("phase")=="POLICY_CACHED" && !it.getBoolean("busy")}
             stage="candidate_validated"
             check(registered.getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
+            if (arguments.getString("fixtureTelemetry") == "true") {
+                require(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+                stage="telemetry_consent"
+                check(registered.getBoolean("telemetryAvailable") && !registered.getBoolean("telemetryEnabled"))
+                call("auth-telemetry", registered.getLong("generation").toString() + ":true")
+                check(status().getBoolean("telemetryEnabled"))
+            }
             check(!JSONObject(checkNotNull(call("status").getString("json"))).getBoolean("desiredOn"))
         }.isSuccess
         finish(if(ok)-1 else 0,Bundle().apply {
