@@ -35,6 +35,8 @@ class FailoverAdmission(
     private val metricGroup: String,
     energyClasses: Map<String, Int> = emptyMap(),
     private val algorithm: FailoverAlgorithm = FailoverAlgorithm.BASELINE,
+    private val confirmations: Int = algorithm.confirmations,
+    private val minSwitchIntervalMs: Long = algorithm.switchIntervalMs,
 ) {
     private val members = authorized.toSet()
     private val energy = energyClasses.toMap()
@@ -52,6 +54,7 @@ class FailoverAdmission(
     private var nextSwitch = 0L
 
     init {
+        require(confirmations in algorithm.confirmations..6 && minSwitchIntervalMs in algorithm.switchIntervalMs..300_000L)
         require(Decision.validContext(context) && Decision.validId(metricGroup))
         require(members.size in 2..8 && members.all(Decision::validId))
         require(energy.all { (path, cost) -> path in members && cost in 0..2 })
@@ -180,15 +183,15 @@ class FailoverAdmission(
             return null
         }
         failureStreak = if (lastFailureMember == selected && nowMs - lastFailureAt < 120_000)
-            (failureStreak + 1).coerceAtMost(algorithm.confirmations) else 1
+            (failureStreak + 1).coerceAtMost(confirmations) else 1
         lastFailureMember = selected
         lastFailureAt = nowMs
-        if (failureStreak < algorithm.confirmations || nowMs < nextSwitch) return null
+        if (failureStreak < confirmations || nowMs < nextSwitch) return null
         val best = verified.minWith(compareBy<VerifiedPathSample>(
             { -(success[it.pathId]?.streak ?: 0) }, { energy[it.pathId] ?: 2 }, { it.latencyMs }, { it.pathId },
         ))
         clearFailure()
-        nextSwitch = nowMs + algorithm.switchIntervalMs
+        nextSwitch = nowMs + minSwitchIntervalMs
         return FailoverChoice(selected, best.pathId, receipt)
     }
 }

@@ -55,6 +55,7 @@ object RouteSnapshot {
     private fun transientDial(code:String?, observation:RouteObservation) =
         code=="dial_failed" && observation.cause in transientCauses
     private var failoverAdmission:Pair<FailoverAlgorithm,FailoverAdmission>?=null
+    private var activeFailoverProgram: io.syn443.policy.VerifiedFailoverProgram? = null
     private var failoverShadow:FailoverShadow?=null
     private var batchSequence=0L
     private var completedReceipt=""
@@ -157,7 +158,7 @@ object RouteSnapshot {
     }
 
     @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();searchScope=null;searches=emptyMap();codes=emptyMap();timings=emptyMap();durations=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();checkPlans=emptyMap();lastStarted=-60_000;activationAttempt=null
-        completedReceipt="";reserveRecovery=null;failoverAdmission=null;failoverShadow=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false;manualContext=null}
+        completedReceipt="";reserveRecovery=null;failoverAdmission=null;activeFailoverProgram=null;failoverShadow=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false;manualContext=null}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
         return rows.any {it.configured()} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
@@ -335,7 +336,7 @@ object RouteSnapshot {
     @Synchronized internal fun confirmingFailover(scope:RouteScope):Boolean=live==scope && confirmingFailure
     @Synchronized internal fun hasManagedFailover(scope:RouteScope):Boolean=live==scope && failover!=null && completedReceipt.isNotEmpty()
     @Synchronized internal fun failoverAdvice(scope:RouteScope,trackReserveFailures:Boolean=false,
-        algorithm:FailoverAlgorithm=FailoverAlgorithm.BASELINE):FailoverCommand? {
+        algorithm:FailoverAlgorithm=FailoverAlgorithm.BASELINE, program:io.syn443.policy.VerifiedFailoverProgram?=null):FailoverCommand? {
         val plan=failover ?: return null
         val receipt=completedReceipt
         if(live!=scope || current!=scope || receipt.isEmpty())return null
@@ -370,12 +371,21 @@ object RouteSnapshot {
         // A failed selector in a reduced survey needs one full comparison, but
         // does not itself count as an independent path failure.
         confirmingFailure=verdict==ProbeVerdict.CONFIRMED_PATH_FAILURE || measuredFailure && skippedMeteredReserves
+        require(program == null || algorithm == FailoverAlgorithm.CONFIRMED)
+        if (activeFailoverProgram != program) {
+            activeFailoverProgram = program
+            failoverAdmission = null
+            failoverShadow = null
+            reserveRecovery = null
+            confirmingFailure = false
+        }
         val context=failoverContext(scope,algorithm)
-        fun evaluator(version:FailoverAlgorithm) = FailoverAdmission(failoverContext(scope,version),plan.intent,plan.members.toSet(),comparison,
-            rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)},version)
+        fun evaluator(version:FailoverAlgorithm, tuning:io.syn443.policy.VerifiedFailoverProgram? = null) = FailoverAdmission(failoverContext(scope,version),plan.intent,plan.members.toSet(),comparison,
+            rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)},version,
+            tuning?.confirmations ?: version.confirmations, tuning?.minSwitchIntervalMs ?: version.switchIntervalMs)
         val compare=algorithm==FailoverAlgorithm.CONFIRMED && !trackReserveFailures
         if (!compare) failoverShadow=null
-        val admission=failoverAdmission?.takeIf {it.first==algorithm}?.second ?: evaluator(algorithm).also {
+        val admission=failoverAdmission?.takeIf {it.first==algorithm}?.second ?: evaluator(algorithm,program).also {
             failoverAdmission=algorithm to it
             if (compare) failoverShadow=FailoverShadow(failoverContext(scope,FailoverAlgorithm.BASELINE),
                 evaluator(FailoverAlgorithm.BASELINE))

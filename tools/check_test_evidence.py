@@ -72,6 +72,7 @@ if mode=="jvm":
         "capacityCannotEvictAnActiveQuarantineOrConfigurationFence",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route health cases missing"
     assert {("io.syn443.decision.FailoverAdmissionTest",name) for name in {
+        "negotiatedProgramKeepsBothConfirmationAndMinimumIntervalLimits",
         "independentFailuresAndCurrentVerifiedReservePermitOneSwitch",
         "conservativeRevisionRequiresThreeIndependentBatchesAndSixtySecondsBetweenSwitches",
         "targetFailureAndWrongScopeDoNotCountTowardFailover",
@@ -201,6 +202,7 @@ if mode=="policy":
         "reserveCooldownRequiresBoundConfigurationAndHasAnIndependentRollbackFingerprint",
         "exitCheckRequiresMatchingCapabilityOnKeyBoundConfiguration",
         "countryCheckRequiresItsOwnBoundCapabilityAndCannotReuseIpAuthority",
+        "independentProgramIsBoundToTheLeaseAndItsSemanticHashSurvivesRenewal",
         "decisionRevisionMustMatchKeyBoundFailoverCapability",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="health":

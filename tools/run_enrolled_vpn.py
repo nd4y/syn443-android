@@ -127,6 +127,17 @@ def check_rejected_policies(fixture, proxy, generation):
     examples = [invalid_signature, fixture.publisher.signed_document(header, other_device),
                 first, fixture.publisher.signed_document(header, unsupported)]
 
+    # A valid outer signature cannot retarget the separately signed decision program.
+    comparison = dict(fixture.config, route_failover={})
+    with_program = fixture.publisher.sign(comparison, revision=3, key_thumbprint=thumb,
+        extra_capabilities=('route.health.v1', 'route.failover.v1'),
+        decision_program={'revision': 7, 'confirmations': 4, 'minSwitchIntervalMs': 120000})
+    nested_policy = json.loads(decode(with_program.split('.')[1]))
+    inner_header, inner_body, _ = nested_policy['decisionBundle'].split('.')
+    foreign = dict(json.loads(decode(inner_body)), targetDevice='different-synthetic-recipient')
+    nested_policy['decisionBundle'] = fixture.publisher.signed_document(json.loads(decode(inner_header)), foreign)
+    examples.append(fixture.publisher.signed_document(header, nested_policy))
+
     # The current policy remains valid for the whole exercise. Each example is
     # served to this session, and a new successful proxy exchange must follow it.
     fixture.policy_example = examples[0]

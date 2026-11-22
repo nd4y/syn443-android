@@ -47,6 +47,28 @@ class FailoverAdmissionTest {
         assertEquals(FailoverChoice("reserve-a", "reserve-b", "probe-7"), batch(7, 63_000, "reserve-a", "reserve-b"))
     }
 
+    @Test fun negotiatedProgramKeepsBothConfirmationAndMinimumIntervalLimits() {
+        val algorithm = FailoverAlgorithm.CONFIRMED
+        val scope = context.copy(algorithmRevision = algorithm.revision)
+        fun admission(count: Int, interval: Long) = FailoverAdmission(scope, ExitClass.privateRoute, members,
+            "comparison", algorithm = algorithm, confirmations = count, minSwitchIntervalMs = interval)
+        assertTrue(runCatching { admission(2, 120_000) }.isFailure)
+        assertTrue(runCatching { admission(7, 120_000) }.isFailure)
+        assertTrue(runCatching { admission(4, 59_999) }.isFailure)
+        assertTrue(runCatching { admission(4, 300_001) }.isFailure)
+        val evaluator = admission(4, 120_000)
+        fun batch(n: Int, at: Long, active: String, reserve: String): FailoverChoice? {
+            val receipt = "probe-$n"
+            fun sample(id: String, verdict: ProbeVerdict) = VerifiedPathSample(id, ExitClass.privateRoute, receipt, "comparison", at, verdict, 20)
+            return evaluator.decide(scope, n.toLong(), receipt, at, active, sample(active, ProbeVerdict.CONFIRMED_PATH_FAILURE),
+                listOf(sample(reserve, ProbeVerdict.VERIFIED)))
+        }
+        for (n in 1..3) assertNull(batch(n, n * 1000L, "primary", "reserve-a"))
+        assertEquals("reserve-a", batch(4, 4000, "primary", "reserve-a")?.candidate)
+        for (n in 5..8) assertNull(batch(n, 123_990L + n, "reserve-a", "reserve-b"))
+        assertEquals("reserve-b", batch(9, 124_000, "reserve-a", "reserve-b")?.candidate)
+    }
+
     @Test fun targetFailureAndWrongScopeDoNotCountTowardFailover() {
         val d = make()
         fun decide(n: Int, verdict: ProbeVerdict, current: Context = context, candidate: String = "reserve-a") =

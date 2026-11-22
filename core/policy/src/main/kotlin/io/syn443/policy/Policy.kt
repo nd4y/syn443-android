@@ -22,8 +22,9 @@ import java.util.Base64
     val notBeforeMs: Long, val refreshAfterMs: Long, val offlineUntilMs: Long,
     val requiredCapabilities: List<String>, val algorithmRevision: String,
     val engineConfigB64: String, val contentHash: String, val activation: Gate, val operation: String = "configure",
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val keyThumbprint: String = "")
-data class Verified(val envelope: String, val payload: Payload, val engineConfig: String, val homeProof:HomeWiFiProof?=null, val modeSelection:NetworkModePolicy?=null)
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val keyThumbprint: String = "",
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val decisionBundle: String = "")
+data class Verified(val envelope: String, val payload: Payload, val engineConfig: String, val homeProof:HomeWiFiProof?=null, val modeSelection:NetworkModePolicy?=null, val decisionProgram: VerifiedFailoverProgram? = null)
 enum class Preparation { WAIT, REVOKE_OWNER, BEGIN_WITHOUT_BASELINE, CHECK_BASELINE }
 @Serializable data class Journal(val phase: String = "idle", val desired: String? = null,
     val active: String? = null, val lastGood: String? = null, val candidate: String? = null,
@@ -127,12 +128,13 @@ object Policy {
     const val HOME_WIFI_PROOF = "network.home-proof.v1"
     const val ROUTE_HTTPS_STATUS = "route.https-status.v1"
     const val ROUTE_CHECK_PLAN = "route.check-plan.v2"
+    const val DECISION_BUNDLE = "decision.bundle.v1"
     const val ROUTE_DECISION = "route.decision.v1"
     const val ROUTE_ADAPTIVE_TCP = "route.adaptive-tcp.v1"
     const val BASELINE_ALGORITHM = "m1-local-v1"
     const val CONFIRMED_ALGORITHM = "m4-confirmed-v1"
     const val ADAPTIVE_ALGORITHM = "m4-graph-tcp-v1"
-    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1", RESERVE_PROBE_COOLDOWN, ROUTE_EXIT_IP, ROUTE_EXIT_COUNTRY, ROUTE_DECISION, ROUTE_ADAPTIVE_TCP, ROUTE_CHECK_PLAN, ROUTE_HTTPS_STATUS, HOME_WIFI_PROOF, NETWORK_MODE_SELECTION)
+    val capabilities = setOf("engine-config.v1", "policy.es256.v1", "policy.keybound.v2", "tun.lease.v1", "netbird.direct", "netbird.vless", "overlay.credentials.v1", "route.health.v1", "route.failover.v1", RESERVE_PROBE_COOLDOWN, ROUTE_EXIT_IP, ROUTE_EXIT_COUNTRY, ROUTE_DECISION, DECISION_BUNDLE, ROUTE_ADAPTIVE_TCP, ROUTE_CHECK_PLAN, ROUTE_HTTPS_STATUS, HOME_WIFI_PROOF, NETWORK_MODE_SELECTION)
     fun hash(raw: String): String = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     fun decode64(value: String): ByteArray {
         require(value.matches(Regex("[A-Za-z0-9_-]+")))
@@ -141,13 +143,13 @@ object Policy {
         return bytes
     }
     fun utf8(bytes: ByteArray): String = Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
-    fun verify(raw: String, keys: Map<String, String>, device: String, now: Long): Verified {
-        require(raw.length in 1..524_288 && raw.all { it.code < 128 })
+    internal fun signedDocument(raw: String, keys: Map<String, String>, type: String, limit: Int): JsonObject {
+        require(raw.length in 1..limit && raw.all { it.code < 128 })
         val parts = raw.split('.'); require(parts.size == 3 && parts[0].length <= 1024)
         val headerText = utf8(decode64(parts[0])); val header = Canonical.parse(headerText).jsonObject
         require(header.keys == setOf("alg", "kid", "typ") && headerText == Canonical.encode(header))
         require(header.values.all { it is JsonPrimitive && it.isString })
-        require(header.getValue("alg").jsonPrimitive.content == "ES256" && header.getValue("typ").jsonPrimitive.content == "syn443-policy+jws")
+        require(header.getValue("alg").jsonPrimitive.content == "ES256" && header.getValue("typ").jsonPrimitive.content == type)
         val kid = header.getValue("kid").jsonPrimitive.content; require(kid.matches(Regex("[a-zA-Z0-9_-]{1,64}")))
         val key = KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(Base64.getDecoder().decode(keys.getValue(kid)))) as ECPublicKey
         require(key.params.order == BigInteger("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551", 16) && key.params.cofactor == 1 && key.params.curve.field.fieldSize == 256)
@@ -160,6 +162,10 @@ object Policy {
         val der = byteArrayOf(0x30, integers.size.toByte()) + integers
         require(Signature.getInstance("SHA256withECDSA").run { initVerify(key); update((parts[0] + "." + parts[1]).toByteArray(Charsets.US_ASCII)); verify(der) })
         val text = utf8(decode64(parts[1])); val element = Canonical.parse(text); require(Canonical.encode(element) == text)
+        return element.jsonObject
+    }
+    fun verify(raw: String, keys: Map<String, String>, device: String, now: Long): Verified {
+        val element = signedDocument(raw, keys, "syn443-policy+jws", 524_288)
         val objectValue=element.jsonObject
         fun integer(value:JsonElement?) {require(value is JsonPrimitive && !value.isString && value.longOrNull!=null)}
         fun string(value:JsonElement?) {require(value is JsonPrimitive && value.isString)}
@@ -236,7 +242,14 @@ object Policy {
                 else -> error("unsupported_check")
             }
         }
-        return Verified(raw, p, engine, homeProof, modeSelection)
+        require(("decisionBundle" in objectValue) == (DECISION_BUNDLE in p.requiredCapabilities))
+        val program = if ("decisionBundle" in objectValue) {
+            string(objectValue["decisionBundle"])
+            require(p.schemaVersion == 2 && p.operation == "configure" && p.algorithmRevision == CONFIRMED_ALGORITHM &&
+                ROUTE_DECISION in p.requiredCapabilities)
+            VerifiedFailoverProgram.verify(p, keys, now)
+        } else null
+        return Verified(raw, p, engine, homeProof, modeSelection, program)
     }
     fun verifyBound(raw:String,keys:Map<String,String>,device:String,ownThumbprint:String,now:Long):Verified =
         verify(raw,keys,device,now).also {require(it.payload.schemaVersion==2 && it.payload.keyThumbprint==ownThumbprint)}
@@ -264,7 +277,8 @@ object Policy {
     }
     fun snapshot(p: Payload) = hash(p.operation + ":" + p.contentHash + ":" + p.algorithmRevision + ":" +
         Canonical.encode(json.encodeToJsonElement(p.activation)) +
-        if(RESERVE_PROBE_COOLDOWN in p.requiredCapabilities) ":$RESERVE_PROBE_COOLDOWN" else "")
+        (if (RESERVE_PROBE_COOLDOWN in p.requiredCapabilities) ":$RESERVE_PROBE_COOLDOWN" else "") +
+        (if (p.decisionBundle.isEmpty()) "" else ":" + VerifiedFailoverProgram.journalProgramHash(p.decisionBundle)))
     fun rollback(j: Journal, revision: Long, reason: String): Journal {
         val fingerprint = j.candidate?.let { snapshot(json.decodeFromString<Payload>(utf8(decode64(it.split('.')[1])))) }
         return j.copy(phase = "rolled_back", candidate = null, active = j.lastGood,
