@@ -673,8 +673,16 @@
     {
       "id": "PROV-07",
       "text": "Онлайн-устройство при доступном канале получает новую политику в пределах 5 минут, если не задан иной интервал. Отзыв сессии применяется при следующем обращении; принудительный отзыв уже выданного доступа требует поддержки конечного сервера. Офлайн-мгновенный отзыв не обещается.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginControls.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ControlProvider.kt",
+        "tools/run_enrolled_vpn.py",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt"
+      ],
+      "implementationScope": "The active VPN supervisor and a visible enrolled client share signed-deadline admission with a five-minute default cap. The user can explicitly fetch an assignment with VPN Off. The higher-version emulator drill receives a new signed revision before reconnecting with the same device.",
+      "remainingScope": "Convergence timing across a real cohort, suspended-device delivery, explicit operator interval overrides and external endpoint revocation."
     },
     {
       "id": "PROV-08",
@@ -1531,8 +1539,16 @@
     {
       "id": "ROUTE-04",
       "text": "DNS cache и health cache учитывают сеть, путь и ревизию. NXDOMAIN, timeout и TLS failure различаются. После смены сети старый ответ не должен закреплять неисправный маршрут.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/AndroidProbeResolver.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/PolicyCheckSnapshot.kt",
+        "app/src/main/kotlin/io/syn443/android/support/DiagnosticProjection.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/HealthChecksTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/DiagnosticProjectionTest.kt"
+      ],
+      "implementationScope": "Android distinguishes platform-reported NXDOMAIN, SERVFAIL, REFUSED, NOERROR without addresses, other response codes, resolver errors and deadline expiry. The current Internet health result is scoped to its VPN generation, network and policy activation. Support export retains fixed counts.",
+      "remainingScope": "DNS cache ownership and in-flight requests across selector changes, production route timing and raw protocol metrics remain to be verified."
     },
     {
       "id": "ROUTE-05",
@@ -1779,8 +1795,16 @@
     {
       "id": "TEL-04",
       "text": "Протокольные метрики: время DNS/TCP/TLS/proxy handshake/first byte/full response; rcode; потери по проверкам; классы HTTP/TLS ошибок; повторные попытки; смена upstream; P2P/relay; разрывы и время восстановления. Производительность XHTTP/gRPC/SSH учитывается отдельно по типу транспорта.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/AndroidProbeResolver.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/PolicyCheckSnapshot.kt",
+        "app/src/main/kotlin/io/syn443/android/support/DiagnosticProjection.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/HealthChecksTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/DiagnosticProjectionTest.kt"
+      ],
+      "implementationScope": "Android distinguishes platform-reported NXDOMAIN, SERVFAIL, REFUSED, NOERROR without addresses, other response codes, resolver errors and deadline expiry. The current Internet health result is scoped to its VPN generation, network and policy activation. Support export retains fixed counts.",
+      "remainingScope": "DNS cache ownership and in-flight requests across selector changes, production route timing and raw protocol metrics remain to be verified."
     },
     {
       "id": "TEL-05",
@@ -2842,6 +2866,11 @@
       "text": "Release manifest подписан, включает package/signing identity, versionCode, channel, ABI/SDK, engine/evaluator/schema capabilities, hash/size и совместимость миграции. Установка требует штатного действия Android; отказ/отсрочка не удаляет рабочую разрешённую конфигурацию. Обновление сохраняет intent, enrollment, drafts и identity. Поддельная/неподходящая сборка отклоняется до установки.",
       "status": "partial",
       "evidence": [
+        "core/identity/src/main/kotlin/io/syn443/identity/ReleaseAdmission.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/ReleaseAdmissionTest.kt",
+        "app/src/main/kotlin/io/syn443/android/update/VerifiedUpdate.kt",
+        "app/src/main/kotlin/io/syn443/android/update/UpdateActivity.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/VerifiedUpdateTest.kt",
         "tools/verify_signed_apk.py",
         "tools/exercise_release_delivery.py",
         "tools/exercise_signed_apk.py",
@@ -2851,8 +2880,8 @@
         "tools/release_input.py",
         "tools/test_release_input.py"
       ],
-      "implementationScope": "The normal release build and packaged manifest run through GitHub Actions. The unsigned signing input carries the package/version, min/target SDK, exact file and native library hashes, ABI, engine and contract lock inventories. ZIP and ELF alignment are verified for 16 KiB pages. The independent SDK signing receipt and final package bytes feed the offline Control Plane release signer. Its public verifier checks the same APK and recipient, accepts an identical retry and rejects another device, an older revision, or a different APK with the same certificate.",
-      "remainingScope": "Android client trust and update delivery, installer consent and migration on the same enrolled device; production release key operations and distribution."
+      "implementationScope": "The normal release build and packaged manifest run through GitHub Actions. The unsigned signing input carries the package/version, min/target SDK, exact file and native library hashes, ABI, engine and contract lock inventories. ZIP and ELF alignment are verified for 16 KiB pages. The independent SDK signing receipt and final package bytes feed the offline Control Plane release signer. Its public verifier checks the same APK and recipient, accepts an identical retry and rejects another device, an older revision, or a different APK with the same certificate. The mobile entry verifies a release against the APK-provisioned authority, installed signer, registered device and current policy. The Android package manager and native library hashes are checked before explicit system installation.",
+      "remainingScope": "Production key operations, remote distribution, real human installation consent, enrolled-device migration and failure recovery across release versions."
     },
     {
       "id": "ENG-04",
@@ -3053,8 +3082,14 @@
     {
       "id": "AC24",
       "specRow": " Обновление APK/схемы, восстановление сервера из backup | Конфиг/identity сохранены при разрешённой миграции, rollback/restore действительно проверены |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "tools/run_enrolled_vpn.py",
+        "tools/verify_upgrade_fixture.py",
+        ".github/workflows/ci.yml"
+      ],
+      "implementationScope": "The Actions upgrade scenario installs a higher-version APK over an enrolled app, checks explicit Off and the existing committed policy, then signs a fresh policy request and reconnects through the real TUN with the original device binding.",
+      "remainingScope": "Hosted results for this revision, historical Android data schema migrations, release-signed physical upgrades and the combined server restore and rollback acceptance."
     },
     {
       "id": "AC25",

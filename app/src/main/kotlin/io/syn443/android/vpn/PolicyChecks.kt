@@ -17,10 +17,15 @@ class PolicyChecks(synthetic: Boolean = false) {
     companion object {
         private val pool = ProbePool()
         private val results = PolicyCheckSnapshot()
+        private val internet = PolicyCheckSnapshot()
+        internal fun recordInternet(batch: io.syn443.health.Batch, intent: Long, network: Long, activation: Long) =
+            internet.record(batch,intent,network,activation)
+        internal fun internetView(intent: Long, network: Long, activation: Long, active: Boolean) =
+            internet.read(intent,network,activation,active)
         internal fun record(batch: io.syn443.health.Batch, intent: Long, network: Long, activation: Long) = results.record(batch,intent,network,activation)
-        internal fun invalidate() = results.invalidate()
+        internal fun invalidate() { results.invalidate(); internet.invalidate() }
         internal fun view(intent: Long, network: Long, activation: Long, active: Boolean) = results.read(intent,network,activation,active)
-        internal fun snapshotForDiagnostics() = results.passiveSnapshot()
+        internal fun snapshotForDiagnostics() = results.passiveSnapshot().put("internet",internet.passiveSnapshot())
         private var sampledAt = -30_000L
         private var cached = ""
         /** Explicit DEBUG diagnostics only: fixed worker names and stack symbols, never values/targets. */

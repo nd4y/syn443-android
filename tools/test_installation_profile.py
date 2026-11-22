@@ -51,6 +51,23 @@ class InstallationProfileTest(unittest.TestCase):
             with self.subTest(index=index), self.assertRaises(ValueError):
                 check_profile(profile(adminBootstrap=candidate))
 
+    def test_release_profile_requires_a_scoped_independent_public_key(self):
+        raw = profile()
+        legacy = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+        prefix = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d03010703420004")
+        # The packaging gate checks the ASN.1 public encoding. Android validates the EC point.
+        public = base64.b64encode(prefix + bytes(range(64))).decode()
+        release = {"serviceId": "fixture", "channel": "pilot", "anchor": {"id": "release", "epoch": 1, "spki": public}}
+        document = dict(legacy, schemaVersion=3, releaseAuthority=release)
+        check_profile(encode(document))
+        for candidate in (dict(document, schemaVersion=1), dict(document, releaseAuthority=None),
+                          dict(document, releaseAuthority=dict(release, serviceId="other")),
+                          dict(document, releaseAuthority=dict(release, extra="value")),
+                          dict(document, releaseAuthority=dict(release, anchor=dict(release["anchor"], spki="invalid"))),
+                          dict(document, releaseAuthority=dict(release, anchor=dict(release["anchor"], id=legacy["anchor"]["id"])))):
+            with self.assertRaises(ValueError):
+                check_profile(encode(candidate))
+
     def test_encoded_private_endpoints_and_unknown_fields_are_rejected(self):
         for raw in (profile(apiOrigin="https://host." + "local"), profile(apiOrigin="https://127.0.0.1"),
                     profile(issuer="https://identity.example.invalid/realms/test?token=x"), profile(extra="x"),

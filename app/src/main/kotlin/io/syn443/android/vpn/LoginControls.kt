@@ -52,6 +52,13 @@ import org.json.JSONObject
     }
     val phase=status.optString("phase");val generation=status.optLong("generation",-1)
     val revision=status.optLong("intentRevision",-1)
+    val cachedPermit=phase=="POLICY_CACHED" && status.optJSONObject("assignedPolicy")?.optBoolean("runtimeAuthorized")==true
+    LaunchedEffect(visible,vpnStopped,generation,cachedPermit) {
+        if(visible && vpnStopped && cachedPermit)while(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            command("auth-policy-poll",generation.toString())
+            delay(15_000)
+        }
+    }
     val canReauthenticate=status.optBoolean("canReauthenticate")
     val reason=status.optString("reason")
     val panelConfigured=status.optBoolean("controlPanelConfigured")

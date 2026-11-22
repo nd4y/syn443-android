@@ -29,6 +29,8 @@ jobs:
       - run: python3 tools/check_installation_profile.py
       - run: python3 tools/check_public_data.py --history
       - run: bash tools/scan_secrets.sh
+      - name: Verify scanner cache integrity and offline reuse
+        run: bash tools/test_scanner_cache.sh
   documents:
     needs: public-data
     runs-on: ubuntu-24.04
@@ -242,6 +244,26 @@ jobs:
           path: ${{ runner.temp }}/signing-acceptance.json
           if-no-files-found: error
           retention-days: 14
+      - name: Assemble the higher-version debug upgrade fixture
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/upgrade-fixture"
+          mkdir "$fixture"
+          base="$RUNNER_TEMP/base-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$base"
+          ./gradlew -Psyn443CiUpgrade=true :app:assembleDebug --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk "$fixture/new-debug.apk"
+          python3 tools/verify_upgrade_fixture.py record "$base" "$fixture/new-debug.apk" public-evidence/build-manifest.json "$fixture/upgrade.json"
+          python3 tools/check_apk.py "$fixture/new-debug.apk"
+          python3 tools/check_apk_assets.py "$fixture/new-debug.apk"
+          python3 tools/check_public_data.py "$fixture"
+          bash tools/scan_secrets.sh "$fixture"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: syn443-version-upgrade-fixture
+          path: ${{ runner.temp }}/upgrade-fixture/
+          if-no-files-found: error
+          retention-days: 7
   workflow-lint:
     needs: public-data
     runs-on: ubuntu-24.04
@@ -311,12 +333,18 @@ jobs:
         with:
           name: syn443-build-manifest
           path: ${{ runner.temp }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: syn443-version-upgrade-fixture
+          path: ${{ runner.temp }}/upgrade-fixture
       - run: python3 tools/run_packaged_instrumentation.py verify
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
           cmdline-tools-version: '15859902'
           packages: 'platform-tools platforms;android-37.1 build-tools;36.0.0'
       - run: bash tools/prepare_android_tools.sh
+      - name: Verify exact upgrade inputs before using the emulator
+        run: python3 tools/verify_upgrade_fixture.py verify app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/upgrade-fixture/new-debug.apk" "$RUNNER_TEMP/build-manifest.json" "$RUNNER_TEMP/upgrade-fixture/upgrade.json"
       - name: Start ADB before emulator
         run: adb version && adb start-server
       - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808

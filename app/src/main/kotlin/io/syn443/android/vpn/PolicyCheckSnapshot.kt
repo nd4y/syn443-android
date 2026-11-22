@@ -17,6 +17,7 @@ internal class PolicyCheckSnapshot(private val clock: () -> Long = { android.os.
                 JSONObject().put("index", index).put("outcome", value.outcome.name)
                     .put("stage", value.stage?.name ?: JSONObject.NULL)
                     .put("failure", value.failure?.name ?: JSONObject.NULL)
+                    .also { row -> value.dnsResult?.let { row.put("dnsResult",it.name) } }
             })).toString()
         ownerCurrent = true
     }
@@ -36,5 +37,32 @@ internal class PolicyCheckSnapshot(private val clock: () -> Long = { android.os.
             value.getLong("networkEpoch") == network && value.getLong("activationGeneration") == activation
         return JSONObject().put("schemaVersion", 1).put("current", current).put("ageMs", age?.takeIf { it >= 0 } ?: JSONObject.NULL)
             .put("lastBatch", value ?: JSONObject.NULL)
+    }
+}
+
+/** Render only fresh, typed DNS evidence. Endpoints and arbitrary response values stay out of the UI. */
+internal fun internetDnsFailures(snapshot:JSONObject?):List<String> {
+    if (snapshot == null || snapshot.opt("current") != true) return emptyList()
+    val rows=snapshot.optJSONObject("lastBatch")?.optJSONArray("checks") ?: return emptyList()
+    if (rows.length() !in 1..8) return emptyList()
+    return buildList {
+        for (i in 0 until rows.length()) {
+            val row=rows.optJSONObject(i) ?: continue
+            if (row.optString("stage")!="RESOLVE" || row.optString("outcome")!="FAIL") continue
+            val detail=when (row.optString("failure")) {
+                "TIMEOUT" -> "истекло время ожидания"
+                "DNS" -> when(row.optString("dnsResult")) {
+                    "NXDOMAIN" -> "имя не существует (NXDOMAIN)"
+                    "SERVFAIL" -> "сбой DNS-сервера (SERVFAIL)"
+                    "REFUSED" -> "DNS-сервер отклонил запрос (REFUSED)"
+                    "NO_ADDRESSES" -> "ответ без IP-адресов (NOERROR)"
+                    "OTHER_RCODE" -> "сервер вернул другую ошибку DNS"
+                    "RESOLVER_ERROR" -> "ошибка системного резолвера"
+                    else -> "не удалось разрешить имя"
+                }
+                else -> continue
+            }
+            add("DNS, проверка ${i+1}: $detail")
+        }
     }
 }

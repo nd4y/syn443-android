@@ -295,6 +295,36 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     /** Memory/public-intent reads only. Never call StateStore, Keystore or network in this block. */
     internal fun <T> assignedRead(block:(LoginIntent)->T):T=synchronized(commands) {block(journal.snapshot())}
+    /** Same-UID UI projection. Only facts from the live registered session and committed policy leave the controller. */
+    internal fun releaseContext():android.os.Bundle {
+        val root = BootstrapTrust.installationProfile(io.syn443.android.BuildConfig.INSTALLATION_PROFILE).releaseAuthority
+            ?: error("Release channel unavailable")
+        val currentBoot = boot()
+        return assignedRead { login ->
+            val owned = checkNotNull(cached)
+            require(activeAdminContext(login) && adminContextBinding(login) == adminContextBinding(owned.first))
+            val session = checkNotNull(owned.second.session)
+            require(session.session.deviceId == login.deviceId && session.keyThumbprint == login.thumbprint &&
+                session.authority == login.authority && root.appliesTo(owned.second.bootstrap))
+            val view = assignedRuntime.read(login)
+            require(view.state.journal.phase in setOf("committed", "rolled_back", "degraded"))
+            val now = elapsed()
+            val time = session.time.window(currentBoot, now)
+            require(time.upperMs < session.session.accessUntilMs)
+            val policy = checkNotNull(view.permit).authorized(login, view.state, currentBoot, now).payload
+            android.os.Bundle().apply {
+                putBoolean("ok", true)
+                putString("device", login.deviceId)
+                putString("binding", adminContextBinding(login))
+                putString("policy", policy.contentHash)
+                putString("evaluator", policy.algorithmRevision)
+                putString("schema", "policy-v" + policy.schemaVersion)
+                putStringArrayList("capabilities", ArrayList(policy.requiredCapabilities))
+                putLong("lowerMs", time.lowerMs)
+                putLong("upperMs", time.upperMs)
+            }
+        }
+    }
     internal fun ownsPolicy()=runCatching {journal.snapshot().phase!=LoginPhase.SIGNED_OUT}.getOrDefault(true)
     fun allowsConnect():Boolean = runCatching {
         val s=journal.snapshot()
@@ -902,18 +932,21 @@ class LoginController private constructor(private val context:android.app.Applic
             current(expected);resumeWorker(expected)
         }
     }
-    internal fun refreshAssignment(force:Boolean):Boolean {
+    internal fun refreshAssignment(force:Boolean, visibleGeneration:Long?=null):Boolean {
         val s=journal.snapshot()
         if(s.phase !in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))return false
-        val interval=if(force)5_000L else runCatching {
+        if(visibleGeneration!=null && (s.generation!=visibleGeneration || reportVpnOn()))return false
+        val remaining=if(force)null else runCatching {
             val view=assignedRuntime.read(s);val raw=view.state.journal.active ?: view.state.journal.candidate
             val policy=checkNotNull(assignedRuntime.allowed(s,raw))
-            (policy.payload.refreshAfterMs-checkNotNull(view.state.time).window(boot(),elapsed()).upperMs).coerceIn(30_000,300_000)
-        }.getOrDefault(30_000L)
-        if(elapsed()-lastAssignmentFetch<interval)return !force &&
+            policy.payload.refreshAfterMs-checkNotNull(view.state.time).window(boot(),elapsed()).upperMs
+        }.getOrNull()
+        val previous=lastAssignmentFetch
+        if(!assignmentRefreshDue(elapsed()-previous,remaining,force))return !force && visibleGeneration==null &&
             (refreshOverlayCredential() || reportActivation() || syncDeviceSubscription() || syncTechnicalTelemetry() || syncRuntimeObservation())
         if(runCatching {assignedRuntime.read(s).state.journal.phase=="applying"}.getOrDefault(false))return false
-        return submitIfIdle(onAdmission={lastAssignmentFetch=elapsed()}) {
+        return submitIfIdle(admit={journal.isCurrent(s) && lastAssignmentFetch==previous},
+            onAdmission={lastAssignmentFetch=elapsed()}) {
             current(s);resumeWorker(s)
         }
     }

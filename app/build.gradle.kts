@@ -26,6 +26,12 @@ val prototypeAssets = tasks.register<PrototypeAssets>("preparePrototypeAssets") 
 androidComponents.onVariants { variant ->
     variant.sources.assets?.addGeneratedSourceDirectory(prototypeAssets, PrototypeAssets::outputDirectory)
 }
+if (providers.gradleProperty("syn443CiUpgrade").orNull == "true") {
+    require(providers.environmentVariable("GITHUB_ACTIONS").orNull == "true")
+    androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
+        variant.outputs.forEach { output -> output.versionCode.set(Math.addExact(output.versionCode.get(), 1)) }
+    }
+}
 val enrollmentLinkHost = providers.environmentVariable("SYN443_ENROLLMENT_LINK_HOST").orElse("").get()
     .ifBlank { "links.example.invalid" }
 val installationProfile = providers.environmentVariable("SYN443_INSTALLATION_PROFILE").orElse("").get()
@@ -47,8 +53,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 132
-        versionName = "0.9.104-private-route"
+        versionCode = 133
+        versionName = "0.9.105-verified-update"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
         manifestPlaceholders["enrollmentLinkHost"] = enrollmentLinkHost
         buildConfigField("String", "ENROLLMENT_LINK_HOST", "\"$enrollmentLinkHost\"")

@@ -95,6 +95,10 @@ if mode=="emulator":
     assert {
         ("io.syn443.android.RouteSnapshotTest", "terminalOmissionAndDeadlineClearOnlyMissingMeasurements"),
     } <= set(identities), "Missing route measurement consistency outcomes"
+    assert {("io.syn443.android.VerifiedUpdateTest", name) for name in (
+        "updateScreenShowsInstalledBuildAndCannotInstallWithoutAnAcceptedOffer",
+        "packageManagerRechecksRealPackageSignerSdkAndEmbeddedAbiHashes",
+    )} <= set(identities), "Missing enrolled APK update checks"
     assert {("io.syn443.android.SystemVpnProtectionTest", name) for name in (
         "systemProtectionsRequireFreshBooleanEvidenceForEachSetting",
         "unavailableSettingsExplainManualAccessAndAllowRetry",
@@ -191,6 +195,7 @@ if mode=="policy":
 if mode=="health":
     assert {('io.syn443.health.ChecksTest',name) for name in {
         'positionalDiagnosticsKeepEachFailureSeparateFromLaterSuccessOrMismatch',
+        'dnsResultsRequireAFailedResolutionAndNeverSurviveCancellation',
         'checksNeverStartedDoNotInheritAStageOrNetworkFailure',
         'oneAdmissionRetryUsesFreedCapacityAndRunsTheProbeOnlyOnce'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required per-check diagnostic cases missing'
     required={('io.syn443.health.AddressFallbackTest',name) for name in {
@@ -294,6 +299,7 @@ if mode=="emulator":
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'logoutAfterAccessExpiryRotatesOnlyInRamRevokesAndErasesTheProtectedSession',
         'lostLogoutRefreshKeepsRecoveryTombstoneWithoutRestoringSecretsOrRetryingEnrollment'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android expired-session retirement cases missing'
+    assert ('io.syn443.android.HealthChecksTest','platformDnsResponsesReachOnlyCurrentInternetDiagnostics') in identities, 'Missing DNS health outcome'
     assert ('io.syn443.android.HealthChecksTest','androidDnsRetainsBoundedDistinctAddressesForFallbackAndStillCancelsQuery') in {(c.get('classname'),c.get('name')) for c in cases}, 'Required Android DNS fallback case missing'
     assert {('io.syn443.android.LoginControllerTest',name) for name in {
         'expiredRefreshFamilyRequiresLoginWithoutContactingTheServer',
@@ -326,9 +332,10 @@ if mode=="emulator":
         "assignedActivationCannotReusePriorScopeOrIncompleteRouteProof",
         "enrolledAssignedRoutesCommitWithOptionalFailure",
         "enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet",
-        "enrolledStopFencesPendingCandidateRouteSuccess"}
+        "enrolledStopFencesPendingCandidateRouteSuccess","enrolledVersionUpgradeRetainsBindingPolicyAndRealTun"}
     live_engine_required={"savedEngineCheckpointCannotClaimAnUnownedLiveProcess"}
     route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
+    assert ("io.syn443.android.LoginControllerTest", "cachedPolicyRefreshUsesTheSignedDeadlineOrFiveMinuteLimit") in {(c.get("classname"),c.get("name")) for c in cases}, "Signed refresh deadline coverage missing"
     route_required.add("adbLocalConfigPreviewDoesNotWriteAndApplyFencesStaleBase")
     route_required.add("assignmentQuotedStringStreamingMatchesReferenceDefaultsEscapesAndUnicode")
     fatal_required={"competingVpnOwnsTunAndRevokesOriginalWithoutRetryFight","fatalCommandsCannotStartAnOffNativeOwner","uncaughtJavaFaultRecoversRealTunAndRetainsIntent","uncaughtNativeFaultRecoversRealTunAndRetainsIntent","fatalCrashSeriesPreservesRestartBudgetAndStopFencesLateRecovery",
@@ -535,6 +542,13 @@ if mode in ADMIN_DISCOVERY_REQUIRED:
     assert set(ADMIN_DISCOVERY_REQUIRED[mode]) <= set(identities), "Missing current admin discovery or controller-owned budget outcomes"
 
 # Native administrative owner, private Control API and UI are separate from the VPN identity.
+if mode == "identity":
+    assert {("io.syn443.identity.ReleaseAdmissionTest", name) for name in (
+        "authenticatesDeviceSignerChannelAndEntireTrustedTimeWindow",
+        "migrationAbiAndActivePolicyMustAllBeCompatible",
+        "acceptedFloorSurvivesRetriesAndRejectsConflictsOrBackwardsSteps",
+        "streamedPackageMustMatchSizeAndDigestBeforeItCanBeHandedOff",
+    )} <= set(identities), "Missing addressed release verification outcomes"
 NATIVE_ADMIN_REQUIRED = {'identity': [('io.syn443.identity.AdminControlTest', 'threeReadActionsBindExactSignedOriginBodyAccessTokenAndFreshDpopProofs'), ('io.syn443.identity.AdminControlTest', 'paginationRequiresAtMostThirtyTwoUniqueOrderedDevicesAndExactContinuation'), ('io.syn443.identity.AdminControlTest', 'configurationPreservesTheEntireUtf8ReplyAndRejectsMismatchedOuterMetadata'), ('io.syn443.identity.AdminControlTest', 'runtimeReadsValidateRequestedIdentityReportClockAndRecentStaleNoneSemantics'), ('io.syn443.identity.AdminControlTest', 'expiredAccessCannotUseAnOtherwiseLiveRefreshFamilyOrStartAHiddenRefresh'), ('io.syn443.identity.AdminControlTest', 'foreignKeyBootClockLogoutConsumedAndUnguardedOwnersCannotSendControlRequests'), ('io.syn443.identity.AdminControlTest', 'revokedTrustDuringSigningOrResponseCannotDispatchOrPublishARead'), ('io.syn443.identity.AdminControlTest', 'cancellationAndLogoutDuringReadNeverPublishDataOrConsumeRefreshOwnership'), ('io.syn443.identity.AdminControlTest', 'finiteServerErrorsAndDpopNonceChallengesNeverRetryOrRotateTokens'), ('io.syn443.identity.AdminControlTest', 'replyBoundsDuplicateJsonWrongContentAndStaleDatesCannotReachThePrivateMailbox'), ('io.syn443.identity.AdminControlTest', 'newApiClockCanRejectAccessButCannotExtendLeaseOrRollBackItsAcceptedFloor'), ('io.syn443.identity.AdminControlTest', 'configurationInventoryAcceptsWideLayersAnd4096EffectiveOriginsWithoutTruncation'), ('io.syn443.identity.AdminControlTest', 'configurationJsonKeepsExactBoundsGrammarAndUnrelatedParserLimits')], 'emulator': [('io.syn443.android.AdminControllerTest', 'signedAdminLoginAndThreePrivateReadsKeepDeviceVpnAndPublicStatusUnchanged'), ('io.syn443.android.AdminControllerTest', 'foreignCallbackPreservesUnusedAttemptWhileDenialAndCodeReplayNeverReuseCredentials'), ('io.syn443.android.AdminControllerTest', 'revokedContextAfterRealSignedCodeDispatchCannotPublishLateSessionOrAdmitAnotherOwner'), ('io.syn443.android.AdminControllerTest', 'logoutDuringBlockedRotatingRefreshRetainsBusyUntilActualExitAndRejectsItsLatePair'), ('io.syn443.android.AdminControllerTest', 'exactReadCancellationAndMailboxExpiryNeverReleaseABlockedOwnerOrRetireAValidSession'), ('io.syn443.android.AdminControllerTest', 'recreatedReservedBrowserAuthenticatedAndRetiringRecordsRequireFreshOwnedKeyRetirement'), ('io.syn443.android.AdminControllerTest', 'corruptOrMissingAdminAesKeyNeverResetsTheJournalOrCreatesANewOwner'), ('io.syn443.android.AdminControllerTest', 'dueRefreshRotatesOnceWhileUncertainDeliveryCannotReplayTheOldPair'), ('io.syn443.android.AdminControllerTest', 'readDenialAndTransportFailurePreserveValidSessionButUnauthorizedReadRetiresIt'), ('io.syn443.android.AdminControllerTest', 'browserHandoffsExpireConsumeOnceAndCancelOnlyTheirBlockedFreshAuthorization'), ('io.syn443.android.AdminControllerTest', 'bootClockRollbackAndNewDeviceContextCannotBorrowAnAuthenticatedOwner'), ('io.syn443.android.AdminControllerTest', 'cancelledPublicationOfAnAlreadyReturnedRefreshRetiresItsConsumedFamilyImmediately'), ('io.syn443.android.AdminKeyJournalTest', 'adminOwnershipRetirementDeletesOnlyItsPersistedKeyAndPreservesDeviceSentinel'), ('io.syn443.android.AdminKeyJournalTest', 'recreatedAdminPhaseRecordsContainNoCredentialsAndRequireExplicitOwnedRetirement'), ('io.syn443.android.AdminKeyJournalTest', 'adminJournalCasRejectsStaleWritersInvalidCountersAliasesAndPhaseShortcuts'), ('io.syn443.android.AdminKeyJournalTest', 'adminJournalCiphertextRejectsTamperingTruncationOversizeAndForeignNamespace'), ('io.syn443.android.AdminKeyJournalTest', 'missingAdminAesKeyAndOrphanedAtomicWritesNeverResetOwnership'), ('io.syn443.android.AdminKeyJournalTest', 'adminKeystoreAndJournalRejectMainBinderWorkAndForeignAliases'), ('io.syn443.android.AdminKeyJournalTest', 'cancelledAdminKeyCreationCannotOutrunPersistedRetirementOrRecreateItsAlias'), ('io.syn443.android.AdminNativeUiTest', 'signedOutOffersSeparateAdminLoginAndFullPanelWithoutVpnActions'), ('io.syn443.android.AdminNativeUiTest', 'authorizedPageUsesExplicitNextCursorAndReadOnlyDeviceSelection'), ('io.syn443.android.AdminNativeUiTest', 'configurationAndStaleRuntimeStayReadOnlyCollapsedAndExplicitlyLastReported'), ('io.syn443.android.AdminNativeUiTest', 'busyReadBlocksAnotherReadButLeavesAdministrativeLogoutAvailable'), ('io.syn443.android.AdminNativeUiTest', 'unknownErrorsRenderFiniteRussianTextWithoutRawControllerReason'), ('io.syn443.android.AdminNativeUiTest', 'documentDecoderBoundsUtf8AndSplitsFullTextOffMainWithoutBreakingSurrogates'), ('io.syn443.android.AdminNativeUiTest', 'devicePageDecoderKeepsThirtyTwoRowBoundOrderingAndCursor'), ('io.syn443.android.AdminLoginBrowserTest', 'trustedControllerAdminLoginUsesDarkTitledCustomTabWithoutAppHeaders'), ('io.syn443.android.AdminLoginBrowserTest', 'unsafeOriginsInjectedFieldsDeviceCallbacksAndWeakProofsNeverBecomeBrowserIntents'), ('io.syn443.android.AdminLoginBrowserTest', 'explicitSeparateIssuerIsPreservedWithoutDeviceOrWebPanelFallback'), ('io.syn443.android.AdminLoginBrowserTest', 'unavailableBrowserAttemptsOneExactCustomTabAndDoesNotFallback'), ('io.syn443.android.AdminEntryControlsTest', 'separateAdminAccountDoesNotRequireWebGrantAndStaysCollapsedByDefault'), ('io.syn443.android.AdminEntryControlsTest', 'currentWebGrantShowsHomeShortcutAndUnprovisionedAccountCannotOfferSeparateLogin'), ('io.syn443.android.LoginControllerTest', 'signedAdminDiscoveryContextPreservesDeviceIdentityAndFencesTrustAndReauthentication'), ('io.syn443.android.LoginControllerTest', 'adminDiscoveryContextRejectsMainAndBinderNamedThreadsWithoutChangingDeviceState')]}
 if mode in NATIVE_ADMIN_REQUIRED:
     assert set(NATIVE_ADMIN_REQUIRED[mode]) <= set(identities), "Missing native administrative ownership, API, storage or UI outcomes"
@@ -997,6 +1011,7 @@ SUPPORT_BUNDLE_REQUIRED = {'io.syn443.android.DiagnosticArchiveTest': ['storedAr
                                              'truncatedAndProjectionOnlyComponentsNeverClaimComplete',
                                              'namesSizesAndDiagnosticsCannotEscapeOrEchoInputs'],
  'io.syn443.android.DiagnosticProjectionTest': ['knownSnapshotsProjectOnlyFixedPublicFields',
+    'internetDnsProjectionExportsOnlyObservedCategories',
                                                 'nestedSecretsLabelsTargetsAndFreeTextNeverReachComponents',
                                                 'incorrectBooleanAndNumericTypesStayUnknownRatherThanFalseOrZero',
                                                 'eventsKeepOnlyLast64OrderedAllowlistedRecords',
@@ -1035,7 +1050,7 @@ SUPPORT_BUNDLE_EXTERNAL_REQUIRED = ('io.syn443.android.SupportBundleProtocolTest
 if mode == "emulator":
     required = {(owner, name) for owner, names in SUPPORT_BUNDLE_REQUIRED.items() for name in names}
     required.add(SUPPORT_BUNDLE_EXTERNAL_REQUIRED)
-    assert len(required) == 46, "Duplicate support bundle requirement"
+    assert len(required) == 47, "Duplicate support bundle requirement"
     assert required <= set(identities), "Missing exact offline support archive outcomes"
     for owner, expected in SUPPORT_BUNDLE_REQUIRED.items():
         path = root / "app/src/androidTest/kotlin/io/syn443/android" / (owner.rsplit(".", 1)[1] + ".kt")

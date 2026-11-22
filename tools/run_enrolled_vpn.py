@@ -2,6 +2,9 @@
 import base64
 import copy
 import json
+import os
+from pathlib import Path
+import re
 import subprocess
 import threading
 import time
@@ -19,6 +22,54 @@ def stopped_rollback_recovered(controller,generation):
     return (pid(':controller') not in ('',controller) and state.get('engineActive') is False and
         state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
         not call('auth-status')['busy'])
+
+def check_enrolled_upgrade(fixture, proxy, auth_generation):
+    if (os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('SYN443_CI_AVD') != 'syn443-ci'
+            or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']):
+        raise ValueError('This APK upgrade requires the disposable CI emulator')
+    directory = Path(os.environ['RUNNER_TEMP']) / 'upgrade-fixture'
+    receipt = json.loads((directory / 'upgrade.json').read_bytes())
+
+    def installed_version():
+        versions = re.findall(rb'^\s*versionCode=(\d+)\b', adb('shell', 'dumpsys', 'package', PACKAGE), re.MULTILINE)
+        if len(versions) != 1:
+            raise ValueError('Installed package version is ambiguous')
+        return int(versions[0])
+
+    def binding():
+        return {(thumb, session['deviceId']) for thumb, session in fixture.sessions.copy().items()}
+
+    original = binding()
+    assert len(original) == 1 and fixture.registrations == 1
+    assert installed_version() == receipt['previous']
+    assert call('status')['policy']['activeRevision'] == 1
+    call('disconnect')
+    await_condition(vpn_stopped)
+    before = call('status')
+    assert before['desiredOn'] is False
+    response = adb('install', '-r', str(directory / 'new-debug.apk'), timeout=120)
+    assert b'Success' in response.splitlines() and installed_version() == receipt['previous'] + 1
+    adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
+    def restored_off():
+        state = call('status')
+        assert state['desiredOn'] is False and state['generation'] == before['generation'] and vpn_stopped()
+        return state['policy'].get('activeRevision') == 1 and not call('auth-status')['busy']
+    await_condition(restored_off)
+    assert call('auth-status')['generation'] == auth_generation
+    # The fixture counts policy requests only after verifying the signed DPoP proof, nonce and access token.
+    requests = fixture.policy_requests
+    fixture.revision = 2
+    await_condition(lambda: call('policy-refresh').get('admitted') is True, 30)
+    await_condition(lambda: fixture.policy_requests > requests and call('status')['policy'].get('desiredRevision') == 2)
+    assert call('status')['desiredOn'] is False and vpn_stopped()
+    progress = proxy.progress
+    call('connect')
+    await_condition(lambda: call('status')['phase'] == 'Online' and
+                    call('status')['policy'].get('activeRevision') == 2 and
+                    call('status')['policy'].get('phase') == 'committed' and proxy.progress > progress)
+    assert binding() == original and fixture.registrations == 1
+    assert call('status')['policy']['activeRevision'] == 2 and call('auth-status')['generation'] == auth_generation
+
 
 def failure_summary():
     state=call('status');auth=call('auth-status');policy=state.get('policy',{})
@@ -76,7 +127,7 @@ def main():
            'enrolledLogoutRetiresFrozenNativeBeforeAcknowledging',
            'enrolledAssignedRoutesCommitWithOptionalFailure',
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
-           'enrolledStopFencesPendingCandidateRouteSuccess']
+           'enrolledStopFencesPendingCandidateRouteSuccess', 'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
     def observed_report(revision,outcome,selected):
         return any(r['policyRevision']==revision and r['outcome']==outcome and r['activePolicyRevision']==selected
                    for r in list(fixture.activation_reports.values()))
@@ -143,6 +194,8 @@ def main():
                         await_condition(lambda:stopped_rollback_recovered(controller,generation_after),45)
                         assert call('status')['generation']==generation_after and not call('status')['desiredOn'] and vpn_stopped()
                     proxy.delay=0
+                elif name=='enrolledVersionUpgradeRetainsBindingPolicyAndRealTun':
+                    check_enrolled_upgrade(fixture, proxy, generation)
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
                     fixture.policy_status=403;call('policy-refresh')
                     await_condition(lambda:call('auth-status').get('phase')=='NEEDS_REAUTH' and
