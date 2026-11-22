@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 import warnings
 import zipfile
-from check_apk_assets import TEST_SUFFIX_LIST, check, expected_assets
+from check_apk_assets import CHAT_VIDEO_FIXTURES, TEST_SUFFIX_LIST, check, expected_assets
 
 
 class ApkAssetsTest(unittest.TestCase):
@@ -13,9 +13,10 @@ class ApkAssetsTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
+        self.clips = [('assets/' + name, name.encode()) for name in CHAT_VIDEO_FIXTURES]
         for name, value in [('app/src/main/assets/licenses/fixture.txt', b'synthetic license'),
-                            ('contracts/v1/decision-vectors.json', b'{"cases":[]}'),
-                            ('app/src/androidTest/assets/chat-fixture.mp4', b'synthetic fixture')]:
+                            ('contracts/v1/decision-vectors.json', b'{"cases":[]}')] + [
+                                ('app/src/androidTest/' + name, data) for name, data in self.clips]:
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(value)
@@ -34,13 +35,13 @@ class ApkAssetsTest(unittest.TestCase):
 
     def test_instrumentation_requires_exact_pinned_suffix_data_and_runtime_rejects_it(self):
         synthetic = b'public suffix test data'
-        expected = [('assets/chat-fixture.mp4', b'synthetic fixture'), (TEST_SUFFIX_LIST, synthetic)]
+        expected = self.clips + [(TEST_SUFFIX_LIST, synthetic)]
         test_name = 'app-debug-androidTest.apk'
         with patch('check_apk_assets.TEST_SUFFIX_SHA256', hashlib.sha256(synthetic).hexdigest()):
             check(self.apk(expected, test_name), self.root)
-            for invalid in (expected[:1], expected + expected[1:],
-                            [expected[0], (TEST_SUFFIX_LIST, b'changed')],
-                            [expected[0], ('assets/foreign.list', synthetic)]):
+            for invalid in (self.clips, expected + expected[-1:],
+                            self.clips + [(TEST_SUFFIX_LIST, b'changed')],
+                            self.clips + [('assets/foreign.list', synthetic)]):
                 with self.assertRaises(AssertionError):
                     check(self.apk(invalid, test_name), self.root)
             with self.assertRaises(AssertionError):
@@ -82,7 +83,8 @@ class ApkAssetsTest(unittest.TestCase):
     def test_instrumentation_fixture_cannot_be_replaced_or_extended(self):
         suffix = b'synthetic suffix list'
         with patch('check_apk_assets.TEST_SUFFIX_SHA256', hashlib.sha256(suffix).hexdigest()):
-            for values in [[], [('assets/chat-fixture.mp4', b'changed')],
-                           [('assets/chat-fixture.mp4', b'synthetic fixture'), ('assets/private.mp4', b'not allowed')]]:
+            for values in [self.clips[1:], self.clips + [('assets/private.mp4', b'extra')]] + [
+                    [(name, b'changed' if name == changed else value) for name, value in self.clips]
+                    for changed, _ in self.clips]:
                 with self.assertRaises(AssertionError):
                     check(self.apk(values + [(TEST_SUFFIX_LIST, suffix)], 'app-debug-androidTest.apk'), self.root)

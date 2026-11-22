@@ -47,6 +47,19 @@ class RouteCheckProfileTest {
         assertEquals("RouteCheckProfile([redacted])",value.toString())
         assertFalse(value.toString().contains("example.invalid"))
     }
+    @Test fun confirmedCountryRequiresAPassedCountryLeafAndOneUnambiguousClass() {
+        fun country(id: String, exit: String) =
+            leaf(id, "https_exit_country", "https://$id.example.invalid/", ",\"expected_exit_class\":\"$exit\"")
+        val checks = listOf(country("first", "RU"), country("second", "RU"),
+            country("remote", "NON_RU"), leaf("ordinary")).joinToString(",")
+        val value = RouteCheckProfile.decode(profile(checks,
+            """["first","second","remote"]""", """[{"leaf":"ordinary"}]"""))
+        assertNull(value.confirmedExitClass(emptySet()))
+        assertNull(value.confirmedExitClass(setOf("ordinary", "unrecognized")))
+        assertEquals("RU", value.confirmedExitClass(setOf("first", "second", "ordinary")))
+        assertEquals("NON_RU", value.confirmedExitClass(setOf("remote")))
+        assertNull(value.confirmedExitClass(setOf("first", "remote")))
+    }
     @Test fun securityLeavesAreUnconditionalAndPublicIntentRequiresMatchingCountryGate() {
         val country=leaf("country","https_exit_country","https://country.example.invalid/",",\"expected_exit_class\":\"RU\"")
         val value=RouteCheckProfile.decode(profile(country+","+leaf("a"),"[\"country\"]","[{\"leaf\":\"a\"}]"))

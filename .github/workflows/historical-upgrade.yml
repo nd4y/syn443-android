@@ -1,0 +1,87 @@
+name: Historical APK upgrade
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Protected CI run with the newer version (latest successful by default)
+        type: string
+      previous_run:
+        description: Protected CI run with the older version (closest prior version by default)
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/historical-upgrade.yml
+      - tools/protected_upgrade_inputs.py
+      - tools/test_protected_upgrade_inputs.py
+      - tools/run_installer_acceptance.sh
+      - tools/run_enrolled_vpn.py
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  upgrade:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          cmdline-tools-version: '15859902'
+          packages: 'platform-tools build-tools;36.0.0'
+      - name: Prepare two provenance-checked protected packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run || github.event.workflow_run.id || '' }}
+          PREVIOUS_RUN: ${{ inputs.previous_run || '' }}
+        run: |
+          python3 -m unittest discover -s tools -p 'test_protected_upgrade_inputs.py'
+          python3 tools/protected_upgrade_inputs.py
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Enroll the prior version and replace the installed package
+        uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+        env:
+          SYN443_CI_AVD: syn443-ci
+        with:
+          avd-name: syn443-ci
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          ram-size: 3072M
+          cores: 2
+          disk-size: 6G
+          disable-animations: true
+          emulator-options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim -no-metrics
+          script: bash tools/run_installer_acceptance.sh --historical
+      - name: Check the two public evidence files
+        run: |
+          python3 tools/check_public_data.py "$RUNNER_TEMP/historical-upgrade/upgrade.json" "$RUNNER_TEMP/historical-upgrade/result.xml"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: protected-historical-upgrade
+          path: |
+            ${{ runner.temp }}/historical-upgrade/upgrade.json
+            ${{ runner.temp }}/historical-upgrade/result.xml
+          if-no-files-found: error
+          retention-days: 14

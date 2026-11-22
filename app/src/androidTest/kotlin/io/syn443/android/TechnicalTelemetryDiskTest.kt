@@ -134,6 +134,36 @@ class TechnicalTelemetryDiskTest {
         } finally { capture.disable() }
     }
 
+    @Test fun firstOrdinaryEventAfterEmptyOptInUsesTheExistingTickAndKeepsRetryLimits() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val capture = TelemetryCapture(context, "test-first-" + UUID.randomUUID().toString().replace("-", ""))
+        val owner = Identity.random()
+        val now = 1_800_000_000_000L
+        try {
+            capture.enable(owner, 8)
+            val consent = checkNotNull(capture.consent(owner))
+            val snapshot = JSONObject().put("eventSequence", 8).put("events", JSONArray())
+            assertFalse(TelemetryCapture.needsEarlyCollection(snapshot, consent, null))
+            val event = JSONObject().put("sequence", 9).put("code", "ordinary").put("phase", "Online")
+                .put("at", now).put("elapsed", 41).put("networkEpoch", 1)
+            snapshot.put("eventSequence", 9).getJSONArray("events").put(event)
+            assertTrue(TelemetryCapture.needsEarlyCollection(snapshot, consent, null))
+            val (entries, through) = capture.sample(snapshot, consent, 137)
+            val batch = checkNotNull(TechnicalTelemetry.Snapshot(1, owner, entries).peek(owner))
+            assertEquals("online", batch.events.single().code)
+            assertTrue(capture.recorded(consent, through))
+            val sampled = checkNotNull(capture.consent(owner))
+            assertFalse(TelemetryCapture.needsEarlyCollection(snapshot, sampled, "foreign"))
+            assertTrue(TelemetryCapture.needsEarlyCollection(snapshot, sampled, sampled.session))
+            assertTrue(capture.attempted(sampled, now, batch, urgent = false))
+            val attempted = checkNotNull(capture.consent(owner))
+            snapshot.put("eventSequence", 10)
+            assertFalse(TelemetryCapture.needsEarlyCollection(snapshot, attempted, null))
+            assertFalse(capture.attempted(attempted, now + 60_000, batch, urgent = true))
+            assertTrue(capture.attempted(attempted, now + TelemetryCapture.ROUTINE_MS, batch, urgent = false))
+        } finally { capture.disable() }
+    }
+
     @Test fun stoppedTelemetryRequiresPositiveObservationThatEngineAndIntentAreOff() {
         val off = JSONObject().put("desiredOn",false).put("engineActive",false).put("generation",2).put("engineStateKnown",true)
         fun observation(field: String, value: Any) =

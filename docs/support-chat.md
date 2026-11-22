@@ -14,7 +14,10 @@ operation; an unacknowledged send can be retried with the same ID.
 
 Photo mode applies orientation, limits dimensions and writes a fresh JPEG without
 source EXIF. Video mode uses pinned AndroidX Media3 1.11.1, H.264/AAC, up to 720p
-and 30 fps, a duration-based bitrate budget and a checked final size. Original
+and 30 fps, a duration-based bitrate budget and a checked final size. The long
+edge is limited to 1280 pixels and the short edge to 720. Portrait and square
+clips keep their display shape, and smaller clips keep their resolution within
+encoder alignment limits. Original
 file mode requires a file already within the size limit. Codec work uses bounded
 private temporary files, which are deleted on completion/cancellation. Media3
 is Apache-2.0 licensed; its modules are separate Gradle dependencies.

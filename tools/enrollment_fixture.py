@@ -43,8 +43,11 @@ class Fixture:
         self.authorization={};self.codes={};self.tokens={};self.sessions={};self.receipts={};self.refresh_receipts={};self.proofs=set()
         self.config=config;self.revision=1;self.policy_status=200;self.envelopes={};self.policy_requests=0;self.registrations=0
         self.activation_reports={}
+        self.policy_example=None
+        self.example_deliveries={}
         self.telemetry_enabled=False
         self.telemetry_receipts=[]
+        self.telemetry_requests=0
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
     def close(self):
         self.server.shutdown();self.server.server_close();self.thread.join(timeout=3);self.publisher.close()
@@ -77,6 +80,7 @@ class Fixture:
         return thumb,claims
     def request(self,method,path,headers,body):
         parsed=urlsplit(path);oidc='/realms/test/protocol/openid-connect'
+        if parsed.path=='/v1/device/telemetry':self.telemetry_requests+=1
         if method=='GET' and parsed.path.endswith('/.well-known/openid-configuration'):
             return 200,{'issuer':self.issuer,'authorization_endpoint':self.origin+oidc+'/auth',
                 'token_endpoint':self.origin+oidc+'/token','jwks_uri':self.origin+oidc+'/certs',
@@ -158,10 +162,15 @@ class Fixture:
             self.publisher.device=session['deviceId']
             self.envelopes[key]=self.publisher.sign(self.config,revision=self.revision,key_thumbprint=thumb,ttl=self.policy_ttl_seconds,
                 degraded=getattr(self,'allow_degraded',False),checks=getattr(self,'policy_checks',None),
-                extra_capabilities=getattr(self,'extra_capabilities',()))
+                extra_capabilities=getattr(self,'extra_capabilities',()), decision_program=getattr(self,'decision_program',None))
         headers={'Content-Type':'application/jose'}
         if self.telemetry_enabled:headers['X-Syn443-Telemetry']='1'
-        return 200,self.envelopes[key],headers
+        envelope = self.envelopes[key]
+        example = self.policy_example
+        if example is not None:
+            envelope = example
+            self.example_deliveries[example] = self.example_deliveries.get(example, 0) + 1
+        return 200,envelope,headers
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args):pass

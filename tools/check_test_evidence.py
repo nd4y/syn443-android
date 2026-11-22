@@ -72,6 +72,7 @@ if mode=="jvm":
         "capacityCannotEvictAnActiveQuarantineOrConfigurationFence",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required route health cases missing"
     assert {("io.syn443.decision.FailoverAdmissionTest",name) for name in {
+        "negotiatedProgramKeepsBothConfirmationAndMinimumIntervalLimits",
         "independentFailuresAndCurrentVerifiedReservePermitOneSwitch",
         "conservativeRevisionRequiresThreeIndependentBatchesAndSixtySecondsBetweenSwitches",
         "targetFailureAndWrongScopeDoNotCountTowardFailover",
@@ -95,6 +96,7 @@ if mode=="emulator":
     assert {
         ("io.syn443.android.RouteSnapshotTest", "terminalOmissionAndDeadlineClearOnlyMissingMeasurements"),
     } <= set(identities), "Missing route measurement consistency outcomes"
+    assert ("io.syn443.android.RouteSnapshotTest", "ordinaryHttpsAndConflictingCountryChecksCannotConfirmAnExitClass") in identities, "Missing measured exit-class provenance outcome"
     assert {("io.syn443.android.RouteSnapshotTest", name) for name in (
         "applicationDurationsCountDistinctSuccessesAndRetireOnLossOfRouteEvidence",
         "routeDurationWindowBoundsSamplesLifetimeAndPathIdentity",
@@ -121,6 +123,8 @@ if mode=="emulator":
     assert {("io.syn443.android.NetBirdProfileStateTest", name) for name in (
         "runningProfileEvidenceRequiresAReadyCurrentOwnerAndSuppressesRetiredRows",
         "profileWithoutNetBirdHasOneExplanationAndConfiguredModuleKeepsItsControls",
+        "plannedProvidersNeverInspectNetBirdAndReturnOnlyTheirAvailability",
+        "overlayControlTransportRequiresMatchingNetBirdEvidenceAndNeverClaimsAPeerPath",
     )} <= set(identities), "Missing NetBird profile-presence outcomes"
     assert {("io.syn443.android.PhysicalLinkDetailsTest", name) for name in (
         "familyFactsExcludeLinkLocalAndKeepAddressAndDefaultRouteSeparate",
@@ -185,6 +189,7 @@ if mode=="emulator":
         "firstValidatedManagedBatchBypassesCadenceOnceWithoutCancellingInFlightWork",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed Wi-Fi failover cases missing"
     assert {
+        ("io.syn443.android.TechnicalTelemetryDiskTest","firstOrdinaryEventAfterEmptyOptInUsesTheExistingTickAndKeepsRetryLimits"),
         ("io.syn443.android.TechnicalTelemetryDiskTest","encryptedQueueRestartsWithoutExposingAnotherEnrollment"),
         ("io.syn443.android.TechnicalTelemetryDiskTest","consentFenceDropsPriorEventsAndRawDiagnosticStrings"),
         ("io.syn443.android.TechnicalTelemetryDiskTest","onlyConfirmedRouteSelectionCarriesItsPolicyAndAlgorithmRevisions"),
@@ -198,6 +203,7 @@ if mode=="policy":
         "reserveCooldownRequiresBoundConfigurationAndHasAnIndependentRollbackFingerprint",
         "exitCheckRequiresMatchingCapabilityOnKeyBoundConfiguration",
         "countryCheckRequiresItsOwnBoundCapabilityAndCannotReuseIpAuthority",
+        "independentProgramIsBoundToTheLeaseAndItsSemanticHashSurvivesRenewal",
         "decisionRevisionMustMatchKeyBoundFailoverCapability",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required signed managed-policy verifier case missing"
 if mode=="health":
@@ -367,7 +373,7 @@ if mode=="emulator":
     chat_required |= {"invalidUnicodeCannotReplaceOrCreateEncryptedChatDrafts",
                       "composingChatInputRequiresExplicitSendAfterCommit"}
     chat_required.add("chatReadinessRejectsMissingRootTitleAndStatus")
-    chat_required |= {"chatRestartReclaimsUnsentFilesButPreservesDraftAttachments","chatVideoCompressionProducesBoundedMp4AndStripsLocation","chatCancellingActiveVideoExportRemovesPrivateTemporaryFiles"}
+    chat_required |= {"chatRestartReclaimsUnsentFilesButPreservesDraftAttachments","chatVideoCompressionProducesBoundedMp4AndStripsLocation","chatSquareVideoFillsTheExportedFrame","chatRotatedSmallVideoRetainsDisplayOrientationAndSize","chatCancellingActiveVideoExportRemovesPrivateTemporaryFiles"}
     chat_required |= {"sendReceiptPreservesPendingBytesAcrossWrongRepliesAndStorageFailure",
                       "visiblePendingMessagesStayInTheSelectedConversationUntilAcknowledged"}
     chat_required |= {"chatReplyIsPrivateAndDenialDoesNotWithdrawAssignedPolicy","cancelledQueuedChatNeverTransmitsAndDoesNotPoisonNextRequest"}
@@ -460,7 +466,8 @@ if mode=="emulator":
         "withdrawnOrUnreadableAssignmentRejectsRuntimeCommandsWithoutCrashing",
         "enrolledSignedAssignmentStartsRealTun", "enrolledControllerDeathRecoversAuthorizedCache",
         "enrolledCandidateRegressionRollsBack", "enrolledRevocationStopsNativeWithoutLocalFallback",
-        "enrolledLogoutRetiresFrozenNativeBeforeAcknowledging",
+        "enrolledLogoutRetiresFrozenNativeBeforeAcknowledging", "enrolledRejectedUpdatesRetainAuthorizedTunnel",
+        "enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun",
         "pendingPollFencesStaleGenerationAndCannotReviveLogout",
         "enrolledPendingAssignmentRetriesWhileVisible"}
     required |= {"encryptedRuntimeRetrySurvivesRestartAndConsentWithdrawalRetainsOnlyItsCursor",
@@ -854,7 +861,8 @@ ADAPTIVE_SEARCH_REQUIRED = [
 if mode=="emulator":
     assert set(ADAPTIVE_SEARCH_REQUIRED) <= set(identities), "Missing exact bounded adaptive search diagnostic outcomes"
 
-CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
+CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'confirmedCountryRequiresAPassedCountryLeafAndOneUnambiguousClass'),
+            ('io.syn443.policy.RouteCheckProfileTest',
              'sharedClosedProfilesAcceptNineValidAndRejectAllFortyThreeInvalidVectors'),
             ('io.syn443.policy.RouteCheckProfileTest',
              'ownedSortedLeavesAndCompleteWirePreserveOrderedExpressionsWithoutLeakingTargets'),
@@ -874,7 +882,8 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
              'countryAndIpLeavesKeepIndependentCapabilitiesAndCannotHideInAlternatives'),
             ('io.syn443.policy.RouteCheckPlanPolicyTest',
              'legacySignedBytesRemainOpaqueAndNullDuplicateCaseOrMixedProfileCannotDowngrade')],
- 'emulator': [('io.syn443.android.RouteCheckPlanTest', 'canceledBatchClearsEarlierSuccessfulLeafOutcomes'),
+ 'emulator': [('io.syn443.android.RouteCheckPlanTest', 'onlyFreshMatchedCountryEvidenceIsShownForTheCurrentMeasuredPath'),
+              ('io.syn443.android.RouteCheckPlanTest', 'canceledBatchClearsEarlierSuccessfulLeafOutcomes'),
               ('io.syn443.android.RouteCheckPlanTest',
                'ordinaryRequestOwnsWholeProfileAndNeverFlattensOrBorrowsMutatedInput'),
               ('io.syn443.android.RouteCheckPlanTest',
@@ -893,7 +902,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
 if mode in CHECK_PLAN_REQUIRED:
     required = set(CHECK_PLAN_REQUIRED[mode])
-    assert len(required) == (11 if mode == "policy" else 10)
+    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == {'policy': 12, 'emulator': 11}[mode]
     assert required <= set(identities), "Missing exact closed check-plan, policy or passive projection outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/policy/src/test/kotlin/io/syn443/policy" if mode == "policy" else "app/src/androidTest/kotlin/io/syn443/android"
@@ -1040,6 +1049,7 @@ SUPPORT_BUNDLE_REQUIRED = {'io.syn443.android.DiagnosticArchiveTest': ['storedAr
  'io.syn443.android.DiagnosticProjectionTest': ['knownSnapshotsProjectOnlyFixedPublicFields',
     'internetDnsProjectionExportsOnlyObservedCategories',
                                                 'nestedSecretsLabelsTargetsAndFreeTextNeverReachComponents',
+                                                'directLogResponseAndEveryArchivedEntryOmitPrivateTransportAndCrashText',
                                                 'incorrectBooleanAndNumericTypesStayUnknownRatherThanFalseOrZero',
                                                 'eventsKeepOnlyLast64OrderedAllowlistedRecords',
                                                 'routeAndCheckCollectionsExposeCountsWithoutIdentifiers',
@@ -1077,7 +1087,7 @@ SUPPORT_BUNDLE_EXTERNAL_REQUIRED = ('io.syn443.android.SupportBundleProtocolTest
 if mode == "emulator":
     required = {(owner, name) for owner, names in SUPPORT_BUNDLE_REQUIRED.items() for name in names}
     required.add(SUPPORT_BUNDLE_EXTERNAL_REQUIRED)
-    assert len(required) == 47, "Duplicate support bundle requirement"
+    assert len(required) == 48, "Duplicate support bundle requirement"
     assert required <= set(identities), "Missing exact offline support archive outcomes"
     for owner, expected in SUPPORT_BUNDLE_REQUIRED.items():
         path = root / "app/src/androidTest/kotlin/io/syn443/android" / (owner.rsplit(".", 1)[1] + ".kt")

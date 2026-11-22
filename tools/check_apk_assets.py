@@ -6,6 +6,7 @@ import zipfile
 
 # OkHttp Android 5.5.1, verified against the published AAR and the matching
 # Square tag, okhttp/src/androidMain/assets/PublicSuffixDatabase.list.
+CHAT_VIDEO_FIXTURES = ('chat-fixture.mp4', 'chat-square.mp4', 'chat-rotated.mp4')
 TEST_SUFFIX_LIST = 'assets/PublicSuffixDatabase.list'
 TEST_SUFFIX_SHA256 = 'c75ab827afd7ffff59a51b14729c25dbfc3b45237eb40ccf02bec7b7d44304a4'
 
@@ -39,9 +40,11 @@ def check(path, root):
     if instrumented:
         # Generated from the public testsrc/sine recipe on this build worker.
         # Compare the generated media with the exact bytes in the test APK.
-        fixture = root / 'app/src/androidTest/assets/chat-fixture.mp4'
-        assert fixture.is_file() and 0 < fixture.stat().st_size < 25*1024*1024
-        expected = {'assets/chat-fixture.mp4': fixture.read_bytes()}
+        expected = {}
+        for name in CHAT_VIDEO_FIXTURES:
+            fixture = root / 'app/src/androidTest/assets' / name
+            assert fixture.is_file() and 0 < fixture.stat().st_size < 25 * 1024 * 1024
+            expected['assets/' + name] = fixture.read_bytes()
     else:
         expected = expected_assets(root)
         if path.name == 'app-release-unsigned.apk':

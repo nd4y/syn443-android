@@ -62,3 +62,39 @@ class NetBirdViewControlTest(unittest.TestCase):
             with patch.object(syn443ctl.Device, "call", return_value=state), contextlib.redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(syn443ctl.main(["--serial", "usb-fixture", "capabilities"]), 0)
             self.assertEqual("netbird-cancel" in json.loads(out.getvalue())["result"]["operations"], supported)
+
+    def test_overlay_query_requires_a_supported_apk_and_closed_provider_status(self):
+        cmd = ["--serial", "usb-fixture", "overlay-status", "--provider", "tailscale"]
+        def result(raw):
+            return subprocess.CompletedProcess([], 0, raw, b"")
+        legacy = result(b"Result: null")
+        with patch("syn443ctl.subprocess.run", return_value=legacy) as run, contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(syn443ctl.main(cmd), 4)
+        self.assertEqual(run.call_count, 1)
+        self.assertIn("gettype", run.call_args.args[0])
+        self.assertEqual(json.loads(out.getvalue())["error"], "unsupported_by_device")
+        detected = result(b"Result: application/vnd.syn443.overlay-status-v1")
+        expected = {"schemaVersion": 1, "provider": "tailscale", "implementation": "not_implemented"}
+        for value, code in [(expected, 0), (dict(expected, control="connected"), 5),
+                            (dict(expected, provider="zerotier"), 5), (dict(expected, schemaVersion=True), 5),
+                            (dict(expected, private="private-fixture"), 5)]:
+            reply = result(("Result: Bundle[{ok=true, json=" + json.dumps(value) + "}]").encode())
+            with patch("syn443ctl.subprocess.run", side_effect=[detected, reply]) as run, contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(syn443ctl.main(cmd), code)
+            self.assertEqual(run.call_args.args[0][-4:], ["--method", "overlay-status", "--arg", "tailscale"])
+            self.assertNotIn("private-fixture", out.getvalue())
+            if code == 0:
+                self.assertEqual(json.loads(out.getvalue())["result"], expected)
+
+    def test_overlay_compatibility_rejects_inconsistent_current_transport(self):
+        report = dict(schemaVersion=1, provider="netbird", implementation="available",
+                      configured=True, control="connected", controlTransport="vless")
+        self.assertEqual(syn443ctl.overlay_health("netbird", report), report)
+        for bad in (dict(report, configured=False), dict(report, control="unknown"),
+                    dict(report, controlTransport="relay"), dict(report, peer="private-fixture")):
+            with self.assertRaises(syn443ctl.ControlError):
+                syn443ctl.overlay_health("netbird", bad)
+        for args in (["overlay-status"], ["vpn-start", "--provider", "netbird"], ["overlay-status", "--provider", "other"]):
+            with patch("syn443ctl.subprocess.run") as run, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(syn443ctl.main(["--serial", "usb-fixture", *args]), 2)
+            run.assert_not_called()

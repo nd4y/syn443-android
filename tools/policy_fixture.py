@@ -32,7 +32,7 @@ class Publisher:
         self.temp.cleanup()
 
     def sign(self, config, revision=1, checks=None, degraded=False, ttl=600, floor=0, epoch=0, operation='configure', key_thumbprint=None,
-             extra_capabilities=()):
+             extra_capabilities=(), decision_program=None):
         now = int(time.time() * 1000)
         engine = json.dumps(config, separators=(',', ':'), ensure_ascii=True).encode()
         payload = {'schemaVersion': 1, 'revision': revision, 'securityEpoch': epoch, 'revocationFloor': floor, 'operation': operation,
@@ -56,6 +56,20 @@ class Publisher:
             assert key_thumbprint is not None and operation == 'configure'
             assert {'route.health.v1', 'route.failover.v1'} <= set(extra_capabilities) and isinstance(config.get('route_failover'), dict)
         payload['requiredCapabilities'].extend(extra_capabilities)
+        if decision_program is not None:
+            assert key_thumbprint and isinstance(config.get('route_failover'), dict)
+            assert {'route.health.v1', 'route.failover.v1'} <= set(extra_capabilities)
+            payload['algorithmRevision'] = 'm4-confirmed-v1'
+            payload['requiredCapabilities'] += ['route.decision.v1', 'decision.bundle.v1']
+            program_bytes = json.dumps(decision_program, sort_keys=True, separators=(',', ':')).encode()
+            document = {
+                'schemaVersion': 1, 'algorithmId': payload['algorithmRevision'], 'evaluatorMin': 1, 'evaluatorMax': 1,
+                'requiredCapabilities': ['decision.bundle.v1', 'route.decision.v1'],
+                'targetDevice': payload['targetDevice'], 'keyThumbprint': key_thumbprint, 'configHash': payload['contentHash'],
+                'notBeforeMs': payload['notBeforeMs'], 'expiresMs': payload['offlineUntilMs'],
+                'program': decision_program, 'policyHash': hashlib.sha256(program_bytes).hexdigest(),
+            }
+            payload['decisionBundle'] = self.signed_document(dict(header, typ='syn443-decision+jws'), document)
         return self.signed_document(header, payload)
 
     def signed_document(self, header, payload):

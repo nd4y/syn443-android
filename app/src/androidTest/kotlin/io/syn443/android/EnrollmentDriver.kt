@@ -37,6 +37,7 @@ class EnrollmentDriver:AndroidJUnitRunner() {
         val arguments=checkNotNull(fixtureArguments)
         var stage="preflight"
         var scheduled:Bundle?=null
+        var telemetryWifiEligible:Boolean?=null
         val ok=runCatching {
             require(BuildConfig.DEBUG)
             if(android.os.Build.HARDWARE !in setOf("ranchu","goldfish")) {
@@ -85,7 +86,20 @@ class EnrollmentDriver:AndroidJUnitRunner() {
             val registered=await {it.getString("phase")=="POLICY_CACHED" && !it.getBoolean("busy")}
             stage="candidate_validated"
             check(registered.getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
-            if (arguments.getString("fixtureTelemetry") == "stopped") {
+            val telemetryMode = arguments.getString("fixtureTelemetry")
+            if (telemetryMode in setOf("stopped", "true")) {
+                require(BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+                stage = "telemetry_wifi"
+                val deadline = SystemClock.elapsedRealtime() + 60_000
+                while (runCatching {
+                    io.syn443.android.vpn.PhysicalIdentityRoute.capture(targetContext, wifiOnly = true, unmeteredOnly = true).check()
+                }.isFailure) {
+                    check(SystemClock.elapsedRealtime() < deadline)
+                    SystemClock.sleep(500)
+                }
+                telemetryWifiEligible = true
+            }
+            if (telemetryMode == "stopped") {
                 require(BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
                 stage="telemetry_connect"
                 call("connect")
@@ -97,7 +111,7 @@ class EnrollmentDriver:AndroidJUnitRunner() {
                     SystemClock.sleep(150)
                 }
                 scheduled=StoppedTelemetryFixture.optInStopAndLocateJob(targetContext) {stage=it}
-            } else if (arguments.getString("fixtureTelemetry") == "true") {
+            } else if (telemetryMode == "true") {
                 require(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
                 stage="telemetry_consent"
                 check(registered.getBoolean("telemetryAvailable") && !registered.getBoolean("telemetryEnabled"))
@@ -108,6 +122,7 @@ class EnrollmentDriver:AndroidJUnitRunner() {
         }.isSuccess
         finish(if(ok)-1 else 0,Bundle().apply {
             if(ok) scheduled?.let { putAll(it) }
+            telemetryWifiEligible?.let { putBoolean("telemetry_wifi_eligible",it) }
             putString("result",if(ok)"synthetic_enrollment_verified" else "synthetic_enrollment_failed")
             putString("stage",stage)
         })

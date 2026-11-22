@@ -61,6 +61,45 @@ class DiagnosticProjectionTest {
         assertFalse(DiagnosticArchive.create(items).manifest.getBoolean("complete"))
     }
 
+    @Test fun directLogResponseAndEveryArchivedEntryOmitPrivateTransportAndCrashText() {
+        val marker = "synthetic-log-privacy"
+        val metadata = JSONObject().put("serviceName", "$marker-grpc")
+            .put("path", "/account/$marker-path").put("url", "https://fixture.example.invalid/$marker-url")
+        val source = stateFixture().put("configRevision", "$marker-config")
+            .put("effectiveConfig", JSONObject().put("transport", metadata)).put("reason", "$marker-free-text")
+            .put("eventSequence", 71L).put("activationGeneration", 8L)
+        val rows = JSONArray()
+        for (i in 0 until 70) rows.put(JSONObject().put("sequence", i).put("phase", "Online")
+            .put("code", if (i == 69) "$marker-code" else "required_https_ok").put("serviceName", metadata))
+        source.put("events", rows)
+        val crash = exitsFixture()
+        crash.getJSONArray("exits").getJSONObject(0).put("description", "$marker-crash").put("trace", metadata)
+        val logs = DiagnosticProjection.logs(source)
+        assertEquals(setOf("generation", "networkEpoch", "activationGeneration", "eventSequence", "events"), logs.keys().asSequence().toSet())
+        val safe = logs.getJSONArray("events")
+        assertEquals(64, safe.length())
+        assertEquals(6, safe.getJSONObject(0).getInt("sequence"))
+        assertEquals("required_https_ok", safe.getJSONObject(0).getString("code"))
+        assertEquals("redacted", safe.getJSONObject(63).getString("code"))
+        assertFalse(logs.toString().contains(marker))
+        val archive = DiagnosticArchive.create(project(source, overlayFixture().put("transport", metadata), checksFixture(), crash))
+        val names = mutableSetOf<String>()
+        java.util.zip.ZipInputStream(archive.bytes.inputStream()).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                val contents = zip.readBytes().toString(Charsets.UTF_8)
+                assertTrue(names.add(entry.name))
+                assertFalse(entry.name, contents.contains(marker))
+                if (entry.name == "events.jsonl") {
+                    assertEquals(64, contents.lineSequence().count { it.isNotEmpty() })
+                    assertTrue(contents.contains("required_https_ok"))
+                }
+                zip.closeEntry()
+            }
+        }
+        assertTrue(names.containsAll(listOf("manifest.json", "events.jsonl", "crashes.json")))
+    }
+
     @Test fun nestedSecretsLabelsTargetsAndFreeTextNeverReachComponents() {
         val secret = "synthetic-private-value"
         val sensitive = JSONObject().put("password", secret).put("token", secret)

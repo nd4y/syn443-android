@@ -4,6 +4,8 @@ package io.syn443.android
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.media.MediaMetadataRetriever
 import android.media.ExifInterface
 import androidx.core.content.FileProvider
 import androidx.test.core.app.ApplicationProvider
@@ -194,10 +196,10 @@ class ChatStorageTest {
             assertEquals(file.length(),info.getLong("size"));assertEquals(37,store.chunk(info.getString("localId"),2)[0].toInt())
         }} finally {file.delete()}
     }
-    private fun videoFixture():File {
+    private fun videoFixture(asset: String = "chat-fixture.mp4"):File {
         val dir=File(context.cacheDir,"chat-test").apply {mkdirs()}
         return File(dir,"source-${ChatLimits.id()}.mp4").also {file->
-            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().context.assets.open("chat-fixture.mp4").use {input->file.outputStream().use {input.copyTo(it)}}
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().context.assets.open(asset).use {input->file.outputStream().use {input.copyTo(it)}}
         }
     }
     @Test fun chatDecoderSelectionPreservesPhysicalCodecsAndExcludesBrokenVirtualDecoder() {
@@ -230,6 +232,57 @@ class ChatStorageTest {
             }
         } finally {input.delete()}
     }
+    @Test fun chatSquareVideoFillsTheExportedFrame() = runBlocking {
+        verifyVideoGeometry("chat-square.mp4", 720, 720)
+    }
+
+    @Test fun chatRotatedSmallVideoRetainsDisplayOrientationAndSize() = runBlocking {
+        verifyVideoGeometry("chat-rotated.mp4", 240, 320)
+    }
+
+    private suspend fun verifyVideoGeometry(asset: String, width: Int, height: Int) {
+        val input = videoFixture(asset)
+        fun frameColors(retriever: MediaMetadataRetriever): List<Int> {
+            val frame = requireNotNull(retriever.getFrameAtTime(0))
+            try {
+                return listOf(4 to 4, 96 to 4, 4 to 96, 96 to 96, 63 to 63).map { (x, y) ->
+                    val pixel = frame.getPixel(x * frame.width / 100, y * frame.height / 100)
+                    val channels = listOf(Color.red(pixel), Color.green(pixel), Color.blue(pixel))
+                    val highest = channels.maxOrNull()!!
+                    assertTrue("Expected a colored region in the exported picture",
+                        channels.count { highest - it > 40 } == 2)
+                    channels.indexOf(highest)
+                }
+            } finally {
+                frame.recycle()
+            }
+        }
+        try {
+            val reference = MediaMetadataRetriever().use {
+                it.setDataSource(input.path)
+                frameColors(it)
+            }
+            assertEquals(3, reference.toSet().size)
+            val uri = FileProvider.getUriForFile(context, "io.syn443.chat.fixture", input)
+            ChatMedia.prepare(context, uri, true) {}.use { output ->
+                assertEquals("video/mp4", output.mime)
+                assertTrue(output.file.length() in 1..ChatLimits.file.toLong())
+                MediaMetadataRetriever().use { retriever ->
+                    retriever.setDataSource(output.file.path)
+                    val codedWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)!!.toInt()
+                    val codedHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)!!.toInt()
+                    val angle = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
+                    val swap = angle % 180 != 0
+                    assertEquals(width, if (swap) codedHeight else codedWidth)
+                    assertEquals(height, if (swap) codedWidth else codedHeight)
+                    assertEquals(reference, frameColors(retriever))
+                }
+            }
+        } finally {
+            input.delete()
+        }
+    }
+
     @Test fun chatCancellingActiveVideoExportRemovesPrivateTemporaryFiles()=runBlocking {
         val input=videoFixture()
         fun temporary()=context.cacheDir.listFiles().orEmpty().filter {it.name.startsWith("chat-") && (it.name.endsWith(".input") || it.name.endsWith(".output"))}.map {it.name}.toSet()

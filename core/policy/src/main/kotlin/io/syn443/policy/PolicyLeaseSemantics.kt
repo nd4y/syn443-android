@@ -1,6 +1,7 @@
 package io.syn443.policy
 
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -28,7 +29,10 @@ object PolicyLeaseSemantics {
     fun sameContent(old: Verified, next: Verified): Boolean {
         val p = old.payload
         val n = next.payload
-        return old.engineConfig == next.engineConfig && p.copy(revision = n.revision, issuedAtMs = n.issuedAtMs,
+        if (p.decisionBundle.isNotEmpty() != (old.decisionProgram != null) ||
+            n.decisionBundle.isNotEmpty() != (next.decisionProgram != null)) return false
+        return old.engineConfig == next.engineConfig && old.decisionProgram == next.decisionProgram &&
+            p.copy(decisionBundle = n.decisionBundle, revision = n.revision, issuedAtMs = n.issuedAtMs,
             notBeforeMs = n.notBeforeMs, refreshAfterMs = n.refreshAfterMs, offlineUntilMs = n.offlineUntilMs) == n
     }
 
@@ -55,7 +59,7 @@ object PolicyLeaseSemantics {
         require(roots.size in 1..4 && roots.keys.all(keyID::matches))
         val raw = verified.envelope
         require(raw.length in 1..524_288 && raw.all { it.code < 128 })
-        val parts = raw.split('.')
+        val parts = raw.split('.', limit = 4)
         require(parts.size == 3 && parts[0].length <= 1024)
         val headerText = Policy.utf8(Policy.decode64(parts[0]))
         val header = Canonical.parse(headerText).jsonObject
@@ -76,7 +80,13 @@ object PolicyLeaseSemantics {
         require(engine.size in 1..262_144 && Base64.getUrlEncoder().withoutPadding().encodeToString(engine) == verified.payload.engineConfigB64 &&
             Policy.hash(verified.engineConfig) == verified.payload.contentHash)
         val normalizedRoots = roots.toSortedMap().mapValues { (_, root) -> JsonPrimitive(normalizedRoot(root)) }
-        val semantic = JsonObject(payload.filterKeys { it !in leaseFields })
+        val semanticFields = payload.filterKeys { it !in leaseFields }.toMutableMap()
+        if (verified.payload.decisionBundle.isNotEmpty()) {
+            val program = VerifiedFailoverProgram.verify(verified.payload, roots, verified.payload.notBeforeMs)
+            require(program == verified.decisionProgram)
+            semanticFields["decisionBundle"] = JsonArray(listOf(JsonPrimitive(program.signer), JsonPrimitive(program.policyHash)))
+        } else require(verified.decisionProgram == null)
+        val semantic = JsonObject(semanticFields)
         val digest = MessageDigest.getInstance("SHA-256")
         fun put(value: String) {
             val bytes = value.toByteArray(Charsets.UTF_8)

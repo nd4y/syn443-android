@@ -6,6 +6,14 @@ case "$(adb -e shell getprop ro.hardware | tr -d '\r')" in
   *) echo 'Refusing tests outside the disposable emulator'; exit 1 ;;
 esac
 
+# Network-dependent enrollment cases require a real, non-metered Wi-Fi underlay.
+# Keep the disposable AVD on that transport across activity and process tests.
+test "${GITHUB_ACTIONS:-}" = true
+test "${SYN443_CI_AVD:-}" = syn443-ci
+test "$(adb -e emu avd name | tr -d '\r')" = $'syn443-ci\nOK'
+adb -e shell svc wifi enable
+adb -e shell svc data disable
+
 instrumentation_display=''
 restore_instrumentation_display() {
   if [ -n "$instrumentation_display" ]; then

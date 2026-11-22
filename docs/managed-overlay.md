@@ -5,6 +5,12 @@ and controller/native handoff below. This remains partial M2/M3 work: exact fina
 Actions, real managed provider enrollment and physical acceptance are required.
 It does not adopt the operator NetBird identity or activate future providers.
 
+## Read provider health
+
+On a debug device, run `syn443ctl.py --serial SERIAL overlay-status --provider netbird` for the observed control transport. The home screen and the operator command use the same freshness-checked NetBird state. A VLESS result identifies the path to the NetBird services. Peers can have different data paths; inspect their individual rows in the app or through the existing paged view.
+
+The provider query returns `not_implemented` for Tailscale and ZeroTier before opening the runtime snapshot. Older APKs that lack the query return `unsupported_by_device` through the CLI. [ADB control reference](adb-control.md)
+
 ## Identity and authority
 
 The namespace is the shared canonical SHA256 derivation from authenticated

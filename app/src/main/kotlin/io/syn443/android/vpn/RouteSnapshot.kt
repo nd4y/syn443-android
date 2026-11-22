@@ -24,6 +24,21 @@ import java.util.UUID
 object RouteSnapshot {
     internal data class FailoverCommand(val receipt:String,val checkId:String,val group:String,val previous:String,val candidate:String)
     private data class Row(val id: String,val tag: String,val type: String,val required: Boolean,val checks: JSONArray,val profile: RouteCheckProfile?,val chain: List<String>,val rules: Int)
+    private fun Row.confirmedExitClass(): String? {
+        if (profile != null) {
+            val result = checkPlans[id] ?: return null
+            if (result.optString("outcome") != "TRUE") return null
+            val leaves = result.getJSONArray("leaves")
+            val passed = (0 until leaves.length()).map { leaves.getJSONObject(it) }
+                .filter { it.getString("outcome") == "TRUE" && it.getString("code") == "ok" }
+                .map { it.getString("id") }.toSet()
+            return profile.confirmedExitClass(passed)
+        }
+        // A successful legacy batch completed every configured check on the same path.
+        return (0 until checks.length()).map { checks.getJSONObject(it) }
+            .filter { it.getString("method") == "https_exit_country" }
+            .map { it.getString("expected_exit_class") }.distinct().singleOrNull()
+    }
     private fun Row.configured() = profile != null || checks.length() > 0
     private var rows = emptyList<Row>()
     private var observations = emptyMap<String,RouteObservation>()
@@ -55,6 +70,7 @@ object RouteSnapshot {
     private fun transientDial(code:String?, observation:RouteObservation) =
         code=="dial_failed" && observation.cause in transientCauses
     private var failoverAdmission:Pair<FailoverAlgorithm,FailoverAdmission>?=null
+    private var activeFailoverProgram: io.syn443.policy.VerifiedFailoverProgram? = null
     private var failoverShadow:FailoverShadow?=null
     private var batchSequence=0L
     private var completedReceipt=""
@@ -157,7 +173,7 @@ object RouteSnapshot {
     }
 
     @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();searchScope=null;searches=emptyMap();codes=emptyMap();timings=emptyMap();durations=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();checkPlans=emptyMap();lastStarted=-60_000;activationAttempt=null
-        completedReceipt="";reserveRecovery=null;failoverAdmission=null;failoverShadow=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false;manualContext=null}
+        completedReceipt="";reserveRecovery=null;failoverAdmission=null;activeFailoverProgram=null;failoverShadow=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false;manualContext=null}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
         return rows.any {it.configured()} && SystemClock.elapsedRealtime()-lastStarted>=intervalMs
@@ -335,7 +351,7 @@ object RouteSnapshot {
     @Synchronized internal fun confirmingFailover(scope:RouteScope):Boolean=live==scope && confirmingFailure
     @Synchronized internal fun hasManagedFailover(scope:RouteScope):Boolean=live==scope && failover!=null && completedReceipt.isNotEmpty()
     @Synchronized internal fun failoverAdvice(scope:RouteScope,trackReserveFailures:Boolean=false,
-        algorithm:FailoverAlgorithm=FailoverAlgorithm.BASELINE):FailoverCommand? {
+        algorithm:FailoverAlgorithm=FailoverAlgorithm.BASELINE, program:io.syn443.policy.VerifiedFailoverProgram?=null):FailoverCommand? {
         val plan=failover ?: return null
         val receipt=completedReceipt
         if(live!=scope || current!=scope || receipt.isEmpty())return null
@@ -370,12 +386,20 @@ object RouteSnapshot {
         // A failed selector in a reduced survey needs one full comparison, but
         // does not itself count as an independent path failure.
         confirmingFailure=verdict==ProbeVerdict.CONFIRMED_PATH_FAILURE || measuredFailure && skippedMeteredReserves
+        require(program == null || algorithm == FailoverAlgorithm.CONFIRMED)
+        if (activeFailoverProgram != program) {
+            activeFailoverProgram = program
+            failoverAdmission = null
+            failoverShadow = null
+            reserveRecovery = null
+        }
         val context=failoverContext(scope,algorithm)
-        fun evaluator(version:FailoverAlgorithm) = FailoverAdmission(failoverContext(scope,version),plan.intent,plan.members.toSet(),comparison,
-            rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)},version)
+        fun evaluator(version:FailoverAlgorithm, tuning:io.syn443.policy.VerifiedFailoverProgram? = null) = FailoverAdmission(failoverContext(scope,version),plan.intent,plan.members.toSet(),comparison,
+            rows.filter {it.tag in plan.members}.associate {it.tag to (it.chain.size-1).coerceIn(0,2)},version,
+            tuning?.confirmations ?: version.confirmations, tuning?.minSwitchIntervalMs ?: version.switchIntervalMs)
         val compare=algorithm==FailoverAlgorithm.CONFIRMED && !trackReserveFailures
         if (!compare) failoverShadow=null
-        val admission=failoverAdmission?.takeIf {it.first==algorithm}?.second ?: evaluator(algorithm).also {
+        val admission=failoverAdmission?.takeIf {it.first==algorithm}?.second ?: evaluator(algorithm,program).also {
             failoverAdmission=algorithm to it
             if (compare) failoverShadow=FailoverShadow(failoverContext(scope,FailoverAlgorithm.BASELINE),
                 evaluator(FailoverAlgorithm.BASELINE))
@@ -420,6 +444,13 @@ object RouteSnapshot {
                 .also {value->
                     if (currentSnapshot && state == RouteState.WORKING && row.id !in queued) {
                         durations[row.id]?.summary(now)?.let { value.put("durationDistribution", it) }
+                        if (sample != null && (measuredPaths[row.id]?.length() ?: 0) > 0) {
+                            val remaining = RouteEvidence.DEFAULT_TTL_MS - (now - sample.elapsedMs)
+                            if (remaining > 0) row.confirmedExitClass()?.let { exitClass ->
+                                value.put("verifiedExit", JSONObject().put("class", exitClass)
+                                    .put("source", "https_exit_country").put("validForMs", remaining))
+                            }
+                        }
                     }
                     if (state == RouteState.FAILED && scope == live && row.id !in queued) {
                         sample?.cause?.let { value.put("cause", it.wire) }

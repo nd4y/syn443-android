@@ -13,6 +13,9 @@ class RouteCheckProfile private constructor(
     private data class Leaf(val id: String, val method: String, val exit: String, val check: String)
     fun wireJson(): String = encoded
     fun leafIDs(): List<String> = leaves.map { it.id }
+    fun confirmedExitClass(passed: Set<String>): String? = leaves
+        .filter { it.method == "https_exit_country" && it.id in passed }
+        .map { it.exit }.distinct().singleOrNull()
     fun methods(): Set<String> = leaves.map { it.method }.toSet()
     fun requireIntent(intent: String) {
         require(intent in setOf("RU", "NON_RU", "INTERNAL"))

@@ -22,7 +22,14 @@ class RouteProxy(socketserver.BaseRequestHandler):
         line=stream.readline(4096);Proxy.headers(stream)
         if line.startswith(b'CONNECT 203.0.113.10:80 '):
             self.request.sendall(b'HTTP/1.1 200 Connection established\r\n\r\n')
-            if stream.readline(4096).startswith(b'GET /generate_204 '):
+            request = stream.readline(4096)
+            if request.startswith(b'GET /syn443-payload '):
+                received = getattr(self.server, 'payload_received', None)
+                Proxy.headers(stream)
+                if received is not None:
+                    received.set()
+                    self.request.sendall(b'HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+            elif request.startswith(b'GET /generate_204 '):
                 Proxy.headers(stream)
                 self.request.sendall(b'HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n' if self.server.health_ok else b'HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\n\r\n')
                 self.server.progress+=1

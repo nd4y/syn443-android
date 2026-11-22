@@ -364,8 +364,7 @@ internal fun VpnStatusSummary(status: JSONObject, available: Boolean?, accountPo
         phase in setOf("Online", "Degraded", "Recovering")) {
         val overlay = status.optJSONObject("netbird")
         if (overlay?.opt("configuredInRunningProfile") == true) {
-            val summary = NetBirdConnectionState.entries.firstOrNull { it.name == overlay.opt("connectionState") }
-                ?: NetBirdConnectionState.UNKNOWN
+            val summary = OverlayProviderHealth.netBirdState(overlay)
             Text(summary.label, Modifier.testTag("vpn-netbird-summary").semantics { liveRegion = LiveRegionMode.Polite })
         }
     }

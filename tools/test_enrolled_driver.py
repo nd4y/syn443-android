@@ -1,7 +1,36 @@
 import copy
 import unittest
 from unittest.mock import patch
-from run_enrolled_vpn import stopped_rollback_recovered, failure_summary
+from run_enrolled_vpn import stopped_rollback_recovered, failure_summary, logout, committed_online
+from run_vpn_process_faults import ControlUnavailable
+
+
+class SignedPolicyReadinessTest(unittest.TestCase):
+    def test_online_during_publication_is_incomplete_until_the_engine_and_revision_match(self):
+        online = {'phase': 'Online', 'engineActive': True}
+        for partial in (None, {}, {'phase': 'committed'}, {'phase': 'committed', 'activeRevision': 1},
+                        {'phase': 'preparing', 'activeRevision': 2}):
+            self.assertFalse(committed_online(dict(online, policy=partial), 2))
+        ready = dict(online, policy={'phase': 'committed', 'activeRevision': 2})
+        self.assertTrue(committed_online(ready, 2))
+        self.assertFalse(committed_online(dict(ready, engineActive=False), 2))
+
+
+class FreshInstallReadinessTest(unittest.TestCase):
+    def test_startup_polls_only_reads_and_uses_one_final_signed_out_snapshot(self):
+        with patch('run_vpn_process_faults.time.sleep'), patch('run_enrolled_vpn.vpn_stopped', return_value=True), patch('run_enrolled_vpn.call') as invoke:
+            invoke.side_effect = [ControlUnavailable(), {'phase': 'SIGNED_OUT'}, {},
+                                  {'phase': 'SIGNED_OUT', 'busy': True}, {'phase': 'SIGNED_OUT', 'busy': False}]
+            logout(fresh_install=True)
+        self.assertEqual([args.args[0] for args in invoke.call_args_list],
+                         ['auth-status', 'auth-status', 'auth-cancel', 'auth-status', 'auth-status'])
+
+    def test_lost_cancel_acknowledgement_is_never_replayed(self):
+        with patch('run_enrolled_vpn.call') as invoke:
+            invoke.side_effect = [{'phase': 'SIGNED_OUT'}, ControlUnavailable()]
+            with self.assertRaises(ControlUnavailable):
+                logout(fresh_install=True)
+        self.assertEqual([args.args[0] for args in invoke.call_args_list], ['auth-status', 'auth-cancel'])
 
 
 class StoppedControllerRecoveryTest(unittest.TestCase):

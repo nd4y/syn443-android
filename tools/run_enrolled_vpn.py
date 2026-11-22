@@ -24,15 +24,50 @@ def stopped_rollback_recovered(controller,generation):
         state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
         not call('auth-status')['busy'])
 
-def upgrade_directory(system_installer):
+def exchange_through_proxy(proxy):
+    # Keep the client half-open while the application UID reads the reply.
+    # A pipe directly into toybox nc can close its input before the peer responds.
+    proxy.payload_received = threading.Event()
+    try:
+        command = (r"(printf 'GET /syn443-payload HTTP/1.1\r\nHost: fixture.invalid\r\n"
+                   r"Connection: close\r\n\r\n'; sleep 3) | run-as " + PACKAGE +
+                   " toybox nc -w 5 203.0.113.10 80")
+        response = adb('shell', '-T', command, timeout=12)
+        confirmed = proxy.payload_received.wait(1)
+        status = re.match(rb'HTTP/1\.1 ([0-9]{3}) ', response)
+        if not confirmed or status is None or status[1] != b'204':
+            raise AssertionError('Application payload: expected proxy received=%s, HTTP status=%s' %
+                                 (confirmed, status[1].decode() if status else 'absent'))
+    finally:
+        proxy.payload_received = None
+
+
+def logout(fresh_install=False):
+    if fresh_install:
+        # Package installation can return before its provider can answer. Only poll a read.
+        await_condition(lambda: bool(call('auth-status').get('phase')), 40)
+    call('auth-cancel')
+
+    def signed_out():
+        if not vpn_stopped():
+            return False
+        snapshot = call('auth-status')
+        return snapshot.get('phase') == 'SIGNED_OUT' and snapshot.get('busy') is False
+
+    await_condition(signed_out, 40)
+
+
+def upgrade_directory(system_installer=False, historical=False):
+    if historical:
+        return Path(os.environ['RUNNER_TEMP']) / 'historical-upgrade'
     return Path(os.environ['RUNNER_TEMP']) / ('syn443-installer-private' if system_installer else 'upgrade-fixture')
 
 
-def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=False):
+def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=False, historical=False):
     if (os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('SYN443_CI_AVD') != 'syn443-ci'
             or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']):
         raise ValueError('This APK upgrade requires the disposable CI emulator')
-    directory = upgrade_directory(system_installer)
+    directory = upgrade_directory(system_installer, historical)
     receipt = json.loads((directory / 'upgrade.json').read_bytes())
 
     def installed_version():
@@ -48,6 +83,8 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=Fal
     assert len(original) == 1 and fixture.registrations == 1
     assert installed_version() == receipt['previous']
     assert call('status')['policy']['activeRevision'] == 1
+    if historical:
+        exchange_through_proxy(proxy)
     call('disconnect')
     await_condition(vpn_stopped)
     before = call('status')
@@ -59,7 +96,7 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=Fal
         assert vpn_stopped() and call('status')['generation'] == before['generation']
         assert call('status')['policy']['activeRevision'] == 1
     response = adb('install', '-r', str(directory / 'new-debug.apk'), timeout=120)
-    assert b'Success' in response.splitlines() and installed_version() == receipt['previous'] + 1
+    assert b'Success' in response.splitlines() and installed_version() == receipt['following'] > receipt['previous']
     adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
     def restored_off():
         state = call('status')
@@ -80,6 +117,145 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=Fal
                     call('status')['policy'].get('phase') == 'committed' and proxy.progress > progress)
     assert binding() == original and fixture.registrations == 1
     assert call('status')['policy']['activeRevision'] == 2 and call('auth-status')['generation'] == auth_generation
+    if historical:
+        exchange_through_proxy(proxy)
+
+
+def committed_online(status, revision):
+    policy = status.get('policy')
+    return (status.get('phase') == 'Online' and status.get('engineActive') is True and
+            isinstance(policy, dict) and policy.get('activeRevision') == revision and
+            policy.get('phase') == 'committed')
+
+
+def signed_program_failover(fixture, primary, generation):
+    reserve = Server(('127.0.0.1', 0), RouteProxy)
+    reserve.ssh_ok, reserve.health_ok, reserve.delay, reserve.route_probes = True, True, 0, 0
+    port = reserve.server_address[1]
+    threading.Thread(target=reserve.serve_forever, daemon=True).start()
+    try:
+        adb('reverse', 'tcp:'+str(port), 'tcp:'+str(port))
+        route = copy.deepcopy(fixture.config)
+        preferred = route['outbounds'][0]['tag']
+        members = [preferred, 'reserve']
+        route['outbounds'] += [dict(route['outbounds'][0], tag='reserve', server_port=port),
+            {'type':'selector', 'tag':'internal', 'outbounds':members, 'interrupt_exist_connections':False}]
+        route['route']['rules'] = [{'ip_cidr':['192.0.2.9/32','203.0.113.10/32'], 'action':'route', 'outbound':'internal'}]
+        route['route_checks'] = [{'outbound':tag,'required':tag=='internal',
+            'checks':[{'method':'ssh_banner','target':'192.0.2.9:22'}]} for tag in ['internal',*members]]
+        route['route_failover'] = {'selector':'internal','network_mode':'wifi','intent':'INTERNAL','members':members}
+        fixture.extra_capabilities = ('route.health.v1','route.failover.v1')
+        fixture.decision_program = {'revision':7,'confirmations':4,'minSwitchIntervalMs':120000}
+        fixture.config = route
+        fixture.revision = 2
+        call('policy-refresh')
+        def active():
+            return committed_online(call('status'), 2)
+        def measured(member):
+            rows = call('routes-status')['routes']
+            by_tag = {row['label']:row for row in rows}
+            if member not in by_tag or 'internal' not in by_tag:
+                return False
+            group = by_tag['internal']
+            return group.get('state') == 'working' and group.get('measuredPath') == [group['id'], by_tag[member]['id']]
+        await_condition(lambda: active() and measured(preferred), 100)
+        exchange_through_proxy(primary)
+        original = pid(':engine')
+        activation = call('status')['policy']['activationGeneration']
+        assert original and fixture.registrations==1
+        thumb, = fixture.sessions
+        original_device = fixture.sessions[thumb]['deviceId']
+        before = reserve.route_probes
+        primary.ssh_ok = False
+        # No check or switch command is issued after the outage.
+        await_condition(lambda: measured('reserve'), 240)
+        assert reserve.route_probes >= before+4, 'Reserve lacked a successful comparator for four batches'
+        exchange_through_proxy(reserve)
+        assert active() and pid(':engine')==original and call('status')['policy']['activationGeneration']==activation
+        assert call('auth-status')['generation']==generation and fixture.registrations==1 and fixture.sessions[thumb]['deviceId']==original_device
+    finally:
+        primary.ssh_ok = True
+        try:
+            adb('reverse','--remove','tcp:'+str(port))
+        finally:
+            reserve.shutdown()
+            reserve.server_close()
+
+
+def check_rejected_policies(fixture, proxy, generation):
+    """Deliver each negative AC06 example over the normal, authenticated policy endpoint."""
+    from policy_fixture import b64
+
+    def committed(revision):
+        return committed_online(call('status'), revision)
+
+    def refresh_until(observed):
+        # Foreground reconciliation admits forced requests at a bounded rate.
+        last_request = None
+        def ready():
+            nonlocal last_request
+            if observed():
+                return True
+            now = time.monotonic()
+            if last_request is None or now - last_request >= 7:
+                call('policy-refresh')
+                last_request = now
+            return False
+        await_condition(ready, 75)
+
+    thumb, = fixture.sessions
+    device = fixture.sessions[thumb]['deviceId']
+    first = fixture.envelopes[(thumb, 1)]
+    fixture.revision = 2
+    refresh_until(lambda: committed(2))
+    engine = pid(':engine')
+    activation = call('status')['policy']['activationGeneration']
+    assert engine
+
+    next_policy = fixture.publisher.sign(fixture.config, revision=3, key_thumbprint=thumb)
+    header_text, payload_text, signature = next_policy.split('.')
+    header = json.loads(decode(header_text))
+    payload = json.loads(decode(payload_text))
+    damaged = bytearray(decode(signature))
+    damaged[0] ^= 1
+    invalid_signature = '.'.join([header_text, payload_text, b64(damaged)])
+    other_device = dict(payload, targetDevice='different-synthetic-recipient')
+    unsupported = dict(payload, requiredCapabilities=payload['requiredCapabilities'] + ['future.fixture.v1'])
+    examples = [invalid_signature, fixture.publisher.signed_document(header, other_device),
+                first, fixture.publisher.signed_document(header, unsupported)]
+
+    # A valid outer signature cannot retarget the separately signed decision program.
+    comparison = dict(fixture.config, route_failover={})
+    with_program = fixture.publisher.sign(comparison, revision=3, key_thumbprint=thumb,
+        extra_capabilities=('route.health.v1', 'route.failover.v1'),
+        decision_program={'revision': 7, 'confirmations': 4, 'minSwitchIntervalMs': 120000})
+    nested_policy = json.loads(decode(with_program.split('.')[1]))
+    inner_header, inner_body, _ = nested_policy['decisionBundle'].split('.')
+    foreign = dict(json.loads(decode(inner_body)), targetDevice='different-synthetic-recipient')
+    nested_policy['decisionBundle'] = fixture.publisher.signed_document(json.loads(decode(inner_header)), foreign)
+    examples.append(fixture.publisher.signed_document(header, nested_policy))
+
+    # The current policy remains valid for the whole exercise. Each example is
+    # served to this session, and a new successful proxy exchange must follow it.
+    fixture.policy_example = examples[0]
+    fixture.revision = 3
+    for example in examples:
+        deliveries = fixture.example_deliveries.get(example, 0)
+        fixture.policy_example = example
+        refresh_until(lambda: fixture.example_deliveries.get(example, 0) > deliveries and not call('auth-status')['busy'])
+        assert committed(2)
+        received_before = proxy.progress
+        await_condition(lambda: proxy.progress > received_before, 100)
+        assert committed(2) and pid(':engine') == engine
+        assert call('status')['policy']['activationGeneration'] == activation
+        assert fixture.registrations == 1 and set(fixture.sessions) == {thumb}
+        assert fixture.sessions[thumb]['deviceId'] == device and call('auth-status')['generation'] == generation
+        assert (thumb, 3) not in fixture.activation_reports
+
+    fixture.policy_example = None
+    refresh_until(lambda: committed(3))
+    assert fixture.registrations == 1 and fixture.sessions[thumb]['deviceId'] == device
+    assert call('auth-status')['generation'] == generation
 
 
 def failure_summary():
@@ -96,6 +272,7 @@ def failure_summary():
         'engineStateKnown':observed_bool('engineStateKnown'),'offPhase':state.get('phase')=='Off',
         'intentGeneration':state.get('generation') if type(state.get('generation')) is int else None,
         'policy':safe_policy,'authBusy':auth.get('busy') is True,
+        'telemetryAvailable':auth.get('telemetryAvailable') is True,'telemetryConsent':auth.get('telemetryEnabled') is True,
         'controllerPresent':bool(pid(':controller')),'nativePresent':bool(pid(':engine'))}
 
 def main():
@@ -103,18 +280,19 @@ def main():
     assert PACKAGE+'.test/io.syn443.android.EnrollmentDriver' in adb('shell','pm','list','instrumentation').decode(),'Test APK enrollment driver is not installed'
     suite=ET.Element('testsuite',name='SYN443 enrolled native VPN')
     args=sys.argv[1:]
-    if args not in ([], ['--system-installer']):
+    if args not in ([], ['--system-installer'], ['--historical']):
         raise ValueError('Unexpected enrollment scenario')
-    installer_only=bool(args)
+    installer_only=args==['--system-installer']
+    historical=args==['--historical']
     out=(Path(os.environ['RUNNER_TEMP'])/'syn443-installer-private'/'result.xml' if installer_only
          else ROOT/'app/build/outputs/androidTest-results/external/TEST-enrolled-vpn.xml')
+    if historical:
+        out=upgrade_directory(historical=True)/'result.xml'
     proxy=Server(('127.0.0.1',0),RouteProxy);threading.Thread(target=proxy.serve_forever,daemon=True).start()
     proxy.ssh_ok=True;proxy.delay=0;proxy.health_ok=True;proxy.route_probes=0
     port=proxy.server_address[1];adb('reverse','tcp:'+str(port),'tcp:'+str(port))
     config={'outbounds':[{'type':'http','tag':'enrolled-proxy','server':'127.0.0.1','server_port':port}], 'route':{'final':'enrolled-proxy'}}
     fixture=None
-    def logout():
-        call('auth-cancel');await_condition(lambda:vpn_stopped() and call('auth-status').get('phase')=='SIGNED_OUT' and not call('auth-status').get('busy'),40)
     def close_fixture():
         nonlocal fixture
         if fixture:
@@ -130,7 +308,8 @@ def main():
             envelope=(directory/'syn443-update.txt').read_text(encoding='ascii')
             device=json.loads(decode(envelope.split('.')[1]))['scope']['deviceId']
             assert b'Success' in adb('install','-r',str(directory/'installer-base.apk'),timeout=120).splitlines()
-        logout();close_fixture();call('policy-test-reset');call('test-reset')
+        logout(fresh_install=historical or installer)
+        close_fixture();call('policy-test-reset');call('test-reset')
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
         # Keep the assignment valid for the first periodic job while the access token rotates.
@@ -145,7 +324,7 @@ def main():
         before=proxy.progress
         driver=subprocess.run(['adb','-e','shell','am','instrument','-w','-e','fixturePort',str(fixture_port),'-e','fixtureCa',fixture.ca,
             *(['-e','fixtureTelemetry','stopped' if telemetry=='stopped' else 'true'] if telemetry else []),
-            PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=150 if telemetry=='stopped' else 75)
+            PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=(150 if telemetry=='stopped' else 75) + (60 if telemetry else 0))
         result=driver.stdout.decode()
         if driver.returncode or 'synthetic_enrollment_verified' not in result or 'INSTRUMENTATION_CODE: -1' not in result:
             stage=re.search(r'INSTRUMENTATION_RESULT: stage=([a-z_]{1,40})',result)
@@ -159,15 +338,19 @@ def main():
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')
         before=proxy.progress;call('connect')
         await_condition(lambda:call('status').get('phase')=='Online' and call('status').get('policy',{}).get('phase')=='committed' and proxy.progress>before)
+        return result
     names=['enrolledPendingAssignmentRetriesWhileVisible','enrolledSignedAssignmentStartsRealTun','enrolledControllerDeathRecoversAuthorizedCache',
            'enrolledCandidateRegressionRollsBack','enrolledRevocationStopsNativeWithoutLocalFallback',
            'enrolledLogoutRetiresFrozenNativeBeforeAcknowledging',
            'enrolledAssignedRoutesCommitWithOptionalFailure',
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
            'enrolledStopFencesPendingCandidateRouteSuccess','enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn',
+           'enrolledRejectedUpdatesRetainAuthorizedTunnel', 'enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun',
            'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
     if installer_only:
         names=['enrolledSystemInstallerCancelKeepsBoundPolicy']
+    elif historical:
+        names=['enrolledHistoricalUpgradeKeepsOriginalBindingAndPayload']
     def observed_report(revision,outcome,selected):
         return any(r['policyRevision']==revision and r['outcome']==outcome and r['activePolicyRevision']==selected
                    for r in list(fixture.activation_reports.values()))
@@ -197,8 +380,19 @@ def main():
                     before=proxy.progress
                     await_condition(lambda:call('auth-status').get('generation')==generation and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert fixture.registrations==1
+                elif name=='enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun':
+                    signed_program_failover(fixture, proxy, generation)
+                elif name=='enrolledRejectedUpdatesRetainAuthorizedTunnel':
+                    check_rejected_policies(fixture, proxy, generation)
                 elif name=='enrolledCandidateRegressionRollsBack':
-                    await_condition(lambda:bool(fixture.telemetry_receipts),330)
+                    try:
+                        await_condition(lambda:bool(fixture.telemetry_receipts),330)
+                    except Exception:
+                        # Synthetic-only flags and counters; no network, identity or event data.
+                        print('First telemetry receipt observation:', {
+                            'eligibleWifiAtConsent':'telemetry_wifi_eligible=true' in driver_result,
+                            'httpRequests':fixture.telemetry_requests,'acknowledged':len(fixture.telemetry_receipts)},flush=True)
+                        raise
                     first_received=fixture.telemetry_receipts[0][0]
                     assert all(('policy','rolled_back') not in events for _,events in fixture.telemetry_receipts)
                     broken=copy.deepcopy(config);broken['outbounds'][0]['server_port']=1;fixture.config=broken;fixture.revision=2
@@ -289,8 +483,8 @@ def main():
                     assert len(fixture.sessions)==1 and next(iter(fixture.sessions.values()))['generation']>0
                     assert vpn_stopped() and call('status')['generation']==stopped
                     assert fixture.registrations==1 and call('auth-status')['generation']==generation
-                elif name in ('enrolledVersionUpgradeRetainsBindingPolicyAndRealTun','enrolledSystemInstallerCancelKeepsBoundPolicy'):
-                    check_enrolled_upgrade(fixture, proxy, generation, system_installer=installer_only)
+                elif name in ('enrolledVersionUpgradeRetainsBindingPolicyAndRealTun','enrolledSystemInstallerCancelKeepsBoundPolicy','enrolledHistoricalUpgradeKeepsOriginalBindingAndPayload'):
+                    check_enrolled_upgrade(fixture, proxy, generation, system_installer=installer_only, historical=historical)
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
                     fixture.policy_status=403;call('policy-refresh')
                     await_condition(lambda:call('auth-status').get('phase')=='NEEDS_REAUTH' and

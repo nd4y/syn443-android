@@ -859,7 +859,9 @@
         "app/src/androidTest/kotlin/io/syn443/android/NetBirdReportTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/NetBirdPagingUiTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/NetBirdProfileStateTest.kt",
-        "docs/implementation-status.md#common-probe-failure-and-netbird-status"
+        "docs/implementation-status.md#common-probe-failure-and-netbird-status",
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlayProviderHealth.kt",
+        "docs/adb-control.md"
       ]
     },
     {
@@ -1313,8 +1315,12 @@
     {
       "id": "ALG-20",
       "text": "Происхождение страны/класса exit хранится с источником и сроком. Подтверждение делает назначенный exit probe или доверенная актуальная информация провайдера по политике. Entry GeoIP, имя профиля, emoji флага и доступность одного сайта не считаются достаточной независимой проверкой exit.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/exit-country-probe.md",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteCheckPlanTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSnapshotTest.kt"
+      ]
     },
     {
       "id": "ALG-21",
@@ -3001,8 +3007,13 @@
     {
       "id": "AC06",
       "specRow": " Неверная подпись, чужой адресат, replay, несовместимая capability | Кандидат не активируется, предыдущая разрешённая версия работает |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "tools/run_policy_activation.py",
+        "tools/run_enrolled_vpn.py",
+        "tools/check_test_evidence.py"
+      ],
+      "remainingScope": "The enrolled emulator scenario serves four invalid or stale policy responses to an active session, checks subsequent proxy traffic and then issues a valid revision. Protected three-API evidence and the physical acceptance boundary are recorded separately."
     },
     {
       "id": "AC07",
@@ -3242,8 +3253,12 @@
     {
       "id": "AC42",
       "specRow": " Запросы на planned panel/overlay типы и неподдержанную цепочку | Структурированный not_implemented/unsupported, нет upstream запроса, бинарника или ложного Connected; реальная интеграция x-ui/3x-ui/Tailscale/ZeroTier не требуется |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlayProviderHealth.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/NetBirdProfileStateTest.kt",
+        "docs/adb-control.md"
+      ]
     },
     {
       "id": "AC43",

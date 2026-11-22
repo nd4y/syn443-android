@@ -97,17 +97,30 @@ object DiagnosticProjection {
             value.put("routeHealth", safe)
         }
     }
-    private fun events(source: JSONObject): DiagnosticArchive.Component {
-        val input = source.opt("events") as? JSONArray ?: return missing(DiagnosticArchive.Name.EVENTS)
-        val output = StringBuilder()
+    internal fun logs(source: JSONObject): JSONObject = JSONObject().also { result ->
+        numbers(source, result, "generation", "networkEpoch", "activationGeneration", "eventSequence")
+        result.put("events", logRows(source) ?: JSONArray())
+    }
+
+    private fun logRows(source: JSONObject): JSONArray? {
+        val input = source.opt("events") as? JSONArray ?: return null
+        val output = JSONArray()
         for (index in (input.length() - MAX_ROWS).coerceAtLeast(0) until input.length()) {
             val row = input.opt(index) as? JSONObject ?: continue
             val phase = known(row, "phase", phases) ?: continue
             val safe = JSONObject().put("phase", phase).put("code", known(row, "code", eventCodes) ?: "redacted")
             numbers(row, safe, "at", "elapsed", "sequence", "intentGeneration", "networkEpoch")
-            output.append(safe.toString()).append('\n')
+            output.put(safe)
         }
-        return bytes(DiagnosticArchive.Name.EVENTS, output.toString().toByteArray(Charsets.UTF_8))
+        return output
+    }
+
+    private fun events(source: JSONObject): DiagnosticArchive.Component {
+        val rows = logRows(source) ?: return missing(DiagnosticArchive.Name.EVENTS)
+        val output = buildString {
+            for (index in 0 until rows.length()) append(rows.getJSONObject(index)).append('\n')
+        }
+        return bytes(DiagnosticArchive.Name.EVENTS, output.toByteArray(Charsets.UTF_8))
     }
     private fun checkProjection(source: JSONObject): JSONObject = checkBatch(source).also { value ->
         source.optJSONObject("internet")?.let(::checkBatch)?.takeIf { it.length()>1 }?.let { value.put("internet",it) }

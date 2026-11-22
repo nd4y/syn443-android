@@ -169,6 +169,48 @@ class PolicyTest {
         invalid { verify(sign(candidate.copy(schemaVersion=1,keyThumbprint="",
             requiredCapabilities=candidate.requiredCapabilities-"policy.keybound.v2"))) }
     }
+    @Test fun independentProgramIsBoundToTheLeaseAndItsSemanticHashSurvivesRenewal() {
+        val engine = """{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"},"route_failover":{}}"""
+        val base = payload().let { it.copy(schemaVersion = 2, keyThumbprint = enc(ByteArray(32) { 9 }),
+            algorithmRevision = Policy.CONFIRMED_ALGORITHM, engineConfigB64 = enc(engine.toByteArray()),
+            contentHash = Policy.hash(engine), requiredCapabilities = it.requiredCapabilities + listOf(
+                "policy.keybound.v2", "route.health.v1", "route.failover.v1", Policy.ROUTE_DECISION, Policy.DECISION_BUNDLE)) }
+        fun program(policy: Payload, count: Int = 4, mutate: (JsonObject) -> JsonObject = { it }): String {
+            val body = buildJsonObject { put("revision", 7); put("confirmations", count); put("minSwitchIntervalMs", 120000) }
+            val document = buildJsonObject {
+                put("schemaVersion", 1); put("algorithmId", Policy.CONFIRMED_ALGORITHM); put("evaluatorMin", 1); put("evaluatorMax", 1)
+                put("requiredCapabilities", buildJsonArray { add(Policy.DECISION_BUNDLE); add(Policy.ROUTE_DECISION) })
+                put("targetDevice", policy.targetDevice); put("keyThumbprint", policy.keyThumbprint); put("configHash", policy.contentHash)
+                put("notBeforeMs", policy.notBeforeMs); put("expiresMs", policy.offlineUntilMs)
+                put("policyHash", Policy.hash(Canonical.encode(body))); put("program", body)
+            }
+            return signText(Canonical.encode(mutate(document)), """{"alg":"ES256","kid":"test-root","typ":"syn443-decision+jws"}""")
+        }
+        val first = verify(sign(base.copy(decisionBundle = program(base))))
+        assertEquals(4, first.decisionProgram!!.confirmations)
+        val lease = base.copy(revision = 2, offlineUntilMs = base.offlineUntilMs + 1000)
+        val renewed = verify(sign(lease.copy(decisionBundle = program(lease))))
+        assertTrue(PolicyLeaseSemantics.sameContent(first, renewed))
+        assertFalse(PolicyLeaseSemantics.sameContent(first.copy(decisionProgram = null), renewed))
+        val anchor = "a".repeat(64)
+        assertEquals(PolicyLeaseSemantics.authority(first, roots, anchor, anchor), PolicyLeaseSemantics.authority(renewed, roots, anchor, anchor))
+        val rejected = Policy.rollback(Policy.stage(Journal(), first), 1, "activation_failed")
+        invalid { Policy.stage(rejected, renewed) }
+        val changed = verify(sign(lease.copy(decisionBundle = program(lease, 5))))
+        assertFalse(PolicyLeaseSemantics.sameContent(first, changed))
+        assertEquals("prepared", Policy.stage(rejected, changed).phase)
+        invalid { verify(sign(lease.copy(decisionBundle = program(base)))) }
+        invalid { verify(sign(base.copy(decisionBundle = program(base, 2)))) }
+        invalid { verify(sign(base.copy(decisionBundle = sign()))) }
+        invalid { verify(sign(base)) }
+        for ((key, value) in mapOf("targetDevice" to JsonPrimitive("other-device"), "keyThumbprint" to JsonPrimitive(enc(ByteArray(32))),
+            "configHash" to JsonPrimitive(anchor), "policyHash" to JsonPrimitive(anchor), "evaluatorMax" to JsonPrimitive(2),
+            "expiresMs" to JsonPrimitive(base.offlineUntilMs + 1), "unexpected" to JsonPrimitive(true))) {
+            val altered = program(base) { JsonObject(it + (key to value)) }
+            invalid { verify(sign(base.copy(decisionBundle = altered))) }
+        }
+    }
+
     @Test fun decisionRevisionMustMatchKeyBoundFailoverCapability() {
         val base = payload()
         val engine = """{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"},"route_failover":{}}"""

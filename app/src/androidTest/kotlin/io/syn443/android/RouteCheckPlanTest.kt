@@ -45,6 +45,46 @@ class RouteCheckPlanTest {
         .put("results",JSONArray().put(JSONObject().put("id","route-1").put("complete",ok).put("ok",ok).put("code",if(ok)"ok" else "cancelled")
             .put("elapsedMs",5).put("sampledElapsedMs",SystemClock.elapsedRealtime()).put("path",JSONArray().put("route-1")).put("checkPlan",plan))).toString()
 
+    @Test fun onlyFreshMatchedCountryEvidenceIsShownForTheCurrentMeasuredPath() {
+        val value = config()
+        val plan = row(value).getJSONObject("profile")
+        plan.getJSONArray("leaves").getJSONObject(1).put("check", JSONObject()
+            .put("method", "https_exit_country").put("target", "https://country.example.invalid/")
+            .put("expected_exit_class", "NON_RU"))
+        plan.put("gates", JSONArray().put("b")).put("stages", JSONArray().put(JSONObject().put("leaf", "a")))
+        val scope = configure(value)
+        fun snapshot(at: Long) = JSONObject().put("routeHealth", RouteSnapshot.readAt(true, true, scope, at))
+        val pending = JSONObject(requireNotNull(RouteSnapshot.request(scope)))
+        val skipped = JSONObject(report(pending))
+        assertTrue(RouteSnapshot.update(scope, skipped.toString()))
+        assertFalse(view(scope).has("verifiedExit"))
+
+        val request = JSONObject(requireNotNull(RouteSnapshot.request(scope, force = true)))
+        val proof = diagnostic()
+        proof.getJSONArray("leaves").getJSONObject(1).put("outcome", "TRUE").put("code", "ok")
+        val response = JSONObject(report(request, plan = proof))
+        val at = response.getJSONArray("results").getJSONObject(0).getLong("sampledElapsedMs")
+        assertTrue(RouteSnapshot.update(scope, response.toString()))
+        val current = snapshot(at)
+        val observed = current.getJSONObject("routeHealth").getJSONArray("routes").getJSONObject(0).getJSONObject("verifiedExit")
+        assertEquals(setOf("class", "source", "validForMs"), observed.keys().asSequence().toSet())
+        assertEquals("NON_RU", observed.getString("class"))
+        assertEquals("https_exit_country", observed.getString("source"))
+        assertEquals(io.syn443.recovery.RouteEvidence.DEFAULT_TTL_MS, observed.getLong("validForMs"))
+        assertFalse(current.toString().contains("country.example.invalid"))
+
+        val model = mutableStateOf(current)
+        compose.setContent { MaterialTheme { RouteControls(model.value) { _, _ -> error("read-only") } } }
+        val label = compose.onNodeWithTag("route-1-verified-exit")
+        label.assertTextEquals("Выход: вне России · подтверждён HTTPS-проверкой · ещё 120 с")
+        compose.runOnIdle { model.value = snapshot(at + 119_500) }
+        label.assertTextEquals("Выход: вне России · подтверждён HTTPS-проверкой · ещё 1 с")
+        compose.runOnIdle { model.value = snapshot(at + 120_001) }
+        label.assertDoesNotExist()
+        assertFalse(RouteSnapshot.read(true, false, scope).getJSONArray("routes").getJSONObject(0).has("verifiedExit"))
+        assertFalse(RouteSnapshot.read(true, true, scope.copy(network = 8)).getJSONArray("routes").getJSONObject(0).has("verifiedExit"))
+    }
+
     @Test fun canceledBatchClearsEarlierSuccessfulLeafOutcomes() {
         val scope = configure()
         val first = JSONObject(checkNotNull(RouteSnapshot.request(scope)))

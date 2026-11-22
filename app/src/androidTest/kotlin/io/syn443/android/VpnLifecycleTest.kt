@@ -340,7 +340,10 @@ class VpnLifecycleTest {
         assertEquals(native, pid())
         assertEquals("Online", status().optString("phase"))
         assertTrue(tunnels.get() >= 2)
-        assertFalse(context.contentResolver.call(uri, "logs", null, null)!!.getString("json")!!.contains("peer_state"))
+        val logs = JSONObject(checkNotNull(context.contentResolver.call(uri, "logs", null, null)?.getString("json")))
+        assertTrue(logs.keys().asSequence().all { it in setOf("generation", "networkEpoch", "activationGeneration", "eventSequence", "events") })
+        assertTrue(logs.getJSONArray("events").length() in 1..64)
+        assertEquals(status().getLong("generation"), logs.getLong("generation"))
     }
     @Test fun nativeCrashRecoversButNewerStopWins() {
         connect()
@@ -375,9 +378,10 @@ class VpnLifecycleTest {
         connect()
         val old = pid()
         val epoch = status().optLong("networkEpoch")
+        val mobileDataWasOff = shell("settings get global mobile_data").toString(Charsets.UTF_8).trim() == "0"
         try {
             shell("svc wifi disable")
-            shell("svc data disable")
+            if (!mobileDataWasOff) shell("svc data disable")
             await { status().optString("phase") == "NoNetwork" }
             assertTrue(status().getBoolean("desiredOn"))
             assertEquals(old, pid())
@@ -385,7 +389,7 @@ class VpnLifecycleTest {
             assertEquals("NoNetwork", status().optString("phase"))
         } finally {
             shell("svc wifi enable")
-            shell("svc data enable")
+            if (!mobileDataWasOff) shell("svc data enable")
         }
         await(60_000) { status().optString("phase") == "Online" }
         assertEquals(old, pid())
