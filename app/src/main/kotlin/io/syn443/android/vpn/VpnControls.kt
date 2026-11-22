@@ -65,6 +65,11 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
         val accepted = result?.takeIf { it.getBoolean("ok") }
         message = when {
             accepted == null -> "Не удалось выполнить команду"
+            method == "policy-refresh" -> {
+                val reply=accepted.getString("json")?.let { runCatching { JSONObject(it) }.getOrNull() }
+                if(reply?.opt("admitted")==false) "Проверка уже выполняется или выполнялась недавно"
+                else "Запрошено обновление политики"
+            }
             method == "routes-check" && arg != null -> "Запрошена проверка маршрута"
             else -> ""
         }
@@ -207,13 +212,17 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
         ) { Text(if (detailsOpen) "Скрыть диагностику" else "Маршруты и диагностика") }
         if (detailsOpen) {
             if (statusAvailable == true && desiredOn == true) PhysicalLinkDetails(status.optJSONObject("physicalLink"))
+            if (statusAvailable == true && desiredOn == true) {
+                for (detail in internetDnsFailures(status.optJSONObject("internetChecks"))) Text(detail)
+            }
             if (status.optBoolean("testHealth")) Text("ТЕСТОВЫЙ СТЕНД: синтетический HTTP, проверка TLS не выполняется")
             if (status.optString("reason").isNotEmpty()) Text("Диагностика: " + status.optString("reason"))
             if (policy?.optBoolean("managed") == true) {
                 Text("Политика: ${policy.optString("phase")}", Modifier.testTag("policy-status"))
                 Text("Желаемая: ${policy.optString("desiredRevision", "-")}; активная: ${policy.optString("activeRevision", "-")}; рабочая: ${policy.optString("lastKnownGoodRevision", "-")}")
                 if (policy.optString("reason").isNotEmpty()) Text("Политика: ${policy.optString("reason")}")
-                Button(onClick = { command("policy-refresh") }) { Text("Проверить обновление политики") }
+                Button(enabled=status.optBoolean("desiredOn") || policy.optString("source")=="account",
+                    onClick = { command("policy-refresh") }) { Text("Проверить обновление политики") }
             }
             val overlay = status.optJSONObject("netbird")
             if (overlay != null) NetBirdControls(overlay) { method, arg -> command(method, arg) }

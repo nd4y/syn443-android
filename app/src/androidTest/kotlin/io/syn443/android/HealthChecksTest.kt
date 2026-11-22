@@ -77,6 +77,32 @@ class HealthChecksTest {
         assertEquals(answers.take(16),bounded.resolveAll("host.example.org"))
         assertEquals(listOf(other),resolver.resolveAll("127.0.0.1"))
     }
+    @Test fun platformDnsResponsesReachOnlyCurrentInternetDiagnostics() {
+        val clock = java.util.concurrent.atomic.AtomicLong(100)
+        val snapshot = io.syn443.android.vpn.PolicyCheckSnapshot(clock::get)
+        val cases = listOf(3 to DnsResult.NXDOMAIN, 2 to DnsResult.SERVFAIL, 5 to DnsResult.REFUSED,
+            0 to DnsResult.NO_ADDRESSES, 4 to DnsResult.OTHER_RCODE, -1 to DnsResult.RESOLVER_ERROR)
+        ProbePool().use { pool ->
+            for ((rcode, expected) in cases) {
+                val resolver = AndroidProbeResolver(query = { _, _, callback ->
+                    if (rcode < 0) callback.onError() else callback.onAnswer(emptyList(),rcode)
+                    callback.onAnswer(listOf(InetAddress.getLoopbackAddress()), 0)
+                })
+                val job = CheckJob(pool, NetworkProbe(resolve=resolver::resolveAll))
+                val batch = job.run(listOf(Check("internet", "https_204", "https://example.org/")))
+                assertEquals(CheckObservation(Outcome.FAIL, Failure.DNS, Stage.RESOLVE, expected),batch.observations.single())
+                snapshot.record(batch,1,2,3)
+                val view = snapshot.read(1,2,3,true)
+                assertEquals(expected.name,view.getJSONObject("lastBatch").getJSONArray("checks").getJSONObject(0).getString("dnsResult"))
+                assertEquals(1,io.syn443.android.vpn.internetDnsFailures(view).size)
+                assertFalse(view.toString().contains("example.org"))
+                assertTrue(io.syn443.android.vpn.internetDnsFailures(snapshot.read(1,3,3,true)).isEmpty())
+                assertTrue(io.syn443.android.vpn.internetDnsFailures(snapshot.read(1,2,4,true)).isEmpty())
+            }
+            clock.addAndGet(30_001)
+            assertTrue(io.syn443.android.vpn.internetDnsFailures(snapshot.read(1,2,3,true)).isEmpty())
+        }
+    }
     @Test fun androidDnsDeadlineCancelsQueryAndRejectsLateSuccess() {
         lateinit var callback: AndroidProbeResolver.Answer
         lateinit var signal: CancellationSignal

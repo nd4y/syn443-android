@@ -111,6 +111,22 @@ class DiagnosticProjectionTest {
         assertFalse(json(project(stateFixture().put("desiredOn", false)), Name.HEALTH).getBoolean("desiredOn"))
     }
 
+    @Test fun internetDnsProjectionExportsOnlyObservedCategories() {
+        val input = checksFixture()
+        input.getJSONObject("lastBatch").put("checks",JSONArray()
+            .put(JSONObject().put("outcome","FAIL").put("stage","RESOLVE").put("failure","DNS").put("dnsResult","NXDOMAIN"))
+            .put(JSONObject().put("outcome","FAIL").put("stage","RESOLVE").put("failure","DNS").put("dnsResult","SERVFAIL"))
+            .put(JSONObject().put("outcome","FAIL").put("stage","RESOLVE").put("failure","DNS").put("dnsResult","private.example.invalid"))
+            .put(JSONObject().put("outcome","PASS").put("stage","RESOLVE").put("failure","DNS").put("dnsResult","REFUSED")))
+        val receipt=json(project(checks=JSONObject().put("internet",input)),Name.CHECKS)
+        val counts=receipt.getJSONObject("internet").getJSONObject("lastBatch").getJSONObject("dnsResults")
+        assertEquals(2,counts.length())
+        assertEquals(1,counts.getInt("NXDOMAIN"))
+        assertEquals(1,counts.getInt("SERVFAIL"))
+        assertFalse(receipt.toString().contains("private.example.invalid"))
+        assertFalse(json(project(checks=checksFixture().put("internet",JSONObject())),Name.CHECKS).has("internet"))
+    }
+
     @Test fun eventsKeepOnlyLast64OrderedAllowlistedRecords() {
         val rows = JSONArray()
         for (index in 0..128) rows.put(JSONObject().put("phase", "Online").put("code", "required_https_ok")

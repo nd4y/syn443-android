@@ -5,7 +5,8 @@ import android.net.InetAddresses
 import android.os.CancellationSignal
 import java.net.InetAddress
 import java.net.SocketTimeoutException
-import java.net.UnknownHostException
+import io.syn443.health.DnsResult
+import io.syn443.health.ProbeDnsException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
@@ -26,23 +27,35 @@ internal class AndroidProbeResolver(
         fun onAnswer(answer: List<InetAddress>, rcode: Int)
         fun onError()
     }
+    private data class Reply(val addresses:List<InetAddress> = emptyList(), val failure:DnsResult? = null)
     init { require(timeoutMillis in 1..2_500) }
     fun resolve(host: String): InetAddress = resolveAll(host).first()
     fun resolveAll(host: String): List<InetAddress> {
         if (InetAddresses.isNumericAddress(host)) return listOf(InetAddresses.parseNumericAddress(host))
         val cancel = CancellationSignal()
         val done = CountDownLatch(1)
-        val address = AtomicReference<List<InetAddress>>()
+        val reply = AtomicReference<Reply>()
+        fun finish(result: Reply) {
+            if (!cancel.isCanceled && reply.compareAndSet(null, result)) done.countDown()
+        }
         try {
             query(host, cancel, object : Answer {
                 override fun onAnswer(answer: List<InetAddress>, rcode: Int) {
-                    if (!cancel.isCanceled && rcode == 0) address.set(answer.take(16).distinct())
-                    done.countDown()
+                    val failure = when (rcode) {
+                        0 -> if (answer.isEmpty()) DnsResult.NO_ADDRESSES else null
+                        2 -> DnsResult.SERVFAIL
+                        3 -> DnsResult.NXDOMAIN
+                        5 -> DnsResult.REFUSED
+                        else -> DnsResult.OTHER_RCODE
+                    }
+                    finish(if (failure == null) Reply(answer.take(16).distinct()) else Reply(failure=failure))
                 }
-                override fun onError() { done.countDown() }
+                override fun onError() { finish(Reply(failure=DnsResult.RESOLVER_ERROR)) }
             })
             if (!done.await(timeoutMillis, TimeUnit.MILLISECONDS)) throw SocketTimeoutException()
-            return address.get()?.takeIf {it.isNotEmpty()} ?: throw UnknownHostException()
+            val completed = checkNotNull(reply.get())
+            completed.failure?.let { throw ProbeDnsException(it) }
+            return completed.addresses
         } finally { cancel.cancel() }
     }
 }

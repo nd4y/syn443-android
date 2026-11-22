@@ -8,6 +8,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.syn443.android.vpn.DeviceKey
 import io.syn443.android.vpn.BootstrapTrustStore
 import io.syn443.android.vpn.LoginController
+import io.syn443.android.vpn.assignmentRefreshDue
 import io.syn443.android.vpn.needsForegroundRenewal
 import io.syn443.android.vpn.LoginJournal
 import io.syn443.android.vpn.LoginStorageException
@@ -664,6 +665,17 @@ class LoginControllerTest {
         assertEquals(IdentityOperation.supportedCapabilities.sorted(),p.advertisedCapabilities)
         val posts=f.server.capabilityBodies.size;f.restart();assertEquals(posts,f.server.capabilityBodies.size)
     }
+    @Test fun cachedPolicyRefreshUsesTheSignedDeadlineOrFiveMinuteLimit() {
+        assertFalse(assignmentRefreshDue(150_000,150_000,false))
+        assertFalse(assignmentRefreshDue(299_999,1,false))
+        assertTrue(assignmentRefreshDue(300_000,600_000,false))
+        assertTrue(assignmentRefreshDue(60_000,0,false))
+        assertFalse(assignmentRefreshDue(29_999,-10_000,false))
+        assertTrue(assignmentRefreshDue(30_000,null,false))
+        assertFalse(assignmentRefreshDue(-1,null,true))
+        assertFalse(assignmentRefreshDue(4_999,0,true))
+        assertTrue(assignmentRefreshDue(5_000,600_000,true))
+    }
     @Test fun foregroundPollRenewsExpiredCommittedPolicyWithoutStartingVpnOrChangingIdentity()=fixture {f->
         f.server.policyLifetimeMs=15_000
         f.server.policyReady=true
@@ -674,6 +686,8 @@ class LoginControllerTest {
         assertTrue(f.controller.finishAssignment(ticket,listOf(true),true));f.idle()
         assertTrue(f.controller.allowsConnect())
         assertFalse(f.controller.pollProvisioning(login.generation))
+        assertFalse(f.controller.refreshAssignment(false,login.generation+1))
+        assertFalse(f.controller.refreshAssignment(false,login.generation))
         until {!f.controller.allowsConnect()}
         val expired=f.controller.status()
         assertEquals("",expired.getString("reason"))

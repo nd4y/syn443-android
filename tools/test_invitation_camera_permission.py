@@ -17,6 +17,27 @@ class CameraPermissionTest(unittest.TestCase):
             with self.subTest(replies=replies), patch.object(camera, 'adb', side_effect=replies), self.assertRaises(AssertionError):
                 camera.require_initial_camera_denied()
 
+    def test_denial_must_be_an_explicit_android_decision(self):
+        self.assertEqual((False, False), camera.camera_state(b'  android.permission.CAMERA: granted=false\r\n'))
+        prefix = b'android.permission.CAMERA: granted=false, flags=['
+        self.assertEqual((False, False), camera.camera_state(prefix + b' USER_SENSITIVE_WHEN_DENIED]'))
+        self.assertEqual((False, True), camera.camera_state(prefix + b' USER_SET|USER_SENSITIVE_WHEN_DENIED]'))
+        self.assertEqual((True, True), camera.camera_state(prefix.replace(b'false', b'true') + b' USER_SET]'))
+        with self.assertRaises(AssertionError):
+            camera.camera_state(prefix + b']\n' + prefix + b']')
+
+    def test_only_the_visible_syn443_camera_request_may_be_denied(self):
+        owner = 'com.android.permissioncontroller'
+        def node(name, text=''):
+            return ET.Element('node', {'package': owner, 'enabled': 'true', 'clickable': 'true',
+                                       'resource-id': owner + ':id/' + name, 'text': text, 'bounds': '[10,10][50,50]'})
+        message = node('permission_message', 'Allow SYN443 to take pictures and record video?')
+        button = node('permission_deny_button')
+        self.assertIs(button, camera.camera_deny_target([message, button]))
+        for nodes in ([button], [message, button, button], [node('permission_message', 'Allow SYN443 to send notifications?'), button],
+                      [node('permission_message', 'Allow a different app to use your camera?'), button]):
+            self.assertIsNone(camera.camera_deny_target(nodes))
+
     def test_screen_diagnostic_uses_only_fixed_categories(self):
         for package, label in [(camera.PACKAGE,'enrollment'),('com.android.systemui','system_ui'),
                                ('com.android.launcher3','launcher'),('com.android.permissioncontroller','permission'),

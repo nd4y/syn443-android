@@ -56,6 +56,10 @@ private fun Home(consentGeneration: Long) {
                 modifier = Modifier.testTag("support-chat"),
             ) { Text("Чат с администратором") }
             TextButton(
+                onClick = { context.startActivity(Intent(context, io.syn443.android.update.UpdateActivity::class.java)) },
+                modifier = Modifier.testTag("application-update"),
+            ) { Text("Обновление приложения") }
+            TextButton(
                 onClick = { context.startActivity(Intent(context, DiagnosticsActivity::class.java)) },
                 modifier = Modifier.testTag("support-diagnostics"),
             ) { Text("Диагностический архив") }

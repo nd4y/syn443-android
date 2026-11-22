@@ -23,3 +23,11 @@ The tool checks the SDK signature and signer, then compares the name, size, comp
 GitHub Actions signs a normal release with a temporary test identity to exercise these checks. The public evidence records only the source, version and scenario results. The test key and test-signed APK are removed with the temporary directory.
 
 The same job builds the pinned Control Plane `apk-release` tool. It issues two addressed metadata revisions for the SDK-verified file using a separate disposable metadata key. After deleting that key, it verifies both revisions, repeats the accepted revision and rejects an older revision, another recipient and a different file signed by the same APK signer. The uploaded receipt contains the scenario names. The test files remain on the runner until the fixture exits.
+
+## Verify an update on Android
+
+On the home screen, open **Обновление приложения**. A managed installation profile with version 3 carries a public `releaseAuthority` containing the service ID, channel and an independent P-256 verification anchor. This field is distributed inside the installed APK. The device borrows the current policy's capability list, evaluator, schema and trusted time from its enrolled session. Older installation profiles keep their existing bootstrap and have no configured update channel.
+
+Select the addressed JWS manifest and then the APK. The app checks the offered revision, its recipient, channel, minimum upgrade version, Android SDK and ABI. It copies and hashes the selected file in a private directory and uses Android's package parser to check the signing certificate, version and SDK. The embedded engine libraries must match the signed per-ABI hashes. An older revision or a conflicting offer at the same revision cannot supersede the encrypted local record.
+
+Tap **Перейти к установке** to hand the verified file to the Android system installer. Android may first ask you to allow SYN443 as an installation source. After returning, tap the installation button again. The app rechecks the file, current enrollment, policy and revision before handoff. Closing the screen or cancelling installation preserves the running configuration and enrollment. Final acceptance of the release update on an enrolled physical device is tracked separately.

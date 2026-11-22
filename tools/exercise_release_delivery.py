@@ -79,5 +79,8 @@ def exercise_delivery(tool, directory, inventory, signed, other_signed, signing_
     private_json(foreign, {**expected, "scope": {**scope, "deviceId": recipient(b"test device two")}})
     check(foreign, newer, signed, False)
     check(trust_file, newer, other_signed, False)
-    return ["addressed-release", "unchanged-release-retry", "stale-release-revision",
+    subprocess.run(["./gradlew", ":core:identity:verifyReleaseDelivery", "--quiet"],
+                   env={**public_env, "SYN443_RELEASE_FIXTURE_DIR": str(directory)},
+                   check=True, timeout=240)
+    return ["kotlin-verified-signed-apk", "addressed-release", "unchanged-release-retry", "stale-release-revision",
             "foreign-release-device", "other-apk-with-same-signer"]
