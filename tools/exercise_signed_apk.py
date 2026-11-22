@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import zipfile
 
+from exercise_release_delivery import exercise_delivery
 from verify_signed_apk import require_alignment, verify
 
 
@@ -18,7 +19,7 @@ def run(command):
         raise RuntimeError(f"{Path(command[0]).name} failed in signing fixture")
 
 
-def exercise(unsigned, inventory, apksigner):
+def exercise(unsigned, inventory, apksigner, release_tool):
     record = json.loads(inventory.read_bytes())
     if record["kind"] != "unsigned-release-input":
         raise ValueError("expected the checked normal release input")
@@ -78,10 +79,11 @@ def exercise(unsigned, inventory, apksigner):
                 raise
         else:
             raise AssertionError("SDK accepted an unaligned native library")
+        delivery = exercise_delivery(release_tool, work, inventory, signed, signed_different, receipt)
     return {"schemaVersion": 1, "sourceCommit": record["sourceCommit"], "versionCode": record["apk"]["versionCode"],
             "kind": "synthetic-signing-acceptance", "passed": ["signed-release", "modified-input-digest",
             "wrong-certificate", "unsigned-apk", "different-payload-with-valid-signature",
-            "signed-apk-alignment", "unaligned-native-library"]}
+            "signed-apk-alignment", "unaligned-native-library", *delivery]}
 
 
 if __name__ == "__main__":
@@ -90,7 +92,8 @@ if __name__ == "__main__":
     parser.add_argument("inventory", type=Path)
     parser.add_argument("apksigner", type=Path)
     parser.add_argument("receipt", type=Path)
+    parser.add_argument("--release-tool", required=True, type=Path)
     args = parser.parse_args()
-    result = exercise(args.unsigned, args.inventory, args.apksigner)
+    result = exercise(args.unsigned, args.inventory, args.apksigner, args.release_tool)
     args.receipt.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print("Signed release identity, content and 16 KiB archive alignment verified")
