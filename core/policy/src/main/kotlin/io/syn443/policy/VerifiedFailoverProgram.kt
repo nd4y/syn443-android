@@ -13,7 +13,7 @@ data class VerifiedFailoverProgram internal constructor(
         // Called only for previously authenticated journal entries when computing the rollback key.
         internal fun journalProgramHash(raw: String): String {
             require(raw.length in 1..8192)
-            val parts = raw.split('.')
+            val parts = raw.split('.', limit = 4)
             require(parts.size == 3)
             val document = Canonical.parse(Policy.utf8(Policy.decode64(parts[1]))).jsonObject
             val digest = document.getValue("policyHash").jsonPrimitive

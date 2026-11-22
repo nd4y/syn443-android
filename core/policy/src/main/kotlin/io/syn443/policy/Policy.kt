@@ -145,7 +145,7 @@ object Policy {
     fun utf8(bytes: ByteArray): String = Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
     internal fun signedDocument(raw: String, keys: Map<String, String>, type: String, limit: Int): JsonObject {
         require(raw.length in 1..limit && raw.all { it.code < 128 })
-        val parts = raw.split('.'); require(parts.size == 3 && parts[0].length <= 1024)
+        val parts = raw.split('.', limit = 4); require(parts.size == 3 && parts[0].length <= 1024 && parts[2].length == 86)
         val headerText = utf8(decode64(parts[0])); val header = Canonical.parse(headerText).jsonObject
         require(header.keys == setOf("alg", "kid", "typ") && headerText == Canonical.encode(header))
         require(header.values.all { it is JsonPrimitive && it.isString })

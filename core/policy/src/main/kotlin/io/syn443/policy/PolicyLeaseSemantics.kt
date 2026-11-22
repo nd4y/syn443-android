@@ -59,7 +59,7 @@ object PolicyLeaseSemantics {
         require(roots.size in 1..4 && roots.keys.all(keyID::matches))
         val raw = verified.envelope
         require(raw.length in 1..524_288 && raw.all { it.code < 128 })
-        val parts = raw.split('.')
+        val parts = raw.split('.', limit = 4)
         require(parts.size == 3 && parts[0].length <= 1024)
         val headerText = Policy.utf8(Policy.decode64(parts[0]))
         val header = Canonical.parse(headerText).jsonObject
