@@ -76,6 +76,7 @@ dependencies {
     implementation(composeBom)
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.browser:browser:1.10.0")
+    implementation("androidx.work:work-multiprocess:2.12.0")
     implementation("com.google.zxing:core:3.5.4")
     implementation("com.google.re2j:re2j:1.8")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")

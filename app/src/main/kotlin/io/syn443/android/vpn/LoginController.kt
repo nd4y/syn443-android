@@ -1,5 +1,8 @@
 package io.syn443.android.vpn
 
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+
 import io.syn443.android.support.EffectiveConfig
 
 import android.content.Context
@@ -649,6 +652,7 @@ class LoginController private constructor(private val context:android.app.Applic
                 TelemetryAuthority(accepted.generation,accepted.sessionGeneration,telemetryKey(session))
             } else null
         }
+        reconcileTelemetrySchedule(response.technicalTelemetry)
         prepareOverlays(accepted,p,next,protocol,scope)
     }
     private fun persistAssignment(s:LoginIntent,p:LoginPayload,next:AssignmentState,target:LoginIntent=s,canCommit:()->Boolean={true}):LoginIntent {
@@ -930,8 +934,20 @@ class LoginController private constructor(private val context:android.app.Applic
         // A running/queued command already drains this flag. Do not consume the retirement slot.
         runCatching {submitIfIdle(quiet=true) {}}
     }
+    private fun disableTelemetryCapture() {
+        val session = telemetryCapture.activeConsent()?.session
+        telemetryCapture.disable()
+        if (session != null && namespace == "device-login-v1") runCatching { TelemetryWork.cancel(context, session) }
+    }
+    private fun reconcileTelemetrySchedule(enabled: Boolean) {
+        if (namespace != "device-login-v1") return
+        val consent = telemetryCapture.activeConsent() ?: return
+        runCatching {
+            if (enabled) TelemetryWork.schedule(context, consent.session) else TelemetryWork.cancel(context, consent.session)
+        }
+    }
     private fun eraseTechnicalTelemetryOnRetirement() {
-        runCatching {telemetryCapture.disable()}
+        runCatching {disableTelemetryCapture()}
         runCatching {telemetryDisk.erase()}
         runCatching {runtimeDisk.erase()}
     }
@@ -951,12 +967,12 @@ class LoginController private constructor(private val context:android.app.Applic
                 nextRuntimeElapsed=0
             } else {
                 cancelTechnicalTelemetry()
-                telemetryCapture.disable()
+                disableTelemetryCapture()
                 purgeTechnicalTelemetryWhenIdle()
             }
             true
         }
-    }
+    }.also { changed -> if (changed && enabled) reconcileTelemetrySchedule(true) }
     private fun syncTechnicalTelemetry():Boolean {
         val snapshot = state().read()
         if (!(testReportVpnOn?.invoke() ?: snapshot.optBoolean("desiredOn"))) return false
@@ -1034,6 +1050,99 @@ class LoginController private constructor(private val context:android.app.Applic
             }
         }
     }
+    internal fun ownsTelemetrySchedule(ticket: String): Boolean =
+        TelemetryWork.valid(ticket) && telemetryCapture.activeConsent()?.session == ticket
+
+    /** WorkManager awaits the controller's existing identity worker and cancels only its own socket. */
+    internal suspend fun deliverStoppedTelemetry(ticket: String): Boolean = suspendCancellableCoroutine { continuation ->
+        val owned = java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
+        continuation.invokeOnCancellation { owned.get()?.cancel() }
+        val admitted = submitIfIdle(quiet=true) {
+            val success = runCatching {
+                sendStoppedTelemetry(ticket, { continuation.isActive }, owned)
+            }.getOrDefault(false)
+            if (continuation.isActive) continuation.resume(success)
+        }
+        if (!admitted && continuation.isActive) continuation.resume(false)
+    }
+
+    private fun sendStoppedTelemetry(ticket: String, active: () -> Boolean,
+                                     owned: java.util.concurrent.atomic.AtomicReference<IdentityScope?>): Boolean {
+        if (!active() || !ownsTelemetrySchedule(ticket)) return true
+        val initial = journal.snapshot()
+        if (initial.phase != LoginPhase.POLICY_CACHED &&
+            !(initial.phase == LoginPhase.REFRESHING && initial.refreshReturnPhase == LoginPhase.POLICY_CACHED)) return true
+        val stopped = LifecycleAccess.engineStatus(context, state().read())
+        when (TelemetryWork.vpnState(stopped)) {
+            TelemetryWork.VpnState.ACTIVE -> return true
+            TelemetryWork.VpnState.UNKNOWN -> return false
+            TelemetryWork.VpnState.STOPPED -> Unit
+        }
+        val generation = stopped.getLong("generation")
+        val original = payload(initial)
+        val scopeKey = telemetryKey(checkNotNull(original.session))
+        val consent = telemetryCapture.consent(scopeKey)?.takeIf { it.session == ticket } ?: return true
+        val queueKey = Identity.hash(("syn443/telemetry-queue/" + scopeKey + "/" + ticket).toByteArray(Charsets.US_ASCII))
+        fun checkOwner() {
+            val identity = journal.snapshot()
+            check(active() && identity.generation == initial.generation && identity.reauthRevision == initial.reauthRevision &&
+                telemetryCapture.consent(scopeKey)?.session == ticket)
+            val vpn = LifecycleAccess.engineStatus(context, state().read())
+            check(TelemetryWork.vpnState(vpn) == TelemetryWork.VpnState.STOPPED && vpn.getLong("generation") == generation)
+        }
+        checkOwner()
+        val old = telemetryDisk.read(queueKey)
+        val (events, through) = telemetryCapture.sample(stopped, consent, io.syn443.android.BuildConfig.VERSION_CODE)
+        if (events.isEmpty() && old.entries.isEmpty()) {
+            return through == consent.through || telemetryCapture.recorded(consent, through)
+        }
+        val physical = PhysicalIdentityRoute.capture(context, wifiOnly=true, unmeteredOnly=true)
+        val route = object : HttpRoute {
+            override fun check() { checkOwner(); physical.check() }
+            override fun resolve(host: String): List<java.net.InetAddress> {
+                check()
+                return physical.resolve(host).also { check() }
+            }
+            override fun bind(socket: java.net.Socket) { check(); physical.bind(socket) }
+        }
+        route.check()
+        return withProtocol(initial, original.bootstrap, route) { protocol, scope ->
+            owned.set(scope)
+            try {
+                check(telemetryTransport.compareAndSet(null, scope))
+                route.check()
+                resumeSession(initial, original, protocol, scope, fetch=false)
+                val current = journal.snapshot()
+                check(current.phase == LoginPhase.POLICY_CACHED)
+                val p = payload(current)
+                val session = checkNotNull(p.session)
+                check(telemetryKey(session) == scopeKey)
+                val permission = protocol.policy(session, scope)
+                val previous = checkNotNull(journal.readAssignment(current))
+                val verified = Assignments.receive(previous, current, p, permission, boot(), elapsed())
+                Assignments.receipt(verified, current, p, boot(), elapsed())
+                route.check()
+                if (!permission.technicalTelemetry) return@withProtocol true
+                val now = permission.time.window(boot(),elapsed()).upperMs
+                var queue = old
+                for (event in events) queue = queue.offer(queueKey, event)
+                queue = queue.expired(queueKey, now)
+                if (queue != old) telemetryDisk.write(queueKey, queue)
+                if (!telemetryCapture.recorded(consent, through)) return@withProtocol true
+                val batch = queue.peek(queueKey) ?: return@withProtocol true
+                if (!telemetryCapture.attempted(consent, now, batch, urgent=false)) return@withProtocol true
+                route.check()
+                if (!protocol.uploadTechnicalTelemetry(batch,session,scope)) return@withProtocol false
+                route.check()
+                telemetryDisk.write(queueKey, queue.acknowledged(queueKey,batch))
+                true
+            } finally {
+                telemetryTransport.compareAndSet(scope,null)
+                owned.compareAndSet(scope,null)
+            }
+        }
+    }
+
     /** Reuse the supervisor's worker and consent; no new timer, wake lock or probe. */
     internal fun syncRuntimeObservation():Boolean {
         if(!reportVpnOn())return false

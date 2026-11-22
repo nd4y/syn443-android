@@ -828,6 +828,8 @@ class LoginControllerTest {
                 pause.set(true);val accepted=caller.submit {f.controller.start(0)}
                 assertTrue(entered.await(3,TimeUnit.SECONDS))
                 assertTrue(f.controller.status().getBoolean("busy"))
+                val ticket = Identity.hash("synthetic telemetry consent".toByteArray())
+                assertFalse(kotlinx.coroutines.runBlocking { f.controller.deliverStoppedTelemetry(ticket) })
                 assertThrows(IllegalArgumentException::class.java) {f.controller.start(0)}
                 f.controller.cancel();assertTrue(f.controller.status().getBoolean("busy"))
                 pause.set(false);release.countDown();accepted.get(3,TimeUnit.SECONDS);f.idle()

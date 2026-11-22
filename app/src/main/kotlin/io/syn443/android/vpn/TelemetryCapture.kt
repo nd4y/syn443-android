@@ -18,6 +18,8 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
     // durable upload cursor require the actual result of the synchronous write.
     @android.annotation.SuppressLint("UseKtx")
     private fun commit(edit:SharedPreferences.Editor.()->Unit):Boolean=prefs.edit().apply(edit).commit()
+    @Synchronized fun activeConsent(): Consent? = prefs.getString("scope",null)?.let { consent(it) }
+
     @Synchronized fun consent(scope:String):Consent? {
         if(prefs.getString("scope",null)!=scope)return null
         return Consent(scope,prefs.getString("session",null) ?: return null,prefs.getLong("through",0),prefs.getLong("attempt",0))

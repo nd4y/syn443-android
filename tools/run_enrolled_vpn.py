@@ -2,11 +2,12 @@
 import base64
 import copy
 import json
+import re
 import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
-from enrollment_fixture import Fixture
+from enrollment_fixture import Fixture, decode
 from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
 from run_route_lifecycle import RouteProxy
 
@@ -27,7 +28,11 @@ def failure_summary():
     for name in ('activeRevision','lastKnownGoodRevision','candidateRevision','activationGeneration','maxRevision'):
         value=policy.get(name)
         if type(value) is int and 0<=value<=9007199254740991:safe_policy[name]=value
-    return {'desiredOn':state.get('desiredOn') is True,'engineActive':state.get('engineActive') is True,
+    def observed_bool(key):
+        value=state.get(key)
+        return value if type(value) is bool else None
+    return {'desiredOn':observed_bool('desiredOn'),'engineActive':observed_bool('engineActive'),
+        'engineStateKnown':observed_bool('engineStateKnown'),'offPhase':state.get('phase')=='Off',
         'intentGeneration':state.get('generation') if type(state.get('generation')) is int else None,
         'policy':safe_policy,'authBusy':auth.get('busy') is True,
         'controllerPresent':bool(pid(':controller')),'nativePresent':bool(pid(':engine'))}
@@ -48,28 +53,35 @@ def main():
         nonlocal fixture
         if fixture:
             adb('reverse','--remove','tcp:'+str(fixture.server.server_port));fixture.close();fixture=None
-    def setup(pending=False,telemetry=False):
+    def setup(pending=False,telemetry=None):
         nonlocal fixture
         logout();close_fixture();call('policy-test-reset');call('test-reset')
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
-        fixture=Fixture(config);fixture_port=fixture.server.server_port
-        fixture.telemetry_enabled=telemetry
+        # The first eligible periodic job is 15 minutes after opt-in. Its signed
+        # assignment must still be valid when the ten-minute access token rotates.
+        fixture=Fixture(config,policy_ttl_seconds=3600) if telemetry=='stopped' else Fixture(config)
+        fixture_port=fixture.server.server_port
+        fixture.telemetry_enabled=telemetry is not None
         fixture.pending_policy_requests=1 if pending else 0
         adb('reverse','tcp:'+str(fixture_port),'tcp:'+str(fixture_port))
         data=json.dumps(fixture.bootstrap(),separators=(',',':')).encode()
         subprocess.run(['adb','-e','shell','-T','run-as',PACKAGE,'dd','of=no_backup/operator-identity.json'],input=data,capture_output=True,check=True,timeout=15)
         call('auth-bootstrap-file');await_condition(lambda:call('auth-status').get('configured') and not call('auth-status').get('busy'),20)
+        before=proxy.progress
         driver=subprocess.run(['adb','-e','shell','am','instrument','-w','-e','fixturePort',str(fixture_port),'-e','fixtureCa',fixture.ca,
-            *(['-e','fixtureTelemetry','true'] if telemetry else []),
-            PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=75)
+            *(['-e','fixtureTelemetry','stopped' if telemetry=='stopped' else 'true'] if telemetry else []),
+            PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=150 if telemetry=='stopped' else 75)
         result=driver.stdout.decode()
         if driver.returncode or 'synthetic_enrollment_verified' not in result or 'INSTRUMENTATION_CODE: -1' not in result:
-            import re
             stage=re.search(r'INSTRUMENTATION_RESULT: stage=([a-z_]{1,40})',result)
             state=call('auth-status');safe={k:v for k,v in state.items() if k in ('phase','reason') and isinstance(v,str) and re.fullmatch('[A-Z_]{0,64}',v)}
             raise AssertionError('Synthetic enrollment failed at '+(stage[1] if stage else 'driver_launch')+' '+json.dumps(safe))
         assert fixture.registrations==1 and not call('status')['desiredOn']
+        if telemetry=='stopped':
+            assert proxy.progress>before
+            await_condition(vpn_stopped)
+            return result
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')
         before=proxy.progress;call('connect')
         await_condition(lambda:call('status').get('phase')=='Online' and call('status').get('policy',{}).get('phase')=='committed' and proxy.progress>before)
@@ -78,7 +90,7 @@ def main():
            'enrolledLogoutRetiresFrozenNativeBeforeAcknowledging',
            'enrolledAssignedRoutesCommitWithOptionalFailure',
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
-           'enrolledStopFencesPendingCandidateRouteSuccess']
+           'enrolledStopFencesPendingCandidateRouteSuccess','enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn']
     def observed_report(revision,outcome,selected):
         return any(r['policyRevision']==revision and r['outcome']==outcome and r['activePolicyRevision']==selected
                    for r in list(fixture.activation_reports.values()))
@@ -86,7 +98,9 @@ def main():
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
             try:
-                setup(name=='enrolledPendingAssignmentRetriesWhileVisible',telemetry=name=='enrolledCandidateRegressionRollsBack')
+                telemetry_modes={'enrolledCandidateRegressionRollsBack':'foreground',
+                                 'enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':'stopped'}
+                driver_result=setup(name=='enrolledPendingAssignmentRetriesWhileVisible',telemetry_modes.get(name))
                 before=proxy.progress;generation=call('auth-status')['generation']
                 if name=='enrolledPendingAssignmentRetriesWhileVisible':
                     assert fixture.policy_requests>=2 and fixture.registrations==1
@@ -154,6 +168,50 @@ def main():
                         await_condition(lambda:stopped_rollback_recovered(controller,generation_after),45)
                         assert call('status')['generation']==generation_after and not call('status')['desiredOn'] and vpn_stopped()
                     proxy.delay=0
+                elif name=='enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':
+                    job=re.search(r'(?m)^INSTRUMENTATION_RESULT: job=([0-9]{1,10})\s*$',driver_result)
+                    namespace=re.search(r'(?m)^INSTRUMENTATION_RESULT: namespace=([A-Za-z0-9_.-]{0,80})\r?$',driver_result)
+                    until_eligible=re.search(r'(?m)^INSTRUMENTATION_RESULT: untilEligibleMs=([0-9]{1,6})\s*$',driver_result)
+                    assert job and namespace and until_eligible and 0<int(until_eligible[1])<=900_000
+                    remaining_ms=int(until_eligible[1])
+                    due=time.monotonic()+remaining_ms/1000
+                    deadline_ms=int(time.time()*1000)+remaining_ms
+                    signed_policy,=fixture.envelopes.values()
+                    policy=json.loads(decode(signed_policy.split('.')[1]))
+                    session,=fixture.sessions.values()
+                    assert session['accessUntilMs'] < deadline_ms
+                    assert policy['offlineUntilMs'] > deadline_ms+120_000, 'assignment expires before worker acceptance'
+                    await_condition(vpn_stopped)
+                    stopped=call('status')['generation']
+                    assert not fixture.telemetry_receipts
+                    adb('shell','input','keyevent','KEYCODE_HOME')
+                    old=pid(':controller');assert old
+                    call('fault-controller')
+                    await_condition(lambda:pid(':controller')!=old,30)
+                    cmd=['shell','cmd','jobscheduler','run','-f','-u','0']
+                    if namespace[1]:cmd+=['-n',namespace[1]]
+                    # JobScheduler can launch a service early, but WorkManager independently
+                    # checks the first eligible wall-clock time for periodic work. Preserve the
+                    # entire production interval, including session token refresh while stopped.
+                    def received_off():
+                        return any(('vpn','off') in events for _,events in fixture.telemetry_receipts)
+                    print('Waiting for the first eligible periodic telemetry upload',flush=True)
+                    while not received_off() and time.monotonic()<due:
+                        time.sleep(min(5,max(0,due-time.monotonic())))
+                    if not received_off():
+                        adb(*cmd,PACKAGE,job[1])
+                    try:
+                        await_condition(received_off,120)
+                    except Exception:
+                        # Expose only receiver counts, never credentials, device IDs or events.
+                        print('Stopped telemetry observation:', {
+                            'registrations': fixture.registrations, 'policyRequests': fixture.policy_requests,
+                            'sessionRefreshed': any(s['generation']>0 for s in fixture.sessions.values()),
+                            'batches': len(fixture.telemetry_receipts)}, flush=True)
+                        raise
+                    assert len(fixture.sessions)==1 and next(iter(fixture.sessions.values()))['generation']>0
+                    assert vpn_stopped() and call('status')['generation']==stopped
+                    assert fixture.registrations==1 and call('auth-status')['generation']==generation
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
                     fixture.policy_status=403;call('policy-refresh')
                     await_condition(lambda:call('auth-status').get('phase')=='NEEDS_REAUTH' and

@@ -1841,10 +1841,11 @@
         "app/src/main/kotlin/io/syn443/android/vpn/TelemetryCapture.kt",
         "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
         "app/src/androidTest/kotlin/io/syn443/android/TechnicalTelemetryDiskTest.kt",
-        "tools/run_enrolled_vpn.py"
+        "tools/run_enrolled_vpn.py",
+        "app/src/main/kotlin/io/syn443/android/vpn/TelemetryWork.kt"
       ],
-      "implementationScope": "Foreground supervisor on validated unmetered Wi-Fi. Ordinary deliveries are five minutes apart. New critical or full batches may use a one-minute floor, with durable same-prefix retry suppression.",
-      "remainingScope": "Android WorkManager while Off and end-to-end acceptance against an enrolled telemetry service."
+      "implementationScope": "Foreground supervisor on validated unmetered Wi-Fi. Ordinary deliveries are five minutes apart. New critical or full batches may use a one-minute floor, with durable same-prefix retry suppression. WorkManager schedules consent-scoped Off delivery at a deferrable 15-minute interval.",
+      "remainingScope": "Field acceptance against the enrolled pilot telemetry service and natural background scheduling on the handset."
     },
     {
       "id": "TEL-12",

@@ -60,14 +60,13 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
     val toolbar=MaterialTheme.colorScheme.surface.toArgb()
     val navigation=MaterialTheme.colorScheme.background.toArgb()
     var model by remember {mutableStateOf(AdminUiModel())}
-    var visible by remember {mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))}
-    var foregroundEpoch by remember {mutableLongStateOf(0L)}
+    var visible by remember(lifecycle, bridge) { mutableStateOf(false) }
     var operation by remember {mutableStateOf<Job?>(null)}
     var sequence by remember {mutableStateOf(0L)}
     fun current(ticket:Long,generation:Long?=null)=visible && sequence==ticket &&
         (generation==null || model.status.generation==generation)
     fun execute(cancelExisting:Boolean=false,block:suspend (Long)->Unit) {
-        if(operation?.isActive==true && !cancelExisting)return
+        if (!visible || (operation?.isActive == true && !cancelExisting)) return
         if(cancelExisting)operation?.cancel()
         sequence++
         val ticket=sequence
@@ -112,22 +111,32 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         }
         if(load && next.phase==AdminUiPhase.AUTHENTICATED)loadPage(ticket,next.generation,"",model.activePrefix)
     }
-    DisposableEffect(lifecycle) {
-        val observer=LifecycleEventObserver {_,_->
-            val nextVisible=lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-            // STOP/START may arrive before Compose observes the intermediate
-            // false value. Keep a transition key so cleared RAM is reread once.
-            if(nextVisible && !visible)foregroundEpoch++
-            visible=nextVisible
-            if(!visible) {
-                sequence++;operation?.cancel();operation=null
-                model=AdminUiModel(status=model.status)
+    DisposableEffect(lifecycle, bridge) {
+        fun retireVisibleSession() {
+            visible = false
+            sequence++
+            operation?.cancel()
+            operation = null
+            model = AdminUiModel(status = model.status)
+        }
+
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> if (!visible) {
+                    visible = true
+                    // Reopen the inventory even when STOP and START occur between frames.
+                    execute { ticket -> refresh(ticket) }
+                }
+                Lifecycle.Event.ON_STOP, Lifecycle.Event.ON_DESTROY -> if (visible) retireVisibleSession()
+                else -> Unit
             }
         }
         lifecycle.addObserver(observer)
-        onDispose {sequence++;operation?.cancel();lifecycle.removeObserver(observer)}
+        onDispose {
+            lifecycle.removeObserver(observer)
+            retireVisibleSession()
+        }
     }
-    LaunchedEffect(visible,foregroundEpoch) {if(visible)execute {refresh(it)}}
     fun editCommand(kind:io.syn443.android.vpn.AdminEditorCoordinator.Kind,pages:List<String> = emptyList(),
         review:String="",deadline:Long=0,comparisonBinding:String="",operationBinding:String="") {
         val captured=model.editor?:return

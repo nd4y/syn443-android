@@ -280,6 +280,17 @@ class RouteSnapshotTest {
             val unresolved = LifecycleAccess.engineStatus(saved().put("resumeRequired", true), false, present)
             assertTrue(unresolved.isNull("engineActive"));assertFalse(unresolved.getBoolean("engineStateKnown"))
         }
+        fun interruptedStop() = saved().put("desiredOn",false).put("phase","Off")
+        val physicallyStopped = LifecycleAccess.engineStatus(interruptedStop(), false, false, serviceAttached = false)
+        assertFalse(physicallyStopped.getBoolean("engineActive"))
+        assertTrue(physicallyStopped.getBoolean("engineStateKnown"))
+        assertEquals(7, physicallyStopped.getInt("generation"))
+        for (present in listOf(true, null)) {
+            assertTrue(LifecycleAccess.engineStatus(interruptedStop(), false, present, serviceAttached = false).isNull("engineActive"))
+        }
+        assertTrue(LifecycleAccess.engineStatus(interruptedStop(), false, false, serviceAttached = true).isNull("engineActive"))
+        assertTrue(LifecycleAccess.engineStatus(saved(), false, false, serviceAttached = false).isNull("engineActive"))
+        assertTrue(LifecycleAccess.engineStatus(interruptedStop().put("phase","Recovering"), false, false, serviceAttached = false).isNull("engineActive"))
         val live=LifecycleAccess.engineStatus(saved(),true,true)
         assertTrue(live.getBoolean("engineActive"));assertTrue(live.getBoolean("engineStateKnown"))
         val readyAfterHandshake=LifecycleAccess.engineStatus(JSONObject().put("engineActive",false),true,null)
