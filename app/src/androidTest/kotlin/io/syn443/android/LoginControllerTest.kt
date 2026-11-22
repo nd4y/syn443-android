@@ -146,7 +146,9 @@ class LoginControllerTest {
         val refreshBodies=mutableListOf<String>()
         private val refreshReceipts=mutableMapOf<String,Pair<String,String>>()
         private val policies=mutableMapOf<String,String>()
-        private fun now()=System.currentTimeMillis()/1000*1000
+        // The issuer, API and their signed policy share a wall clock in this fixture.
+        @Volatile var clockAdvanceMs = 0L
+        private fun now()=(System.currentTimeMillis()+clockAdvanceMs)/1000*1000
         private fun reply(status:Int=200,text:String="{}",timeMs:Long=now())=Reply(status,mapOf(
             "content-type" to listOf("application/json; charset=utf-8"),
             "date" to listOf(DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'",Locale.US).withZone(ZoneOffset.UTC).format(Instant.ofEpochMilli(timeMs)))),text.toByteArray())
@@ -1410,30 +1412,41 @@ class LoginControllerTest {
     }
 
     @Test fun expiredRegisteredBrowserKeepsOriginalDeviceOnRenewedLogin() {
-        val at=AtomicLong(-1)
-        fixture(monotonicMillis={at.get().takeIf { it>=0 } ?: SystemClock.elapsedRealtime()}) { f->
-            f.server.policyReady=true
-            f.controller.callback(f.begin());f.idle()
-            val enrolled=f.journal.snapshot()
-            f.server.policyStatus=409;f.server.policyProblem="reauthentication_required"
-            f.controller.retry(enrolled.generation);f.idle()
-            assertEquals(LoginPhase.NEEDS_REAUTH,f.journal.snapshot().phase)
-            f.repeatLogin()
-            val old=f.journal.snapshot()
-            val pending=checkNotNull(LoginPayload.decode(f.journal.readProtected(old),old).pending)
-            at.set(pending.startedElapsedMs+300_000)
+        val advance = AtomicLong(0)
+        fixture(monotonicMillis = { SystemClock.elapsedRealtime() + advance.get() }) { f ->
+            f.server.policyReady = true
+            f.controller.callback(f.begin()); f.idle()
+            val enrolled = f.journal.snapshot()
+            assertEquals(LoginPhase.POLICY_CACHED, enrolled.phase)
+            val publicKey = DeviceKey.open(enrolled.keyAlias).publicKey.encoded
+            f.server.policyStatus = 409
+            f.server.policyProblem = "reauthentication_required"
+            f.controller.retry(enrolled.generation); f.idle()
+            assertEquals(LoginPhase.NEEDS_REAUTH, f.journal.snapshot().phase)
+            val obsolete = f.repeatLogin()
+            val old = f.journal.snapshot()
+            val pending = checkNotNull(LoginPayload.decode(f.journal.readProtected(old), old).pending)
+            advance.set(300_000)
+            f.server.clockAdvanceMs = advance.get()
+            assertTrue(SystemClock.elapsedRealtime() + advance.get() >= pending.startedElapsedMs + 300_000)
             assertTrue(f.controller.status().getBoolean("browserExpired"))
-            assertThrows(IllegalArgumentException::class.java) {f.controller.browserUrl(old.generation)}
-            f.server.policyStatus=200
-            val fresh=f.repeatLogin()
-            f.controller.callback(fresh);f.idle()
-            val restored=f.journal.snapshot()
-            assertEquals(LoginPhase.POLICY_CACHED,restored.phase)
-            assertEquals(enrolled.deviceId,restored.deviceId)
-            assertEquals(enrolled.keyAlias,restored.keyAlias)
-            assertEquals(enrolled.generation,restored.generation)
-            assertEquals(enrolled.thumbprint,restored.thumbprint)
-            at.set(-1)
+            assertThrows(IllegalArgumentException::class.java) { f.controller.browserUrl(old.generation) }
+            val fresh = f.repeatLogin()
+            f.controller.callback(obsolete); f.idle()
+            assertEquals(LoginPhase.BROWSER, f.journal.snapshot().phase)
+            assertEquals(1, f.server.enrollBodies.size)
+            f.server.policyStatus = 200
+            // The previous policy's signed refresh deadline passed while the user was away.
+            f.server.policyRevision++
+            f.controller.callback(fresh); f.idle()
+            val restored = f.journal.snapshot()
+            assertEquals(LoginPhase.POLICY_CACHED, restored.phase)
+            assertEquals(enrolled.deviceId, restored.deviceId)
+            assertEquals(enrolled.keyAlias, restored.keyAlias)
+            assertEquals(enrolled.generation, restored.generation)
+            assertEquals(enrolled.thumbprint, restored.thumbprint)
+            assertArrayEquals(publicKey, DeviceKey.open(restored.keyAlias).publicKey.encoded)
+            assertEquals(2, f.server.enrollBodies.size)
         }
     }
 

@@ -66,8 +66,12 @@ def parse_run(output):
         elif reading_stack and active not in source_lines:
             classname, test = active
             simple_class = classname.rsplit('.', 1)[-1]
-            frame = re.fullmatch(r'\s*at ' + re.escape(classname + '.' + test + '(' + simple_class + '.kt:') +
-                                 r'([1-9][0-9]{0,3})\)\s*', line)
+            # Kotlin may put the assertion in a generated lambda frame. Only match the
+            # current public test, its own filename and a bounded source line number.
+            owner = re.escape(classname)
+            method = re.escape(test)
+            callable_name = rf"(?:\.{method}(?:\x24lambda[-\x24][0-9]+)*|\x24{method}(?:\x24[0-9]+)+\.invoke)"
+            frame = re.fullmatch(rf"\s*at {owner}{callable_name}\({re.escape(simple_class)}\.kt:([1-9][0-9]{{0,3}})\)\s*", line)
             if frame:
                 source_lines[active] = int(frame[1])
     if not finished or not cases:

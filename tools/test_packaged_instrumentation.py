@@ -23,6 +23,21 @@ END = 'INSTRUMENTATION_CODE: -1\n'
 
 
 class PackagedInstrumentationTest(unittest.TestCase):
+    def test_kotlin_lambda_reports_only_the_current_source_line(self):
+        for function in ("ExampleTest.secondCase$lambda$12", "ExampleTest.secondCase$lambda-12",
+                         "ExampleTest$secondCase$2.invoke"):
+            stack = ("INSTRUMENTATION_STATUS: stack=private message\n"
+                     "    at io.syn443.android.ExampleTest.firstCase$lambda$12(ExampleTest.kt:72)\n"
+                     f"    at io.syn443.android.{function}(ExampleTest.kt:81)\n"
+                     "    at io.syn443.android.ExampleTest.secondCase(ExampleTest.kt:90)\n")
+            failure = event("secondCase", 2, -2).replace("INSTRUMENTATION_STATUS_CODE:", stack + "INSTRUMENTATION_STATUS_CODE:")
+            displayed = io.StringIO()
+            with redirect_stdout(displayed):
+                parse_run(START + PASS + SECOND + failure + END)
+            self.assertIn("Test source line: 81", displayed.getvalue())
+            for private in ("private message", "lambda", "line: 72", "line: 90"):
+                self.assertNotIn(private, displayed.getvalue())
+
     def test_failure_location_contains_only_the_current_public_test_line(self):
         stack = ('INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: private fixture message\n'
                  '    at io.syn443.android.AnotherTest.other(AnotherTest.kt:92)\n'
