@@ -42,6 +42,17 @@ class PackagedInstrumentationTest(unittest.TestCase):
                 self.assertEqual([case.get('name') for case in suite], ['firstCase', 'secondCase'])
                 self.assertEqual([node.tag for node in suite[1]], [expected] if expected else [])
 
+    def test_runner_interruption_reports_progress_and_only_checked_in_names(self):
+        stopped = 'INSTRUMENTATION_RESULT: shortMsg=Process crashed.'
+        with self.assertRaisesRegex(ValueError, r'process_crashed; completed=1/2$'):
+            parse_run(START + PASS + SECOND + stopped)
+        active = START.replace('ExampleTest', 'AdminOperationRouteTest').replace(
+            'firstCase', 'explicitNativeSearchKeepsPrefixAcrossPagesAndForgetsItOnForegroundLoss')
+        with self.assertRaises(ValueError) as error:
+            parse_run(active + 'INSTRUMENTATION_RESULT: shortMsg=private synthetic detail')
+        self.assertIn('runner_stopped; completed=0/2; active=io.syn443.android.AdminOperationRouteTest.', str(error.exception))
+        self.assertNotIn('private synthetic detail', str(error.exception))
+
     def test_incomplete_reordered_duplicate_and_foreign_results_fail(self):
         last = event('secondCase', 2, 0)
         for output in [END, START + END, PASS + SECOND + last + END, START + PASS + END,
