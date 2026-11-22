@@ -1,6 +1,7 @@
 package io.syn443.android
 
 import io.syn443.policy.Policy
+import io.syn443.android.vpn.RouteSnapshot
 import java.io.Closeable
 import org.json.JSONArray
 import org.json.JSONObject
@@ -88,9 +89,37 @@ class AdaptiveRecoveryAdmissionTest {
             assertEquals(group, replacement.getString("group")); recoveryRequests+=replacement.getString("request")
             assertNotEquals(current.getJSONArray("hops").toString(), replacement.getJSONArray("hops").toString())
             select(replacement)
-            assertTrue("replacement lacked its matched native ACK", h.view().getBoolean("requiredReady"))
+            assertMeasuredReadiness(group)
             assertTrue(now-completed<=30_000)
             return current to replacement
+        }
+        // Sixteen routes share a finite hourly budget. A successful replacement cannot
+        // freshen observations on other routes while their individual measurements age.
+        fun assertMeasuredReadiness(recoveredGroup: String? = null) {
+            val snapshot = RouteSnapshot.readAt(true, true, h.scope, now)
+            val rows = snapshot.getJSONArray("routes")
+            assertEquals(selectedAt.size, rows.length())
+            var allWorking = true
+            for (i in 0 until rows.length()) {
+                val row = rows.getJSONObject(i)
+                val group = row.getString("label").replaceFirst("managed-", "group-")
+                val age = now - selectedAt.getValue(group).last()
+                val working = age in 0..120_000
+                assertEquals("Measurement changed for $group", age, row.getLong("ageMs"))
+                assertEquals(group, if (working) "working" else "stale", row.getString("state"))
+                if (group == recoveredGroup) assertTrue("Replacement requires fresh payload evidence", working)
+                allWorking = allWorking && working
+            }
+            assertEquals(allWorking, snapshot.getBoolean("requiredReady"))
+        }
+
+        fun observations(): Map<String, List<Any>> {
+            val rows=RouteSnapshot.readAt(true, true, h.scope, now).getJSONArray("routes")
+            return (0 until rows.length()).associate { i ->
+                val row=rows.getJSONObject(i)
+                row.getString("label") to listOf(now-row.getLong("ageMs"), row.getString("reason"),
+                    row.getJSONArray("measuredPath").toString())
+            }
         }
         fun signature(): Map<String, String> {
             val rows=h.view().getJSONArray("routes")
@@ -123,12 +152,13 @@ class AdaptiveRecoveryAdmissionTest {
                 s.h.controller.force(); assertNull(s.tick(now))
             }
             assertEquals(112, s.h.starts.size)
-            val before=s.signature()
+            s.assertMeasuredReadiness()
+            val before=s.observations()
             val completed=s.now
             val (a, b)=s.recover()
             assertEquals("hop-000", a.getJSONArray("hops").getString(0)); assertEquals("hop-001", b.getJSONArray("hops").getString(0))
             assertTrue(s.now-completed<=30_000); assertEquals(114, s.h.starts.size)
-            val after=s.signature()
+            val after=s.observations()
             for((tag, value) in before) if(tag!="managed-00") assertEquals("unrelated route changed during recovery", value, after[tag])
             assertEquals(96, s.routineStarts().size)
             assertFalse(s.h.controller.requiresRetirement())
@@ -274,7 +304,7 @@ class AdaptiveRecoveryAdmissionTest {
                 s.tick(at)?.let {s.select(it)}
                 at+=1000
             }
-            assertTrue(recovered); assertTrue(s.h.view().getBoolean("requiredReady"))
+            assertTrue(recovered); s.assertMeasuredReadiness()
             assertTrue("maintenance could not sustain16 groups", s.routineStarts().size>=144)
             for((group, times) in s.selectedAt) {
                 assertTrue("group $group lost repeated maintenance", times.size>=9)
