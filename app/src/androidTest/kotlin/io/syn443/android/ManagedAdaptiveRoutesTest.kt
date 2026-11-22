@@ -390,6 +390,47 @@ class ManagedAdaptiveRoutesTest {
         }
     }
 
+    @Test fun threeAttributedFailuresLetAStableSlowerReserveReplaceTheRecoveredIncumbent() {
+        Harness(config()).use { h ->
+            h.ready()
+            val initial = checkNotNull(h.tick(1000))
+            h.selected(initial, 1000, 20)
+            val primary = initial.getJSONArray("hops").toString()
+            var failures = 0
+            var recoveredAt = 0L
+            for (now in 121000L..291000L step 5000) {
+                val probe = h.tick(now) ?: continue
+                if (probe.getJSONArray("hops").toString() != primary) {
+                    h.report(h.result(probe, "probe_unavailable", selected = true), now)
+                } else if (failures < 3) {
+                    h.report(h.result(probe, "exit_mismatch", selected = true), now)
+                    failures++
+                } else {
+                    h.selected(probe, now, 20)
+                    recoveredAt = now
+                    break
+                }
+            }
+            assertEquals(3, failures)
+            assertTrue("primary needs a fresh recovery sample before exploration", recoveredAt in 181000L..291000L)
+            val exploreAt = maxOf(301000L, recoveredAt + 60000L)
+            for (i in 0..2) {
+                val now = exploreAt + i * 5000L
+                val reserve = checkNotNull(h.tick(now))
+                assertNotEquals(primary, reserve.getJSONArray("hops").toString())
+                if (i < 2) {
+                    assertEquals("discard", h.measured(reserve, now, 400).getString("command"))
+                    h.report(h.result(reserve, "discarded", selected = true), now)
+                } else {
+                    h.selected(reserve, now, 400)
+                }
+            }
+            val selected = h.view().getJSONArray("routes").getJSONObject(0)
+            assertEquals(400, selected.getInt("latencyMs"))
+            assertNotEquals(primary, selected.getJSONArray("measuredPath").toString())
+        }
+    }
+
     @Test fun delayedReserveReceiptCannotContributeToThreeFreshMeasurements() {
         Harness(config()).use { h ->
             val incumbent = prepareHealthy(h)

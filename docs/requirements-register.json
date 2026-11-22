@@ -945,8 +945,15 @@
     {
       "id": "AUTO-05",
       "text": "Сначала применяются обязательные фильтры доступа, безопасности, конечного выхода и возможностей пути. Затем пригодные маршруты сравниваются лексикографически по заданным классам качества: стабильность, энергозатраты, скорость, точность/достоверность дополнительных измерений. Суммарный score не может компенсировать существенно худшую стабильность низким ping. Стоимость, квоты и предпочтения администратора задают допустимость или дополнительный tie-breaker, не отменяя основных приоритетов.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "core/decision/src/main/kotlin/io/syn443/decision/PathStabilityHistory.kt",
+        "core/decision/src/test/kotlin/io/syn443/decision/PathStabilityHistoryTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedAdaptiveRoutes.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveRoutesTest.kt"
+      ],
+      "implementationScope": "The live coordinator tracks up to five recent attributable outcomes per path and comparison group. An incumbent with three failures can lose to a stable but slower reserve after a fresh confirmed return and the hold time. Three consecutive successful checks clear degradation.",
+      "remainingScope": "End-to-end signed quality thresholds, path energy comparisons, longer-term loss and recovery statistics, and physical verification remain open."
     },
     {
       "id": "AUTO-06",
@@ -954,10 +961,13 @@
       "status": "partial",
       "evidence": [
         "docs/managed-adaptive-runtime.md",
-        "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveRoutesTest.kt"
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveRoutesTest.kt",
+        "core/decision/src/main/kotlin/io/syn443/decision/PathStabilityHistory.kt",
+        "core/decision/src/test/kotlin/io/syn443/decision/PathStabilityHistoryTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedAdaptiveRoutes.kt"
       ],
-      "implementationScope": "The adaptive Android coordinator applies a sixty-second healthy-path hold, three independent successful measurements and a fresh comparable latency baseline. Confirmed failure and replacement use a separate recovery path.",
-      "remainingScope": "The rolling three-of-five degradation policy, remotely selectable thresholds, full comparison of energy and stability classes, and field validation remain open."
+      "implementationScope": "The adaptive Android coordinator applies a sixty-second healthy-path hold, three independent successful measurements and a fresh comparable latency baseline. Confirmed failure and replacement use a separate recovery path. The live coordinator tracks up to five recent attributable outcomes per path and comparison group. An incumbent with three failures can lose to a stable but slower reserve after a fresh confirmed return and the hold time. Three consecutive successful checks clear degradation.",
+      "remainingScope": "End-to-end signed quality thresholds, path energy comparisons, longer-term loss and recovery statistics, and physical verification remain open."
     },
     {
       "id": "AUTO-07",
@@ -1136,8 +1146,15 @@
     {
       "id": "ALG-05",
       "text": "Стабильность оценивается по доле релевантных успехов, сериям отказов, длительности непрерывной работы, потерям/таймаутам, обрывам прикладных запросов и времени восстановления в скользящих окнах. Для редких/новых кандидатов есть состояние insufficient data: отсутствие истории не выдаётся за идеальную стабильность.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "core/decision/src/main/kotlin/io/syn443/decision/PathStabilityHistory.kt",
+        "core/decision/src/test/kotlin/io/syn443/decision/PathStabilityHistoryTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedAdaptiveRoutes.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveRoutesTest.kt"
+      ],
+      "implementationScope": "The live coordinator tracks up to five recent attributable outcomes per path and comparison group. An incumbent with three failures can lose to a stable but slower reserve after a fresh confirmed return and the hold time. Three consecutive successful checks clear degradation.",
+      "remainingScope": "End-to-end signed quality thresholds, path energy comparisons, longer-term loss and recovery statistics, and physical verification remain open."
     },
     {
       "id": "ALG-06",
