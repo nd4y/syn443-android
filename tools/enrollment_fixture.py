@@ -45,6 +45,7 @@ class Fixture:
         self.activation_reports={}
         self.telemetry_enabled=False
         self.telemetry_receipts=[]
+        self.telemetry_requests=0
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
     def close(self):
         self.server.shutdown();self.server.server_close();self.thread.join(timeout=3);self.publisher.close()
@@ -77,6 +78,7 @@ class Fixture:
         return thumb,claims
     def request(self,method,path,headers,body):
         parsed=urlsplit(path);oidc='/realms/test/protocol/openid-connect'
+        if parsed.path=='/v1/device/telemetry':self.telemetry_requests+=1
         if method=='GET' and parsed.path.endswith('/.well-known/openid-configuration'):
             return 200,{'issuer':self.issuer,'authorization_endpoint':self.origin+oidc+'/auth',
                 'token_endpoint':self.origin+oidc+'/token','jwks_uri':self.origin+oidc+'/certs',

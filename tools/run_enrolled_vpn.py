@@ -96,6 +96,7 @@ def failure_summary():
         'engineStateKnown':observed_bool('engineStateKnown'),'offPhase':state.get('phase')=='Off',
         'intentGeneration':state.get('generation') if type(state.get('generation')) is int else None,
         'policy':safe_policy,'authBusy':auth.get('busy') is True,
+        'telemetryAvailable':auth.get('telemetryAvailable') is True,'telemetryConsent':auth.get('telemetryEnabled') is True,
         'controllerPresent':bool(pid(':controller')),'nativePresent':bool(pid(':engine'))}
 
 def main():
@@ -159,6 +160,7 @@ def main():
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')
         before=proxy.progress;call('connect')
         await_condition(lambda:call('status').get('phase')=='Online' and call('status').get('policy',{}).get('phase')=='committed' and proxy.progress>before)
+        return result
     names=['enrolledPendingAssignmentRetriesWhileVisible','enrolledSignedAssignmentStartsRealTun','enrolledControllerDeathRecoversAuthorizedCache',
            'enrolledCandidateRegressionRollsBack','enrolledRevocationStopsNativeWithoutLocalFallback',
            'enrolledLogoutRetiresFrozenNativeBeforeAcknowledging',
@@ -198,7 +200,14 @@ def main():
                     await_condition(lambda:call('auth-status').get('generation')==generation and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert fixture.registrations==1
                 elif name=='enrolledCandidateRegressionRollsBack':
-                    await_condition(lambda:bool(fixture.telemetry_receipts),330)
+                    try:
+                        await_condition(lambda:bool(fixture.telemetry_receipts),330)
+                    except Exception:
+                        # Synthetic-only flags and counters; no network, identity or event data.
+                        print('First telemetry receipt observation:', {
+                            'eligibleWifiAtConsent':'telemetry_wifi_eligible=true' in driver_result,
+                            'httpRequests':fixture.telemetry_requests,'acknowledged':len(fixture.telemetry_receipts)},flush=True)
+                        raise
                     first_received=fixture.telemetry_receipts[0][0]
                     assert all(('policy','rolled_back') not in events for _,events in fixture.telemetry_receipts)
                     broken=copy.deepcopy(config);broken['outbounds'][0]['server_port']=1;fixture.config=broken;fixture.revision=2

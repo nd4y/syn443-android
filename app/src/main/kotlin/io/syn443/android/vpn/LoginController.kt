@@ -111,7 +111,7 @@ class LoginController private constructor(private val context:android.app.Applic
         if(namespace=="device-login-v1")"runtime-observation-v1" else "$namespace-runtime")}
     private var nextRuntimeElapsed=0L
     private val telemetryPurge=java.util.concurrent.atomic.AtomicBoolean()
-    @Volatile private var telemetryPressureSession: String? = null
+    @Volatile private var pendingTelemetrySession: String? = null
     private var nextTelemetryPressureElapsed=0L
     private var nextTelemetryElapsed=0L
     private val deviceSourceScope=java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
@@ -1035,7 +1035,7 @@ class LoginController private constructor(private val context:android.app.Applic
             if (now < nextTelemetryElapsed) {
                 if (now < nextTelemetryPressureElapsed) return@submitIfIdle false
                 nextTelemetryPressureElapsed = now + TelemetryCapture.URGENT_MS
-                if (telemetryPressureSession != preference.session && !TelemetryCapture.hasNewPressure(snapshot, preference.through)) return@submitIfIdle false
+                if (!TelemetryCapture.needsEarlyCollection(snapshot, preference, pendingTelemetrySession)) return@submitIfIdle false
             }
             expected=state;authority=active;consent=preference;true
         },onAdmission={
@@ -1062,7 +1062,7 @@ class LoginController private constructor(private val context:android.app.Applic
             if(queue!=old)telemetryDisk.write(queueKey,queue)
             val batch = queue.peek(queueKey)
             val urgent = TelemetryCapture.isUrgent(queue)
-            telemetryPressureSession = consent.session.takeIf { urgent }
+            pendingTelemetrySession = consent.session.takeIf { urgent || (batch != null && consent.attemptedAt == 0L) }
             if (!urgent && !telemetryCapture.recorded(consent,through)) return@submitIfIdle
             if (batch == null || !reportVpnOn()) return@submitIfIdle
             val vpnGeneration=state().checkpoint().generation
@@ -1083,7 +1083,7 @@ class LoginController private constructor(private val context:android.app.Applic
             }
             if (!admitted) return@submitIfIdle
             if (urgent && !telemetryCapture.recorded(consent, through)) return@submitIfIdle
-            telemetryPressureSession = null
+            pendingTelemetrySession = null
             val route=object:HttpRoute {
                 override fun resolve(host:String)=physical.resolve(host)
                 override fun bind(socket:java.net.Socket)=physical.bind(socket)
@@ -1100,7 +1100,7 @@ class LoginController private constructor(private val context:android.app.Applic
                         route.check()
                         val remaining = queue.acknowledged(queueKey, batch)
                         telemetryDisk.write(queueKey, remaining)
-                        telemetryPressureSession = consent.session.takeIf { TelemetryCapture.isUrgent(remaining) }
+                        pendingTelemetrySession = consent.session.takeIf { TelemetryCapture.isUrgent(remaining) }
                     }
                 } finally {telemetryTransport.compareAndSet(scope,null)}
             }

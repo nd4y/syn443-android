@@ -37,6 +37,7 @@ class EnrollmentDriver:AndroidJUnitRunner() {
         val arguments=checkNotNull(fixtureArguments)
         var stage="preflight"
         var scheduled:Bundle?=null
+        var telemetryWifiEligible:Boolean?=null
         val ok=runCatching {
             require(BuildConfig.DEBUG)
             if(android.os.Build.HARDWARE !in setOf("ranchu","goldfish")) {
@@ -100,6 +101,9 @@ class EnrollmentDriver:AndroidJUnitRunner() {
             } else if (arguments.getString("fixtureTelemetry") == "true") {
                 require(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
                 stage="telemetry_consent"
+                telemetryWifiEligible=runCatching {
+                    io.syn443.android.vpn.PhysicalIdentityRoute.capture(targetContext,wifiOnly=true,unmeteredOnly=true).check()
+                }.isSuccess
                 check(registered.getBoolean("telemetryAvailable") && !registered.getBoolean("telemetryEnabled"))
                 call("auth-telemetry", registered.getLong("generation").toString() + ":true")
                 check(status().getBoolean("telemetryEnabled"))
@@ -108,6 +112,7 @@ class EnrollmentDriver:AndroidJUnitRunner() {
         }.isSuccess
         finish(if(ok)-1 else 0,Bundle().apply {
             if(ok) scheduled?.let { putAll(it) }
+            telemetryWifiEligible?.let { putBoolean("telemetry_wifi_eligible",it) }
             putString("result",if(ok)"synthetic_enrollment_verified" else "synthetic_enrollment_failed")
             putString("stage",stage)
         })

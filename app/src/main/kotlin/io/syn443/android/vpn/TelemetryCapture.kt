@@ -60,6 +60,13 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
             return false
         }
 
+        // The first ordinary event may arrive just after opt-in sampled an empty ring.
+        // The controller calls this only on its existing, minute-limited supervisor tick.
+        fun needsEarlyCollection(snapshot: JSONObject, consent: Consent, pendingSession: String?): Boolean =
+            pendingSession == consent.session ||
+                (consent.attemptedAt == 0L && snapshot.optLong("eventSequence") > consent.through) ||
+                hasNewPressure(snapshot, consent.through)
+
         fun isUrgent(queue: TechnicalTelemetry.Snapshot): Boolean =
             queue.entries.size >= TechnicalTelemetry.MAX_BATCH || queue.entries.any {
                 val event = it.event

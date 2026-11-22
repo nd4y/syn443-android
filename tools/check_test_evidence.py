@@ -185,6 +185,7 @@ if mode=="emulator":
         "firstValidatedManagedBatchBypassesCadenceOnceWithoutCancellingInFlightWork",
     }} <= {(c.get("classname"),c.get("name")) for c in cases}, "Required managed Wi-Fi failover cases missing"
     assert {
+        ("io.syn443.android.TechnicalTelemetryDiskTest","firstOrdinaryEventAfterEmptyOptInUsesTheExistingTickAndKeepsRetryLimits"),
         ("io.syn443.android.TechnicalTelemetryDiskTest","encryptedQueueRestartsWithoutExposingAnotherEnrollment"),
         ("io.syn443.android.TechnicalTelemetryDiskTest","consentFenceDropsPriorEventsAndRawDiagnosticStrings"),
         ("io.syn443.android.TechnicalTelemetryDiskTest","onlyConfirmedRouteSelectionCarriesItsPolicyAndAlgorithmRevisions"),
