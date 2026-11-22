@@ -2826,6 +2826,8 @@
       "text": "Release manifest подписан, включает package/signing identity, versionCode, channel, ABI/SDK, engine/evaluator/schema capabilities, hash/size и совместимость миграции. Установка требует штатного действия Android; отказ/отсрочка не удаляет рабочую разрешённую конфигурацию. Обновление сохраняет intent, enrollment, drafts и identity. Поддельная/неподходящая сборка отклоняется до установки.",
       "status": "partial",
       "evidence": [
+        "tools/verify_signed_apk.py",
+        "tools/exercise_signed_apk.py",
         "docs/release-packaging.md",
         ".github/workflows/ci.yml",
         "tools/check_apk.py",

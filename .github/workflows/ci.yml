@@ -217,6 +217,20 @@ jobs:
           path: ${{ runner.temp }}/syn443-release-input/
           if-no-files-found: error
           retention-days: 14
+      - name: Verify a signed release with a disposable fixture certificate
+        run: |
+          python3 tools/exercise_signed_apk.py \
+            "$RUNNER_TEMP/syn443-release-input/app-release-unsigned.apk" \
+            "$RUNNER_TEMP/syn443-release-input/inventory.json" \
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" "$RUNNER_TEMP/signing-acceptance.json"
+          python3 tools/check_public_data.py "$RUNNER_TEMP/signing-acceptance.json"
+          bash tools/scan_secrets.sh "$RUNNER_TEMP/signing-acceptance.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: syn443-signing-test-evidence
+          path: ${{ runner.temp }}/signing-acceptance.json
+          if-no-files-found: error
+          retention-days: 14
   workflow-lint:
     needs: public-data
     runs-on: ubuntu-24.04
