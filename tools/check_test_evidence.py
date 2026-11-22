@@ -171,6 +171,7 @@ if mode=="emulator":
         ("io.syn443.android.TechnicalTelemetryDiskTest","encryptedQueueRestartsWithoutExposingAnotherEnrollment"),
         ("io.syn443.android.TechnicalTelemetryDiskTest","consentFenceDropsPriorEventsAndRawDiagnosticStrings"),
         ("io.syn443.android.TechnicalTelemetryDiskTest","onlyConfirmedRouteSelectionCarriesItsPolicyAndAlgorithmRevisions"),
+        ("io.syn443.android.TechnicalTelemetryDiskTest","adaptiveAcknowledgementKeepsLifecycleAndAttributesOnlyCurrentSignedEvents"),
         ("io.syn443.android.PhysicalIdentityRouteTest","technicalTelemetryCannotUseMeteredWifiOrCellular"),
     } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required technical telemetry device cases missing"
 if mode=="policy":

@@ -2,6 +2,8 @@ package io.syn443.android
 
 import androidx.test.platform.app.InstrumentationRegistry
 import io.syn443.android.vpn.TechnicalTelemetryDisk
+import io.syn443.android.vpn.StateStore
+import io.syn443.decision.NetworkMode
 import io.syn443.android.vpn.TelemetryCapture
 import io.syn443.identity.Identity
 import io.syn443.identity.TechnicalTelemetry
@@ -34,6 +36,45 @@ class TechnicalTelemetryDiskTest {
             assertNull(capture.consent(owner))
         }finally {capture.disable()}
     }
+    @Test fun adaptiveAcknowledgementKeepsLifecycleAndAttributesOnlyCurrentSignedEvents() {
+        val state = JSONObject().put("desiredOn", true).put("generation", 7L).put("networkEpoch", 9L)
+            .put("phase", "Online").put("reason", "required_https_ok")
+        val pristine = state.toString()
+        fun record(generation: Long, epoch: Long, revision: Long) =
+            StateStore.recordAdaptiveReselection(state, generation, epoch, revision, NetworkMode.HOME_WIFI)
+        assertFalse(record(6, 9, 43))
+        assertFalse(record(7, 8, 43))
+        assertFalse(record(7, 9, 0))
+        assertEquals(pristine, state.toString())
+        state.put("desiredOn", false)
+        assertFalse(record(7, 9, 43))
+        state.put("desiredOn", true)
+        assertTrue(record(7, 9, 43))
+        assertEquals("Online", state.getString("phase"))
+        assertEquals("required_https_ok", state.getString("reason"))
+        val row = state.getJSONArray("events").getJSONObject(0)
+        assertEquals(setOf("sequence","at","elapsed","phase","code","intentGeneration","networkEpoch","policyRevision","algorithmRevision","networkMode"), row.keys().asSequence().toSet())
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val capture = TelemetryCapture(context, "test-consent-" + UUID.randomUUID().toString().replace("-",""))
+        val owner = Identity.hash("synthetic adaptive sample".toByteArray())
+        try {
+            capture.enable(owner, 0)
+            val consent = checkNotNull(capture.consent(owner))
+            val queued = capture.sample(state, consent, 128).first.single()
+            assertEquals(43L, queued.key.policyRevision)
+            assertEquals(3, queued.key.algorithmRevision)
+            assertEquals("route", queued.event.kind)
+            assertEquals("reselected", queued.event.code)
+            assertEquals("home_wifi", queued.event.mode)
+            assertNull(queued.event.path)
+            assertEquals(0L, capture.sample(state, consent, 127).first.single().key.policyRevision)
+            row.put("policyRevision", "43")
+            assertEquals(0L, capture.sample(state, consent, 128).first.single().key.policyRevision)
+            row.put("policyRevision", 43).put("algorithmRevision", "synthetic-other")
+            assertEquals(0L, capture.sample(state, consent, 128).first.single().key.policyRevision)
+        } finally { capture.disable() }
+    }
+
     @Test fun onlyConfirmedRouteSelectionCarriesItsPolicyAndAlgorithmRevisions() {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val capture=TelemetryCapture(context,"test-consent-"+UUID.randomUUID().toString().replace("-",""))

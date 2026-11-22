@@ -251,11 +251,15 @@ class AssignedPolicyRuntimeContinuityTest {
             val ack=h.status().put("request", b.getString("request")).put("group", b.getString("group"))
                 .put("hops", JSONArray(b.getJSONArray("hops").toString())).put("code", "selected").put("groupSelected", true)
                 .put("receipt", commit.getString("receipt")).put("probeMs", 20)
+            assertTrue(h.reselections.isEmpty())
+            h.acknowledge(JSONObject(ack.toString()).put("receipt", Policy.hash("synthetic-other-receipt")), 313_000)
+            assertTrue(h.reselections.isEmpty())
             h.acknowledge(ack, 313_000)
             assertEquals("hop-001", h.view().getJSONArray("routes").getJSONObject(0).getJSONArray("measuredPath").getString(0))
             val count=h.commands.size
             h.acknowledge(ack, 313_000); assertNull(h.tick(314_000))
             assertEquals(count, h.commands.size); assertTrue(h.view().getBoolean("requiredReady"))
+            assertEquals(listOf(f.binding().revision to NetworkMode.WIFI), h.reselections)
             assertFalse(h.controller.requiresRetirement())
         }
         }

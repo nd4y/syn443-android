@@ -55,7 +55,7 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
                 "tls_timeout" -> "probe" to "tls_timeout"
                 "tls_failed" -> "probe" to "tls_failure"
                 "transport_eof" -> "probe" to "transport_eof"
-                "managed_route_recheck" -> "route" to "reselected"
+                "managed_route_recheck", "adaptive_route_reselected" -> "route" to "reselected"
                 "vpn_permission_revoked" -> "vpn" to "permission_revoked"
                 else -> when(row.optString("phase")) {
                     "Online" -> "vpn" to "online"
@@ -67,12 +67,27 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
                 }
             }
             val id=Identity.hash(("${consent.session}/$sequence").toByteArray(Charsets.US_ASCII))
-            val algorithm=if(kind=="route" && code=="reselected")
-                FailoverAlgorithm.fromRevision(row.optString("algorithmRevision")) else null
-            val policyRevision=if(algorithm!=null)row.optLong("policyRevision").takeIf {it in 1..9_007_199_254_740_991L} ?: 0 else 0
-            val algorithmRevision=if(policyRevision>0 && algorithm==FailoverAlgorithm.CONFIRMED)2 else 1
-            // A stamped managed reselection is currently admitted only on validated Wi-Fi.
-            val mode=if(policyRevision>0)"wifi" else "unknown"
+            val adaptive = row.optString("code") == "adaptive_route_reselected"
+            val rawRevision = row.opt("policyRevision")
+            val revision = row.optLong("policyRevision").takeIf {
+                it in 1..9_007_199_254_740_991L && (!adaptive || rawRevision is Int || rawRevision is Long)
+            }
+            val variant = when {
+                adaptive && row.optString("algorithmRevision") == io.syn443.policy.Policy.ADAPTIVE_ALGORITHM && build >= 128 -> 3
+                !adaptive && kind == "route" && code == "reselected" -> when (FailoverAlgorithm.fromRevision(row.optString("algorithmRevision"))) {
+                    FailoverAlgorithm.CONFIRMED -> 2
+                    FailoverAlgorithm.BASELINE -> 1
+                    null -> null
+                }
+                else -> null
+            }
+            val policyRevision = if (variant != null) revision ?: 0 else 0
+            val algorithmRevision = if (policyRevision > 0) checkNotNull(variant) else 1
+            val mode = when {
+                policyRevision == 0L -> "unknown"
+                adaptive -> row.optString("networkMode").takeIf { it in setOf("home_wifi","wifi","cellular_restricted","cellular","unknown") } ?: "unknown"
+                else -> "wifi"
+            }
             val event=TechnicalTelemetry.Event(id,row.optLong("at"),row.optLong("elapsed",-1),
                 row.optLong("networkEpoch",-1),kind,code,mode)
             if(runCatching {event.validate()}.isSuccess)output+=TechnicalTelemetry.Queued(

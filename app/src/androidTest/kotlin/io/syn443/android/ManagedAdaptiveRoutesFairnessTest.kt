@@ -64,6 +64,7 @@ class ManagedAdaptiveRoutesFairnessTest {
         var scope = RouteScope(1, 2, 3, "synthetic-fair-owner", Policy.hash(raw))
         var epoch = 1L
         var nativeScope = Policy.hash("synthetic-fair-native")
+        val reselections = mutableListOf<Pair<Long, NetworkMode>>()
         val commands = mutableListOf<JSONObject>()
         val starts = mutableListOf<Pair<Long, JSONObject>>()
         private val dispatch: (String) -> Unit = { raw ->
@@ -83,7 +84,7 @@ class ManagedAdaptiveRoutesFairnessTest {
             .put("policyScope", policyScope).put("ready", true).put("group", "").put("hops", JSONArray())
             .put("code", "idle").put("elapsedMs", 0).put("probeMs", 0).put("receipt", "").put("groupSelected", false).put("workAgeMs", 0)
         fun ready(now: Long) = controller.report(status(), now, dispatch)
-        fun acknowledge(frame: JSONObject, now: Long) = controller.report(frame, now, dispatch)
+        fun acknowledge(frame: JSONObject, now: Long) = controller.report(frame, now, dispatch) { revision, mode -> reselections += revision to mode }
         fun tick(now: Long): JSONObject? {
             val before = commands.size
             controller.tick(now, true, true, dispatch)
@@ -104,12 +105,12 @@ class ManagedAdaptiveRoutesFairnessTest {
         }
         fun verified(probe: JSONObject, now: Long, latency: Long = 20): JSONObject {
             val before = commands.size
-            controller.report(result(probe, "verified").put("probeMs", latency).put("receipt", Policy.hash(probe.getString("request"))), now, dispatch)
+            acknowledge(result(probe, "verified").put("probeMs", latency).put("receipt", Policy.hash(probe.getString("request"))), now)
             return commands.drop(before).single()
         }
         fun selected(probe: JSONObject, now: Long, latency: Long = 20) {
             assertEquals("commit", verified(probe, now, latency).getString("command"))
-            controller.report(result(probe, "selected").put("probeMs", latency).put("receipt", Policy.hash(probe.getString("request"))).put("groupSelected", true), now, dispatch)
+            acknowledge(result(probe, "selected").put("probeMs", latency).put("receipt", Policy.hash(probe.getString("request"))).put("groupSelected", true), now)
         }
         fun rebind(now: Long) {
             scope = scope.copy(network=scope.network+1)

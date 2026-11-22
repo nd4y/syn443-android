@@ -659,7 +659,12 @@ class TunnelService : VpnService() {
                 RouteSnapshot.owner(scope)
                 adaptiveRoutes?.let {routes->
                     routes.bind(scope,mode,policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
-                    routes.report(adaptive,SystemClock.elapsedRealtime()) {command->runCatching {host?.checkRoutes(session,command)}}
+                    routes.report(adaptive, SystemClock.elapsedRealtime(), { command ->
+                        runCatching { host?.checkRoutes(session, command) }
+                    }) { revision, selectedMode ->
+                        // A diagnostic write cannot change the acknowledged native selection.
+                        runCatching { store.adaptiveReselected(scope.intent, scope.network, revision, selectedMode) }
+                    }
                     adaptiveTick()
                 }
                 return@post

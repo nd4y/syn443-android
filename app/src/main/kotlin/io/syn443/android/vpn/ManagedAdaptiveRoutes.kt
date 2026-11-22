@@ -213,7 +213,12 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         }
     }
     fun report(raw:JSONObject,now:Long,dispatch:(String)->Unit) {
-        try { reportCurrent(raw,now,dispatch) } finally {publishSearch()}
+        report(raw, now, dispatch) { _, _ -> }
+    }
+
+    fun report(raw: JSONObject, now: Long, dispatch: (String) -> Unit,
+               onReselection: (Long, NetworkMode) -> Unit) {
+        try { reportCurrent(raw, now, dispatch, onReselection) } finally { publishSearch() }
     }
     /** A native scope change revokes selected paths even when Android's route
      * scope did not change. Negative evidence and admission debt stay owned.
@@ -240,7 +245,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         if(hops.length()!=0)return false
         return !raw.has("recheckHints") || raw.optJSONArray("recheckHints")?.length()==0
     }
-    private fun reportCurrent(raw:JSONObject,now:Long,dispatch:(String)->Unit) {
+    private fun reportCurrent(raw:JSONObject,now:Long,dispatch:(String)->Unit, onReselection:(Long, NetworkMode)->Unit) {
         if(retireOwner || context==null)return
         if(!advanceClock(now) || raw.toString().length>32768)return
         val epoch=safeInteger(raw,"nativeEpoch") ?: return
@@ -357,6 +362,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             send(frame(work.action).put("request",work.request).put("receipt",receipt),now,dispatch)
             return
         }
+        var replacedSelectedPath = false
         if(work.action=="commit" && code=="selected") {
             if(!raw.optBoolean("groupSelected") || raw.optString("receipt")!=work.receipt)return
             // Only an independently verified replacement with a successful
@@ -365,6 +371,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 memory?.record(checkNotNull(context),key(work.group,it.path),it.attempt,now,ProbeVerdict.CONFIRMED_PATH_FAILURE)
             }
             val changed=group.current?.id!=work.path.id
+            replacedSelectedPath = changed && group.current != null
             group.current=work.path;group.measuredAt=now;group.latency=work.latency;group.nextAt=now+maintenanceCadence
             group.selectionToken=safeInteger(raw,"selectionToken") ?: 0;group.hintSequence=0;group.urgentRecheck=false;group.forceCheck=false
             if(changed)group.selectedAt=now
@@ -408,6 +415,10 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         } else if(code !in setOf("commit_rejected","discarded"))return
         pending=null
         markSearch(work.group,AdaptiveSearchState.SEARCH_INCOMPLETE)
+        val binding = boundPolicy
+        if (replacedSelectedPath && binding != null && now < binding.leaseDeadlineElapsed) {
+            onReselection(binding.revision, mode)
+        }
     }
     private fun key(group:String,path:PlannedPath)=PathHealthKey(path.id,checkNotNull(wire.graph.groupInfo(group)).intent,group)
     fun tick(now:Long,unmetered:Boolean,allowExplore:Boolean,dispatch:(String)->Unit) {
