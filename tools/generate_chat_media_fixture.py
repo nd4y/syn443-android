@@ -28,10 +28,13 @@ with tempfile.TemporaryDirectory() as directory:
     landscape = Path(directory) / 'landscape.mp4'
     geometry_clip(landscape, '320x240')
     subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
-        '-i', str(landscape), '-c', 'copy', '-metadata:s:v:0', 'rotate=90', str(rotated)],
+        '-display_rotation:v:0', '90', '-i', str(landscape), '-c', 'copy', str(rotated)],
         check=True, timeout=30)
 rotation = subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-    '-show_entries', 'stream_side_data=rotation', '-of', 'json', str(rotated)],
+    '-show_entries', 'stream=width,height:stream_side_data=rotation', '-of', 'json', str(rotated)],
     text=True, timeout=15)
-assert any(item.get('rotation') == 90 for item in json.loads(rotation)['streams'][0]['side_data_list'])
+stream, = json.loads(rotation)['streams']
+assert (stream['width'], stream['height']) == (320, 240)
+assert any(abs(item.get('rotation', 0)) == 90 for item in stream.get('side_data_list', [])), \
+    'Rotated fixture requires a quarter-turn MP4 display matrix'
 print('Generated synthetic chat clips, including a verified 90-degree display transform')
