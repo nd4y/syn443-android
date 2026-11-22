@@ -861,7 +861,8 @@ ADAPTIVE_SEARCH_REQUIRED = [
 if mode=="emulator":
     assert set(ADAPTIVE_SEARCH_REQUIRED) <= set(identities), "Missing exact bounded adaptive search diagnostic outcomes"
 
-CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
+CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'confirmedCountryRequiresAPassedCountryLeafAndOneUnambiguousClass'),
+            ('io.syn443.policy.RouteCheckProfileTest',
              'sharedClosedProfilesAcceptNineValidAndRejectAllFortyThreeInvalidVectors'),
             ('io.syn443.policy.RouteCheckProfileTest',
              'ownedSortedLeavesAndCompleteWirePreserveOrderedExpressionsWithoutLeakingTargets'),
@@ -901,7 +902,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
 if mode in CHECK_PLAN_REQUIRED:
     required = set(CHECK_PLAN_REQUIRED[mode])
-    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == 11
+    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == {'policy': 12, 'emulator': 11}[mode]
     assert required <= set(identities), "Missing exact closed check-plan, policy or passive projection outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/policy/src/test/kotlin/io/syn443/policy" if mode == "policy" else "app/src/androidTest/kotlin/io/syn443/android"
