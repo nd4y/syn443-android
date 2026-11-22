@@ -383,7 +383,7 @@ def enrolled_operator_mode(fixture):
             adaptive = next((r for r in rows if r.get('type') == 'syn443-adaptive'), {})
             search = adaptive.get('search', {}).get('state')
             print('Signed Wi-Fi selection:', json.dumps({
-                'candidateServed': any(revision == 2 for _, revision in fixture.envelopes),
+                'candidateServed': any(revision == 2 for _, revision in list(fixture.envelopes)),
                 'routePresent': bool(adaptive),
                 'working': adaptive.get('state') == 'working',
                 'selectedExpectedHop': adaptive.get('measuredPath') == [wifi_hop],

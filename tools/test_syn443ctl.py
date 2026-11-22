@@ -10,6 +10,25 @@ import syn443ctl
 
 
 class AdbControlTest(unittest.TestCase):
+    def test_consented_overlay_negotiates_on_the_read_endpoint_before_asking_for_health(self):
+        legacy = {"schemaVersion": 1, "operations": ["capabilities","status","logs"]}
+        latest = dict(legacy, optionalOperations=["overlay-status"])
+        health = {"schemaVersion":1,"provider":"netbird","implementation":"available","configured":True,
+                  "control":"connected","controlTransport":"vless"}
+        for caps, expected in [(legacy,4),(latest,0),(dict(legacy, optionalOperations=["bad value"]),5)]:
+            payloads = [caps,health]
+            def reply(command, **kwargs):
+                self.assertEqual(command[command.index("--uri")+1], syn443ctl.LOCAL_READ_URI)
+                self.assertEqual(command[command.index("--method")+1], "capabilities" if len(payloads)==2 else "overlay-status")
+                raw = ("Result: Bundle[{ok=true, json="+json.dumps(payloads.pop(0))+"}]").encode()
+                return subprocess.CompletedProcess(command,0,raw,b"")
+            with patch("syn443ctl.subprocess.run", side_effect=reply), contextlib.redirect_stdout(io.StringIO()) as out:
+                code = syn443ctl.main(["--serial","synthetic","--local-read","overlay-status","--provider","netbird"])
+            self.assertEqual(code,expected)
+            if code == 0:
+                self.assertEqual(json.loads(out.getvalue())["result"]["controlTransport"],"vless")
+            self.assertEqual(len(payloads),int(expected!=0))
+
     def test_local_grant_uses_only_the_separate_read_endpoint(self):
         def invoke(operation, payload):
             wire = ("Result: Bundle[{ok=true, json=" + json.dumps(payload) + "}]").encode()

@@ -19,7 +19,8 @@ import zipfile
 
 URI = "content://io.syn443.control"
 LOCAL_READ_URI = "content://io.syn443.operator.read"
-LOCAL_READ_OPERATIONS = ("capabilities", "status", "logs")
+LOCAL_READ_BASE = ("capabilities", "status", "logs")
+LOCAL_READ_OPERATIONS = LOCAL_READ_BASE + ("overlay-status",)
 METHODS = {
     "status": "status", "logs": "logs", "routes-status": "routes-status",
     "routes-check": "routes-check", "routes-cancel": "routes-cancel",
@@ -121,6 +122,17 @@ def canonical_view(raw):
         raise ControlError("invalid_arguments", 2) from err
 
 
+def local_read_operations(reply):
+    if type(reply.get("schemaVersion")) is not int or reply["schemaVersion"] != 1 or reply.get("operations") != list(LOCAL_READ_BASE):
+        raise ControlError("invalid_reply", 5)
+    optional = reply.get("optionalOperations", [])
+    if not isinstance(optional, list) or len(optional) > 16 or any(
+            not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,47}", name) for name in optional
+    ) or len(set(optional)) != len(optional):
+        raise ControlError("invalid_reply", 5)
+    return [name for name in LOCAL_READ_OPERATIONS if name in LOCAL_READ_BASE or name in optional]
+
+
 def overlay_health(provider, data):
     base = {"schemaVersion", "provider", "implementation"}
     if (type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 1 or
@@ -192,7 +204,7 @@ class Device:
         self.local_read = local_read
 
     def call(self, operation, argument=None):
-        if self.local_read and (operation not in LOCAL_READ_OPERATIONS or argument is not None):
+        if self.local_read and (operation not in LOCAL_READ_OPERATIONS or argument is not None and operation != "overlay-status"):
             raise ControlError("unsupported_operation", 4)
         method = operation if self.local_read else METHODS[operation]
         uri = LOCAL_READ_URI if self.local_read else URI
@@ -808,10 +820,7 @@ def main(argv=None):
             raise ControlError("unsupported_operation", 4)
         device = Device(args.serial, args.timeout, local_read=True) if args.local_read else Device(args.serial, args.timeout)
         if args.local_read and args.operation == "capabilities":
-            value = device.call("capabilities")
-            if type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1 or value.get("operations") != list(LOCAL_READ_OPERATIONS):
-                raise ControlError("invalid_reply", 5)
-            data = {"access": "local_read_grant", "operations": list(LOCAL_READ_OPERATIONS)}
+            data = {"access": "local_read_grant", "operations": local_read_operations(device.call("capabilities"))}
         elif args.local_read and args.operation == "status":
             value = device.call("status")
             phase, reason = value.get("phase"), value.get("reason")
@@ -848,7 +857,10 @@ def main(argv=None):
             follow(device, args.follow_seconds, 2.0)
             return 0
         elif args.operation == "overlay-status":
-            if not device.supports_type("overlay-status", b"application/vnd.syn443.overlay-status-v1"):
+            if args.local_read:
+                if "overlay-status" not in local_read_operations(device.call("capabilities")):
+                    raise ControlError("unsupported_by_device", 4)
+            elif not device.supports_type("overlay-status", b"application/vnd.syn443.overlay-status-v1"):
                 raise ControlError("unsupported_by_device", 4)
             data = overlay_health(args.provider, device.call(args.operation, args.provider))
         elif args.operation == "netbird-cancel":

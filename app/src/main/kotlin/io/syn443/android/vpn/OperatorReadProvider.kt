@@ -44,7 +44,12 @@ class OperatorReadProvider : ContentProvider() {
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         fun rejected(code: String) = Bundle().apply { putBoolean("ok", false); putString("error", code) }
         if (Binder.getCallingUid() != 2000) return rejected("unauthorized")
-        if (arg != null || (extras != null && !extras.isEmpty) || method !in setOf("capabilities", "status", "logs")) {
+        val validMethod = when (method) {
+            "capabilities", "status", "logs" -> arg == null
+            "overlay-status" -> OverlayProviderHealth.supports(arg)
+            else -> false
+        }
+        if (!validMethod || (extras != null && !extras.isEmpty)) {
             return rejected("command_rejected")
         }
         val app = checkNotNull(context)
@@ -54,6 +59,8 @@ class OperatorReadProvider : ContentProvider() {
                 when (method) {
                     "capabilities" -> JSONObject().put("schemaVersion", 1).put("operations",
                         JSONArray(listOf("capabilities", "status", "logs")))
+                        .put("optionalOperations", JSONArray(listOf("overlay-status")))
+                    "overlay-status" -> OverlayProviderHealth.live(app, requireNotNull(arg))
                     "logs" -> DiagnosticProjection.logs(StateStore.get(app).read())
                     else -> DiagnosticProjection.operatorStatus(LifecycleAccess.engineStatus(app, StateStore.get(app).read()))
                 }

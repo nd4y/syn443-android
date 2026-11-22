@@ -35,13 +35,17 @@ class OperatorReadConsentTest {
             assertTrue(shell("status").contains("local_consent_required"))
             assertTrue(shell("operator-read-access", privateUri, "grant").contains("ok=false"))
             assertTrue(shell("logs").contains("local_consent_required"))
+            assertTrue(shell("overlay-status", argument = "netbird").contains("local_consent_required"))
             ui.setContent { DiagnosticsRoute() }
             val enable = ui.onNodeWithText("Разрешить на 15 минут")
             val revoke = ui.onNodeWithText("Отозвать доступ")
             ui.waitUntil(10000) { ui.onAllNodesWithText("Разрешить на 15 минут").fetchSemanticsNodes().isNotEmpty() }
             enable.performScrollTo().performClick()
             ui.waitUntil(10000) { ui.onAllNodesWithText("Отозвать доступ").fetchSemanticsNodes().isNotEmpty() }
-            assertTrue(shell("capabilities").contains("ok=true"))
+            assertTrue(shell("capabilities").contains("optionalOperations"))
+            assertTrue(shell("overlay-status", argument = "netbird").contains("\"controlTransport\""))
+            assertTrue(shell("overlay-status", argument = "tailscale").contains("not_implemented"))
+            assertTrue(shell("overlay-status", argument = "invalid").contains("ok=false"))
             val status = shell("status")
             assertTrue(status.contains("ok=true") && status.contains("\"phase\""))
             assertFalse(status.contains("configRevision") || status.contains("targetDevice"))

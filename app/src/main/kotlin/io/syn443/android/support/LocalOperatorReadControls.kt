@@ -62,7 +62,7 @@ internal fun LocalOperatorReadControls() {
         }
     }
     Text("Чтение через ADB")
-    Text("Компьютер с разрешённой отладкой сможет прочитать состояние VPN и очищенные технические события.")
+    Text("Компьютер с разрешённой отладкой сможет прочитать состояние VPN, способ подключения NetBird и очищенные технические события.")
     if (deadline > 0) Text("Доступ разрешён на ограниченное время.")
     if (message.isNotEmpty()) Text(message)
     OutlinedButton(enabled = !busy, onClick = {

@@ -86,12 +86,7 @@ class ControlProvider : ContentProvider() {
             }
             if (method == "overlay-status") {
                 require(extras == null || extras.isEmpty)
-                val result = OverlayProviderHealth.read(requireNotNull(arg)) {
-                    val state = StateStore.get(context).read()
-                    LifecycleAccess.engineStatus(context, state)
-                    OverlaySnapshot.forStatus(state.optLong("generation", -1), state.optLong("networkEpoch", -1),
-                        state.opt("desiredOn") == true, state.opt("engineActive") == true)
-                }
+                val result = OverlayProviderHealth.live(context, requireNotNull(arg))
                 return Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
             }
             if (method == "route-explain") {

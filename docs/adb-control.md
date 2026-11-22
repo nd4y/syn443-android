@@ -1,18 +1,23 @@
 # Android operator access over ADB
 
-## Read status and logs from the release app
+## Read VPN status, NetBird connectivity and logs from the release app
 
 On the phone, open **Диагностический архив**. Under **Чтение через ADB**,
 tap **Разрешить на 15 минут**. From the computer already paired with Android,
 run `python3 tools/syn443ctl.py --serial <adb-serial> --local-read status`
-or replace `status` with `logs` or `capabilities`. Logs also support
+or replace `status` with `logs` or `capabilities`. To inspect NetBird on a
+compatible release, run `python3 tools/syn443ctl.py --serial <adb-serial> --local-read overlay-status --provider netbird`.
+It reports the current control connection and its direct or VLESS transport.
+When the underlying state cannot be confirmed the result is `unknown`.
+This read neither contacts peers nor includes peer names, addresses or proxy
+settings. Older clients continue to receive the original capability list. Logs also support
 `--follow-seconds 60`. An unknown engine state omits `engineActive`.
 
 The grant expires after fifteen minutes. The owner can revoke it on the same
 screen. A controller restart also ends it. Exit code 4 with
 `local_consent_required` means the phone needs a fresh local grant.
 The separate read endpoint checks Android shell UID and returns a closed
-projection of VPN health and technical events. The CLI lists exactly the
+projection of VPN health, overlay connectivity and technical events. The CLI lists exactly the
 operations available through this grant.
 
 ## Development controls

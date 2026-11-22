@@ -1,9 +1,20 @@
 package io.syn443.android.vpn
 
+import android.content.Context
 import org.json.JSONObject
 
 /** A provider-wide control connection does not establish a data path to any particular peer. */
 internal object OverlayProviderHealth {
+    private val providers = setOf("netbird", "tailscale", "zerotier")
+
+    fun supports(provider: String?) = provider != null && provider in providers
+
+    fun live(context: Context, provider: String): JSONObject = read(provider) {
+        val state = LifecycleAccess.engineStatus(context, StateStore.get(context).read())
+        OverlaySnapshot.forStatus(state.optLong("generation", -1), state.optLong("networkEpoch", -1),
+            state.opt("desiredOn") == true, state.opt("engineActive") == true)
+    }
+
     fun netBirdState(snapshot: JSONObject): NetBirdConnectionState {
         if (snapshot.opt("configuredInRunningProfile") != true) return NetBirdConnectionState.UNKNOWN
         return NetBirdConnectionState.entries.firstOrNull { it.name == snapshot.opt("connectionState") }
@@ -11,7 +22,7 @@ internal object OverlayProviderHealth {
     }
 
     fun read(provider: String, snapshot: () -> JSONObject): JSONObject {
-        require(provider in setOf("netbird", "tailscale", "zerotier"))
+        require(supports(provider))
         val result = JSONObject().put("schemaVersion", 1).put("provider", provider)
         if (provider != "netbird") return result.put("implementation", "not_implemented")
 

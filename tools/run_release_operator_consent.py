@@ -1,8 +1,10 @@
 """Exercise owner consent on the normal release, before creating the CI fixture identity."""
+import json
 import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -29,12 +31,13 @@ def press(label):
 
 
 def denied(client):
-    try:
-        client.call("status")
-    except ControlError as err:
-        assert err.code == "local_consent_required", err.code
-    else:
-        raise AssertionError("Unconsented release read succeeded")
+    for method, arg in (("status", None), ("overlay-status", "netbird")):
+        try:
+            client.call(method, arg)
+        except ControlError as err:
+            assert err.code == "local_consent_required", err.code
+        else:
+            raise AssertionError("Unconsented release read succeeded")
 
 
 def await_grant(client, enabled):
@@ -79,12 +82,25 @@ def run():
             press("Диагностический архив")
             press("Разрешить на 15 минут")
             status = await_grant(client, True)
-            assert client.call("capabilities") == {"schemaVersion": 1, "operations": ["capabilities", "status", "logs"]}
+            capabilities = client.call("capabilities")
+            assert capabilities["operations"] == ["capabilities", "status", "logs"]
+            assert capabilities["optionalOperations"] == ["overlay-status"]
+            netbird = client.call("overlay-status", "netbird")
+            assert set(netbird) == {"schemaVersion", "provider", "implementation", "configured", "control", "controlTransport"}
+            assert netbird["control"] == netbird["controlTransport"] == "unknown"
+            command = [sys.executable, str(Path(__file__).with_name("syn443ctl.py")), "--serial", client.serial,
+                       "--local-read", "overlay-status", "--provider", "netbird"]
+            projection = json.loads(subprocess.check_output(command, timeout=20))
+            assert projection["result"] == netbird
+            for reserved in ("tailscale", "zerotier"):
+                assert client.call("overlay-status", reserved) == {"schemaVersion":1,"provider":reserved,"implementation":"not_implemented"}
+            assert (PACKAGE + ":engine").encode() not in adb("shell", "ps", "-A", "-o", "NAME").splitlines()
             assert status["desiredOn"] is False and type(status["generation"]) is int
             assert isinstance(client.call("logs")["events"], list)
             assert b"ok=false" in adb("shell", "content", "call", "--uri", "content://io.syn443.operator.read", "--method", "connect")
             press("Отозвать доступ")
             await_grant(client, False)
+            denied(client)
             press("Разрешить на 15 минут")
             assert await_grant(client, True)["schemaVersion"] == 1
             adb("shell", "am", "force-stop", PACKAGE)
@@ -93,6 +109,7 @@ def run():
         finally:
             assert b"Success" in adb("uninstall", PACKAGE, timeout=30)
     print("ordinaryReleaseLocalOperatorGrantAndProcessRestart: passed", flush=True)
+    print("ordinaryReleasePassiveOverlayWithoutNativeOwner: passed", flush=True)
 
 
 if __name__ == "__main__":
