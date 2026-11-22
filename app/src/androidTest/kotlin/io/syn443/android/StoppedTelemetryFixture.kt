@@ -14,20 +14,26 @@ import java.util.concurrent.TimeUnit
 
 /** Disposable Actions emulator only. Return the OS job number, never enrollment data. */
 internal object StoppedTelemetryFixture {
-    fun optInStopAndLocateJob(context: Context): Bundle {
+    fun optInStopAndLocateJob(context: Context, stage:(String)->Unit): Bundle {
         val uri = Uri.parse("content://io.syn443.control")
         fun call(method: String, arg: String? = null) = checkNotNull(context.contentResolver.call(uri,method,arg,null))
             .also { check(it.getBoolean("ok")) }
         fun state(method: String) = JSONObject(checkNotNull(call(method).getString("json")))
+        stage("telemetry_opt_in")
         val auth = state("auth-status")
         check(auth.getBoolean("telemetryAvailable") && !auth.getBoolean("telemetryEnabled") && state("status").getBoolean("desiredOn"))
-        call("auth-telemetry", auth.getLong("generation").toString() + ":true")
-        call("disconnect")
         val work = WorkManager.getInstance(context)
+        val tag=StoppedTelemetryWorker::class.java.name
+        val previous=work.getWorkInfosByTag(tag).get(5,TimeUnit.SECONDS).map { it.id }.toSet()
+        call("auth-telemetry", auth.getLong("generation").toString() + ":true")
+        check(state("auth-status").getBoolean("telemetryEnabled"))
+        stage("telemetry_stop")
+        call("disconnect")
+        stage("telemetry_lookup_job")
         val scheduler = checkNotNull(context.getSystemService(JobScheduler::class.java))
         val deadline = SystemClock.elapsedRealtime() + 25_000
         do {
-            val active = work.getWorkInfosByTag(StoppedTelemetryWorker::class.java.name).get(3,TimeUnit.SECONDS).filter { !it.state.isFinished }
+            val active = work.getWorkInfosByTag(tag).get(3,TimeUnit.SECONDS).filter { it.id !in previous && !it.state.isFinished }
             check(active.size <= 1)
             val item = active.singleOrNull()
             if (item != null) {

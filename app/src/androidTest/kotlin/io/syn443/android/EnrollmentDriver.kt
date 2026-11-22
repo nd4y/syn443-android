@@ -19,20 +19,12 @@ import javax.net.ssl.TrustManagerFactory
 class EnrollmentDriver:AndroidJUnitRunner() {
     private var fixtureArguments:Bundle?=null
     private var observeCameraPermission = false
-    private var stopWithTelemetry = false
     override fun onCreate(args:Bundle?) {
-        stopWithTelemetry = args?.getString("fixtureStopWithTelemetry") == "true"
         observeCameraPermission = args?.getString("observeCameraPermission") == "true"
         fixtureArguments=args?.takeIf {it.containsKey("fixturePort")}
         super.onCreate(args)
     }
     override fun onStart() {
-        if (stopWithTelemetry) {
-            check(BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
-            val result = runCatching { StoppedTelemetryFixture.optInStopAndLocateJob(targetContext) }.getOrNull()
-            finish(if (result == null) 0 else -1, result ?: Bundle())
-            return
-        }
         if (observeCameraPermission) {
             val granted = targetContext.checkSelfPermission(android.Manifest.permission.CAMERA) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -44,6 +36,7 @@ class EnrollmentDriver:AndroidJUnitRunner() {
         if(fixtureArguments==null) {super.onStart();return}
         val arguments=checkNotNull(fixtureArguments)
         var stage="preflight"
+        var scheduled:Bundle?=null
         val ok=runCatching {
             require(BuildConfig.DEBUG)
             if(android.os.Build.HARDWARE !in setOf("ranchu","goldfish")) {
@@ -92,7 +85,19 @@ class EnrollmentDriver:AndroidJUnitRunner() {
             val registered=await {it.getString("phase")=="POLICY_CACHED" && !it.getBoolean("busy")}
             stage="candidate_validated"
             check(registered.getJSONObject("assignedPolicy").getBoolean("candidateValidated"))
-            if (arguments.getString("fixtureTelemetry") == "true") {
+            if (arguments.getString("fixtureTelemetry") == "stopped") {
+                require(BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
+                stage="telemetry_connect"
+                call("connect")
+                val until=SystemClock.elapsedRealtime()+45_000
+                while(true) {
+                    val vpn=JSONObject(checkNotNull(call("status").getString("json")))
+                    if(vpn.optString("phase")=="Online" && vpn.optJSONObject("policy")?.optString("phase")=="committed") break
+                    check(SystemClock.elapsedRealtime()<until)
+                    SystemClock.sleep(150)
+                }
+                scheduled=StoppedTelemetryFixture.optInStopAndLocateJob(targetContext) {stage=it}
+            } else if (arguments.getString("fixtureTelemetry") == "true") {
                 require(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
                 stage="telemetry_consent"
                 check(registered.getBoolean("telemetryAvailable") && !registered.getBoolean("telemetryEnabled"))
@@ -102,6 +107,7 @@ class EnrollmentDriver:AndroidJUnitRunner() {
             check(!JSONObject(checkNotNull(call("status").getString("json"))).getBoolean("desiredOn"))
         }.isSuccess
         finish(if(ok)-1 else 0,Bundle().apply {
+            if(ok) scheduled?.let { putAll(it) }
             putString("result",if(ok)"synthetic_enrollment_verified" else "synthetic_enrollment_failed")
             putString("stage",stage)
         })
