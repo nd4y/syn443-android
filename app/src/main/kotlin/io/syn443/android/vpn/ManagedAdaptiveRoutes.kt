@@ -6,6 +6,7 @@ import io.syn443.decision.Context
 import io.syn443.decision.Decision
 import io.syn443.decision.NetworkMode
 import io.syn443.decision.PathHealthKey
+import io.syn443.decision.PathStabilityHistory
 import io.syn443.decision.PathReadiness
 import io.syn443.decision.PlannedPath
 import io.syn443.decision.ProbeVerdict
@@ -55,6 +56,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private val order=groups.keys.sortedWith(compareBy<String>({wire.groupTags()[it]!=priorityTag},{it}))
     private var context:Context?=null
     private var routeScope:RouteScope?=null
+    private val stability = PathStabilityHistory()
     private var memory:RouteHealthMemory?=null
     var homeProofUntil=0L
     var modeOverrideUntil=0L
@@ -145,6 +147,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         previousPolicyScope=if(sameEngine)policyScope else ""
         if(!sameEngine) {nativeEpoch=0;retireOwner=false}
         context=next;routeScope=scope;mode=networkMode;policyRevision=revision;policyScope=next.dependencyHash
+        stability.clear()
         memory=nextMemory;pending=null;pendingAdmission=null;nativeReady=false;nativeScope="";observedNativeScope="";drainingSince=null
         groupCursor=0;cpuYields.clear()
         groups.values.forEach {it.frontier=null;it.current=null;it.measuredAt=0;it.nextAt=0;it.clearImprovement();it.recheckFailed=false;it.failure=null;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false}
@@ -225,6 +228,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
      * An old pending command remains a tombstone until a current idle report
      * proves the actual native probe-worker has exited; configure is not ACK. */
     private fun nativeOwnerChanged(now:Long) {
+        stability.clear()
         drainingSince=pending?.startedAt ?: drainingSince ?: now
         pendingAdmission=null
         groups.values.forEach {
@@ -341,6 +345,11 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             val same=group.current?.id==work.path.id
             if(same) {group.failure=null;group.recheckFailed=false}
             work.recovery=recoveryFailure(group,work,now)
+            val candidateKey = key(work.group, work.path)
+            // A matching terminal report is consumed once. Use the start as a conservative
+            // lower time bound because a positive native receipt has no completion stamp.
+            val sampled = stability.observe(candidateKey, work.attempt, work.startedAt, now, ProbeVerdict.VERIFIED)
+            val incumbentDegraded = group.current?.let { stability.quality(key(work.group, it), now) } == PathStabilityHistory.Quality.DEGRADED
             val activeFresh=now-group.measuredAt in 0..120_000
             val faster=activeFresh && elapsed+15<group.latency && elapsed*5<=group.latency*4
             val commit=when {
@@ -352,7 +361,10 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                     group.forceCheck=true
                     false
                 }
-                faster -> group.improved(work.path,now)
+                sampled && (incumbentDegraded || faster) -> {
+                    val confirmed = group.improved(work.path, now)
+                    confirmed && stability.quality(candidateKey, now) == PathStabilityHistory.Quality.STEADY
+                }
                 else -> {
                     group.clearImprovement()
                     false
@@ -368,7 +380,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             // Only an independently verified replacement with a successful
             // previous-selection-bound native commit attributes the old failure.
             work.recovery?.takeIf {it==recoveryFailure(group,work,now)}?.let {
-                memory?.record(checkNotNull(context),key(work.group,it.path),it.attempt,now,ProbeVerdict.CONFIRMED_PATH_FAILURE)
+                recordFailure(work.group, it.path, it.attempt, it.completedAt, now)
             }
             val changed=group.current?.id!=work.path.id
             replacedSelectedPath = changed && group.current != null
@@ -391,7 +403,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 if(value<=0 || value !in work.startedAt..now || now-value>30_000)return
                 value
             } else 0L
-            if(code=="exit_mismatch")memory?.record(checkNotNull(context),key(work.group,work.path),work.attempt,now,ProbeVerdict.CONFIRMED_PATH_FAILURE)
+            if(code=="exit_mismatch")recordFailure(work.group, work.path, work.attempt, work.startedAt, now)
             if(group.improvementPath?.id==work.path.id)group.clearImprovement()
             if(group.current?.id==work.path.id && !raw.optBoolean("groupSelected"))group.current=null
             if(group.current?.id==work.path.id) {
@@ -420,6 +432,13 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             onReselection(binding.revision, mode)
         }
     }
+    private fun recordFailure(group: String, path: PlannedPath, attempt: Long, sampledAt: Long, now: Long) {
+        val pathKey = key(group, path)
+        if (memory?.record(checkNotNull(context), pathKey, attempt, now, ProbeVerdict.CONFIRMED_PATH_FAILURE) == true) {
+            stability.observe(pathKey, attempt, sampledAt, now, ProbeVerdict.CONFIRMED_PATH_FAILURE)
+        }
+    }
+
     private fun key(group:String,path:PlannedPath)=PathHealthKey(path.id,checkNotNull(wire.graph.groupInfo(group)).intent,group)
     fun tick(now:Long,unmetered:Boolean,allowExplore:Boolean,dispatch:(String)->Unit) {
         tickGuarded(now,unmetered,allowExplore,{true},dispatch)

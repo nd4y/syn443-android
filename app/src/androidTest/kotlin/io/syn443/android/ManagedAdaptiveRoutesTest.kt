@@ -390,6 +390,22 @@ class ManagedAdaptiveRoutesTest {
         }
     }
 
+    @Test fun delayedReserveReceiptCannotContributeToThreeFreshMeasurements() {
+        Harness(config()).use { h ->
+            val incumbent = prepareHealthy(h)
+            val reserve = checkNotNull(h.tick(301000))
+            assertNotEquals(incumbent.getJSONArray("hops").toString(), reserve.getJSONArray("hops").toString())
+            // The native worker still owns this request, but the start no longer
+            // bounds a fresh sample. A fast delayed receipt earns no retry streak.
+            assertEquals("discard", h.measured(reserve, 332000, 10).getString("command"))
+            h.report(h.result(reserve, "discarded", selected = true), 332000)
+            val next = checkNotNull(h.tick(337000))
+            assertEquals(incumbent.getJSONArray("hops").toString(), next.getJSONArray("hops").toString())
+            h.selected(next, 337000, 100)
+            assertEquals(100, h.view().getJSONArray("routes").getJSONObject(0).getInt("latencyMs"))
+        }
+    }
+
     @Test fun staleBaselineAndInterruptedCandidateKeepTheIncumbent() {
         fun hops(probe:JSONObject)=probe.getJSONArray("hops").toString()
         Harness(config()).use { h ->
