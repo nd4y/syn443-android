@@ -95,6 +95,34 @@ class RouteSnapshotTest {
             assertEquals(0, missing.getJSONArray("measuredPath").length())
         }
     }
+    @Test fun replacedPolicyCannotShowAnotherBatchPendingOrFailed() {
+        val owner = scope.copy(config = "current-policy")
+        RouteSnapshot.owner(null)
+        RouteSnapshot.configure(config, owner.config)
+        RouteSnapshot.owner(owner)
+        try {
+            val status = JSONObject().put("desiredOn", true).put("engineActive", true)
+                .put("networkEpoch", owner.network).put("generation", owner.intent).put("configRevision", "replaced")
+            val request = checkNotNull(RouteSnapshot.request(owner))
+            val other = RouteSnapshot.view(status)
+            assertFalse(other.getBoolean("running"))
+            assertFalse(other.getJSONArray("routes").getJSONObject(0).getBoolean("checkPending"))
+            status.put("configRevision", owner.config)
+            assertTrue(RouteSnapshot.view(status).getBoolean("running"))
+            assertTrue(RouteSnapshot.update(owner, report(request, false)))
+            val current = RouteSnapshot.view(status).getJSONArray("routes").getJSONObject(0)
+            assertEquals("failed", current.getString("state"))
+            assertEquals("dial_failed", current.getString("reason"))
+            val old = RouteSnapshot.view(status.put("configRevision", "replaced")).getJSONArray("routes").getJSONObject(0)
+            assertEquals("unverified", old.getString("state"))
+            assertEquals("not_checked", old.getString("reason"))
+            assertTrue(old.isNull("latencyMs"))
+            assertEquals(0, old.getJSONArray("measuredPath").length())
+        } finally {
+            RouteSnapshot.owner(null)
+        }
+    }
+
     @Test fun independentRoutesKeepOptionalFailureAndUnconfiguredUnknown() {
         setup();val request=checkNotNull(RouteSnapshot.request(scope));assertTrue(RouteSnapshot.update(scope,report(request,true)))
         val view=RouteSnapshot.read(true,true,scope);val rows=view.getJSONArray("routes")

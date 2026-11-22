@@ -206,7 +206,12 @@ func TestDiagnosticCancellationBeforeRosterReturnsCannotStartLateProbes(t *testi
 		close(client.release)
 		t.Fatal("recorder did not enter")
 	}
-	CancelDiagnostics()
+	var pending diagnosticReport
+	if !decodeReport(peer.diagnosticsSnapshot(), &pending) || !validDiagnosticReport(pending) ||
+		pending.State != "preparing" || !validDiagnosticID(pending.JobID) || !CancelDiagnosticJob(pending.JobID) {
+		close(client.release)
+		t.Fatal("could not cancel the displayed roster lookup")
+	}
 	deadline := time.Now().Add(time.Second)
 	for {
 		var job DiagnosticJob
@@ -230,4 +235,21 @@ func TestDiagnosticCancellationBeforeRosterReturnsCannotStartLateProbes(t *testi
 	case <-time.After(time.Second):
 		t.Fatal("released reader did not finish")
 	}
+	peer.mu.Lock()
+	peer.client = &diagnosticPeer{}
+	peer.mu.Unlock()
+	var replacement diagnosticReport
+	if !decodeReport(StartDiagnostics(), &replacement) || replacement.State != "running" || !validDiagnosticID(replacement.JobID) ||
+		replacement.JobID == pending.JobID || CancelDiagnosticJob(pending.JobID) || !CancelDiagnosticJob(replacement.JobID) {
+		t.Fatal("an old cancellation could affect the replacement job")
+	}
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		var terminal diagnosticReport
+		if decodeReport(peer.diagnosticsSnapshot(), &terminal) && terminal.State == "cancelled" && terminal.JobID == "" {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("replacement did not retire its own job ID")
 }

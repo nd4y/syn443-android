@@ -70,10 +70,11 @@ start ledger, not the full common socket/byte/CPU governor or ARC-06 completion.
 
 The [bounded check-profile v2 component](route-check-profiles-v2.md) adds source
 support for all/any/quorum and sequential stages while preserving legacy checks,
-mandatory transport/exit gates and local proof/resource limits. Its Actions,
-integration and physical regression gates must be recorded separately. Normal
-enrollment still advertises the previous capability set; this source component
-does not activate a managed profile or close the full CHK-04 / AC58 requirement.
+mandatory transport/exit gates and local proof/resource limits. Android advertises
+the optional capability on new enrollment and can request it after an upgrade.
+Assigning a profile requires a device with the approved capability. CHK-04 and
+AC58 still require broader expression support and checks on an enrolled handset.
+[Android capability negotiation](https://github.com/nd4y/syn443-android/pull/135)
 
 Its exact Android source 5d5fc52577b4a9ac87bcec650b352515ff68d276 passed all eight
 jobs in [Actions 44062289165](https://github.com/nd4y/syn443-android/actions/runs/44062289165).

@@ -191,5 +191,22 @@ class NetBirdPagingUiTest {
         compose.onNodeWithTag("netbird-diagnose").assertIsNotEnabled()
         compose.onNodeWithTag("netbird-connection").assertTextEquals("Cloud: н/д; signal: н/д")
         compose.onNodeWithTag("netbird-transport").assertTextEquals("Способ подключения: неизвестно")
+        compose.onNodeWithTag("netbird-cancel").assertDoesNotExist()
+        val job = "ab".repeat(16)
+        fun showJob(state: String, stale: Boolean) {
+            compose.runOnIdle {
+                value.value = NetBirdReportFixture.overlay(total = 1).also {
+                    it.getJSONObject("diagnostics").put("state", state).put("stale", stale).put("job_id", job)
+                }
+            }
+            advanceRendering()
+        }
+        showJob("preparing", false)
+        compose.onNodeWithTag("netbird-cancel").scrollWithAdvancingClock().performClick()
+        compose.runOnIdle { assertEquals("netbird-cancel" to job, commands.last()) }
+        showJob("running", true)
+        compose.onNodeWithTag("netbird-cancel").assertDoesNotExist()
+        showJob("cancelled", false)
+        compose.onNodeWithTag("netbird-cancel").assertDoesNotExist()
     }
 }

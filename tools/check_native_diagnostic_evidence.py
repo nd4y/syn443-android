@@ -9,6 +9,8 @@ REQUIRED = {
     'TestDiagnosticCacheCannotPublishAfterStopWhileLocalReadIsPending',
     'TestBlockedDiagnosticRosterReportsTimeoutWithoutReplacementWorkersOrLateSuccess',
     'TestDiagnosticCancellationBeforeRosterReturnsCannotStartLateProbes',
+    'TestDiagnosticDeadlineIncludesRosterAndFreezesHungPeerReport',
+    'TestDiagnosticPeerTimeoutCannotPublishLateSDKSuccess',
 }
 PATH_REQUIRED = {
     'TestPrivateCheckedFailureRequiresAdmittedDispatchWithoutRevokingActiveFlows',

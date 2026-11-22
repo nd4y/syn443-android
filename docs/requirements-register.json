@@ -1149,8 +1149,11 @@
     {
       "id": "ALG-02",
       "text": "Права доступа, обязательный traffic class/exit, TLS-валидация, anti-leak правила и capabilities - жёсткие ограничения. Затем порядок оптимизации: стабильность и восстановление; энергозатраты; скорость; точность оценки дополнительных метрик. Понижение точности не разрешает ложный Connected или отключение проверки сертификата.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md#setup-cost-for-a-common-exit-path"
+      ],
+      "remainingScope": "The adaptive coordinator compares extra proxy sessions for signed paths with a common exit suffix after independent stability checks. On-device radio and battery measurements remain open."
     },
     {
       "id": "ALG-03",
@@ -1185,9 +1188,10 @@
       "text": "Энергетическая цена включает число и объём проб, новые DNS/TCP/TLS handshakes, radio wakeups по доступным оценкам, keepalive и число активных резервов. Она сравнивается при сопоставимой стабильности. Допускаются оценки/классы стоимости; измерение джоулей для каждого маршрута не предполагается.",
       "status": "partial",
       "evidence": [
-        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms"
+        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms",
+        "docs/managed-adaptive-runtime.md#setup-cost-for-a-common-exit-path"
       ],
-      "remainingScope": "Local adaptive TCP admission and passive recheck source only. Exact Actions/native race/Android/device acceptance, common SDK/diagnostic/telemetry governor, broader modes and failure correlation remain separate requirements."
+      "remainingScope": "Local adaptive TCP admission and passive recheck source only. Exact Actions/native race/Android/device acceptance, common SDK/diagnostic/telemetry governor, broader modes and failure correlation remain separate requirements. The adaptive coordinator compares extra proxy sessions for signed paths with a common exit suffix after independent stability checks. On-device radio and battery measurements remain open."
     },
     {
       "id": "ALG-07",
@@ -1597,8 +1601,12 @@
     {
       "id": "CHECK-03",
       "text": "Предусматриваются быстрая проверка до 15 секунд и глубокое задание до 120 секунд с прогрессом, отменой, ограничением параллелизма и бюджетом данных. Дополнительные тесты пропускной способности запускаются отдельно и не являются постоянными. Состав и критерии задания определяет назначенный HealthCheckProfile; бюджет одного задания не отменяет продолжение расширенного поиска следующими шагами.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/netbird-diagnostic-lifecycle.md",
+        "native/engine-netbird/diagnostics.go",
+        "native/engine-netbird/diagnostic_deadline_test.go"
+      ]
     },
     {
       "id": "CHECK-04",
@@ -1609,8 +1617,12 @@
     {
       "id": "CHECK-05",
       "text": "Начальные лимиты: четыре лёгкие проверки одновременно, до 20 кандидатов за один шаг поиска, но не только первые 20 профилей каталога. Большой граф обходится порциями с сохранением фронтира, результатов и ротацией кандидатов. Для peers - четыре пробы с deadline 12 секунд на peer; списки разбиваются на задания. Произвольные сканы LAN и портов не выполняются.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/netbird-diagnostic-lifecycle.md",
+        "native/engine-netbird/diagnostics.go",
+        "native/engine-netbird/diagnostic_deadline_test.go"
+      ]
     },
     {
       "id": "CHECK-06",
@@ -2361,7 +2373,9 @@
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/chat-background-fixture.md"
+        "docs/chat-background-fixture.md",
+        "docs/chat-recovery.md#temporary-attachments-during-screen-recreation",
+        "app/src/androidTest/kotlin/io/syn443/android/ChatUiTest.kt"
       ],
       "text": "Сжатие выполняется одним заданием вне UI-потока, имеет прогресс, отмену и bounded cleanup, не запускает VPN и уступает его критическим операциям. Приложение не сканирует медиатеку: обрабатываются только явно выбранные пользователем URI. Сохранённая очередь и подготовленные файлы хранятся в зашифрованных SQL BLOB в sandbox/no-backup. Для работы системного кодека допустимы временные файлы в приватном cache с ограничением размера и удалением после завершения, отмены и следующего запуска; после выхода из аккаунта очередь прежней учётной записи не отправляется из новой сессии."
     },
@@ -3053,8 +3067,14 @@
     {
       "id": "AC16",
       "specRow": " Проверка всех peers, запуск/отмена/смена сети | Прогресс корректен, старый job stale, нет ложного вывода offline по ICMP |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/netbird-diagnostic-lifecycle.md",
+        "native/engine-netbird/diagnostic_cache_test.go",
+        "native/engine-netbird/diagnostics_test.go",
+        "app/src/androidTest/kotlin/io/syn443/android/NetBirdPagingUiTest.kt"
+      ],
+      "remainingScope": "Native, Android and CLI checks cover explicit cancellation, stale job IDs, bounded workers and partial coverage. Live provider roster coverage and handover acceptance remain separate."
     },
     {
       "id": "AC17",
@@ -3258,8 +3278,11 @@
     {
       "id": "AC48",
       "specRow": " Прямой путь и цепочки при разных history/energy/latency/confidence | Жёсткие фильтры и лексикографический порядок соблюдены, стоимость/квота не подменяют безопасность или exit |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md#setup-cost-for-a-common-exit-path"
+      ],
+      "remainingScope": "The adaptive coordinator compares extra proxy sessions for signed paths with a common exit suffix after independent stability checks. On-device radio and battery measurements remain open."
     },
     {
       "id": "AC49",

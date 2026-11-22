@@ -35,6 +35,13 @@ flows. An uncertain target/reserve result cannot overwrite another healthy path.
 Context-specific negative memory never classifies an unattributed timeout as a
 confirmed bad proxy.
 
+When checking a policy change from the app or ADB, read `routeHealth` in the
+current lifecycle status. `measurementRevision` identifies the configuration
+that owns the observed route. While the lifecycle revision is missing or changing,
+wait for the new policy's measurements before using its status or latency.
+A matching revision allows the app to display measurements from its current
+owner again. [Route status implementation](../app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt)
+
 A failed check is a separate observation with a compiled finite reason and an
 actual native BOOTTIME completion timestamp. Local admission/operation limits,
 constructor failures, cancellation, expired budgets and panic remain uncertain.
@@ -155,3 +162,7 @@ signed managed-policy deployment and actual USB/Wi-Fi chain recovery stay separa
 Each comparison group retains at most five attributable outcomes per path over ten minutes. Three failures in that window mark the path degraded. Three consecutive fresh successes clear the degradation. The coordinator accepts a failure from an explicit exit mismatch or a failed incumbent check corroborated by a working replacement and its native selection acknowledgement. Common target failures and passive traffic hints alone supply no path-quality sample.
 
 For a voluntary switch, the reserve needs three consecutive fresh successful measurements and the existing hold time. A confirmed stable reserve can replace a degraded incumbent even when that reserve is slower. A sole usable path and corroborated hard failure still use the existing recovery rules. Samples belong to the current physical, policy and native execution context. Up to 64 paths retain history. The ten-minute pilot window uses elapsed time and consumes no extra background probes on its own.
+
+## Setup cost for a common exit path
+
+When a healthy route and a candidate use the same ordered exit profiles, each extra upstream proxy adds a session to establish. The coordinator uses this structural estimate to prefer the shorter path after three independent successful checks, even if its application probe took longer. A lower latency alone cannot promote a longer prefix to that same healthy exit. Comparable paths with unknown relative setup cost keep the existing latency thresholds. Confirmed path degradation and recovery take priority. The device still requires a live native receipt from the authorized path to switch.

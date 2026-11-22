@@ -80,6 +80,35 @@ class RouteSearchStatusTest {
         assertNull(RouteSnapshot.resolveManualCheck(next,"route-2",nextStamp))
     }
 
+    @Test fun lifecycleRevisionMustMatchBeforeReportingVerifiedAdaptiveRoute() {
+        val scope = configure()
+        val status = JSONObject().put("desiredOn", true).put("engineActive", true)
+            .put("generation", scope.intent).put("networkEpoch", scope.network)
+        RouteSnapshot.adaptive(scope, "managed-00", true, "ok", 17, listOf("synthetic-hop"))
+        RouteSnapshot.adaptiveSearch(scope, mapOf("managed-00" to AdaptiveSearchState.VERIFIED))
+        for (revision in listOf(null, "replaced")) {
+            if (revision == null) status.remove("configRevision") else status.put("configRevision", revision)
+            val report = RouteSnapshot.view(status)
+            val row = report.getJSONArray("routes").getJSONObject(0)
+            assertEquals("unverified", row.getString("state"))
+            assertEquals("WAITING_CONTEXT", search(row))
+            assertFalse(report.getBoolean("requiredReady"))
+            assertFalse(report.has("measurementRevision"))
+            assertFalse(report.has("checkContext"))
+            assertEquals(0, row.getJSONArray("measuredPath").length())
+            assertTrue(row.isNull("ageMs"))
+            assertTrue(row.isNull("latencyMs"))
+            assertEquals("not_checked", row.getString("reason"))
+        }
+        val report = RouteSnapshot.view(status.put("configRevision", scope.config))
+        assertEquals(scope.config, report.getString("measurementRevision"))
+        assertTrue(report.getBoolean("requiredReady"))
+        val row = report.getJSONArray("routes").getJSONObject(0)
+        assertEquals("VERIFIED", search(row))
+        assertEquals("synthetic-hop", row.getJSONArray("measuredPath").getString(0))
+        assertEquals(17L, row.getLong("latencyMs"))
+    }
+
     @Test fun verifiedProjectionJoinsExactExistingTtlScopeReadinessAndFutureSampleGuards() {
         val scope=configure()
         RouteSnapshot.adaptiveSearch(scope,mapOf("managed-00" to AdaptiveSearchState.VERIFIED))

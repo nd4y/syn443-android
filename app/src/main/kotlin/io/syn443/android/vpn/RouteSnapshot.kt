@@ -236,7 +236,7 @@ object RouteSnapshot {
         val scope = live?.copy(intent=status.optLong("generation"),network=status.optLong("networkEpoch"))
         val on = status.optBoolean("desiredOn")
         val ready = status.optBoolean("engineActive") && live != null
-        val sameConfig = status.optString("configRevision") == revision
+        val sameConfig = live?.config == revision && status.optString("configRevision") == revision
         return readAt(on,ready,scope,SystemClock.elapsedRealtime(),sameConfig).also { report ->
             if (on && ready && scope != null && scope == live && scope.config == revision &&
                 revision == status.optString("configRevision")) report.put("measurementRevision", revision)
@@ -399,22 +399,25 @@ object RouteSnapshot {
     /** Internal deterministic test seam. Production callers cannot supply a clock. */
     @Synchronized internal fun readAt(on:Boolean,ready:Boolean,scope:RouteScope?,now:Long,sameConfig:Boolean=true):JSONObject {
         require(now>=0)
-        val currentSnapshot=on && ready && scope!=null && scope==live && scope.config==revision && sameConfig
-        if(pending.isNotEmpty() && now-startedAt>=35_000) {
+        val sameOwner = sameConfig && scope != null && scope == live
+        val activeOwner = on && ready && sameOwner
+        val currentSnapshot = activeOwner && scope?.config == revision
+        if(sameOwner && pending.isNotEmpty() && now-startedAt>=35_000) {
             current?.let { scope -> for (id in queued) if (receipts[id] != pending) recordMissingResult(id, scope, now) }
             pending="";queued=emptySet()
         }
         val values=rows.map {row->
-            val sample=observations[row.id]
-            val state=if(scope==null) {if(on) RouteState.UNAVAILABLE else RouteState.OFF} else RouteEvidence.classify(on,ready,scope,sample,row.id in queued,now)
+            val sample = observations[row.id]?.takeIf { sameOwner && it.scope == scope }
+            val checking = activeOwner && row.id in queued
+            val state=if(scope==null) {if(on) RouteState.UNAVAILABLE else RouteState.OFF} else RouteEvidence.classify(on,ready,scope,sample,checking,now)
             JSONObject().put("id",row.id).put("label",row.tag.take(80)).put("type",row.type).put("required",row.required).put("state",state.name.lowercase(java.util.Locale.ROOT))
                 .put("configured",row.configured()).put("chain",JSONArray(row.chain)).put("routingRules",row.rules)
                 .put("individualCheck",currentSnapshot && row.individuallyCheckable())
-                .put("checkPending",row.id in queued)
-                .put("measuredPath",if(sample?.scope==scope)measuredPaths[row.id] ?: JSONArray() else JSONArray())
-                .put("reason",if(sample?.scope==scope)codes[row.id] ?: "not_checked" else "not_checked")
-                .put("ageMs",if(sample!=null && sample.scope==scope && now>=sample.elapsedMs)now-sample.elapsedMs else JSONObject.NULL)
-                .put("latencyMs",if(sample?.scope==scope)timings[row.id] ?: JSONObject.NULL else JSONObject.NULL)
+                .put("checkPending",checking)
+                .put("measuredPath",if(sample!=null)measuredPaths[row.id] ?: JSONArray() else JSONArray())
+                .put("reason",if(sample!=null)codes[row.id] ?: "not_checked" else "not_checked")
+                .put("ageMs",if(sample!=null && now>=sample.elapsedMs)now-sample.elapsedMs else JSONObject.NULL)
+                .put("latencyMs",if(sample!=null)timings[row.id] ?: JSONObject.NULL else JSONObject.NULL)
                 .also {value->
                     if (currentSnapshot && state == RouteState.WORKING && row.id !in queued) {
                         durations[row.id]?.summary(now)?.let { value.put("durationDistribution", it) }
@@ -422,10 +425,10 @@ object RouteSnapshot {
                     if (state == RouteState.FAILED && scope == live && row.id !in queued) {
                         sample?.cause?.let { value.put("cause", it.wire) }
                     }
-                    row.profile?.let {profile->value.put("checkPlan",if(on && ready && scope!=null && scope==live && sample?.scope==scope && row.id !in queued && state in setOf(RouteState.WORKING,RouteState.FAILED,RouteState.INCOMPLETE))
+                    row.profile?.let {profile->value.put("checkPlan",if(activeOwner && sample!=null && !checking && state in setOf(RouteState.WORKING,RouteState.FAILED,RouteState.INCOMPLETE))
                         checkPlans[row.id]?.let {JSONObject(it.toString())} ?: RouteCheckPlans.unknown(profile) else RouteCheckPlans.unknown(profile))}
                     if(row.type=="syn443-adaptive") {
-                        val search=if(!on || !ready || scope==null || scope!=live || searchScope!=scope)
+                        val search=if(!activeOwner || searchScope!=scope)
                             AdaptiveSearchState.WAITING_CONTEXT else searches[row.id] ?: AdaptiveSearchState.WAITING_CONTEXT
                         // A selected acknowledgement alone cannot keep a UI
                         // claim fresh across TTL, readiness or scope changes.
@@ -439,10 +442,10 @@ object RouteSnapshot {
                     }
                 }
         }
-        return JSONObject().put("routes",JSONArray(values)).put("running",pending.isNotEmpty()).put("requiredReady",RouteEvidence.requiredReady(values.map {it.getBoolean("required") to RouteState.valueOf(it.getString("state").uppercase(java.util.Locale.ROOT))})).also { result ->
+        return JSONObject().put("routes",JSONArray(values)).put("running",activeOwner && pending.isNotEmpty()).put("requiredReady",activeOwner && RouteEvidence.requiredReady(values.map {it.getBoolean("required") to RouteState.valueOf(it.getString("state").uppercase(java.util.Locale.ROOT))})).also { result ->
             if(currentSnapshot && rows.any {it.individuallyCheckable()})
                 result.put("checkContext",checkContext())
-            if (on && ready && scope!=null && scope==live) failoverShadow?.status()?.let {result.put("decisionShadow",it)}
+            if (activeOwner) failoverShadow?.status()?.let {result.put("decisionShadow",it)}
         }
     }
 }

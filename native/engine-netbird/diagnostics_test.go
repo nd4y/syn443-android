@@ -175,7 +175,13 @@ func TestDiagnosticsAreAsynchronousBoundedAndCancellable(t *testing.T) {
 	if peer.maximum.Load() != 4 {
 		t.Fatal("worker limit", peer.maximum.Load())
 	}
-	CancelDiagnostics()
+	var running diagnosticReport
+	if !decodeReport(RuntimeDiagnostics(), &running) || !validDiagnosticReport(running) || !validDiagnosticID(running.JobID) {
+		t.Fatal("running diagnostic was not addressable")
+	}
+	if CancelDiagnosticJob("") || CancelDiagnosticJob(running.JobID+"0") || !CancelDiagnosticJob(running.JobID) {
+		t.Fatal("cancellation must address the observed job")
+	}
 	for time.Now().Before(deadline) {
 		o.diagMu.Lock()
 		state := o.job.State

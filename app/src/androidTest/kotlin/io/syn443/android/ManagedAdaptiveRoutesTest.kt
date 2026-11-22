@@ -50,6 +50,71 @@ class ManagedAdaptiveRoutesTest {
             .put("route_checks", checks).put("adaptive_routes", wire).toString()
     }
 
+
+    private fun sharedExitConfig(): String {
+        val config = JSONObject(config())
+        val wire = config.getJSONObject("adaptive_routes")
+        val graph = JSONObject(String(Base64.getUrlDecoder().decode(wire.getString("graphB64")), Charsets.UTF_8))
+        val direct = JSONObject().put("id", "one").put("slots", JSONArray().put(JSONArray().put("hop-01")))
+        val chain = JSONObject().put("id", "two").put("slots",
+            JSONArray().put(JSONArray().put("hop-00")).put(JSONArray().put("hop-01")))
+        val edge = JSONObject().put("from", "hop-00").put("to", "hop-01")
+            .put("features", JSONArray().put("TCP").put("IPV4"))
+        graph.put("edges", JSONArray().put(edge)).put("templates", JSONArray().put(direct).put(chain))
+        graph.getJSONArray("groups").getJSONObject(0).put("templates", JSONArray().put("one").put("two"))
+        wire.put("graphB64", b64(canonical(graph)))
+        return config.toString()
+    }
+
+    @Test fun lowerLatencyThroughAnExtraProxyDoesNotDisplaceAHealthySharedExit() {
+        Harness(sharedExitConfig()).use { h ->
+            val primary = prepareHealthy(h, 200)
+            assertEquals(listOf("hop-01"), hopsOf(primary))
+            val faster = checkNotNull(h.tick(301_000))
+            assertEquals(listOf("hop-00", "hop-01"), hopsOf(faster))
+            assertEquals("discard", h.measured(faster, 301_000, 20).getString("command"))
+            h.report(h.result(faster, "discarded", selected = true), 301_000)
+            val recheck = checkNotNull(h.tick(306_000))
+            assertEquals(hopsOf(primary), hopsOf(recheck))
+            h.selected(recheck, 306_000, 200)
+        }
+    }
+
+    @Test fun recoveredSharedExitWithFewerProxySessionsNeedsThreeFreshSuccesses() {
+        Harness(sharedExitConfig()).use { h ->
+            h.ready()
+            val unavailable = checkNotNull(h.tick(1_000))
+            assertEquals(listOf("hop-01"), hopsOf(unavailable))
+            h.report(h.result(unavailable, "probe_unavailable"), 1_000)
+            val chain = checkNotNull(h.tick(6_000))
+            assertEquals(listOf("hop-00", "hop-01"), hopsOf(chain))
+            h.selected(chain, 6_000, 20)
+            for (now in listOf(66_000L, 126_000L, 186_000L, 246_000L)) {
+                val check = checkNotNull(h.tick(now))
+                assertEquals(hopsOf(chain), hopsOf(check))
+                h.selected(check, now, 20)
+            }
+            for (now in listOf(306_000L, 311_000L, 316_000L)) {
+                val shorter = checkNotNull(h.tick(now))
+                assertEquals(hopsOf(unavailable), hopsOf(shorter))
+                if (now < 316_000L) {
+                    assertEquals("discard", h.measured(shorter, now, 200).getString("command"))
+                    h.report(h.result(shorter, "discarded", selected = true), now)
+                } else {
+                    h.selected(shorter, now, 200)
+                }
+            }
+            val row = h.view().getJSONArray("routes").getJSONObject(0)
+            assertEquals("hop-01", row.getJSONArray("measuredPath").getString(0))
+            assertEquals(1, row.getJSONArray("measuredPath").length())
+        }
+    }
+
+    private fun hopsOf(command: JSONObject): List<String> {
+        val hops = command.getJSONArray("hops")
+        return List(hops.length()) { hops.getString(it) }
+    }
+
     private class Harness(val raw: String, mode: NetworkMode = NetworkMode.WIFI) : Closeable {
         val controller = checkNotNull(ManagedAdaptiveRoutes.read(raw))
         var scope = RouteScope(1, 2, 3, "synthetic-engine-one", Policy.hash(raw))

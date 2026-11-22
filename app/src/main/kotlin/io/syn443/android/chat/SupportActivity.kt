@@ -31,7 +31,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 class SupportActivity:ComponentActivity() {
     companion object { internal const val REPORT_PROBLEM = "io.syn443.reportProblem" }
@@ -52,18 +51,16 @@ class SupportActivity:ComponentActivity() {
         var prepared by mutableStateOf(false)
         // Install the root during onCreate. Cache preparation must not attach a
         // new Compose root later, after the resumed window has begun drawing.
-        // Keep chat operations behind preparation so cleanup cannot delete a
-        // file created by this instance of the screen.
         setContent {MaterialTheme(colorScheme=darkColorScheme()) {Surface(Modifier.fillMaxSize()) {
             if(prepared)SupportChat(incidentRequested) { incidentRequested = false }
             else Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
                 Text("Подготовка чата",Modifier.testTag("chat-preparing"))
             }
         }}}
-        // Only private chat preparation files from an interrupted UI operation.
+        // Reclaim files abandoned by earlier processes before showing the chat.
         // Durable drafts/parts live in the encrypted no-backup SQL store.
         lifecycleScope.launch {
-            withContext(Dispatchers.IO) {cacheDir.listFiles()?.filter {it.isFile && it.name.startsWith("chat-") && (it.name.endsWith(".input") || it.name.endsWith(".output") || it.name.startsWith("chat-download-"))}?.take(256)?.forEach {it.delete()}}
+            withContext(Dispatchers.IO) { ChatScratch.removeAbandoned(cacheDir) }
             prepared=true
         }
     }
@@ -210,7 +207,7 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
     val save=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {uri->
         val attachment=download;download=null
         if(uri!=null && attachment!=null)run {
-            val temporary=File(context.cacheDir,"chat-download-${ChatLimits.id()}")
+            val temporary=ChatScratch.download(context.cacheDir)
             try {
                 ChatTransfer.download(requireNotNull(client),attachment,temporary) {status=it}
                 withContext(Dispatchers.IO) {context.contentResolver.openOutputStream(uri,"wt").use {out->requireNotNull(out);temporary.inputStream().use {it.copyTo(out)}}}

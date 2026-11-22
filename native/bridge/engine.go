@@ -248,6 +248,10 @@ func (e *Runtime) NetBirdIdentityProof() string {
 }
 func (e *Runtime) DiagnoseNetBird() bool { return netbird.RequestDiagnostics() }
 
+func (e *Runtime) CancelNetBirdDiagnostic(id string) bool {
+	return e != nil && netbird.CancelDiagnosticJob(id)
+}
+
 // Read-only page selection cannot outlive the current runtime's lease.
 func (e *Runtime) NetBirdView(request string) bool {
 	if e == nil || e.platform == nil || e.platform.lease == nil || !e.platform.lease.allowed() {

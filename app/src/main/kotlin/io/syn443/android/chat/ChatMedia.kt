@@ -36,8 +36,8 @@ object ChatMedia {
         .take(60).trim().takeUnless {it.isEmpty() || it=="." || it==".."}?:"attachment"
     suspend fun prepare(context:Context,uri:Uri,compress:Boolean,progress:(String)->Unit):PreparedMedia {
         require(uri.scheme=="content")
-        val raw=File(context.cacheDir,"chat-${ChatLimits.id()}.input")
-        val output=File(context.cacheDir,"chat-${ChatLimits.id()}.output")
+        val raw=ChatScratch.input(context.cacheDir)
+        val output=ChatScratch.output(context.cacheDir)
         var transferred: File? = null
         fun finish(file: File, name: String, mime: String, kind: String): PreparedMedia =
             PreparedMedia(file, name, mime, kind).also { transferred = file }

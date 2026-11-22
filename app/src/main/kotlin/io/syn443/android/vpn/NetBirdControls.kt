@@ -83,6 +83,11 @@ internal fun NetBirdControls(overlay: JSONObject, command: (String, String?) -> 
         }
         Button(onClick = { command("netbird-diagnose", null) }, enabled = model.canDiagnose,
             modifier = Modifier.testTag("netbird-diagnose")) { Text("Проверить пиры NetBird") }
+        model.cancellableJob?.let { jobId ->
+            TextButton(onClick = { command("netbird-cancel", jobId) }, modifier = Modifier.testTag("netbird-cancel")) {
+                Text("Отменить проверку пиров")
+            }
+        }
         Text("Проверка пиров: ${model.diagnosticLabel}", Modifier.testTag("netbird-diagnostic-state"))
         if (model.diagnosticStale == true) Text("Результат проверки относится к предыдущей сети")
         val coverage = model.coverage

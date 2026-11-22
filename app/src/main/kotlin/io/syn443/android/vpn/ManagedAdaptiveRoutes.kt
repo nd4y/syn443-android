@@ -249,6 +249,19 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         if(hops.length()!=0)return false
         return !raw.has("recheckHints") || raw.optJSONArray("recheckHints")?.length()==0
     }
+
+    // The shared suffix uses the same signed profiles. Every additional upstream hop
+    // opens another proxy session. For unrelated paths the setup cost is unknown.
+    private fun preferSetupOrLatency(candidate: PlannedPath, active: PlannedPath, faster: Boolean): Boolean {
+        val candidateHops = candidate.hops
+        val activeHops = active.hops
+        return when {
+            candidateHops.size < activeHops.size && activeHops.takeLast(candidateHops.size) == candidateHops -> true
+            activeHops.size < candidateHops.size && candidateHops.takeLast(activeHops.size) == activeHops -> false
+            else -> faster
+        }
+    }
+
     private fun reportCurrent(raw:JSONObject,now:Long,dispatch:(String)->Unit, onReselection:(Long, NetworkMode)->Unit) {
         if(retireOwner || context==null)return
         if(!advanceClock(now) || raw.toString().length>32768)return
@@ -342,7 +355,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 return
             }
             work.checkPlan=RouteSnapshot.adaptiveDiagnostic(currentScope,wire.groupTags().getValue(work.group),raw.optJSONObject("checkPlan"),"TRUE")
-            val same=group.current?.id==work.path.id
+            val active = group.current
+            val same = active?.id == work.path.id
             if(same) {group.failure=null;group.recheckFailed=false}
             work.recovery=recoveryFailure(group,work,now)
             val candidateKey = key(work.group, work.path)
@@ -353,7 +367,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             val activeFresh=now-group.measuredAt in 0..120_000
             val faster=activeFresh && elapsed+15<group.latency && elapsed*5<=group.latency*4
             val commit=when {
-                group.current==null || same || work.recovery!=null -> true
+                active == null || same || work.recovery != null -> true
                 !activeFresh || group.recheckFailed || group.urgentRecheck -> {
                     // A stale baseline or an expired failure can only request a new
                     // measurement of the incumbent. It cannot select a reserve.
@@ -361,7 +375,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                     group.forceCheck=true
                     false
                 }
-                sampled && (incumbentDegraded || faster) -> {
+                sampled && (incumbentDegraded || preferSetupOrLatency(work.path, active, faster)) -> {
                     val confirmed = group.improved(work.path, now)
                     confirmed && stability.quality(candidateKey, now) == PathStabilityHistory.Quality.STEADY
                 }
