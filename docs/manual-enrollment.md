@@ -3,7 +3,9 @@
 Open a `syn443://enroll/v1` link, paste it, import a QR image, or select
 **Сканировать QR** to scan inside SYN443. Only the scanner requests camera
 access. Closing it or declining access leaves the link and image controls
-available. The controller verifies the
+available. A malformed incoming link shows an error with paste and scan options.
+If a messenger opens the same invitation twice, the second delivery preserves
+your edits. A different invitation opens a new review. The controller verifies the
 signed service descriptor locally against installation-trust.json and stored
 service floors, then shows service/origin before the user explicitly confirms.
 No key, code or network request is sent by preview. QR content cannot install a

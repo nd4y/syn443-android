@@ -103,6 +103,10 @@ if mode=="emulator":
         "systemProtectionsRequireFreshBooleanEvidenceForEachSetting",
         "unavailableSettingsExplainManualAccessAndAllowRetry",
     )} <= set(identities), "Missing system VPN protection outcomes"
+    assert {("io.syn443.android.EnrollmentAppLinkTest", name) for name in (
+        "browsableColdLaunchShowsOnlyLocalReviewAndDropsTheCarrier",
+        "redeliveredInvitationKeepsEditsAndDifferentLinkStartsItsOwnReview",
+    )} <= set(identities), "Missing incoming enrollment link outcomes"
     assert {("io.syn443.android.InvitationScannerTest", name) for name in (
         "liveDecoderRecognizesBothPolaritiesAndRejectsForeignPayloads",
         "liveCameraReadsCleanFrameWhenTheOrdinaryFinderCannotLocateItsThirdMarker",
