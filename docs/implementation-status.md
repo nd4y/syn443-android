@@ -365,3 +365,15 @@ engine must keep the original binding and active policy within its offline
 lease. After restoring management, the test requires a fresh signed revision
 and another application response. This exercises BOOT-01 on the disposable
 Wi-Fi emulator. Physical Xperia recovery has its own acceptance record.
+
+
+## Packaged backup exclusions
+
+Release CI reads the compiled Android manifest and resolves its extraction
+resource in the APK resource table. It checks the default and all qualified
+variants. Both cloud backup and device transfer must exclude the entire
+application storage domains, including credential and device-protected files,
+preferences and databases. The normal APK also disables legacy full backup.
+The release fails if any selected XML grants access or cannot be resolved.
+Physical device migration and other NFR-04 clauses have separate acceptance.
+[Android backup rules](https://developer.android.com/identity/data/autobackup)

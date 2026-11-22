@@ -2717,8 +2717,14 @@
     {
       "id": "NFR-04",
       "text": "Служебные события и очереди ограничены, секреты зашифрованы на диске, Android backup не переносит enrollment/private keys. Подпись APK и ключи публикации хранятся отдельно от повседневного приложения панели; ротация и восстановление доверия документированы.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/AndroidManifest.xml",
+        "app/src/main/res/xml/data_extraction_rules.xml",
+        "tools/check_packaged_backup.py",
+        "tools/test_packaged_backup.py",
+        "docs/implementation-status.md#packaged-backup-exclusions"
+      ]
     },
     {
       "id": "NFR-05",
