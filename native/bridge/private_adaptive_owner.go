@@ -366,6 +366,7 @@ func (o *privateAdaptiveOwner) run(ctx context.Context, cancel context.CancelFun
 		}
 		if fresh && err == nil && receipt != nil {
 			o.receipt, o.report.Receipt, o.report.Code = receipt, token, "verified"
+			o.report.CheckCompletedBootMS = receipt.proof.completed
 			o.report.ProbeMS = receipt.proof.completed - receipt.proof.started
 		} else if receipt != nil {
 			o.hub.discard(receipt)

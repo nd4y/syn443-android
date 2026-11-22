@@ -480,6 +480,8 @@ if mode in ADAPTIVE_REQUIRED:
         ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'staleBaselineAndInterruptedCandidateKeepTheIncumbent'))
         ADAPTIVE_REQUIRED[mode].append(('io.syn443.android.ManagedAdaptiveRoutesTest', 'otherPhysicalTransportStartsIndependentAdaptiveSearchAndRetiresWifiProof'))
         ADAPTIVE_REQUIRED[mode].extend([
+            ('io.syn443.android.ManagedAdaptiveRoutesTest', 'delayedSelectionKeepsTheProbeTimeForStatusAndMaintenance'),
+            ('io.syn443.android.ManagedAdaptiveRoutesTest', 'malformedCompletionCannotSelectAndOlderReceiptsAgeFromStart'),
             ('io.syn443.android.ManagedAdaptiveRoutesTest', 'manualGroupRecheckKeepsOtherHealthyGroupsOnTheirOriginalCadence'),
             ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'halfOpenAcknowledgementsRespectTheOriginalTrialDeadline'),
         ])

@@ -83,9 +83,14 @@ class ManagedAdaptiveRoutesFairnessTest {
         fun status(): JSONObject = JSONObject().put("request", "").put("running", false).put("nativeEpoch", epoch).put("scope", nativeScope)
             .put("policyScope", policyScope).put("ready", true).put("group", "").put("hops", JSONArray())
             .put("code", "idle").put("elapsedMs", 0).put("probeMs", 0).put("receipt", "").put("groupSelected", false).put("workAgeMs", 0)
-        fun ready(now: Long) = controller.report(status(), now, dispatch)
-        fun acknowledge(frame: JSONObject, now: Long) = controller.report(frame, now, dispatch) { revision, mode -> reselections += revision to mode }
+        private var displayTime = 0L
+        fun ready(now: Long) = acknowledge(status(), now)
+        fun acknowledge(frame: JSONObject, now: Long) {
+            displayTime = now
+            controller.report(frame, now, dispatch) { revision, mode -> reselections += revision to mode }
+        }
         fun tick(now: Long): JSONObject? {
+            displayTime = now
             val before = commands.size
             controller.tick(now, true, true, dispatch)
             val start = commands.drop(before).singleOrNull { it.getString("command")=="start" }
@@ -101,7 +106,7 @@ class ManagedAdaptiveRoutesFairnessTest {
         fun failed(probe: JSONObject, now: Long, code: String = "check_failed") {
             val report = result(probe, code)
             if (code=="check_failed") report.put("checkCode", "dial_failed").put("checkCompletedBootMs", now)
-            controller.report(report, now, dispatch)
+            acknowledge(report, now)
         }
         fun verified(probe: JSONObject, now: Long, latency: Long = 20): JSONObject {
             val before = commands.size
@@ -116,7 +121,7 @@ class ManagedAdaptiveRoutesFairnessTest {
             scope = scope.copy(network=scope.network+1)
             RouteSnapshot.owner(scope); controller.bind(scope, NetworkMode.WIFI, 1); ready(now)
         }
-        fun view() = RouteSnapshot.read(true, true, scope)
+        fun view() = RouteSnapshot.readAt(true, true, scope, displayTime)
         override fun close() { RouteSnapshot.owner(null); RouteSnapshot.configure(null, "") }
     }
 

@@ -188,16 +188,15 @@ object RouteSnapshot {
         val profile=rows.singleOrNull {it.tag==tag && it.type=="syn443-adaptive"}?.profile ?: return null
         return RouteCheckPlans.projection(value,profile,expected)
     }
-    @Synchronized internal fun adaptive(scope:RouteScope,tag:String,ok:Boolean,code:String,latency:Long?,hops:List<String>,checkPlan:JSONObject?=null,receipt:String?=null) {
+    @Synchronized internal fun adaptive(scope:RouteScope,tag:String,ok:Boolean,code:String,latency:Long?,hops:List<String>,checkPlan:JSONObject?=null,receipt:String?=null,measuredAt:Long=SystemClock.elapsedRealtime()) {
         if(scope!=live || code !in setOf("ok","probe_unavailable","exit_mismatch","check_failed"))return
         val row=rows.singleOrNull {it.tag==tag && it.type=="syn443-adaptive"} ?: return
-        val now=SystemClock.elapsedRealtime()
-        observations=observations+(row.id to RouteObservation(scope,now,ok || code=="exit_mismatch" || code=="check_failed",ok))
+        observations=observations+(row.id to RouteObservation(scope,measuredAt,ok || code=="exit_mismatch" || code=="check_failed",ok))
         codes=codes+(row.id to code)
         timings = if (latency != null && latency in 0..30_000) timings + (row.id to latency) else timings - row.id
         durations = if (ok && code == "ok" && scope.config == revision && row.hasSingleApplicationCheck() &&
             !receipt.isNullOrEmpty() && hops.size in 1..4 && latency != null && latency in 0..30_000) {
-            durations + (row.id to RouteProbeDurations.append(durations[row.id], hops, receipt, now, latency))
+            durations + (row.id to RouteProbeDurations.append(durations[row.id], hops, receipt, measuredAt, latency))
         } else durations - row.id
         measuredPaths=measuredPaths+(row.id to JSONArray(hops.take(4)))
         val projection=row.profile?.let {RouteCheckPlans.projection(checkPlan,it,if(ok)"TRUE" else if(code=="probe_unavailable")"UNKNOWN" else "FALSE")}

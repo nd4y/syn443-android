@@ -209,8 +209,16 @@ func TestPrivateAdaptiveOwnerRealTwoHopReceiptAndLocalContextBindings(t *testing
 		o.commit("first", proof.Receipt, epoch+1, scope, 1000) || o.commit("first", proof.Receipt, epoch, strings.Repeat("d", 64), 1000) {
 		t.Fatal("substituted receipt binding committed")
 	}
+	if proof.CheckCompletedBootMS != f.now.Load() {
+		t.Fatal("receipt timestamp does not match the actual check completion")
+	}
+	f.now.Add(250)
 	if !o.commit("first", proof.Receipt, epoch, scope, 1000) || o.commit("first", proof.Receipt, epoch, scope, 1000) {
 		t.Fatal("fresh receipt was rejected or replayed")
+	}
+	selected := readPrivateAdaptiveOwner(t, o)
+	if selected.Code != "selected" || selected.CheckCompletedBootMS != proof.CheckCompletedBootMS {
+		t.Fatal("selection acknowledgement changed the age of the verified check")
 	}
 	flow, err := f.managed.DialContext(context.Background(), "tcp", M.ParseSocksaddr(f.address))
 	if err != nil {
