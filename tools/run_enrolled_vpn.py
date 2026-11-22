@@ -13,6 +13,8 @@ import xml.etree.ElementTree as ET
 from enrollment_fixture import Fixture, decode
 from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
 from run_route_lifecycle import RouteProxy
+from recovery_slo import RecoveryTimeout
+from run_vpn_process_faults import ControlUnavailable
 
 def prepare_emulator_wifi():
     """Reassociate the disposable AVD if previous reboot cases left its Wi-Fi ineligible."""
@@ -370,7 +372,25 @@ def enrolled_operator_mode(fixture):
             return result if (result.get('state') == 'observed' and result.get('effective') == 'WIFI'
                               and result.get('source') == source and result.get('allowed') == ['WIFI']) else None
 
-        await_condition(working, 120)
+        try:
+            await_condition(working, 120)
+        except RecoveryTimeout:
+            # Only bounded facts from the synthetic fixture can reach public CI.
+            try:
+                rows = call('routes-status').get('routes', [])
+            except ControlUnavailable:
+                rows = []
+            adaptive = next((r for r in rows if r.get('type') == 'syn443-adaptive'), {})
+            search = adaptive.get('search', {}).get('state')
+            print('Signed Wi-Fi selection:', json.dumps({
+                'candidateServed': any(revision == 2 for _, revision in fixture.envelopes),
+                'routePresent': bool(adaptive),
+                'working': adaptive.get('state') == 'working',
+                'selectedExpectedHop': adaptive.get('measuredPath') == [wifi_hop],
+                'search': search if search in ('WAITING_CONTEXT','SEARCHING','BUDGET_WAIT','SEARCH_INCOMPLETE','VERIFIED') else 'unknown',
+                'reserveProbed': reserve.route_probes > 0,
+            }), flush=True)
+            raise
         exchange_through_proxy(reserve)
         automatic = mode('automatic')
         assert automatic and automatic['maxMinutes'] == 3
@@ -508,7 +528,7 @@ def main():
         nonlocal fixture
         if fixture:
             adb('reverse','--remove','tcp:'+str(fixture.server.server_port));fixture.close();fixture=None
-    def setup(pending=False, telemetry=None, installer=False):
+    def setup(pending=False, telemetry=None, installer=False, wifi_required=False):
         nonlocal fixture
         device=None
         if installer:
@@ -521,7 +541,7 @@ def main():
             assert b'Success' in adb('install','-r',str(directory/'installer-base.apk'),timeout=120).splitlines()
         logout(fresh_install=historical or installer)
         close_fixture();call('policy-test-reset');call('test-reset')
-        if telemetry:
+        if telemetry or wifi_required:
             prepare_emulator_wifi()
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
@@ -575,7 +595,9 @@ def main():
                 telemetry_modes={'enrolledManagementOutageRetainsTunnelThroughControllerDeath':'foreground',
                                  'enrolledCandidateRegressionRollsBack':'foreground',
                                  'enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':'stopped'}
-                driver_result=setup(name=='enrolledPendingAssignmentRetriesWhileVisible',telemetry=telemetry_modes.get(name), installer=installer_only)
+                driver_result=setup(name=='enrolledPendingAssignmentRetriesWhileVisible',
+                                    telemetry=telemetry_modes.get(name), installer=installer_only,
+                                    wifi_required=name=='enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath')
                 before=proxy.progress;generation=call('auth-status')['generation']
                 if name=='enrolledPendingAssignmentRetriesWhileVisible':
                     assert fixture.policy_requests>=2 and fixture.registrations==1

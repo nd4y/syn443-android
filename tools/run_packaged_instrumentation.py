@@ -20,9 +20,14 @@ def verify_apks(root, manifest, source, run, attempt):
             raise ValueError('Downloaded APK differs from its build manifest')
 
 
+class InstrumentationInterrupted(ValueError):
+    pass
+
+
 def interruption(reporter_line, completed, total, active):
     """Describe a runner stop using only bounded counts and a checked-in test identity."""
     reason = {
+        None: 'deadline',
         'INSTRUMENTATION_RESULT: shortMsg=Process crashed.': 'process_crashed',
         'INSTRUMENTATION_RESULT: shortMsg=Process crashed': 'process_crashed',
     }.get(reporter_line, 'runner_stopped')
@@ -35,10 +40,10 @@ def interruption(reporter_line, completed, total, active):
             source = test_root.joinpath(*classname.split('.')).with_suffix('.kt')
             if source.is_file() and re.search(r'@Test\s+fun\s+' + re.escape(method) + r'\s*\(', source.read_text(encoding='utf-8')):
                 summary += f'; active={classname}.{method}'
-    return ValueError(summary)
+    return InstrumentationInterrupted(summary)
 
 
-def parse_run(output):
+def parse_run(output, *, timed_out=False):
     """Require a matching start and finish for each AndroidJUnitRunner result."""
     fields = {}
     cases = {}
@@ -106,6 +111,8 @@ def parse_run(output):
             frame = re.fullmatch(rf"\s*at {owner}{callable_name}\({re.escape(simple_class)}\.kt:([1-9][0-9]{{0,3}})\)\s*", line)
             if frame:
                 source_lines[active] = int(frame[1])
+    if timed_out:
+        raise interruption(None, len(cases), total, active)
     if not finished or not cases:
         raise ValueError('Missing instrumentation completion')
     suite = ET.Element('testsuite', name='Packaged Android instrumentation', tests=str(len(cases)))
@@ -120,6 +127,20 @@ def parse_run(output):
             if (classname, method) in source_lines:
                 print(f'Test source line: {source_lines[classname, method]}')
     return suite
+
+
+def deadline_failure(raw):
+    # adb can stop halfway through a status line. Only parse complete reporter
+    # events; neither malformed data nor a final status can make a timeout pass.
+    if raw and len(raw) <= 8 * 1024 * 1024:
+        prefix = raw.rpartition(b'\n')[0].decode('utf-8', errors='replace')
+        try:
+            parse_run(prefix, timed_out=True)
+        except InstrumentationInterrupted as ended:
+            return ended
+        except (ValueError, OverflowError):
+            pass
+    return interruption(None, 0, None, None)
 
 
 def main():
@@ -140,7 +161,10 @@ def main():
     command = [*adb, 'shell', 'am', 'instrument', '-w', '-r', '-e', 'listener',
                'io.syn443.android.NetBirdTestProgress,io.syn443.android.DiagnosticBundleTestProgress',
                'io.syn443.android.test/io.syn443.android.EnrollmentDriver']
-    result = subprocess.run(command, check=True, stdout=subprocess.PIPE, timeout=1200)
+    try:
+        result = subprocess.run(command, check=True, stdout=subprocess.PIPE, timeout=1200)
+    except subprocess.TimeoutExpired as exc:
+        raise deadline_failure(exc.stdout) from None
     if len(result.stdout) > 8 * 1024 * 1024:
         raise ValueError('Instrumentation result exceeded its output limit')
     suite = parse_run(result.stdout.decode('utf-8', errors='replace'))
