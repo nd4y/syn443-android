@@ -85,6 +85,10 @@ class ControlProvider : ContentProvider() {
             initializeUnlocked()
             val store = StateStore.get(context)
             when (method) {
+                "release-context" -> {
+                    require(caller == Process.myUid() && arg == null && extras == null)
+                    return LoginController.get(context).releaseContext()
+                }
                 "network-mode" -> {
                     require(caller==Process.myUid() && extras==null && arg!=null && arg.length<=96)
                     val values=arg.split('|')
@@ -231,6 +235,14 @@ class ControlProvider : ContentProvider() {
                     val admitted=LoginController.get(context).startReauthentication(parts[0].toLong(),parts[1].toLong())
                     return Bundle().apply {putBoolean("ok",admitted)}
                 }
+                "auth-policy-poll" -> {
+                    require(caller==Process.myUid() && extras==null)
+                    val generation=requireNotNull(arg?.toLongOrNull()).also { require(it>=0) }
+                    return Bundle().apply {
+                        putBoolean("ok",true)
+                        putBoolean("admitted",LoginController.get(context).refreshAssignment(false,generation))
+                    }
+                }
                 "auth-poll" -> return Bundle().apply {
                     putBoolean("ok",true)
                     putBoolean("admitted",LoginController.get(context).pollProvisioning(requireNotNull(arg?.toLongOrNull())))
@@ -292,8 +304,18 @@ class ControlProvider : ContentProvider() {
                     if (store.checkpoint().desiredOn) requestReconcile(context, store)
                 }
                 "policy-refresh" -> {
-                    require(RuntimePolicies(context).managed())
-                    if (store.checkpoint().desiredOn) requestReconcile(context, store, method)
+                    val policies=RuntimePolicies(context)
+                    require(policies.managed())
+                    if (store.checkpoint().desiredOn) {
+                        requestReconcile(context, store, method)
+                    } else {
+                        require(policies.read().enrolled)
+                        val admitted=policies.refreshAssigned(true)
+                        return Bundle().apply {
+                            putBoolean("ok",true)
+                            putString("json",org.json.JSONObject().put("admitted",admitted).toString())
+                        }
+                    }
                 }
                 "config-plan-file", "config-apply-file" -> {
                     require(io.syn443.android.BuildConfig.DEBUG && caller==2000)

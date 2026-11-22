@@ -90,24 +90,55 @@ def administrative_endpoints(value):
     return (value["issuer"], value["apiOrigin"])
 
 
+def check_release_authority(profile, descriptor):
+    release = profile["releaseAuthority"]
+    if (not isinstance(release, dict) or set(release) != {"serviceId", "channel", "anchor"}
+            or release["serviceId"] != descriptor["serviceId"]
+            or any(not isinstance(release[k], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", release[k])
+                   for k in ("channel", "serviceId"))):
+        raise ValueError("invalid release scope")
+    key = release["anchor"]
+    check_anchor(key)
+    encoded = key["spki"]
+    public = base64.b64decode(encoded, validate=True)
+    # SubjectPublicKeyInfo for a public, uncompressed P-256 point.
+    prefix = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d03010703420004")
+    if len(public) != len(prefix) + 64 or not public.startswith(prefix) or base64.b64encode(public).decode() != encoded:
+        raise ValueError("invalid release public key")
+    roots = descriptor["roots"]
+    if not isinstance(roots, dict) or key["id"] in roots or encoded in roots.values():
+        raise ValueError("release authority overlaps a policy key")
+    for other in [profile["anchor"], profile.get("upgrade", {}).get("previousAnchor")]:
+        if other and (other["id"] == key["id"] or other["spki"] == encoded):
+            raise ValueError("release authority overlaps an installation key")
+
+
 def check_profile(raw: str) -> None:
     profile = public_object(decode(raw, 12_000))
     version = profile.get("schemaVersion")
     expected = {"schemaVersion", "anchor", "service"}
-    if type(version) is not int or version not in (1, 2) or set(profile) != (expected | {"upgrade"} if version == 2 else expected):
+    if type(version) is not int or version not in (1, 2, 3):
         raise ValueError("invalid installation profile")
+    if version == 2 or version == 3 and "upgrade" in profile:
+        expected.add("upgrade")
+    if version == 3:
+        expected.add("releaseAuthority")
+    if set(profile) != expected:
+        raise ValueError("unexpected installation fields")
     anchor = profile["anchor"]
     check_anchor(anchor)
-    if version == 2:
+    if "upgrade" in profile:
         check_upgrade(profile["upgrade"], anchor)
     descriptor = public_object(signed_body(profile["service"], "syn443-bootstrap+jws", anchor))
-    expected = {"schemaVersion", "audience", "rootEpoch", "revision", "serviceId", "issuer",
+    required = {"schemaVersion", "audience", "rootEpoch", "revision", "serviceId", "issuer",
                 "clientId", "apiOrigin", "roots", "issuedAt", "notBefore", "expires"}
-    if not expected <= set(descriptor) or set(descriptor) - (expected | {"controlPanelOrigin", "adminBootstrap"}):
+    if not required <= set(descriptor) or set(descriptor) - (required | {"controlPanelOrigin", "adminBootstrap"}):
         raise ValueError("unexpected service descriptor fields")
-    if version == 2 and (not isinstance(descriptor["roots"], dict)
-                         or profile["upgrade"]["previousAnchor"]["spki"] in descriptor["roots"].values()):
+    if "upgrade" in profile and (not isinstance(descriptor["roots"], dict)
+                                 or profile["upgrade"]["previousAnchor"]["spki"] in descriptor["roots"].values()):
         raise ValueError("retired root is not a publication key")
+    if version == 3:
+        check_release_authority(profile, descriptor)
     endpoints = [descriptor["issuer"], descriptor["apiOrigin"]]
     if descriptor.get("controlPanelOrigin"):
         endpoints.append(descriptor["controlPanelOrigin"])

@@ -232,6 +232,23 @@ class BootstrapTrustTest {
             fail {BootstrapTrust.installationProfile(encode(invalid))}
         }
     }
+    @Test fun installedReleaseAuthorityIsIndependentOfEnrollmentAndOnlinePolicyKeys() {
+        val root = TrustAnchor("release", spki(key()), 1)
+        val release = ReleaseAuthority("service-a", "pilot", root)
+        val profile = InstallationProfile(3, anchor, manifest(descriptor()), releaseAuthority=release)
+        fun read(value: InstallationProfile) = BootstrapTrust.installationProfile(
+            Identity.encode(Canonical.json.encodeToString(value).toByteArray()))
+        assertEquals(release, read(profile).releaseAuthority)
+        for (version in listOf(1, 2)) fail { read(profile.copy(schemaVersion=version)) }
+        fail { read(profile.copy(releaseAuthority=null)) }
+        fail { read(profile.copy(releaseAuthority=release.copy(anchor=anchor))) }
+        fail { release.validate(anchor, root) }
+        val ordinary = AuthenticatedInvite(descriptor(), ServiceFloor(), "").bootstrap()
+        assertTrue(release.appliesTo(ordinary))
+        assertFalse(release.copy(serviceId="other").appliesTo(ordinary))
+        assertFalse(release.copy(anchor=root.copy(spki=spki(publication))).appliesTo(ordinary))
+        assertFalse(release.copy(anchor=root.copy(id="publication-a")).appliesTo(ordinary))
+    }
     @Test fun sharedGoCertificatesMatchKotlinFloorsAndDualRootTransition() {
         val raw=requireNotNull(javaClass.classLoader.getResourceAsStream("bootstrap-wire-vectors.json")).use {it.readBytes().toString(Charsets.UTF_8)}
         val fixture=Canonical.parse(raw).jsonObject
