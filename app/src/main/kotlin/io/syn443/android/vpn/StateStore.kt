@@ -2,6 +2,8 @@ package io.syn443.android.vpn
 
 import android.app.Application
 import android.content.Context
+import io.syn443.decision.NetworkMode
+import io.syn443.policy.Policy
 import io.syn443.decision.FailoverAlgorithm
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -21,6 +23,28 @@ internal data class RouteDecisionStamp(val policyRevision: Long, val algorithm: 
 
 class StateStore private constructor(private val application: Application) {
     companion object {
+        private fun appendEvent(value: JSONObject, phase: String, code: String, epoch: Long): JSONObject {
+            val events = value.optJSONArray("events") ?: JSONArray()
+            val sequence=(value.optLong("eventSequence").coerceIn(0,9_007_199_254_740_990L)+1)
+            value.put("eventSequence",sequence)
+            val event = JSONObject().put("at", System.currentTimeMillis()).put("phase", phase).put("code", code)
+                .put("sequence",sequence).put("elapsed",android.os.SystemClock.elapsedRealtime())
+                .put("intentGeneration", value.optLong("generation")).put("networkEpoch", epoch)
+            events.put(event)
+            while (events.length() > 64) events.remove(0)
+            value.put("events", events)
+            return event
+        }
+
+        internal fun recordAdaptiveReselection(value: JSONObject, generation: Long, epoch: Long, revision: Long, mode: NetworkMode): Boolean {
+            if (!value.optBoolean("desiredOn") || value.optLong("generation") != generation || value.optLong("networkEpoch") != epoch) return false
+            if (revision !in 1..9_007_199_254_740_991L) return false
+            appendEvent(value, value.optString("phase"), "adaptive_route_reselected", epoch)
+                .put("policyRevision", revision).put("algorithmRevision", Policy.ADAPTIVE_ALGORITHM)
+                .put("networkMode", mode.name.lowercase(java.util.Locale.ROOT))
+            return true
+        }
+
         @Volatile private var instance: StateStore? = null
         @Synchronized fun get(context: Context): StateStore {
             check(LifecycleAccess.unlocked(context)) {"credential_storage_locked"}
@@ -35,10 +59,13 @@ class StateStore private constructor(private val application: Application) {
         JSONObject(state.openRead().bufferedReader().use { it.readText() })
     @Synchronized fun update(block: (JSONObject) -> Unit): JSONObject {
         val value = read(); block(value)
+        write(value)
+        return value
+    }
+    private fun write(value: JSONObject) {
         val output = state.startWrite()
         try { output.write(value.toString().toByteArray()); state.finishWrite(output) }
         catch (e: Exception) { state.failWrite(output); throw e }
-        return value
     }
     @Synchronized fun adjustCheckpoint(block: (Checkpoint) -> Checkpoint): Checkpoint {
         val before = checkpoint()
@@ -66,6 +93,11 @@ class StateStore private constructor(private val application: Application) {
         value.put("desiredOn", cp.desiredOn).put("generation", cp.generation).put("attempt", cp.attempt)
             .put("nextWallMs", cp.nextWallMs).put("lastEarlyWallMs", cp.lastEarlyWallMs).put("heavyWallMs", JSONArray(cp.heavyWallMs))
     }
+    @Synchronized internal fun adaptiveReselected(generation: Long, epoch: Long, revision: Long, mode: NetworkMode) {
+        val value = read()
+        if (recordAdaptiveReselection(value, generation, epoch, revision, mode)) write(value)
+    }
+
     @Synchronized internal fun event(
         phase: String, code: String, epoch: Long, generation: Long? = null, decision: RouteDecisionStamp? = null,
     ): Boolean {
@@ -77,19 +109,11 @@ class StateStore private constructor(private val application: Application) {
         var recorded: JSONObject? = null
         update { value ->
             value.put("phase", phase).put("reason", code).put("networkEpoch", epoch)
-            val events = value.optJSONArray("events") ?: JSONArray()
-            val sequence=(value.optLong("eventSequence").coerceIn(0,9_007_199_254_740_990L)+1)
-            value.put("eventSequence",sequence)
-            val event = JSONObject().put("at", System.currentTimeMillis()).put("phase", phase).put("code", code)
-                .put("sequence",sequence).put("elapsed",android.os.SystemClock.elapsedRealtime())
-                .put("intentGeneration", value.optLong("generation")).put("networkEpoch", epoch)
+            val event = appendEvent(value, phase, code, epoch)
             if (decision != null && code == "managed_route_recheck") {
                 event.put("policyRevision", decision.policyRevision).put("algorithmRevision", decision.algorithm.revision)
             }
-            events.put(event)
             recorded = event
-            while (events.length() > 64) events.remove(0)
-            value.put("events", events)
         }
         // The existing intent write must succeed first. Journal admission is
         // bounded memory work only and its failure cannot alter VPN control.

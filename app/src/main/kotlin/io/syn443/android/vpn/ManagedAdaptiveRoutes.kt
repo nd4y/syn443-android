@@ -26,9 +26,24 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private data class Group(var frontier:RouteFrontier?=null,var current:PlannedPath?=null,
         var emptyPages:Int=0,var onlyFenced:Boolean=true,var firstRetryAt:Long?=null,
         var measuredAt:Long=0,var latency:Long=0,var nextAt:Long=0,var exploreAt:Long=0,
-        var improvement:String="",var improvementPath:PlannedPath?=null,var improvementCount:Int=0,var recheckFailed:Boolean=false,
+        var selectedAt:Long=0,var improvementPath:PlannedPath?=null,var improvementCount:Int=0,
+        var improvementAt:Long=0,var recheckFailed:Boolean=false,
         var failure:CurrentFailure?=null,var selectionToken:Long=0,var hintSequence:Long=0,var urgentRecheck:Boolean=false,var forceCheck:Boolean=false,
-        var search:AdaptiveSearchState=AdaptiveSearchState.WAITING_CONTEXT)
+        var search:AdaptiveSearchState=AdaptiveSearchState.WAITING_CONTEXT) {
+        fun clearImprovement() {
+            improvementPath=null
+            improvementCount=0
+            improvementAt=0
+        }
+
+        fun improved(path:PlannedPath,now:Long):Boolean {
+            val consecutive=improvementPath?.id==path.id && now-improvementAt in 1..30_000
+            improvementCount=if(consecutive) (improvementCount+1).coerceAtMost(3) else 1
+            improvementPath=path
+            improvementAt=now
+            return improvementCount==3 && now-selectedAt>=60_000
+        }
+    }
     private data class Pending(val request:String,val group:String,val path:PlannedPath,val attempt:Long,val startedAt:Long,
         val nativeEpoch:Long,val nativeScope:String,var action:String="probe",var latency:Long=0,var receipt:String="",var retries:Int=0,
          var recovery:CurrentFailure?=null,var checkPlan:JSONObject?=null,var retryUntil:Long?=null)
@@ -132,7 +147,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         context=next;routeScope=scope;mode=networkMode;policyRevision=revision;policyScope=next.dependencyHash
         memory=nextMemory;pending=null;pendingAdmission=null;nativeReady=false;nativeScope="";observedNativeScope="";drainingSince=null
         groupCursor=0;cpuYields.clear()
-        groups.values.forEach {it.frontier=null;it.current=null;it.measuredAt=0;it.nextAt=0;it.improvement="";it.improvementPath=null;it.improvementCount=0;it.recheckFailed=false;it.failure=null;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false}
+        groups.values.forEach {it.frontier=null;it.current=null;it.measuredAt=0;it.nextAt=0;it.clearImprovement();it.recheckFailed=false;it.failure=null;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false}
         groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
         RouteSnapshot.adaptiveOwnerChanged(scope,wire.groupTags().values.toSet())
         publishSearch()
@@ -194,11 +209,16 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             group.hintSequence=hint.sequence
             group.urgentRecheck=true
             group.nextAt=minOf(group.nextAt,now)
-            group.improvement="";group.improvementPath=null;group.improvementCount=0
+            group.clearImprovement()
         }
     }
     fun report(raw:JSONObject,now:Long,dispatch:(String)->Unit) {
-        try { reportCurrent(raw,now,dispatch) } finally {publishSearch()}
+        report(raw, now, dispatch) { _, _ -> }
+    }
+
+    fun report(raw: JSONObject, now: Long, dispatch: (String) -> Unit,
+               onReselection: (Long, NetworkMode) -> Unit) {
+        try { reportCurrent(raw, now, dispatch, onReselection) } finally { publishSearch() }
     }
     /** A native scope change revokes selected paths even when Android's route
      * scope did not change. Negative evidence and admission debt stay owned.
@@ -209,7 +229,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         pendingAdmission=null
         groups.values.forEach {
             it.frontier=null;it.current=null;it.measuredAt=0;it.latency=0;it.nextAt=now;it.exploreAt=0
-            it.improvement="";it.improvementPath=null;it.improvementCount=0;it.recheckFailed=false;it.failure=null
+            it.clearImprovement();it.recheckFailed=false;it.failure=null
             it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false
             it.search=AdaptiveSearchState.WAITING_CONTEXT
         }
@@ -225,7 +245,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         if(hops.length()!=0)return false
         return !raw.has("recheckHints") || raw.optJSONArray("recheckHints")?.length()==0
     }
-    private fun reportCurrent(raw:JSONObject,now:Long,dispatch:(String)->Unit) {
+    private fun reportCurrent(raw:JSONObject,now:Long,dispatch:(String)->Unit, onReselection:(Long, NetworkMode)->Unit) {
         if(retireOwner || context==null)return
         if(!advanceClock(now) || raw.toString().length>32768)return
         val epoch=safeInteger(raw,"nativeEpoch") ?: return
@@ -321,18 +341,28 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             val same=group.current?.id==work.path.id
             if(same) {group.failure=null;group.recheckFailed=false}
             work.recovery=recoveryFailure(group,work,now)
-            val improvement=group.current!=null && !same && now-group.measuredAt in 0..120_000 &&
-                elapsed+15<group.latency && elapsed*5<group.latency*4
-            if(improvement) {
-                if(group.improvement==work.path.id)group.improvementCount++ else {group.improvement=work.path.id;group.improvementCount=1}
-                group.improvementPath=work.path
-            } else if(!same) {
-                group.improvement="";group.improvementPath=null;group.improvementCount=0
+            val activeFresh=now-group.measuredAt in 0..120_000
+            val faster=activeFresh && elapsed+15<group.latency && elapsed*5<=group.latency*4
+            val commit=when {
+                group.current==null || same || work.recovery!=null -> true
+                !activeFresh || group.recheckFailed || group.urgentRecheck -> {
+                    // A stale baseline or an expired failure can only request a new
+                    // measurement of the incumbent. It cannot select a reserve.
+                    group.clearImprovement()
+                    group.forceCheck=true
+                    false
+                }
+                faster -> group.improved(work.path,now)
+                else -> {
+                    group.clearImprovement()
+                    false
+                }
             }
-            work.action=if(group.current==null || same || work.recovery!=null || now-group.measuredAt>120_000 || improvement && group.improvementCount>=2)"commit" else "discard"
+            work.action=if(commit)"commit" else "discard"
             send(frame(work.action).put("request",work.request).put("receipt",receipt),now,dispatch)
             return
         }
+        var replacedSelectedPath = false
         if(work.action=="commit" && code=="selected") {
             if(!raw.optBoolean("groupSelected") || raw.optString("receipt")!=work.receipt)return
             // Only an independently verified replacement with a successful
@@ -341,10 +371,12 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 memory?.record(checkNotNull(context),key(work.group,it.path),it.attempt,now,ProbeVerdict.CONFIRMED_PATH_FAILURE)
             }
             val changed=group.current?.id!=work.path.id
+            replacedSelectedPath = changed && group.current != null
             group.current=work.path;group.measuredAt=now;group.latency=work.latency;group.nextAt=now+maintenanceCadence
             group.selectionToken=safeInteger(raw,"selectionToken") ?: 0;group.hintSequence=0;group.urgentRecheck=false;group.forceCheck=false
+            if(changed)group.selectedAt=now
             if(changed || group.exploreAt==0L)group.exploreAt=now+300_000
-            group.improvement="";group.improvementPath=null;group.improvementCount=0;group.recheckFailed=false;group.failure=null
+            group.clearImprovement();group.recheckFailed=false;group.failure=null
             memory?.record(checkNotNull(context),key(work.group,work.path),work.attempt,now,ProbeVerdict.VERIFIED)
             group.search=AdaptiveSearchState.VERIFIED
             RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),true,"ok",work.latency,work.path.hops,work.checkPlan)
@@ -360,12 +392,13 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 value
             } else 0L
             if(code=="exit_mismatch")memory?.record(checkNotNull(context),key(work.group,work.path),work.attempt,now,ProbeVerdict.CONFIRMED_PATH_FAILURE)
+            if(group.improvementPath?.id==work.path.id)group.clearImprovement()
             if(group.current?.id==work.path.id && !raw.optBoolean("groupSelected"))group.current=null
             if(group.current?.id==work.path.id) {
                 group.urgentRecheck=false
                 group.recheckFailed=code!="probe_unavailable"
                 group.failure=if(code=="check_failed")CurrentFailure(work.path,work.attempt,checkedAt,nativeEpoch,nativeScope) else null
-                if(code=="check_failed") {group.improvement="";group.improvementPath=null;group.improvementCount=0}
+                if(code=="check_failed") {group.clearImprovement()}
             } else if(group.current==null) {group.failure=null;group.recheckFailed=false}
             group.nextAt=now+5000
             if(group.current==null || group.current?.id==work.path.id) {
@@ -374,11 +407,18 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                     RouteSnapshot.adaptiveDiagnostic(currentScope,wire.groupTags().getValue(work.group),raw.optJSONObject("checkPlan"),if(code=="probe_unavailable")"UNKNOWN" else "FALSE"))
             }
         } else if(work.action=="discard" && code=="discarded") {
-            // A second independent fresh measurement is needed before a latency switch.
-            group.nextAt=if(group.improvement==work.path.id)now+5000 else minOf(now+maintenanceCadence,group.measuredAt+maintenanceCadence)
+            group.nextAt=when {
+                group.forceCheck -> now
+                group.improvementPath?.id==work.path.id -> now+5000
+                else -> minOf(now+maintenanceCadence,group.measuredAt+maintenanceCadence)
+            }
         } else if(code !in setOf("commit_rejected","discarded"))return
         pending=null
         markSearch(work.group,AdaptiveSearchState.SEARCH_INCOMPLETE)
+        val binding = boundPolicy
+        if (replacedSelectedPath && binding != null && now < binding.leaseDeadlineElapsed) {
+            onReselection(binding.revision, mode)
+        }
     }
     private fun key(group:String,path:PlannedPath)=PathHealthKey(path.id,checkNotNull(wire.graph.groupInfo(group)).intent,group)
     fun tick(now:Long,unmetered:Boolean,allowExplore:Boolean,dispatch:(String)->Unit) {
@@ -419,7 +459,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val due=rotated.filter {id->val g=groups.getValue(id)
             val recovery=g.current==null || g.recheckFailed || g.urgentRecheck
             now>=g.nextAt && (recovery || budget.canStart(now,routine=true)) &&
-            (recovery || g.forceCheck || now-g.measuredAt>=maintenanceCadence || unmetered && allowExplore && now>=g.exploreAt || g.improvement.isNotEmpty())}
+            (recovery || g.forceCheck || now-g.measuredAt>=maintenanceCadence || unmetered && allowExplore && now>=g.exploreAt || g.improvementPath!=null)}
         if(due.isEmpty())return
         // Recovery I/O precedes routine I/O, but a group that consumed only a
         // CPU quantum must let every other due group try before competing
@@ -435,8 +475,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         groupCursor=(order.indexOf(groupID)+1)%order.size
         cpuYields.add(groupID)
         val routine=group.current!=null && !group.recheckFailed && !group.urgentRecheck
-        val explore=routine && !group.forceCheck && unmetered && allowExplore && now>=group.exploreAt
-        val recheck=group.current?.takeIf {!explore && !group.recheckFailed && (group.forceCheck || group.urgentRecheck || now-group.measuredAt>=maintenanceCadence)}
+        val explore=routine && now-group.measuredAt<=120_000 && !group.forceCheck && unmetered && allowExplore && now>=group.exploreAt
+        val recheck=group.current?.takeIf {group.forceCheck || !explore && !group.recheckFailed && (group.urgentRecheck || now-group.measuredAt>=maintenanceCadence)}
         val retryImprovement=group.improvementPath?.takeIf {!group.urgentRecheck && !group.forceCheck}
         var candidate=retryImprovement?.takeIf {now-group.measuredAt<=120_000} ?: recheck
         var exhausted=false

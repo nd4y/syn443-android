@@ -52,10 +52,18 @@ export GOBIND="$(go env GOPATH)/bin/gobind"
 go mod tidy
 go get github.com/sagernet/gomobile/bind@v0.1.12
 gofmt -w ./*.go
+check_selector_sessions() {
+    jq -es '[.[] | select(.Package == "io.syn443/bridge" and .Action == "pass")
+        | .Test | select(. == "TestVerifiedSelectorSwitchKeepsExistingTrafficAndRejectsStaleProof"
+                      or . == "TestUDPSelectorKeepsOpenAssociationUntilCloseAndUsesCurrentExitOnReopen")]
+        | sort == ["TestUDPSelectorKeepsOpenAssociationUntilCloseAndUsesCurrentExitOnReopen",
+                   "TestVerifiedSelectorSwitchKeepsExistingTrafficAndRejectsStaleProof"]' "$1"
+}
 go test -json -tags=with_gvisor,with_utls,with_quic ./... io.syn443/engine-netbird | tee "$work/native-tests.jsonl"
 python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-tests.jsonl"
 python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-tests.jsonl" --path-candidates
 python3 "$root/tools/check_native_protocol_evidence.py" "$work/native-tests.jsonl"
+check_selector_sessions "$work/native-tests.jsonl"
 python3 "$root/tools/check_native_check_plan_evidence.py" "$work/native-tests.jsonl"
 python3 "$root/tools/check_native_report_evidence.py" "$work/native-tests.jsonl"
 jq -es '[.[] | select(.Package == "io.syn443/bridge" and .Action == "pass") | .Test | strings | select(startswith("TestSplitDNSInternalApplicationAndNoPublicFallback/")) | split("/")[-1]] | sort == ["dns_tcp_http","nxdomain","recovery","servfail","silent"]' "$work/native-tests.jsonl"
@@ -64,6 +72,7 @@ if [ "${SYN443_RACE:-0}" = 1 ]; then
     python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-race-tests.jsonl"
     python3 "$root/tools/check_native_diagnostic_evidence.py" "$work/native-race-tests.jsonl" --path-candidates
     python3 "$root/tools/check_native_protocol_evidence.py" "$work/native-race-tests.jsonl"
+    check_selector_sessions "$work/native-race-tests.jsonl"
     python3 "$root/tools/check_native_check_plan_evidence.py" "$work/native-race-tests.jsonl"
     python3 "$root/tools/check_native_report_evidence.py" "$work/native-race-tests.jsonl"
     jq -es '[.[] | select(.Package == "io.syn443/bridge" and .Action == "pass") | .Test | strings | select(startswith("TestSplitDNSInternalApplicationAndNoPublicFallback/")) | split("/")[-1]] | sort == ["dns_tcp_http","nxdomain","recovery","servfail","silent"]' "$work/native-race-tests.jsonl"

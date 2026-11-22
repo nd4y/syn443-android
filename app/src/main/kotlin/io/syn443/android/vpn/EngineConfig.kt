@@ -370,7 +370,7 @@ object EngineConfig {
         require(material==null || managedApplied)
         value.put("inbounds", JSONArray().put(JSONObject().put("type", "tun").put("tag", "tun")
             .put("address", JSONArray().put("192.0.2.1/30").put("fd00:443::1/126"))
-            .put("mtu", 1400).put("auto_route", false).put("stack", "gvisor")))
+            .put("udp_timeout", "5m").put("mtu", 1400).put("auto_route", false).put("stack", "gvisor")))
         if (!value.has("dns")) value.put("dns", JSONObject().put("servers", JSONArray().put(
             JSONObject().put("type", "local").put("tag", "physical-dns"))).put("final", "physical-dns"))
         val route = value.optJSONObject("route") ?: JSONObject()

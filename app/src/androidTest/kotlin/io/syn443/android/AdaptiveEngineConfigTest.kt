@@ -80,6 +80,7 @@ class AdaptiveEngineConfigTest {
         assertEquals(decoded.hash, AdaptiveRuntime.decode(rendered.getJSONObject("adaptive_routes").toString().toByteArray()).hash)
         assertEquals(4, decoded.catalogueIDs().size)
         assertEquals(1, rendered.getJSONArray("inbounds").length())
+        assertEquals("5m", rendered.getJSONArray("inbounds").getJSONObject(0).getString("udp_timeout"))
         assertTrue(rendered.getJSONObject("log").getBoolean("disabled"))
         assertEquals(raw, config.toString())
     }

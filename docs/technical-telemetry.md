@@ -21,3 +21,13 @@ in-flight work. Delivery failure does not affect route health or VPN intent.
 This pilot does not provide full probe metrics, compressed delivery, the
 shared traffic budget, background uploads while Off, analysis or operator
 dashboards. Device/server end-to-end acceptance remains separate.
+
+## Managed adaptive reselection
+
+Build 128 records a managed adaptive route change after the native engine
+acknowledges replacing its existing selection. Initial selection, the reserve
+probe and its commit request produce no reselection event. A duplicate
+acknowledgement cannot create another event. The local event retains the
+current VPN phase and reason. With telemetry enabled, the encrypted queue
+carries the policy revision, numeric algorithm ID 3 and the observed network
+mode. The event carries no route, address, group or peer identifier.

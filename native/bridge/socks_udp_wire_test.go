@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/interrupt"
 	M "github.com/sagernet/sing/common/metadata"
 )
 
@@ -189,4 +190,59 @@ func TestRegisteredSOCKSUDPAssociationActualDatagramAndNoHTTPDetourEscape(t *tes
 			}
 		})
 	}
+}
+
+func TestUDPSelectorKeepsOpenAssociationUntilCloseAndUsesCurrentExitOnReopen(t *testing.T) {
+	target, received := udpEchoWire(t)
+	destination := target.LocalAddr().(*net.UDPAddr)
+	primary, first := socksUDPWire(t, destination)
+	reserve, second := socksUDPWire(t, destination)
+	box := wireBox(t, primary.node("socks", "primary"), reserve.node("socks", "reserve"),
+		map[string]any{"type": "selector", "tag": "group", "default": "primary",
+			"outbounds": []string{"primary", "reserve"}, "interrupt_exist_connections": false})
+	group, ok := box.Outbound().Outbound("group")
+	if !ok {
+		t.Fatal("no configured selector")
+	}
+	selector := group.(interface{ SelectOutbound(string) bool })
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	open := func() net.PacketConn {
+		t.Helper()
+		conn, err := group.ListenPacket(interrupt.ContextWithIsExternalConnection(ctx), M.ParseSocksaddr(destination.String()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		return conn
+	}
+	exchange := func(conn net.PacketConn, payload string, wantFirst, wantSecond int32) {
+		t.Helper()
+		if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := conn.WriteTo([]byte(payload), destination); err != nil {
+			t.Fatal(err)
+		}
+		var answer [64]byte
+		n, _, err := conn.ReadFrom(answer[:])
+		if err != nil || string(answer[:n]) != payload {
+			t.Fatalf("missing echo for %q: %v", payload, err)
+		}
+		if first.Load() != wantFirst || second.Load() != wantSecond || received.Load() != wantFirst+wantSecond {
+			t.Fatalf("unexpected UDP relay counts: primary %d, reserve %d, target %d", first.Load(), second.Load(), received.Load())
+		}
+	}
+	original := open()
+	exchange(original, "original-before-change", 1, 0)
+	if selector.SelectOutbound("unassigned") || !selector.SelectOutbound("reserve") {
+		t.Fatal("selector membership or reselection failed")
+	}
+	exchange(original, "original-after-change", 2, 0)
+	next := open()
+	exchange(next, "new-after-change", 2, 1)
+	if err := original.Close(); err != nil {
+		t.Fatal(err)
+	}
+	exchange(open(), "reopened-after-close", 2, 2)
 }

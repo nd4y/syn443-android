@@ -951,8 +951,13 @@
     {
       "id": "AUTO-06",
       "text": "Начальные параметры для пилота: деградация после трёх релевантных ошибок из последних пяти проверок, минимум 60 секунд удержания исправного пути, три успешные проверки для возврата. Внутри сопоставимых классов стабильности и энергозатрат переключение ради latency допускается при улучшении не менее 20% и достаточной свежести результатов. Жёсткая потеря физической сети или нарушение обязательной политики обходят hold-down. Параметры входят в decision policy и уточняются испытаниями.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedAdaptiveRoutesTest.kt"
+      ],
+      "implementationScope": "The adaptive Android coordinator applies a sixty-second healthy-path hold, three independent successful measurements and a fresh comparable latency baseline. Confirmed failure and replacement use a separate recovery path.",
+      "remainingScope": "The rolling three-of-five degradation policy, remotely selectable thresholds, full comparison of energy and stability classes, and field validation remain open."
     },
     {
       "id": "AUTO-07",
@@ -968,8 +973,16 @@
     {
       "id": "AUTO-08",
       "text": "TCP-сессия закрепляется за выбранным выходом на время жизни. Смена балансира касается новых соединений; при физической потере транспорта существующие сессии могут оборваться. Бесшовное сохранение любого TCP при handover не обещается. Для UDP задаются срок привязки и поведение при смене пути.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "native/bridge/route_selection_wire_test.go",
+        "native/bridge/socks_udp_wire_test.go",
+        "app/src/main/kotlin/io/syn443/android/vpn/EngineConfig.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdaptiveEngineConfigTest.kt",
+        "docs/route-frontier.md"
+      ],
+      "implementationScope": "The managed selector preserves existing TCP connections and external SOCKS5 UDP associations during a healthy member change. New associations resolve the current member. Android owns the five-minute TUN UDP idle setting.",
+      "remainingScope": "Actual idle expiry through the Android TUN, physical handover and other UDP transports need separate acceptance. Private adaptive chains currently admit TCP only."
     },
     {
       "id": "AUTO-09",
