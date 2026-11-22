@@ -778,6 +778,7 @@ ADMIN_OPERATION_RECONCILE_REQUIRED = {
         ('io.syn443.android.AdminOperationWireTest', 'operationFieldsRejectMissingUnknownDuplicateNoncanonicalAndInvalidSealRelationships'),
         ('io.syn443.android.AdminOperationWireTest', 'operationFrameKeepsHardUtf8LimitAndRejectsMainBinderBeforeParsing'),
         ('io.syn443.android.AdminOperationRouteTest', 'routeLookupThenConfirmedSealCarriesExactPendingDocumentAndCasWithoutPublication'),
+        ('io.syn443.android.AdminOperationRouteTest', 'explicitNativeSearchKeepsPrefixAcrossPagesAndForgetsItOnForegroundLoss'),
         ('io.syn443.android.AdminOperationRouteTest', 'busyLookupStopAndRapidResumeDropLateSealPermissionWithoutAutomaticReplay'),
         ('io.syn443.android.AdminOperationRouteTest', 'failedLookupRetainsLocalTextAndWebFallbackWhileReauthenticationClearsOnlyUiRam'),
         ('io.syn443.android.AdminEditorOwnerMigrationTest', 'exactCurrentLegacyMigrationPreservesPendingBytesCasAndExistingAesKey'),
