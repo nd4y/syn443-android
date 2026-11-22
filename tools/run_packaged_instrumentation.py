@@ -20,6 +20,24 @@ def verify_apks(root, manifest, source, run, attempt):
             raise ValueError('Downloaded APK differs from its build manifest')
 
 
+def interruption(reporter_line, completed, total, active):
+    """Describe a runner stop using only bounded counts and a checked-in test identity."""
+    reason = {
+        'INSTRUMENTATION_RESULT: shortMsg=Process crashed.': 'process_crashed',
+        'INSTRUMENTATION_RESULT: shortMsg=Process crashed': 'process_crashed',
+    }.get(reporter_line, 'runner_stopped')
+    summary = f'Android instrumentation {reason}; completed={completed}/{total or 0}'
+    if active is not None:
+        classname, method = active
+        # Never reflect arbitrary status text into the public job log.
+        test_root = Path(__file__).resolve().parents[1] / 'app/src/androidTest/kotlin'
+        if len(classname) <= 200 and len(method) <= 200:
+            source = test_root.joinpath(*classname.split('.')).with_suffix('.kt')
+            if source.is_file() and re.search(r'@Test\s+fun\s+' + re.escape(method) + r'\s*\(', source.read_text(encoding='utf-8')):
+                summary += f'; active={classname}.{method}'
+    return ValueError(summary)
+
+
 def parse_run(output):
     """Require a matching start and finish for each AndroidJUnitRunner result."""
     fields = {}
@@ -31,7 +49,7 @@ def parse_run(output):
     finished = False
     for line in output.splitlines():
         if line.startswith(('INSTRUMENTATION_FAILED:', 'INSTRUMENTATION_ABORTED:', 'INSTRUMENTATION_RESULT: shortMsg=')):
-            raise ValueError('Android reported an instrumentation failure')
+            raise interruption(line, len(cases), total, active)
         if line.startswith('INSTRUMENTATION_CODE:'):
             if finished or line != 'INSTRUMENTATION_CODE: -1' or fields or active or len(cases) != total:
                 raise ValueError('Instrumentation terminated abnormally or with missing outcomes')
