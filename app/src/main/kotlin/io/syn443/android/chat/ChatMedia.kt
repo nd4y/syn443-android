@@ -4,6 +4,7 @@ package io.syn443.android.chat
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -11,7 +12,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.Clock
 import androidx.media3.effect.FrameDropEffect
-import androidx.media3.effect.Presentation
+import androidx.media3.common.util.Size
+import androidx.media3.effect.MatrixTransformation
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.transformer.*
 import kotlinx.coroutines.*
@@ -23,6 +25,20 @@ data class PreparedMedia(val file:File,val name:String,val mime:String,val kind:
     override fun close() {file.delete()}
 }
 object ChatMedia {
+    // Media3 supplies square-pixel input dimensions after interpreting its display transform.
+    private class BoundedVideoFrame : MatrixTransformation {
+        private val identity = Matrix()
+
+        override fun configure(inputWidth: Int, inputHeight: Int): Size {
+            val scale = minOf(1.0, 1280.0 / maxOf(inputWidth, inputHeight),
+                720.0 / minOf(inputWidth, inputHeight))
+            fun evenDimension(value: Int) = ((value * scale / 2).toInt() * 2).coerceAtLeast(2)
+            return Size(evenDimension(inputWidth), evenDimension(inputHeight))
+        }
+
+        override fun getMatrix(presentationTimeUs: Long): Matrix = identity
+    }
+
     internal val decoderSelector=MediaCodecSelector {mime,secure,tunneling->
         val defaults=MediaCodecSelector.DEFAULT.getDecoderInfos(mime,secure,tunneling)
         // API37's emulator H264 decoder fails while draining real 1080p input.
@@ -112,7 +128,7 @@ object ChatMedia {
                                 }
                             }).build()
                         val edited=EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(raw)))
-                            .setEffects(Effects(emptyList(),listOf(Presentation.createForWidthAndHeight(1280,720,Presentation.LAYOUT_SCALE_TO_FIT),FrameDropEffect.createDefaultFrameDropEffect(30f)))).build()
+                            .setEffects(Effects(emptyList(),listOf(BoundedVideoFrame(),FrameDropEffect.createDefaultFrameDropEffect(30f)))).build()
                         val activeTransformer=requireNotNull(transformer)
                         activeTransformer.start(edited,output.path)
                         progress("Сжатие видео: 0%")

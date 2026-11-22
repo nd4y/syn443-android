@@ -17,3 +17,5 @@ __pycache__/
 node_modules/
 dist/
 /app/src/androidTest/assets/chat-fixture.mp4
+/app/src/androidTest/assets/chat-square.mp4
+/app/src/androidTest/assets/chat-rotated.mp4

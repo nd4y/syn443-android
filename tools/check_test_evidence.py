@@ -367,7 +367,7 @@ if mode=="emulator":
     chat_required |= {"invalidUnicodeCannotReplaceOrCreateEncryptedChatDrafts",
                       "composingChatInputRequiresExplicitSendAfterCommit"}
     chat_required.add("chatReadinessRejectsMissingRootTitleAndStatus")
-    chat_required |= {"chatRestartReclaimsUnsentFilesButPreservesDraftAttachments","chatVideoCompressionProducesBoundedMp4AndStripsLocation","chatCancellingActiveVideoExportRemovesPrivateTemporaryFiles"}
+    chat_required |= {"chatRestartReclaimsUnsentFilesButPreservesDraftAttachments","chatVideoCompressionProducesBoundedMp4AndStripsLocation","chatSquareVideoFillsTheExportedFrame","chatRotatedSmallVideoRetainsDisplayOrientationAndSize","chatCancellingActiveVideoExportRemovesPrivateTemporaryFiles"}
     chat_required |= {"sendReceiptPreservesPendingBytesAcrossWrongRepliesAndStorageFailure",
                       "visiblePendingMessagesStayInTheSelectedConversationUntilAcknowledged"}
     chat_required |= {"chatReplyIsPrivateAndDenialDoesNotWithdrawAssignedPolicy","cancelledQueuedChatNeverTransmitsAndDoesNotPoisonNextRequest"}
