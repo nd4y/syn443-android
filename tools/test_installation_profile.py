@@ -31,6 +31,26 @@ class InstallationProfileTest(unittest.TestCase):
     def test_public_profile_is_admitted_to_the_runtime_signature_checks(self):
         check_profile(profile(controlPanelOrigin="https://admin.example.invalid"))
 
+    def test_administrative_bootstrap_allows_only_public_canonical_endpoints_and_fixed_protocol(self):
+        admin = {"issuer": "https://id.example.invalid/realms/mobile", "apiOrigin": "https://control.example.invalid",
+                 "clientId": "syn443-control-mobile", "audience": "syn443-control-api", "assuranceAcr": "urn:syn443:loa:2"}
+        check_profile(profile(adminBootstrap=admin))
+        check_profile(profile(adminBootstrap=dict(admin, issuer="https://id.example.invalid")))
+        invalid = [None, {}, {**admin, "extra": "x"}, {k: v for k, v in admin.items() if k != "audience"}]
+        for key, values in {
+            "clientId": ["syn443-android"], "audience": ["another-api"], "assuranceAcr": ["low"],
+            "apiOrigin": [None, "http://control.example.invalid", "https://host." + "local",
+                          "https://127.0.0.1", "https://control.example.invalid/private",
+                          "https://u@control.example.invalid", "https://control.example.invalid:443",
+                          "https://control.example.invalid?x=y", "https://control.example.invalid#x"],
+            "issuer": [44, "https://id.example.invalid/realms/../private", "https://id.example.invalid/%2F",
+                       "https://id.example.invalid/realms/", "https://id.example.invalid//double"],
+        }.items():
+            invalid.extend(dict(admin, **{key: v}) for v in values)
+        for index, candidate in enumerate(invalid):
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                check_profile(profile(adminBootstrap=candidate))
+
     def test_encoded_private_endpoints_and_unknown_fields_are_rejected(self):
         for raw in (profile(apiOrigin="https://host." + "local"), profile(apiOrigin="https://127.0.0.1"),
                     profile(issuer="https://identity.example.invalid/realms/test?token=x"), profile(extra="x"),
