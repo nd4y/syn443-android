@@ -1,7 +1,10 @@
 import copy
+import os
+from contextlib import ExitStack
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
-from run_enrolled_vpn import stopped_rollback_recovered, failure_summary, logout, committed_online
+from run_enrolled_vpn import stopped_rollback_recovered, failure_summary, logout, committed_online, enrolled_management_outage
 from run_vpn_process_faults import ControlUnavailable
 
 
@@ -61,6 +64,35 @@ class StoppedControllerRecoveryTest(unittest.TestCase):
             def request(method):return state if method=='status' else {'busy':False}
             with patch('run_enrolled_vpn.call',side_effect=request),patch('run_enrolled_vpn.pid',side_effect=lambda suffix:'new-controller' if suffix==':controller' else ''):
                 self.assertFalse(stopped_rollback_recovered('old-controller',7))
+
+    def test_management_outage_requires_a_disposable_emulator_before_touching_a_port(self):
+        with patch.dict(os.environ, {'GITHUB_ACTIONS': 'false'}), patch('run_enrolled_vpn.adb') as adb:
+            with self.assertRaises(ValueError):
+                enrolled_management_outage(None, None, 0)
+            adb.assert_not_called()
+
+    def test_management_port_is_restored_if_the_app_does_not_observe_a_refusal(self):
+        from unittest.mock import call
+        port = 'tcp:10001'
+        fixture = SimpleNamespace(server=SimpleNamespace(server_port=10001), telemetry_enabled=True,
+                                  issuer='https://127.0.0.1:10001/realms/test', origin='https://127.0.0.1:10001',
+                                  sessions={'key': {'deviceId': 'device'}}, registrations=1)
+        proxy = SimpleNamespace(server_address=('127.0.0.1', 10002))
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(os.environ, {'GITHUB_ACTIONS': 'true', 'SYN443_CI_AVD': 'syn443-ci'}))
+            adb = stack.enter_context(patch('run_enrolled_vpn.adb', side_effect=[
+                b"syn443-ci\nOK", b"emulator tcp:10001 tcp:10001", b"", b"emulator tcp:10002 tcp:10002", b""]))
+            stack.enter_context(patch('run_enrolled_vpn.exchange_through_proxy'))
+            stack.enter_context(patch('run_enrolled_vpn.pid', return_value='original'))
+            control = stack.enter_context(patch('run_enrolled_vpn.call'))
+            stack.enter_context(patch('run_enrolled_vpn.committed_online', return_value=True))
+            stack.enter_context(patch('run_enrolled_vpn.subprocess.run',
+                                      return_value=SimpleNamespace(returncode=0, stdout=b'', stderr=b'')))
+            with self.assertRaises(AssertionError):
+                enrolled_management_outage(fixture, proxy, 1)
+            self.assertEqual([call('reverse', '--remove', port), call('reverse', '--list'),
+                              call('reverse', port, port)], adb.call_args_list[-3:])
+            self.assertEqual([call('status')], control.call_args_list)
 
     def test_failure_diagnostics_never_copy_untrusted_or_private_fields(self):
         import json

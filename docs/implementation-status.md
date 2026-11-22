@@ -353,3 +353,27 @@ cancel the temporary choice. Network replacement, policy withdrawal and time
 expiry retire a previous choice. A home mode requires a fresh TLS proof on
 the current Wi-Fi even when explicitly selected. A mode selection grants no
 additional direct egress. Physical deployment and acceptance are separate.
+
+
+## Management outage on Wi-Fi
+
+The enrolled VPN test can disconnect the shared issuer, policy API and
+telemetry endpoint while the application proxy continues to answer. It checks
+a TCP refusal from the application UID before and after killing the controller,
+then checks application traffic at the proxy. The replacement controller and
+engine must keep the original binding and active policy within its offline
+lease. After restoring management, the test requires a fresh signed revision
+and another application response. This exercises BOOT-01 on the disposable
+Wi-Fi emulator. Physical Xperia recovery has its own acceptance record.
+
+
+## Packaged backup exclusions
+
+Release CI reads the compiled Android manifest and resolves its extraction
+resource in the APK resource table. It checks the default and all qualified
+variants. Both cloud backup and device transfer must exclude the entire
+application storage domains, including credential and device-protected files,
+preferences and databases. The normal APK also disables legacy full backup.
+The release fails if any selected XML grants access or cannot be resolved.
+Physical device migration and other NFR-04 clauses have separate acceptance.
+[Android backup rules](https://developer.android.com/identity/data/autobackup)

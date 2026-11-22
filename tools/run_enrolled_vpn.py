@@ -182,6 +182,78 @@ def signed_program_failover(fixture, primary, generation):
             reserve.server_close()
 
 
+def enrolled_management_outage(fixture, proxy, generation):
+    from process_failure_evidence import reverse_snapshot
+
+    if (os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('SYN443_CI_AVD') != 'syn443-ci'
+            or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']):
+        raise ValueError('Disposable Wi-Fi emulator required')
+    port = fixture.server.server_port
+    assert port != proxy.server_address[1] and fixture.telemetry_enabled
+    assert fixture.issuer.startswith(fixture.origin + '/') and fixture.origin == 'https://127.0.0.1:' + str(port)
+    binding = set((key, row['deviceId']) for key, row in fixture.sessions.copy().items())
+    assert len(binding) == 1 and fixture.registrations == 1
+    endpoint = 'tcp:' + str(port)
+
+    def confirm_mapping(present):
+        assert reverse_snapshot(adb('reverse', '--list'), port) == {'known': True, 'ownedMappingPresent': present}
+
+    def offline():
+        confirm_mapping(False)
+        result = subprocess.run(['adb', '-e', 'shell', '-T', 'run-as', PACKAGE, 'toybox', 'nc',
+                                 '-w', '2', '127.0.0.1', str(port)], stdin=subprocess.DEVNULL,
+                                capture_output=True, timeout=8)
+        assert result.returncode != 0 and b'connection refused' in (result.stdout + result.stderr).lower()
+
+    def bound():
+        return (fixture.registrations == 1 and
+                {(key, row['deviceId']) for key, row in fixture.sessions.copy().items()} == binding and
+                call('auth-status')['generation'] == generation)
+
+    confirm_mapping(True)
+    exchange_through_proxy(proxy)
+    original_controller, original_engine = pid(':controller'), pid(':engine')
+    assert original_controller and original_engine and committed_online(call('status'), 1)
+    adb('reverse', '--remove', endpoint)
+    try:
+        offline()
+        call('policy-refresh')
+        exchange_through_proxy(proxy)
+        call('fault-controller')
+
+        def replaced():
+            if not committed_online(call('status'), 1):
+                return False
+            controller, engine = pid(':controller'), pid(':engine')
+            return controller not in ('', original_controller) and engine not in ('', original_engine)
+
+        await_condition(replaced, 100)
+        assert bound()
+        offline()
+        exchange_through_proxy(proxy)
+    finally:
+        adb('reverse', endpoint, endpoint)
+
+    confirm_mapping(True)
+    requests = fixture.policy_requests
+    fixture.revision = 2
+    last_refresh = None
+
+    def renewed():
+        nonlocal last_refresh
+        if fixture.policy_requests > requests and committed_online(call('status'), 2):
+            return True
+        now = time.monotonic()
+        if last_refresh is None or now - last_refresh >= 7:
+            call('policy-refresh')
+            last_refresh = now
+        return False
+
+    await_condition(renewed, 90)
+    assert bound()
+    exchange_through_proxy(proxy)
+
+
 def enrolled_operator_mode(fixture, primary):
     from policy_fixture import b64
     if os.environ.get('GITHUB_ACTIONS') != 'true' or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']:
@@ -220,7 +292,10 @@ def enrolled_operator_mode(fixture, primary):
         route['adaptive_routes'] = {'schemaVersion': 1, 'graphB64': encode(graph),
                                     'catalogueB64': encode(catalogue), 'groups': {'office': 'managed-office'}}
         route['outbounds'].append({'type': 'syn443-adaptive', 'tag': 'managed-office', 'group': 'office'})
-        route['route']['rules'] = [{'ip_cidr': ['203.0.113.10/32'], 'action': 'route', 'outbound': 'managed-office'}]
+        route['route']['rules'] = [
+            {'ip_cidr': ['203.0.113.10/32'], 'network': ['tcp'], 'action': 'route', 'outbound': 'managed-office'},
+            {'network': ['udp'], 'action': 'reject', 'method': 'drop'},
+        ]
         route['route_checks'] = [{'outbound': 'managed-office', 'required': True,
                                   'checks': [{'method': 'ssh_banner', 'target': '192.0.2.9:22'}]}]
         route['network_mode'] = {'preferredMode': 'AUTO', 'userModes': ['WIFI'], 'maxOverrideMinutes': 3}
@@ -427,7 +502,8 @@ def main():
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
            'enrolledStopFencesPendingCandidateRouteSuccess','enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn',
            'enrolledRejectedUpdatesRetainAuthorizedTunnel', 'enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun',
-           'enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath', 'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
+           'enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath', 'enrolledManagementOutageRetainsTunnelThroughControllerDeath',
+           'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
     if installer_only:
         names=['enrolledSystemInstallerCancelKeepsBoundPolicy']
     elif historical:
@@ -439,7 +515,8 @@ def main():
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
             try:
-                telemetry_modes={'enrolledCandidateRegressionRollsBack':'foreground',
+                telemetry_modes={'enrolledManagementOutageRetainsTunnelThroughControllerDeath':'foreground',
+                                 'enrolledCandidateRegressionRollsBack':'foreground',
                                  'enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':'stopped'}
                 driver_result=setup(name=='enrolledPendingAssignmentRetriesWhileVisible',telemetry=telemetry_modes.get(name), installer=installer_only)
                 before=proxy.progress;generation=call('auth-status')['generation']
@@ -454,6 +531,8 @@ def main():
                     except AssertionError:pass
                     before=proxy.progress;call('connect')
                     await_condition(lambda:call('status').get('phase')=='Online' and proxy.progress>before)
+                elif name=='enrolledManagementOutageRetainsTunnelThroughControllerDeath':
+                    enrolled_management_outage(fixture, proxy, generation)
                 elif name=='enrolledControllerDeathRecoversAuthorizedCache':
                     old_controller=pid(':controller');old_engine=pid(':engine');assert old_controller and old_engine
                     fixture.policy_status=503;call('fault-controller')
