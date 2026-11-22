@@ -1,7 +1,25 @@
 import copy
 import unittest
 from unittest.mock import patch
-from run_enrolled_vpn import stopped_rollback_recovered, failure_summary
+from run_enrolled_vpn import stopped_rollback_recovered, failure_summary, logout
+from run_vpn_process_faults import ControlUnavailable
+
+
+class FreshInstallReadinessTest(unittest.TestCase):
+    def test_startup_polls_only_reads_and_uses_one_final_signed_out_snapshot(self):
+        with patch('run_vpn_process_faults.time.sleep'), patch('run_enrolled_vpn.vpn_stopped', return_value=True), patch('run_enrolled_vpn.call') as invoke:
+            invoke.side_effect = [ControlUnavailable(), {'phase': 'SIGNED_OUT'}, {},
+                                  {'phase': 'SIGNED_OUT', 'busy': True}, {'phase': 'SIGNED_OUT', 'busy': False}]
+            logout(fresh_install=True)
+        self.assertEqual([args.args[0] for args in invoke.call_args_list],
+                         ['auth-status', 'auth-status', 'auth-cancel', 'auth-status', 'auth-status'])
+
+    def test_lost_cancel_acknowledgement_is_never_replayed(self):
+        with patch('run_enrolled_vpn.call') as invoke:
+            invoke.side_effect = [{'phase': 'SIGNED_OUT'}, ControlUnavailable()]
+            with self.assertRaises(ControlUnavailable):
+                logout(fresh_install=True)
+        self.assertEqual([args.args[0] for args in invoke.call_args_list], ['auth-status', 'auth-cancel'])
 
 
 class StoppedControllerRecoveryTest(unittest.TestCase):

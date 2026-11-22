@@ -42,6 +42,21 @@ def exchange_through_proxy(proxy):
         proxy.payload_received = None
 
 
+def logout(fresh_install=False):
+    if fresh_install:
+        # Package installation can return before its provider can answer. Only poll a read.
+        await_condition(lambda: bool(call('auth-status').get('phase')), 40)
+    call('auth-cancel')
+
+    def signed_out():
+        if not vpn_stopped():
+            return False
+        snapshot = call('auth-status')
+        return snapshot.get('phase') == 'SIGNED_OUT' and snapshot.get('busy') is False
+
+    await_condition(signed_out, 40)
+
+
 def upgrade_directory(system_installer=False, historical=False):
     if historical:
         return Path(os.environ['RUNNER_TEMP']) / 'historical-upgrade'
@@ -276,8 +291,6 @@ def main():
     port=proxy.server_address[1];adb('reverse','tcp:'+str(port),'tcp:'+str(port))
     config={'outbounds':[{'type':'http','tag':'enrolled-proxy','server':'127.0.0.1','server_port':port}], 'route':{'final':'enrolled-proxy'}}
     fixture=None
-    def logout():
-        call('auth-cancel');await_condition(lambda:vpn_stopped() and call('auth-status').get('phase')=='SIGNED_OUT' and not call('auth-status').get('busy'),40)
     def close_fixture():
         nonlocal fixture
         if fixture:
@@ -293,7 +306,8 @@ def main():
             envelope=(directory/'syn443-update.txt').read_text(encoding='ascii')
             device=json.loads(decode(envelope.split('.')[1]))['scope']['deviceId']
             assert b'Success' in adb('install','-r',str(directory/'installer-base.apk'),timeout=120).splitlines()
-        logout();close_fixture();call('policy-test-reset');call('test-reset')
+        logout(fresh_install=historical or installer)
+        close_fixture();call('policy-test-reset');call('test-reset')
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
         # Keep the assignment valid for the first periodic job while the access token rotates.
