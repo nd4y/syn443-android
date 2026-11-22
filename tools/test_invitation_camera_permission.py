@@ -17,6 +17,18 @@ class CameraPermissionTest(unittest.TestCase):
             with self.subTest(replies=replies), patch.object(camera, 'adb', side_effect=replies), self.assertRaises(AssertionError):
                 camera.require_initial_camera_denied()
 
+    def test_missing_runtime_row_requires_installed_request_and_current_denied_grant(self):
+        fresh = b'  Package [io.syn443.android] (abc):\n    requested permissions:\n      android.permission.CAMERA\n'
+        with patch.object(camera, 'adb', side_effect=[fresh,b'0',b'-1']):
+            self.assertEqual((False,False),camera.installed_camera_state())
+        for bad in (fresh.replace(b'io.syn443.android', b'example.other'),
+                    fresh.replace(b'android.permission.CAMERA', b'android.permission.INTERNET'),
+                    fresh+b'      android.permission.CAMERA: granted=unknown\n'):
+            with patch.object(camera, 'adb', return_value=bad), self.assertRaises(AssertionError):
+                camera.installed_camera_state()
+        with patch.object(camera, 'adb', side_effect=[fresh,b'0',b'0']), self.assertRaises(AssertionError):
+            camera.installed_camera_state()
+
     def test_denial_must_be_an_explicit_android_decision(self):
         self.assertEqual((False, False), camera.camera_state(b'  android.permission.CAMERA: granted=false\r\n'))
         prefix = b'android.permission.CAMERA: granted=false, flags=['
