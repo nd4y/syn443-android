@@ -43,8 +43,14 @@ class AdminOperationRouteTest {
                 phase=phase,documentBinding=binding,pages=listOf(body),operationBinding=if(phase==AdminEditorPhase.UNCERTAIN)operation else "",
                 operationOutcome=outcome,canSeal=seal,error=if(phase==AdminEditorPhase.UNCERTAIN)"OUTCOME_UNKNOWN" else "")
         override suspend fun status():AdminUiStatus {reads+="status";return status}
-        override suspend fun devices(generation:Long,after:String):AdminDevicesPage {
-            check(generation==status.generation && after.isEmpty());reads+="devices"
+        val searches=CopyOnWriteArrayList<Pair<String,String>>()
+        override suspend fun devices(generation:Long,after:String,prefix:String):AdminDevicesPage {
+            check(generation==status.generation);reads+="devices";searches+=after to prefix
+            if(prefix=="Z_A") {
+                val ids=if(after.isEmpty())(0..31).map {"z_a-"+it.toString().padStart(2,'0')} else listOf("z_a-32")
+                return AdminDevicesPage(ids.map {AdminDeviceRow(it,4,5,"")},if(after.isEmpty())ids.last() else "",1000)
+            }
+            check(after.isEmpty() && prefix.isEmpty())
             return AdminDevicesPage(listOf(AdminDeviceRow(device,4,5,"Последний отчёт; соединение неизвестно")),"",1000)
         }
         override suspend fun document(generation:Long,action:AdminReadAction,target:String):AdminDocument {
@@ -109,6 +115,24 @@ class AdminOperationRouteTest {
         }
     }
 
+    @Test fun explicitNativeSearchKeepsPrefixAcrossPagesAndForgetsItOnForegroundLoss() {
+        val bridge=Bridge();content(bridge,mutableStateOf(true))
+        val container="admin-content"
+        waitEnabled(container,"admin-prefix")
+        compose.onNodeWithTag("admin-prefix").performTextInput("Z_A")
+        compose.runOnIdle {assertEquals(listOf("" to ""),bridge.searches.toList())}
+        compose.onNodeWithTag("admin-prefix").performImeAction()
+        waitEnabled(container,"admin-devices-next")
+        compose.onNodeWithTag("admin-devices-next").performClick()
+        waitEnabled(container,"admin-device-z_a-32")
+        compose.runOnIdle {assertEquals(listOf("" to "","" to "Z_A","z_a-31" to "Z_A"),bridge.searches.toList())}
+        compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
+        compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+        waitEnabled(container,"admin-device-"+bridge.device)
+        scroll(container,"admin-prefix")
+        compose.onNodeWithTag("admin-prefix").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText,AnnotatedString("")))
+        compose.runOnIdle {assertEquals("" to "",bridge.searches.last())}
+    }
     @Test fun routeLookupThenConfirmedSealCarriesExactPendingDocumentAndCasWithoutPublication() {
         val bridge=Bridge();content(bridge,mutableStateOf(true));open(bridge)
         input(bridge.text)

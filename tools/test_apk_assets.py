@@ -53,6 +53,28 @@ class ApkAssetsTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 check(self.apk(variant), self.root)
 
+    def test_release_compiler_profiles_must_match_and_cannot_enter_debug_apks(self):
+        files = [('binary_art_profile', 'baseline.prof', b'pro\x00010\x00synthetic'),
+                 ('binary_art_profile_metadata', 'baseline.profm', b'prm\x00002\x00synthetic')]
+        members = []
+        for artifact, name, data in files:
+            file = self.root / 'app/build/intermediates' / artifact / 'release/compileReleaseArtProfile' / name
+            file.parent.mkdir(parents=True)
+            file.write_bytes(data)
+            members.append(('assets/dexopt/' + name, data))
+        normal = list(expected_assets(self.root).items())
+        release_name = 'app-release-unsigned.apk'
+        check(self.apk(normal + members, release_name), self.root)
+        for entries in (normal, normal + members[:1], normal + members + [members[0]],
+                        normal + [members[0], (members[1][0], members[1][1] + b'changed')]):
+            with self.assertRaises(AssertionError):
+                check(self.apk(entries, release_name), self.root)
+        with self.assertRaises(AssertionError):
+            check(self.apk(normal + members), self.root)
+        file.write_bytes(b'unknown-format')
+        with self.assertRaises(AssertionError):
+            check(self.apk(normal + members, release_name), self.root)
+
     def test_instrumentation_cannot_silently_bundle_runtime_assets(self):
         with self.assertRaises(AssertionError):
             check(self.apk(list(expected_assets(self.root).items()), 'app-debug-androidTest.apk'), self.root)

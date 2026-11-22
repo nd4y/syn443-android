@@ -44,11 +44,15 @@ internal object AdminControl {
         RUNTIME("configuration.runtime.get",4096)
     }
     fun id(raw:String)=raw.matches(Regex("[A-Za-z0-9_-]{1,64}"))
-    fun request(read:Read,target:String):ByteArray {
+    fun request(read:Read,target:String,prefix:String=""):ByteArray {
         require(id(target) || read==Read.DEVICES && target.isEmpty())
+        require(prefix.isEmpty() || read==Read.DEVICES && id(prefix))
         return Canonical.encode(buildJsonObject {
             put("version",1);put("requestId",Identity.random());put("action",read.action)
-            put("payload",buildJsonObject {put(if(read==Read.DEVICES)"after" else "id",target)})
+            put("payload",buildJsonObject {
+                put(if(read==Read.DEVICES)"after" else "id",target)
+                if(prefix.isNotEmpty())put("prefix",prefix)
+            })
         }).toByteArray(Charsets.UTF_8).also {require(it.size<=8192)}
     }
     fun objectReply(raw:String,read:Read):JsonObject {
@@ -82,14 +86,16 @@ internal object AdminControl {
         }
         return AdminActivation(state,policy,outcome,active,received)
     }
-    fun devices(value:JsonObject,after:String,time:TimeWindow,wire:String):AdminDevicePage {
+    fun devices(value:JsonObject,after:String,time:TimeWindow,wire:String,prefix:String=""):AdminDevicePage {
         shape(value,setOf("devices","next","observedAtMs"))
         val observed=value.number("observedAtMs",1);observation(observed,time)
         val entries=value.getValue("devices").jsonArray;require(entries.size<=32)
         var previous=after
         val devices=entries.map {
             val row=it.jsonObject;shape(row,setOf("device","policyRevision","desiredRevision","report"))
-            val device=row.getValue("device").text();require(id(device) && device>previous);previous=device
+            val device=row.getValue("device").text()
+            require(id(device) && device>previous && device.startsWith(prefix,ignoreCase=true))
+            previous=device
             val policy=row.number("policyRevision");val desired=row.number("desiredRevision")
             AdminDeviceSummary(device,policy,desired,activation(row.getValue("report").jsonObject,policy,time))
         }

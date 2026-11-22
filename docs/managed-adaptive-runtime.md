@@ -149,3 +149,9 @@ suites (53 total), six budget JVM roots and seven Android controller roots.
 Each API29/35/37 matrix requires279 unique actual outcomes without failures or
 skips. Synthetic controller reports do not establish packet or physical proof;
 signed managed-policy deployment and actual USB/Wi-Fi chain recovery stay separate.
+
+### Rolling stability in the live coordinator
+
+Each comparison group retains at most five attributable outcomes per path over ten minutes. Three failures in that window mark the path degraded. Three consecutive fresh successes clear the degradation. The coordinator accepts a failure from an explicit exit mismatch or a failed incumbent check corroborated by a working replacement and its native selection acknowledgement. Common target failures and passive traffic hints alone supply no path-quality sample.
+
+For a voluntary switch, the reserve needs three consecutive fresh successful measurements and the existing hold time. A confirmed stable reserve can replace a degraded incumbent even when that reserve is slower. A sole usable path and corroborated hard failure still use the existing recovery rules. Samples belong to the current physical, policy and native execution context. Up to 64 paths retain history. The ten-minute pilot window uses elapsed time and consumes no extra background probes on its own.

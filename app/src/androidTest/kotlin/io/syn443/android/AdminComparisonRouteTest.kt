@@ -60,7 +60,7 @@ class AdminComparisonRouteTest {
                 ready=!readOnly && choice.isNotEmpty(),detail=detail,readOnly=readOnly,baseRevision=4,currentRevision=5)
         }
         override suspend fun status():AdminUiStatus {reads+="status";return status}
-        override suspend fun devices(generation:Long,after:String):AdminDevicesPage {
+        override suspend fun devices(generation:Long,after:String,prefix:String):AdminDevicesPage {
             check(generation==status.generation && after.isEmpty());reads+="devices"
             return AdminDevicesPage(listOf(AdminDeviceRow(device,4,4,"Последний отчёт; соединение неизвестно")),"",1000)
         }

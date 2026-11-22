@@ -55,7 +55,7 @@ internal interface AdminUiBridge {
     suspend fun logout(generation:Long):Boolean
     suspend fun browser(generation:Long):AdminBrowserLaunch
     suspend fun callback(raw:String)
-    suspend fun devices(generation:Long,after:String=""):AdminDevicesPage
+    suspend fun devices(generation:Long,after:String="",prefix:String=""):AdminDevicesPage
     suspend fun document(generation:Long,action:AdminReadAction,target:String):AdminDocument
     suspend fun editor(generation:Long,command:io.syn443.android.vpn.AdminEditorCoordinator.Command):AdminEditorModel =
         throw AdminUiFailure("UNAVAILABLE")
@@ -130,10 +130,14 @@ internal class ResolverAdminUiBridge(private val resolver:ContentResolver):Admin
         require(raw.length in 1..8192)
         rpc("admin-callback",raw)
     }
-    private suspend fun read(generation:Long,action:AdminReadAction,target:String):ByteArray {
+    private suspend fun read(generation:Long,action:AdminReadAction,target:String,prefix:String=""):ByteArray {
         require(generation>=0 && (target.isEmpty() && action==AdminReadAction.DEVICES || AdminWire.id.matches(target)))
         val id=UUID.randomUUID().toString().replace("-","")
-        val extras=Bundle().apply {putLong("generation",generation);putString("action",action.wire);putString("target",target)}
+        require(prefix.isEmpty() || action==AdminReadAction.DEVICES && AdminWire.id.matches(prefix))
+        val extras=Bundle().apply {
+            putLong("generation",generation);putString("action",action.wire);putString("target",target)
+            if(prefix.isNotEmpty())putString("prefix",prefix)
+        }
         val resultExtras=Bundle().apply {putLong("generation",generation)}
         if(!rpc("admin-read-start",id,extras).getBoolean("admitted")) {
             val current=status()
@@ -166,8 +170,8 @@ internal class ResolverAdminUiBridge(private val resolver:ContentResolver):Admin
             withContext(NonCancellable+Dispatchers.IO) {runCatching {rpc("admin-read-cancel",id,resultExtras)}}
         }
     }
-    override suspend fun devices(generation:Long,after:String)=withContext(Dispatchers.IO) {
-        AdminWire.page(read(generation,AdminReadAction.DEVICES,after),after)
+    override suspend fun devices(generation:Long,after:String,prefix:String)=withContext(Dispatchers.IO) {
+        AdminWire.page(read(generation,AdminReadAction.DEVICES,after,prefix),after,prefix)
     }
     override suspend fun document(generation:Long,action:AdminReadAction,target:String)=withContext(Dispatchers.IO) {
         require(action!=AdminReadAction.DEVICES)
@@ -259,7 +263,7 @@ internal object AdminWire {
         require(raw.size in 1..MAX_BODY)
         return Policy.utf8(raw)
     }
-    fun page(raw:ByteArray,after:String):AdminDevicesPage {
+    fun page(raw:ByteArray,after:String,prefix:String=""):AdminDevicesPage {
         val value=Canonical.parse(text(raw)).jsonObject
         require(value.keys==setOf("devices","next","observedAtMs"))
         fun number(value:JsonElement):Long=value.jsonPrimitive.let {require(!it.isString);it.long}.also {require(it in 0..9_007_199_254_740_991L)}
@@ -269,7 +273,7 @@ internal object AdminWire {
             val row=entry.jsonObject
             require(row.keys==setOf("device","policyRevision","desiredRevision","report"))
             val device=row.getValue("device").jsonPrimitive.let {require(it.isString);it.content}
-            require(id.matches(device) && device>after)
+            require(id.matches(device) && device>after && device.startsWith(prefix,ignoreCase=true))
             val report=row.getValue("report").jsonObject.getValue("state").jsonPrimitive.let {require(it.isString);it.content}
             val label=when(report) {
                 "reported"->"Получен отчёт о применении"

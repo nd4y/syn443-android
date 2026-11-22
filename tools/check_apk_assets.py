@@ -18,6 +18,22 @@ def expected_assets(root):
     return result
 
 
+def release_art_profiles(root):
+    # AGP 9.4.1 CompileArtProfileTask publishes these two independent outputs.
+    # Use the compiler outputs as the source of truth for the packaged bytes.
+    profiles = {}
+    for artifact, filename, magic in (
+        ('binary_art_profile', 'baseline.prof', b'pro\0'),
+        ('binary_art_profile_metadata', 'baseline.profm', b'prm\0'),
+    ):
+        path = root / 'app/build/intermediates' / artifact / 'release/compileReleaseArtProfile' / filename
+        assert path.is_file() and 8 < path.stat().st_size <= 1_572_864, 'Invalid release ART profile size'
+        data = path.read_bytes()
+        assert data.startswith(magic) and data[4:7].isdigit() and data[7] == 0, 'Invalid release ART profile header'
+        profiles['assets/dexopt/' + filename] = data
+    return profiles
+
+
 def check(path, root):
     instrumented = path.name.endswith('-androidTest.apk')
     if instrumented:
@@ -28,6 +44,8 @@ def check(path, root):
         expected = {'assets/chat-fixture.mp4': fixture.read_bytes()}
     else:
         expected = expected_assets(root)
+        if path.name == 'app-release-unsigned.apk':
+            expected.update(release_art_profiles(root))
     with zipfile.ZipFile(path) as archive:
         names = [i.filename for i in archive.infolist() if i.filename.startswith('assets/')]
         assert len(names) == len(set(names)), 'Duplicate APK asset'

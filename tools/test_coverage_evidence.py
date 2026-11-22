@@ -207,9 +207,9 @@ class CoverageEvidenceTest(unittest.TestCase):
                 'AdminOperationReconcileTest': 18, 'AdminOperationProtocolTest': 7, 'AdminOperationHttpTest': 3,
                 'AdminOperationVersionTest': 6, 'AdminOperationGoConformanceTest': 6, 'AdminEditorAuthorityTest': 6,
                 'BoundedHttpCancellationRaceTest': 3}),
-            ('emulator', 29, 524, 'app/src/androidTest/kotlin/io/syn443/android', {
+            ('emulator', 30, 524, 'app/src/androidTest/kotlin/io/syn443/android', {
                 'AdminPublishDispatchDeadlineTest': 3, 'AdminOperationCoordinatorTest': 10, 'AdminOperationUiTest': 5,
-                'AdminOperationWireTest': 3, 'AdminOperationRouteTest': 3, 'AdminEditorOwnerMigrationTest': 5}),
+                'AdminOperationWireTest': 3, 'AdminOperationRouteTest': 4, 'AdminEditorOwnerMigrationTest': 5}),
         ]:
             expected = set()
             package = 'io.syn443.identity.' if mode == 'identity' else 'io.syn443.android.'
