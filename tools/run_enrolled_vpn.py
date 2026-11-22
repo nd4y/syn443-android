@@ -292,7 +292,10 @@ def enrolled_operator_mode(fixture, primary):
         route['adaptive_routes'] = {'schemaVersion': 1, 'graphB64': encode(graph),
                                     'catalogueB64': encode(catalogue), 'groups': {'office': 'managed-office'}}
         route['outbounds'].append({'type': 'syn443-adaptive', 'tag': 'managed-office', 'group': 'office'})
-        route['route']['rules'] = [{'ip_cidr': ['203.0.113.10/32'], 'action': 'route', 'outbound': 'managed-office'}]
+        route['route']['rules'] = [
+            {'ip_cidr': ['203.0.113.10/32'], 'network': ['tcp'], 'action': 'route', 'outbound': 'managed-office'},
+            {'network': ['udp'], 'action': 'reject', 'method': 'drop'},
+        ]
         route['route_checks'] = [{'outbound': 'managed-office', 'required': True,
                                   'checks': [{'method': 'ssh_banner', 'target': '192.0.2.9:22'}]}]
         route['network_mode'] = {'preferredMode': 'AUTO', 'userModes': ['WIFI'], 'maxOverrideMinutes': 3}
