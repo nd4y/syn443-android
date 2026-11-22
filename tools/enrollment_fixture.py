@@ -24,8 +24,9 @@ def integer(value):
     return bytes([2,len(raw)])+raw
 
 class Fixture:
-    def __init__(self,config, *, assigned_device=None):
+    def __init__(self,config, *, assigned_device=None, policy_ttl_seconds=600):
         self.assigned_device=assigned_device
+        self.policy_ttl_seconds=policy_ttl_seconds
         self.publisher=Publisher();self.root=Path(self.publisher.temp.name)
         self.rsa=self.root/'issuer.pem';self.cert=self.root/'tls.pem';self.tls_key=self.root/'tls-key.pem'
         subprocess.run([OPENSSL,'genpkey','-algorithm','RSA','-pkeyopt','rsa_keygen_bits:2048','-out',str(self.rsa)],check=True,capture_output=True)
@@ -155,7 +156,7 @@ class Fixture:
         key=(thumb,self.revision)
         if key not in self.envelopes:
             self.publisher.device=session['deviceId']
-            self.envelopes[key]=self.publisher.sign(self.config,revision=self.revision,key_thumbprint=thumb,
+            self.envelopes[key]=self.publisher.sign(self.config,revision=self.revision,key_thumbprint=thumb,ttl=self.policy_ttl_seconds,
                 degraded=getattr(self,'allow_degraded',False),checks=getattr(self,'policy_checks',None),
                 extra_capabilities=getattr(self,'extra_capabilities',()))
         headers={'Content-Type':'application/jose'}
