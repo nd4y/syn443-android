@@ -35,6 +35,13 @@ flows. An uncertain target/reserve result cannot overwrite another healthy path.
 Context-specific negative memory never classifies an unattributed timeout as a
 confirmed bad proxy.
 
+When checking a policy change from the app or ADB, read `routeHealth` in the
+current lifecycle status. `measurementRevision` identifies the configuration
+that owns the observed route. While the lifecycle revision is missing or changing,
+wait for the new policy's measurements before using its status or latency.
+A matching revision allows the app to display measurements from its current
+owner again. [Route status implementation](../app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt)
+
 A failed check is a separate observation with a compiled finite reason and an
 actual native BOOTTIME completion timestamp. Local admission/operation limits,
 constructor failures, cancellation, expired budgets and panic remain uncertain.
