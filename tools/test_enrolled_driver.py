@@ -4,11 +4,23 @@ from contextlib import ExitStack
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
-from run_enrolled_vpn import stopped_rollback_recovered, failure_summary, logout, committed_online, enrolled_management_outage, prepare_emulator_wifi
+from run_enrolled_vpn import stopped_rollback_recovered, failure_summary, logout, committed_online, enrolled_management_outage, prepare_emulator_wifi, operator_mode_candidates
 from run_vpn_process_faults import ControlUnavailable
 
 
 class SignedPolicyReadinessTest(unittest.TestCase):
+    def test_operator_mode_signed_profiles_are_distinct_and_only_last_candidate_is_on_wifi(self):
+        base = {'type': 'http', 'tag': 'original', 'server': '127.0.0.1', 'server_port': 14001}
+        graph, catalogue, selected = operator_mode_candidates(base, 14002)
+        choices, = graph['templates'][0]['slots']
+        self.assertEqual(21, len(choices))
+        self.assertEqual(set(choices), set(catalogue))
+        self.assertEqual(21, len({(p['server'], p['server_port']) for p in catalogue.values()}))
+        self.assertEqual([selected], [h['id'] for h in graph['hops'] if 'WIFI' in h['entryModes']])
+        self.assertEqual(choices[-1], selected)
+        self.assertEqual(dict(base, tag=selected, server_port=14002), catalogue[selected])
+        self.assertEqual(14001, base['server_port'])
+
     def test_wifi_reassociation_requires_disposable_emulator_and_new_app_uid_observation(self):
         def fixture(states, scan):
             observations = iter(states)

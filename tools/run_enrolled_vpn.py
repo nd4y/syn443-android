@@ -297,7 +297,28 @@ def enrolled_management_outage(fixture, proxy, generation):
     exchange_through_proxy(proxy)
 
 
-def enrolled_operator_mode(fixture, primary):
+def operator_mode_candidates(base, reserve_port):
+    names = ['hop-%02d' % i for i in range(21)]
+    features = ['TCP', 'IPV4']
+    graph = {'schemaVersion': 1, 'edges': [], 'hops': [], 'templates': [{'id': 'one', 'slots': [names]}],
+             'groups': [{'id': 'office', 'intent': 'INTERNAL', 'features': features, 'templates': ['one']}]}
+    catalogue = {}
+    for index, name in enumerate(names):
+        eligible = name == names[-1]
+        graph['hops'].append({'id': name, 'entryModes': ['WIFI' if eligible else 'HOME_WIFI'],
+                              'exitClass': 'INTERNAL', 'features': features})
+        # The signed catalogue identifies profiles independently of their display tags.
+        # Keep the Wi-Fi candidate on the real reverse port and unused home hops in TEST-NET-1.
+        profile = dict(base, tag=name)
+        if eligible:
+            profile['server_port'] = reserve_port
+        else:
+            profile.update(server='192.0.2.%d' % (index + 1), server_port=8080)
+        catalogue[name] = profile
+    return graph, catalogue, names[-1]
+
+
+def enrolled_operator_mode(fixture):
     from policy_fixture import b64
     if os.environ.get('GITHUB_ACTIONS') != 'true' or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']:
         raise ValueError('Disposable Wi-Fi emulator required')
@@ -320,16 +341,7 @@ def enrolled_operator_mode(fixture, primary):
         adb('reverse', 'tcp:' + str(port), 'tcp:' + str(port))
         route = copy.deepcopy(fixture.config)
         base = route['outbounds'][0]
-        names = ['hop-%02d' % i for i in range(21)]
-        features = ['TCP', 'IPV4']
-        graph = {'schemaVersion': 1, 'edges': [], 'hops': [], 'templates': [{'id': 'one', 'slots': [names]}],
-                 'groups': [{'id': 'office', 'intent': 'INTERNAL', 'features': features, 'templates': ['one']}]}
-        catalogue = {}
-        for name in names:
-            eligible = name == names[-1]
-            graph['hops'].append({'id': name, 'entryModes': ['WIFI' if eligible else 'HOME_WIFI'],
-                                  'exitClass': 'INTERNAL', 'features': features})
-            catalogue[name] = dict(base, tag=name, server_port=port if eligible else primary.server_address[1])
+        graph, catalogue, wifi_hop = operator_mode_candidates(base, port)
         def encode(document):
             return b64(json.dumps(document, sort_keys=True, separators=(',', ':')).encode())
         route['adaptive_routes'] = {'schemaVersion': 1, 'graphB64': encode(graph),
@@ -350,7 +362,7 @@ def enrolled_operator_mode(fixture, primary):
         def working():
             if not committed_online(call('status'), 2):
                 return False
-            return any(row.get('state') == 'working' and row.get('measuredPath') == [names[-1]]
+            return any(row.get('state') == 'working' and row.get('measuredPath') == [wifi_hop]
                        for row in call('routes-status')['routes'])
 
         def mode(source):
@@ -588,7 +600,7 @@ def main():
                 elif name=='enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun':
                     signed_program_failover(fixture, proxy, generation)
                 elif name=='enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath':
-                    enrolled_operator_mode(fixture, proxy)
+                    enrolled_operator_mode(fixture)
                 elif name=='enrolledRejectedUpdatesRetainAuthorizedTunnel':
                     check_rejected_policies(fixture, proxy, generation)
                 elif name=='enrolledCandidateRegressionRollsBack':
