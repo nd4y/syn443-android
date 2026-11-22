@@ -17,6 +17,59 @@ def require_initial_camera_denied():
     assert result == b'-1', 'Expected PackageManager to report camera permission denied'
 
 
+PERMISSION_OWNERS = {'com.android.permissioncontroller', 'com.google.android.permissioncontroller',
+                     'com.android.packageinstaller'}
+
+
+def camera_state(report):
+    rows = re.findall(rb'(?m)^[ \t]*android[.]permission[.]CAMERA: granted=(true|false)(?:, flags=\[([^\]\r\n]*)\])?[ \t]*\r?$', report)
+    if len(rows) != 1:
+        raise AssertionError('Expected one installed camera permission record')
+    granted, flags = rows[0]
+    return granted == b'true', b'USER_SET' in {value.strip() for value in flags.split(b'|')}
+
+
+def camera_deny_target(nodes):
+    prompts = [node for node in nodes if node.get('package') in PERMISSION_OWNERS
+               and node.get('resource-id', '').endswith(':id/permission_message')]
+    if len(prompts) != 1:
+        return None
+    text = prompts[0].get('text', '').casefold()
+    if 'syn443' not in text or not any(word in text for word in ('camera', 'pictures', 'video')):
+        return None
+    candidates = [node for node in nodes if node.get('package') == prompts[0].get('package')
+                  and node.get('enabled') == 'true' and node.get('clickable') == 'true'
+                  and node.get('resource-id', '').endswith(':id/permission_deny_button')]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def deny_camera():
+    deadline = time.monotonic() + 45
+    stable = None
+    attempts = 0
+    last_tap = 0.0
+    observed = set()
+    while time.monotonic() < deadline:
+        nodes = list(tree().iter('node'))
+        granted, user_set = camera_state(adb('shell', 'dumpsys', 'package', PACKAGE))
+        assert not granted, 'Camera was granted during the denial scenario'
+        target = camera_deny_target(nodes)
+        observed.add((visible_owner(nodes), target is not None, user_set))
+        if user_set and attempts > 0:
+            return
+        bounds = target.get('bounds') if target is not None else None
+        now = time.monotonic()
+        if not user_set and bounds and bounds == stable and attempts < 3 and now - last_tap >= 2:
+            tap(target)
+            attempts += 1
+            last_tap = now
+            stable = None
+        else:
+            stable = bounds
+        time.sleep(.3)
+    raise AssertionError(f'Camera denial was not acknowledged; taps={attempts}, observations={sorted(observed)}')
+
+
 def visible_owner(nodes):
     packages = {n.get('package') for n in nodes}
     if PACKAGE in packages:
@@ -59,6 +112,7 @@ def main():
         assert re.findall(rb'(?m)^INSTRUMENTATION_RESULT: cameraPermission=(\w+)\s*$', report) == [b'denied']
         assert re.findall(rb'(?m)^INSTRUMENTATION_CODE: (-?\d+)\s*$', report) == [b'-1']
     require_initial_camera_denied()
+    assert camera_state(adb('shell', 'dumpsys', 'package', PACKAGE)) == (False, False), 'Camera must start without a user decision'
     adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
     adb('shell', 'wm', 'dismiss-keyguard')
     start = adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.EnrollmentActivity')
@@ -67,9 +121,7 @@ def main():
         def label(text):
             return lambda n: n.get('package') == PACKAGE and n.get('text') == text
         tap(find_node(label('Сканировать QR'), 'open scanner', reveal=True))
-        prompt = find_node(lambda n: n.get('package') in ('com.android.permissioncontroller', 'com.google.android.permissioncontroller', 'com.android.packageinstaller')
-                           and n.get('resource-id', '').endswith(':id/permission_deny_button'), 'system deny')
-        tap(prompt)
+        deny_camera()
         find_node(label('QR из фото'), 'image alternative')
         find_node(lambda n: n.get('package') == PACKAGE and n.get('class') == 'android.widget.EditText', 'paste alternative')
         assert b'EnrollmentActivity' in adb('shell', 'dumpsys', 'activity', 'top')
