@@ -374,6 +374,15 @@ class VpnLifecycleTest {
         call("disconnect")
         await { pid() == null }
     }
+    @Test fun debugShellReadsUnavailableModeAndCannotSelectAStaleNetwork() {
+        val content = "content://io.syn443.control"
+        val get = shell("content call --uri $content --method operator-mode-get").toString(Charsets.UTF_8)
+        assertTrue(get.contains("ok=true") && get.contains("\"state\":\"unavailable\""))
+        val set = shell("content call --uri $content --method operator-mode-set --arg 00000000-0000-0000-0000-000000000000:WIFI:1").toString(Charsets.UTF_8)
+        assertTrue(set.contains("ok=false"))
+        assertFalse(status().getBoolean("desiredOn"))
+    }
+
     @Test fun lostNetworkCannotRemainSelectedFromAStaleSystemSnapshot() {
         connect()
         val old = pid()

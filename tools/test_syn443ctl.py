@@ -10,6 +10,36 @@ import syn443ctl
 
 
 class AdbControlTest(unittest.TestCase):
+    def test_network_mode_negotiates_then_issues_one_safe_serial_scoped_command(self):
+        stamp = "00000000-0000-4000-8000-000000000001"
+        receipt = {"admitted": True, "generation": 5, "networkEpoch": 2}
+        argv = ["--serial", "synthetic", "mode-set", "--stamp", stamp, "--mode", "WIFI", "--minutes", "15"]
+        with patch.object(syn443ctl.Device, "supports_type", return_value=True), patch.object(syn443ctl.Device, "call", return_value=receipt) as call:
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(0, syn443ctl.main(argv))
+        call.assert_called_once_with("mode-set", stamp + ":WIFI:15")
+        self.assertEqual(receipt, json.loads(output.getvalue())["result"])
+        with patch.object(syn443ctl.Device, "supports_type", return_value=False), patch.object(syn443ctl.Device, "call") as old:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(4, syn443ctl.main(argv))
+            old.assert_not_called()
+        for unsafe in (stamp + ":WIFI:0", stamp + ":AUTO:3", stamp + ":WIFI:5|other", stamp + ":WIFI:1441"):
+            with patch("syn443ctl.subprocess.run") as transport, self.assertRaises(syn443ctl.ControlError):
+                syn443ctl.Device("synthetic", 5).call("mode-set", unsafe)
+            transport.assert_not_called()
+
+    def test_network_mode_never_exposes_private_fields_or_invents_a_mode(self):
+        stamp = "00000000-0000-4000-8000-000000000001"
+        off = {"state": "unavailable", "networkEpoch": 3}
+        self.assertEqual(off, syn443ctl.mode_reply("mode-get", off))
+        live = dict(state="observed", effective="WIFI", source="manual", allowed=["WIFI"], maxMinutes=15,
+                    generation=3, networkEpoch=2, stamp=stamp, remainingMs=40)
+        self.assertEqual(live, syn443ctl.mode_reply("mode-get", live))
+        for changes in ({"ssid": "synthetic"}, {"allowed": ["WIFI", "WIFI"]}, {"remainingMs": True},
+                        {"stamp": "synthetic"}, {"effective": "invented"}, {"allowed": [{}]}):
+            with self.assertRaises(syn443ctl.ControlError):
+                syn443ctl.mode_reply("mode-get", dict(live, **changes))
+
     def test_adb_uses_explicit_device_and_never_interprets_provider_json(self):
         data = {"phase": "Off", "label": "ok=false, error=command_rejected"}
         for content in ("ok=true, json=" + json.dumps(data), "json=" + json.dumps(data) + ", ok=true"):

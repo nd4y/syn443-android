@@ -2532,10 +2532,13 @@
       "status": "partial",
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/adb-control.md"
+        "docs/adb-control.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/OperatorNetworkMode.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedNetworkModeTest.kt",
+        "tools/test_syn443ctl.py"
       ],
       "implementationScope": "Explicit-device debug CLI for status, events, diagnostics, route/overlay checks, VPN intent and guarded local configuration preview/apply.",
-      "remainingScope": "Configuration export/render and managed import, network modes and atomic reconnect."
+      "remainingScope": "Debug shell mode-get and mode-set use a live policy scope and an expiring choice. Managed configuration export, render, import and atomic reconnect remain open."
     },
     {
       "id": "ADB-02",
