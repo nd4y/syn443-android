@@ -128,6 +128,11 @@ class AdminOperationRouteTest {
         compose.runOnIdle {assertEquals(listOf("" to "","" to "Z_A","z_a-31" to "Z_A"),bridge.searches.toList())}
         compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
         compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+        // Distinguish a missing foreground read from a rendering/scroll failure.
+        compose.waitUntil(5000) { bridge.searches.size >= 4 }
+        compose.runOnIdle {
+            assertEquals(listOf("" to "", "" to "Z_A", "z_a-31" to "Z_A", "" to ""), bridge.searches.toList())
+        }
         waitEnabled(container,"admin-device-"+bridge.device)
         scroll(container,"admin-prefix")
         compose.onNodeWithTag("admin-prefix").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText,AnnotatedString("")))
