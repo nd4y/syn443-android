@@ -2577,8 +2577,12 @@
     {
       "id": "BOOT-01",
       "text": "Рабочий VPN продолжает работать при недоступных панели, телеметрии и Keycloak в пределах действующего конфига и offline policy. Телеметрия не стоит в критическом пути пользовательского соединения.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "tools/run_enrolled_vpn.py",
+        "tools/test_enrolled_driver.py",
+        "docs/implementation-status.md#management-outage-on-wi-fi"
+      ]
     },
     {
       "id": "BOOT-02",

@@ -468,6 +468,7 @@ if mode=="emulator":
         "enrolledCandidateRegressionRollsBack", "enrolledRevocationStopsNativeWithoutLocalFallback",
         "enrolledLogoutRetiresFrozenNativeBeforeAcknowledging", "enrolledRejectedUpdatesRetainAuthorizedTunnel",
         "enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun", "enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath",
+        "enrolledManagementOutageRetainsTunnelThroughControllerDeath",
         "pendingPollFencesStaleGenerationAndCannotReviveLogout",
         "enrolledPendingAssignmentRetriesWhileVisible"}
     required |= {"encryptedRuntimeRetrySurvivesRestartAndConsentWithdrawalRetainsOnlyItsCursor",
