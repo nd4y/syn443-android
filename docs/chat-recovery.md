@@ -28,3 +28,7 @@ uses a closed error code, without response text, message contents or credentials
 Exact-head Actions and physical unavailable-to-available recovery on Xperia are
 pending. This change does not grant an administrator role, enable a deployment,
 complete support-retention controls or close M4/M5. No LTE or battery claim.
+
+## Temporary attachments during screen recreation
+
+Preparation and export use private cache files tagged with the current chat process. Opening or rotating a chat screen can remove up to 256 abandoned files from previous processes, including the legacy filename format. The current owner closes its temporary files after normal completion or cancellation. Draft attachments stay in the encrypted outbox.

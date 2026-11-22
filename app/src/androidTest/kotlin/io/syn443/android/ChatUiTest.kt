@@ -1,6 +1,13 @@
 package io.syn443.android
 
 import android.widget.TextView
+import androidx.core.content.FileProvider
+import io.syn443.android.chat.ChatLimits
+import io.syn443.android.chat.ChatMedia
+import io.syn443.android.chat.ChatScratch
+import java.io.File
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertFalse
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
@@ -47,6 +54,38 @@ class ChatUiTest {
         assertReady()
         compose.onNodeWithTag("incident-preview").assertDoesNotExist()
     }
+
+    @Test fun reopeningChatPreservesActiveFilesAndReclaimsOnlyEarlierChatWork() {
+        assertReady()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val cache = context.cacheDir
+        val fixtureDir = File(cache, "chat-test").apply { mkdirs() }
+        val source = File(fixtureDir, "message-${ChatLimits.id()}.txt")
+        val download = ChatScratch.download(cache)
+        val output = ChatScratch.output(cache)
+        val legacy = File(cache, "chat-${ChatLimits.id()}.input")
+        val previous = File(cache, "chat-download-${ChatLimits.id()}-${ChatLimits.id()}")
+        val other = File(cache, "chat-foreign-${ChatLimits.id()}.output")
+        val files = listOf(source, download, output, legacy, previous, other)
+        try {
+            files.forEach { it.writeText("attachment fixture") }
+            val uri = FileProvider.getUriForFile(context, "io.syn443.chat.fixture", source)
+            val prepared = runBlocking { ChatMedia.prepare(context, uri, false) {} }
+            prepared.use {
+                compose.activityRule.scenario.recreate()
+                assertReady()
+                for (kept in listOf(it.file, source, download, output, other)) {
+                    assertEquals("attachment fixture", kept.readText())
+                }
+                assertFalse(legacy.exists())
+                assertFalse(previous.exists())
+            }
+            assertFalse(prepared.file.exists())
+        } finally {
+            files.forEach { it.delete() }
+        }
+    }
+
     @Test fun supportChatHasVisibleTitleAndConnectionStatus() {
         assertReady()
     }

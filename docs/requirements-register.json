@@ -2373,7 +2373,9 @@
         "contracts/v1/chat-openapi.json",
         "app/src/androidTest/kotlin/io/syn443/android/ChatStorageTest.kt",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/chat-background-fixture.md"
+        "docs/chat-background-fixture.md",
+        "docs/chat-recovery.md#temporary-attachments-during-screen-recreation",
+        "app/src/androidTest/kotlin/io/syn443/android/ChatUiTest.kt"
       ],
       "text": "Сжатие выполняется одним заданием вне UI-потока, имеет прогресс, отмену и bounded cleanup, не запускает VPN и уступает его критическим операциям. Приложение не сканирует медиатеку: обрабатываются только явно выбранные пользователем URI. Сохранённая очередь и подготовленные файлы хранятся в зашифрованных SQL BLOB в sandbox/no-backup. Для работы системного кодека допустимы временные файлы в приватном cache с ограничением размера и удалением после завершения, отмены и следующего запуска; после выхода из аккаунта очередь прежней учётной записи не отправляется из новой сессии."
     },
