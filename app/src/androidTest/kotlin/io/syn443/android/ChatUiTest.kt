@@ -44,12 +44,14 @@ class ChatUiTest {
         val scenario = compose.activityRule.scenario
         scenario.onActivity { activity ->
             activity.startActivity(Intent(activity, SupportActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra(SupportActivity.REPORT_PROBLEM, true))
+                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra(SupportActivity.REPORT_PROBLEM, true))
         }
-        compose.waitUntil(10_000) { compose.onAllNodesWithTag("incident-preview").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("incident-preview").fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty() }
+        compose.onNodeWithTag("incident-preview").assertIsDisplayed()
         scenario.recreate()
-        compose.waitUntil(10_000) { compose.onAllNodesWithTag("incident-cancel").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("incident-cancel").fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty() }
         compose.onNodeWithTag("incident-cancel").performClick()
+        compose.onNodeWithTag("incident-preview").assertDoesNotExist()
         scenario.recreate()
         assertReady()
         compose.onNodeWithTag("incident-preview").assertDoesNotExist()

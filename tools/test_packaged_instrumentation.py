@@ -47,8 +47,25 @@ class PackagedInstrumentationTest(unittest.TestCase):
         log = io.StringIO()
         with redirect_stdout(log):
             suite = parse_run(START + PASS + SECOND + stack + event('secondCase', 2, -2) + END)
-        self.assertEqual(log.getvalue().splitlines(), ['failure: io.syn443.android.ExampleTest.secondCase', 'Test source line: 42'])
+        self.assertEqual(log.getvalue().splitlines(), ['failure: io.syn443.android.ExampleTest.secondCase',
+                                                     'Test failure category: assertion', 'Test source line: 42'])
         self.assertEqual(suite[1][0].get('message'), 'AndroidJUnitRunner status -2')
+
+    def test_failure_categories_never_disclose_names_or_messages(self):
+        for exception, expected in [
+            ('androidx.compose.ui.test.ComposeTimeoutException', 'compose_timeout'),
+            ('java.lang.AssertionError', 'assertion'),
+            ('private.application.Exception', None),
+        ]:
+            with self.subTest(exception=exception):
+                stack = f'INSTRUMENTATION_STATUS: stack={exception}: private synthetic detail\n'
+                log = io.StringIO()
+                with redirect_stdout(log):
+                    parse_run(START + PASS + SECOND + stack + event('secondCase', 2, -2) + END)
+                lines = ['failure: io.syn443.android.ExampleTest.secondCase']
+                if expected:
+                    lines.append('Test failure category: ' + expected)
+                self.assertEqual(log.getvalue().splitlines(), lines)
 
     def test_keeps_all_real_statuses(self):
         for code, expected in [(0, None), (-1, 'error'), (-2, 'failure'), (-3, 'skipped'), (-4, 'skipped')]:
