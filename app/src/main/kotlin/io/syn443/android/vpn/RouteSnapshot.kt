@@ -218,11 +218,14 @@ object RouteSnapshot {
         val projection=row.profile?.let {RouteCheckPlans.projection(checkPlan,it,if(ok)"TRUE" else if(code=="probe_unavailable")"UNKNOWN" else "FALSE")}
         checkPlans=if(projection!=null)checkPlans+(row.id to projection) else checkPlans-row.id
     }
-    @Synchronized fun prepareActivation(scope:RouteScope,startedElapsed:Long):Boolean {
+    @Synchronized fun prepareActivation(scope:RouteScope,startedElapsed:Long,recheckAdaptive:(String)->Unit = {}):Boolean {
         require(startedElapsed>=0)
         val attempt=scope to startedElapsed
         if(activationAttempt==attempt)return false
         invalidate();activationAttempt=attempt
+        if (scope == live && scope.config == revision) {
+            rows.filter { it.required && it.type == "syn443-adaptive" }.forEach { recheckAdaptive(it.tag) }
+        }
         return true
     }
     @Synchronized fun activation(scope:RouteScope,startedElapsed:Long=0):RouteActivation {

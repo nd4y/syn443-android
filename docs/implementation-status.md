@@ -392,3 +392,13 @@ The new context begins with no measured route, latency or traffic permission.
 The native engine must return a current probe result and confirm selection.
 A different link, changed policy authority, suspected failure or expired hint
 uses the normal cold search. This history is process-local.
+
+## Fresh adaptive checks at activation
+
+When a signed policy enters its trial, the controller requests a fresh check
+for each required adaptive group. A result from work started before the trial
+cannot establish availability in the new window. The next check uses the usual
+native receipt, current network scope and probe budget. The regression case
+delivers an earlier selection after activation starts and checks that a new
+request is necessary. The enrolled emulator suite also runs independent TCP
+traffic through a signed candidate on Wi-Fi.

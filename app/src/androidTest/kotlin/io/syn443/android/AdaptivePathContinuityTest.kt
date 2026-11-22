@@ -160,6 +160,31 @@ class AdaptivePathContinuityTest {
         override fun close() { RouteSnapshot.owner(null); RouteSnapshot.configure(null, "") }
     }
 
+    @Test fun activationRequiresANewProbeWhenAnEarlierSelectionArrivesLate() {
+        Harness(config()).use { h ->
+            h.ready(1_050)
+            val earlier = checkNotNull(h.tick(1_100))
+            val commit = h.measured(earlier,1_150)
+            var notified = 0
+            fun startAttempt() = RouteSnapshot.prepareActivation(h.scope,1_200) { tag ->
+                assertTrue(h.controller.requestGroupCheck(h.scope,tag,1_200))
+                notified++
+            }
+            assertTrue(startAttempt())
+            h.report(h.result(earlier,"selected").put("groupSelected",true)
+                .put("receipt",commit.getString("receipt")),1_250)
+            h.assertNoPositive()
+            assertFalse(startAttempt())
+            assertEquals(1,notified)
+
+            val fresh=checkNotNull(h.tick(6_200))
+            assertNotEquals(earlier.getString("request"),fresh.getString("request"))
+            h.selected(fresh,6_250)
+            assertEquals("working",h.view().getJSONArray("routes").getJSONObject(0).getString("state"))
+            assertNull(h.tick(6_300))
+        }
+    }
+
     @Test fun metadataChangesRetainOpaqueTokenButLossPathAndTransportRotateIt() {
         val continuity = PhysicalPathContinuity()
         val original = physical()

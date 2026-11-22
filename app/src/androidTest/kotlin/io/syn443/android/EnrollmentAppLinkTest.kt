@@ -2,6 +2,7 @@ package io.syn443.android
 
 import android.content.Intent
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -27,6 +28,9 @@ class EnrollmentAppLinkTest {
         // ActivityScenario matches action/categories/data to its launch intent.
         // Begin with the same bare component used by the Activity after scrubbing.
         ActivityScenario.launch<EnrollmentActivity>(Intent(context,EnrollmentActivity::class.java)).use {scenario->
+            val help=compose.onNodeWithTag("invite-network-help")
+            help.assertTextContains("доступ к серверу SYN443", substring=true)
+            help.assertTextContains("Для входа через Keycloak", substring=true)
             val preview=compose.onNodeWithTag("invite-preview")
             fun open(raw:String,enabled:Boolean) {
                 scenario.onActivity {activity->

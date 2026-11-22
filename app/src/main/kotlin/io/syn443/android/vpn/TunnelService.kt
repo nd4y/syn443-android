@@ -1069,7 +1069,10 @@ class TunnelService : VpnService() {
             val scope=routeScope() ?: return
             RouteSnapshot.owner(scope)
             val started=d.applyDeadlineElapsed-candidate.payload.activation.timeoutSeconds*1000L
-            if(RouteSnapshot.prepareActivation(scope,started))token?.let {runCatching {host?.cancelRouteChecks(it)}}
+            val newAttempt=RouteSnapshot.prepareActivation(scope,started) { tag ->
+                adaptiveRoutes?.requestGroupCheck(scope,tag,started)
+            }
+            if(newAttempt)token?.let {runCatching {host?.cancelRouteChecks(it)}}
             checkRoutes(activation=true)
             when (RouteSnapshot.activation(scope,started)) {
                 io.syn443.recovery.RouteActivation.WAIT -> return

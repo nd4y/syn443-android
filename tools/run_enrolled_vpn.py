@@ -361,8 +361,20 @@ def enrolled_operator_mode(fixture):
         fixture.revision = 2
         call('policy-refresh')
 
+        applying_search = set()
+        last_route_sample = 0.0
+
         def working():
-            if not committed_online(call('status'), 2):
+            nonlocal last_route_sample
+            status = call('status')
+            if status.get('policy', {}).get('phase') == 'applying' and time.monotonic() - last_route_sample >= 1:
+                last_route_sample = time.monotonic()
+                rows = call('routes-status')['routes']
+                row = next((item for item in rows if item.get('type') == 'syn443-adaptive'), {})
+                search = row.get('search', {}).get('state')
+                known = ('WAITING_CONTEXT', 'SEARCHING', 'BUDGET_WAIT', 'SEARCH_INCOMPLETE', 'VERIFIED')
+                applying_search.add(search if search in known else 'unknown')
+            if not committed_online(status, 2):
                 return False
             return any(row.get('state') == 'working' and row.get('measuredPath') == [wifi_hop]
                        for row in call('routes-status')['routes'])
@@ -384,6 +396,7 @@ def enrolled_operator_mode(fixture):
             search = adaptive.get('search', {}).get('state')
             print('Signed Wi-Fi selection:', json.dumps({
                 'candidateServed': any(revision == 2 for _, revision in list(fixture.envelopes)),
+                'applyingSearch': sorted(applying_search),
                 'routePresent': bool(adaptive),
                 'working': adaptive.get('state') == 'working',
                 'selectedExpectedHop': adaptive.get('measuredPath') == [wifi_hop],
@@ -493,6 +506,11 @@ def failure_summary():
     state=call('status');auth=call('auth-status');policy=state.get('policy',{})
     phases={'unmanaged','unavailable','blocked','prepared','applying','committed','degraded','rolled_back','rejected','released'}
     safe_policy={'phase':policy.get('phase') if policy.get('phase') in phases else 'unknown'}
+    reasons = ('native_configuration_rejected', 'native_activation_failed', 'activation_deadline',
+               'candidate_expired_or_revoked', 'required_route_failed', 'activation_failed',
+               'release_checks_failed')
+    if policy.get('reason') in reasons:
+        safe_policy['reason'] = policy['reason']
     for name in ('activeRevision','lastKnownGoodRevision','candidateRevision','activationGeneration','maxRevision'):
         value=policy.get(name)
         if type(value) is int and 0<=value<=9007199254740991:safe_policy[name]=value

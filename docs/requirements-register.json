@@ -2595,14 +2595,24 @@
     {
       "id": "BOOT-02",
       "text": "Первый запуск требует достижимости сервера регистрации; при входе через Keycloak также необходим доступ к IdP. Ручная привязка через ссылку/QR исключает вход в Keycloak, но не необходимость получить конфиг от сервера. Для белых списков нужен проверенный доступный маршрут регистрации либо заранее выданный индивидуальный сетевой bootstrap.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md#first-registration-with-intermittent-connectivity",
+        "app/src/androidTest/kotlin/io/syn443/android/InvitationControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/EnrollmentAppLinkTest.kt"
+      ],
+      "remainingScope": "Hosted controller faults cover an unavailable registration clock and a lost manual claim reply. The separate IdP reachability flow, constrained-network bootstrap and physical first registration remain outstanding."
     },
     {
       "id": "BOOT-03",
       "text": "QR-приглашение выполняет привязку устройства и не создаёт сетевую доступность само по себе. Общий секретный VLESS, встроенный во все APK, не принимается как универсальное решение. При полностью недоступном сервере регистрации нужен доступный Wi-Fi или отдельный проверенный сетевой bootstrap. OIDC и ручная привязка проверяются как независимые сценарии.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md#first-registration-with-intermittent-connectivity",
+        "app/src/androidTest/kotlin/io/syn443/android/InvitationControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/EnrollmentAppLinkTest.kt"
+      ],
+      "remainingScope": "Hosted controller faults cover an unavailable registration clock and a lost manual claim reply. The separate IdP reachability flow, constrained-network bootstrap and physical first registration remain outstanding."
     },
     {
       "id": "BOOT-04",

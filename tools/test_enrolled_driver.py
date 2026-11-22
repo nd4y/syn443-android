@@ -133,10 +133,14 @@ class StoppedControllerRecoveryTest(unittest.TestCase):
         import json
         state=copy.deepcopy(self.state)
         state.update(token='synthetic-secret',netbird={'peers':['private-fixture']},error='synthetic-secret')
-        state['policy'].update(phase='synthetic-secret',activeRevision='synthetic-secret',target='synthetic-secret')
+        state['policy'].update(phase='synthetic-secret',reason='private-reason',activeRevision='synthetic-secret',target='synthetic-secret')
         with patch('run_enrolled_vpn.call',side_effect=lambda method:state if method=='status' else {'busy':False,'token':'synthetic-secret'}),patch('run_enrolled_vpn.pid',return_value=''):
             result=failure_summary()
         self.assertEqual('unknown',result['policy']['phase'])
         self.assertNotIn('activeRevision',result['policy'])
+        self.assertNotIn('reason',result['policy'])
+        state['policy']['reason']='activation_deadline'
+        with patch('run_enrolled_vpn.call',return_value=state),patch('run_enrolled_vpn.pid',return_value=''):
+            self.assertEqual('activation_deadline',failure_summary()['policy']['reason'])
         self.assertNotIn('synthetic-secret',json.dumps(result))
         self.assertNotIn('private-fixture',json.dumps(result))

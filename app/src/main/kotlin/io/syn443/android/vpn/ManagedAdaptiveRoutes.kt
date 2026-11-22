@@ -35,6 +35,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         var selectedAt:Long=0,var improvementPath:PlannedPath?=null,var improvementCount:Int=0,
         var improvementAt:Long=0,var recheckFailed:Boolean=false,
         var failure:CurrentFailure?=null,var selectionToken:Long=0,var hintSequence:Long=0,var urgentRecheck:Boolean=false,var forceCheck:Boolean=false,
+        var activationStarted:Long=0,
         var search:AdaptiveSearchState=AdaptiveSearchState.WAITING_CONTEXT) {
         private var nextHint: WarmPath? = null
         var frontierHints: List<List<String>> = emptyList()
@@ -417,6 +418,9 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             send(frame(work.action).put("request",work.request).put("receipt",receipt),now,dispatch)
             return
         }
+        // A native reply can arrive after activation starts even though its
+        // request belongs to the preceding measurement window.
+        val freshForActivation = work.startedAt >= group.activationStarted
         var replacedSelectedPath = false
         if(work.action=="commit" && code=="selected") {
             if(!raw.optBoolean("groupSelected") || raw.optString("receipt")!=work.receipt)return
@@ -437,7 +441,9 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             group.clearImprovement();group.recheckFailed=false;group.failure=null
             memory?.record(checkNotNull(context),key(work.group,work.path),work.attempt,now,ProbeVerdict.VERIFIED)
             group.search=AdaptiveSearchState.VERIFIED
-            RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),true,"ok",work.latency,work.path.hops,work.checkPlan,work.receipt,work.measuredAt)
+            if (freshForActivation) {
+                RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),true,"ok",work.latency,work.path.hops,work.checkPlan,work.receipt,work.measuredAt)
+            }
         } else if(work.action=="probe" && code in setOf("probe_unavailable","exit_mismatch","check_failed")) {
             val checkedAt=if(code=="check_failed") {
                 if(raw.optString("checkCode") !in checkedFailures)return
@@ -459,7 +465,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 if(code=="check_failed") {group.clearImprovement()}
             } else if(group.current==null) {group.failure=null;group.recheckFailed=false}
             group.nextAt=now+5000
-            if(group.current==null || group.current?.id==work.path.id) {
+            if(freshForActivation && (group.current==null || group.current?.id==work.path.id)) {
                 group.search=AdaptiveSearchState.SEARCH_INCOMPLETE
                 RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),false,code,null,emptyList(),
                     RouteSnapshot.adaptiveDiagnostic(currentScope,wire.groupTags().getValue(work.group),raw.optJSONObject("checkPlan"),if(code=="probe_unavailable")"UNKNOWN" else "FALSE"),
@@ -476,6 +482,11 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 else -> minOf(now+maintenanceCadence,group.measuredAt+maintenanceCadence)
             }
         } else if(code !in setOf("commit_rejected","discarded"))return
+        if (!freshForActivation) {
+            group.forceCheck = group.current != null
+            group.nextAt = 0
+            group.search = AdaptiveSearchState.SEARCH_INCOMPLETE
+        }
         pending=null
         markSearch(work.group,AdaptiveSearchState.SEARCH_INCOMPLETE)
         val binding = boundPolicy
@@ -677,10 +688,11 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         } finally {publishSearch()}
     }
     fun force() {groups.values.forEach {it.nextAt=0;it.forceCheck=it.current!=null}}
-    fun requestGroupCheck(scope:RouteScope, tag:String):Boolean {
+    fun requestGroupCheck(scope:RouteScope, tag:String, activationStarted:Long?=null):Boolean {
         if(scope!=routeScope || retireOwner) return false
         val id=wire.groupTags().entries.singleOrNull {it.value==tag}?.key ?: return false
         val group=groups.getValue(id)
+        if (activationStarted != null) group.activationStarted = activationStarted
         group.nextAt=0
         group.forceCheck=group.current!=null
         return true

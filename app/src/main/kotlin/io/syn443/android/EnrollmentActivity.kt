@@ -153,7 +153,7 @@ internal object InvitationQr {
     }
     Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         Text("Привязка SYN443",style=MaterialTheme.typography.headlineMedium)
-        Text("Проверьте сервис, затем выберите вход через Keycloak или ручную привязку с подтверждением администратора.")
+        Text("Для ручной привязки нужен доступ к серверу SYN443 и подтверждение администратора. Для входа через Keycloak нужен также доступ к серверу входа.", Modifier.testTag("invite-network-help"))
         OutlinedTextField(value=link,onValueChange={if(it.length<=BootstrapTrust.MAX_LINK){link=it;preview=null;message=""}},label={Text("Ссылка syn443://")},
             visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,autoCorrectEnabled=false),modifier=Modifier.fillMaxWidth().testTag("invite-link"),enabled=!busy,maxLines=3)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
