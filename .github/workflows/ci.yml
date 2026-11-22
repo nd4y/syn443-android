@@ -78,7 +78,7 @@ jobs:
   jvm-and-apk:
     needs: [public-data, native]
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -188,6 +188,35 @@ jobs:
         with:
           name: syn443-build-manifest
           path: public-evidence/build-manifest.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Assemble and inspect the unsigned release for independent signing
+        env:
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          SYN443_INSTALLATION_PROFILE: ''
+          SYN443_ENROLLMENT_LINK_HOST: ''
+        run: |
+          set -euo pipefail
+          ./gradlew :app:assembleRelease --stacktrace
+          apk=app/build/outputs/apk/release/app-release-unsigned.apk
+          stage="$RUNNER_TEMP/syn443-release-input"
+          mkdir "$stage"
+          python3 tools/check_apk.py "$apk"
+          python3 tools/check_apk_assets.py "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 "$apk"
+          if "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"; then
+            echo "Expected an unsigned release input" >&2
+            exit 1
+          fi
+          apkanalyzer manifest print "$apk" > "$RUNNER_TEMP/release-manifest.xml"
+          python3 tools/release_input.py "$RUNNER_TEMP/release-manifest.xml" "$SOURCE_COMMIT" "$stage/inventory.json"
+          cp "$apk" "$stage/"
+          python3 tools/check_public_data.py "$stage"
+          bash tools/scan_secrets.sh "$stage"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: syn443-unsigned-release-input
+          path: ${{ runner.temp }}/syn443-release-input/
           if-no-files-found: error
           retention-days: 14
   workflow-lint:
