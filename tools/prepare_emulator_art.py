@@ -47,9 +47,20 @@ def prepare(adb, *, clock=time.monotonic, sleep=time.sleep, budget=120):
         assert remaining > 0, 'Framework preparation deadline exceeded'
         return adb(*args, timeout=min(10, remaining))
 
-    call('root')
-    call('wait-for-device')
-    assert call('shell', 'id', '-u').strip() == b'0', 'Owned AVD root unavailable'
+    # API 29 adbd can restart before returning the root command's reply.
+    # Dispatch once and inspect the new daemon on the already selected AVD.
+    try:
+        call('root')
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        pass
+    while True:
+        try:
+            call('wait-for-device')
+            uid = call('shell', 'id', '-u').strip()
+            break
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            sleep(min(1, max(0, deadline-clock())))
+    assert uid == b'0', 'Owned AVD root unavailable'
     # Repeat identity checks after restarting adbd, before any framework command.
     assert call('get-serialno').strip() == serial
     assert call('emu', 'avd', 'name').splitlines() == [b'syn443-ci', b'OK']
