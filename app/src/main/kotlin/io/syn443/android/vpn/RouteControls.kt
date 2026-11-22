@@ -22,10 +22,18 @@ import androidx.compose.ui.unit.dp
 import io.syn443.recovery.RouteFailureCause
 import org.json.JSONObject
 
-@Composable fun RouteControls(status:JSONObject,headingModifier:Modifier=Modifier,command:(String,String?)->Unit) {
+@Composable internal fun RouteHeading(modifier: Modifier = Modifier) {
+    Text("Маршруты", modifier.testTag("routes-title").semantics { heading() })
+}
+
+@Composable fun RouteControls(
+    status: JSONObject,
+    routeHeading: @Composable () -> Unit = { RouteHeading() },
+    command: (String, String?) -> Unit,
+) {
     val context=LocalContext.current
     Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
-        Text("Маршруты", headingModifier.testTag("routes-title").semantics { heading() })
+        routeHeading()
         val health=status.optJSONObject("routeHealth")
         val routes=health?.optJSONArray("routes")
         health?.optJSONObject("decisionShadow")?.let { comparison ->
