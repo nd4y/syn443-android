@@ -1046,6 +1046,7 @@ SUPPORT_BUNDLE_REQUIRED = {'io.syn443.android.DiagnosticArchiveTest': ['storedAr
  'io.syn443.android.DiagnosticProjectionTest': ['knownSnapshotsProjectOnlyFixedPublicFields',
     'internetDnsProjectionExportsOnlyObservedCategories',
                                                 'nestedSecretsLabelsTargetsAndFreeTextNeverReachComponents',
+        'directLogResponseAndEveryArchivedEntryOmitPrivateTransportAndCrashText',
                                                 'incorrectBooleanAndNumericTypesStayUnknownRatherThanFalseOrZero',
                                                 'eventsKeepOnlyLast64OrderedAllowlistedRecords',
                                                 'routeAndCheckCollectionsExposeCountsWithoutIdentifiers',

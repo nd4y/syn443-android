@@ -313,7 +313,11 @@ class ControlProvider : ContentProvider() {
                     require(io.syn443.android.BuildConfig.DEBUG && (caller==2000 || caller==Process.myUid()))
                     return Bundle().apply {putBoolean("ok",true);putString("json",PolicyChecks.diagnostics().toString())}
                 }
-                "status", "logs" -> Unit
+                "logs" -> return Bundle().apply {
+                    putBoolean("ok", true)
+                    putString("json", io.syn443.android.support.DiagnosticProjection.logs(store.read()).toString())
+                }
+                "status" -> Unit
                 "foreground-open" -> {
                     val generation = arg?.toLongOrNull()
                     val cp = store.checkpoint()

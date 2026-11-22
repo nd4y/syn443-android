@@ -340,7 +340,10 @@ class VpnLifecycleTest {
         assertEquals(native, pid())
         assertEquals("Online", status().optString("phase"))
         assertTrue(tunnels.get() >= 2)
-        assertFalse(context.contentResolver.call(uri, "logs", null, null)!!.getString("json")!!.contains("peer_state"))
+        val logs = JSONObject(checkNotNull(context.contentResolver.call(uri, "logs", null, null)?.getString("json")))
+        assertTrue(logs.keys().asSequence().all { it in setOf("generation", "networkEpoch", "activationGeneration", "eventSequence", "events") })
+        assertTrue(logs.getJSONArray("events").length() in 1..64)
+        assertEquals(status().getLong("generation"), logs.getLong("generation"))
     }
     @Test fun nativeCrashRecoversButNewerStopWins() {
         connect()
