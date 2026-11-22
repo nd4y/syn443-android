@@ -24,15 +24,23 @@ def stopped_rollback_recovered(controller,generation):
         state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
         not call('auth-status')['busy'])
 
-def upgrade_directory(system_installer):
+def exchange_through_proxy(via):
+    before = via.progress
+    result = adb('shell', r"printf 'GET /generate_204 HTTP/1.1\r\nHost: fixture.invalid\r\nConnection: close\r\n\r\n' | toybox nc -w 5 203.0.113.10 80")
+    assert result.startswith(b'HTTP/1.1 204 ') and via.progress>before, 'Scoped HTTP exchange did not reach expected proxy'
+
+
+def upgrade_directory(system_installer=False, historical=False):
+    if historical:
+        return Path(os.environ['RUNNER_TEMP']) / 'historical-upgrade'
     return Path(os.environ['RUNNER_TEMP']) / ('syn443-installer-private' if system_installer else 'upgrade-fixture')
 
 
-def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=False):
+def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=False, historical=False):
     if (os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('SYN443_CI_AVD') != 'syn443-ci'
             or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']):
         raise ValueError('This APK upgrade requires the disposable CI emulator')
-    directory = upgrade_directory(system_installer)
+    directory = upgrade_directory(system_installer, historical)
     receipt = json.loads((directory / 'upgrade.json').read_bytes())
 
     def installed_version():
@@ -48,6 +56,8 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=Fal
     assert len(original) == 1 and fixture.registrations == 1
     assert installed_version() == receipt['previous']
     assert call('status')['policy']['activeRevision'] == 1
+    if historical:
+        exchange_through_proxy(proxy)
     call('disconnect')
     await_condition(vpn_stopped)
     before = call('status')
@@ -59,7 +69,7 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=Fal
         assert vpn_stopped() and call('status')['generation'] == before['generation']
         assert call('status')['policy']['activeRevision'] == 1
     response = adb('install', '-r', str(directory / 'new-debug.apk'), timeout=120)
-    assert b'Success' in response.splitlines() and installed_version() == receipt['previous'] + 1
+    assert b'Success' in response.splitlines() and installed_version() == receipt['following'] > receipt['previous']
     adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
     def restored_off():
         state = call('status')
@@ -80,6 +90,8 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=Fal
                     call('status')['policy'].get('phase') == 'committed' and proxy.progress > progress)
     assert binding() == original and fixture.registrations == 1
     assert call('status')['policy']['activeRevision'] == 2 and call('auth-status')['generation'] == auth_generation
+    if historical:
+        exchange_through_proxy(proxy)
 
 
 def signed_program_failover(fixture, primary, generation):
@@ -114,12 +126,8 @@ def signed_program_failover(fixture, primary, generation):
                 return False
             group = by_tag['internal']
             return group['state']=='working' and group['measuredPath']==[group['id'],by_tag[member]['id']]
-        def exchange(via):
-            before = via.progress
-            result = adb('shell', r"printf 'GET /generate_204 HTTP/1.1\r\nHost: fixture.invalid\r\nConnection: close\r\n\r\n' | toybox nc -w 5 203.0.113.10 80")
-            assert result.startswith(b'HTTP/1.1 204 ') and via.progress>before, 'Scoped HTTP exchange did not reach expected proxy'
         await_condition(lambda: active() and measured(preferred), 100)
-        exchange(primary)
+        exchange_through_proxy(primary)
         original = pid(':engine')
         activation = call('status')['policy']['activationGeneration']
         assert original and fixture.registrations==1
@@ -130,7 +138,7 @@ def signed_program_failover(fixture, primary, generation):
         # No check or switch command is issued after the outage.
         await_condition(lambda: measured('reserve'), 240)
         assert reserve.route_probes >= before+4, 'Reserve lacked a successful comparator for four batches'
-        exchange(reserve)
+        exchange_through_proxy(reserve)
         assert active() and pid(':engine')==original and call('status')['policy']['activationGeneration']==activation
         assert call('auth-status')['generation']==generation and fixture.registrations==1 and fixture.sessions[thumb]['deviceId']==original_device
     finally:
@@ -243,11 +251,14 @@ def main():
     assert PACKAGE+'.test/io.syn443.android.EnrollmentDriver' in adb('shell','pm','list','instrumentation').decode(),'Test APK enrollment driver is not installed'
     suite=ET.Element('testsuite',name='SYN443 enrolled native VPN')
     args=sys.argv[1:]
-    if args not in ([], ['--system-installer']):
+    if args not in ([], ['--system-installer'], ['--historical']):
         raise ValueError('Unexpected enrollment scenario')
-    installer_only=bool(args)
+    installer_only=args==['--system-installer']
+    historical=args==['--historical']
     out=(Path(os.environ['RUNNER_TEMP'])/'syn443-installer-private'/'result.xml' if installer_only
          else ROOT/'app/build/outputs/androidTest-results/external/TEST-enrolled-vpn.xml')
+    if historical:
+        out=upgrade_directory(historical=True)/'result.xml'
     proxy=Server(('127.0.0.1',0),RouteProxy);threading.Thread(target=proxy.serve_forever,daemon=True).start()
     proxy.ssh_ok=True;proxy.delay=0;proxy.health_ok=True;proxy.route_probes=0
     port=proxy.server_address[1];adb('reverse','tcp:'+str(port),'tcp:'+str(port))
@@ -310,6 +321,8 @@ def main():
            'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
     if installer_only:
         names=['enrolledSystemInstallerCancelKeepsBoundPolicy']
+    elif historical:
+        names=['enrolledHistoricalUpgradeKeepsOriginalBindingAndPayload']
     def observed_report(revision,outcome,selected):
         return any(r['policyRevision']==revision and r['outcome']==outcome and r['activePolicyRevision']==selected
                    for r in list(fixture.activation_reports.values()))
@@ -442,8 +455,8 @@ def main():
                     assert len(fixture.sessions)==1 and next(iter(fixture.sessions.values()))['generation']>0
                     assert vpn_stopped() and call('status')['generation']==stopped
                     assert fixture.registrations==1 and call('auth-status')['generation']==generation
-                elif name in ('enrolledVersionUpgradeRetainsBindingPolicyAndRealTun','enrolledSystemInstallerCancelKeepsBoundPolicy'):
-                    check_enrolled_upgrade(fixture, proxy, generation, system_installer=installer_only)
+                elif name in ('enrolledVersionUpgradeRetainsBindingPolicyAndRealTun','enrolledSystemInstallerCancelKeepsBoundPolicy','enrolledHistoricalUpgradeKeepsOriginalBindingAndPayload'):
+                    check_enrolled_upgrade(fixture, proxy, generation, system_installer=installer_only, historical=historical)
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
                     fixture.policy_status=403;call('policy-refresh')
                     await_condition(lambda:call('auth-status').get('phase')=='NEEDS_REAUTH' and
