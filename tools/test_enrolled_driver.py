@@ -1,8 +1,19 @@
 import copy
 import unittest
 from unittest.mock import patch
-from run_enrolled_vpn import stopped_rollback_recovered, failure_summary, logout
+from run_enrolled_vpn import stopped_rollback_recovered, failure_summary, logout, committed_online
 from run_vpn_process_faults import ControlUnavailable
+
+
+class SignedPolicyReadinessTest(unittest.TestCase):
+    def test_online_during_publication_is_incomplete_until_the_engine_and_revision_match(self):
+        online = {'phase': 'Online', 'engineActive': True}
+        for partial in (None, {}, {'phase': 'committed'}, {'phase': 'committed', 'activeRevision': 1},
+                        {'phase': 'preparing', 'activeRevision': 2}):
+            self.assertFalse(committed_online(dict(online, policy=partial), 2))
+        ready = dict(online, policy={'phase': 'committed', 'activeRevision': 2})
+        self.assertTrue(committed_online(ready, 2))
+        self.assertFalse(committed_online(dict(ready, engineActive=False), 2))
 
 
 class FreshInstallReadinessTest(unittest.TestCase):

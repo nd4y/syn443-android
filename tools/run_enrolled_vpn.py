@@ -121,6 +121,13 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=Fal
         exchange_through_proxy(proxy)
 
 
+def committed_online(status, revision):
+    policy = status.get('policy')
+    return (status.get('phase') == 'Online' and status.get('engineActive') is True and
+            isinstance(policy, dict) and policy.get('activeRevision') == revision and
+            policy.get('phase') == 'committed')
+
+
 def signed_program_failover(fixture, primary, generation):
     reserve = Server(('127.0.0.1', 0), RouteProxy)
     reserve.ssh_ok, reserve.health_ok, reserve.delay, reserve.route_probes = True, True, 0, 0
@@ -143,16 +150,14 @@ def signed_program_failover(fixture, primary, generation):
         fixture.revision = 2
         call('policy-refresh')
         def active():
-            status = call('status')
-            return (status.get('phase')=='Online' and status['policy']['activeRevision']==2 and
-                    status['policy']['phase']=='committed')
+            return committed_online(call('status'), 2)
         def measured(member):
             rows = call('routes-status')['routes']
             by_tag = {row['label']:row for row in rows}
             if member not in by_tag or 'internal' not in by_tag:
                 return False
             group = by_tag['internal']
-            return group['state']=='working' and group['measuredPath']==[group['id'],by_tag[member]['id']]
+            return group.get('state') == 'working' and group.get('measuredPath') == [group['id'], by_tag[member]['id']]
         await_condition(lambda: active() and measured(preferred), 100)
         exchange_through_proxy(primary)
         original = pid(':engine')
@@ -182,10 +187,7 @@ def check_rejected_policies(fixture, proxy, generation):
     from policy_fixture import b64
 
     def committed(revision):
-        state = call('status')
-        policy = state.get('policy', {})
-        return (state.get('phase') == 'Online' and state.get('engineActive') is True and
-                policy.get('activeRevision') == revision and policy.get('phase') == 'committed')
+        return committed_online(call('status'), revision)
 
     def refresh_until(observed):
         # Foreground reconciliation admits forced requests at a bounded rate.
