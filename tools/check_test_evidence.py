@@ -95,6 +95,12 @@ if mode=="emulator":
     assert {
         ("io.syn443.android.RouteSnapshotTest", "terminalOmissionAndDeadlineClearOnlyMissingMeasurements"),
     } <= set(identities), "Missing route measurement consistency outcomes"
+    assert {("io.syn443.android.RouteSnapshotTest", name) for name in (
+        "applicationDurationsCountDistinctSuccessesAndRetireOnLossOfRouteEvidence",
+        "routeDurationWindowBoundsSamplesLifetimeAndPathIdentity",
+    )} <= set(identities), "Missing route duration distribution outcomes"
+    assert ("io.syn443.android.RouteSearchStatusTest",
+            "activeAdaptiveRouteShowsOnlyComparableConfirmedApplicationTimings") in identities
     assert {("io.syn443.android.VerifiedUpdateTest", name) for name in (
         "updateScreenShowsInstalledBuildAndCannotInstallWithoutAnAcceptedOffer",
         "packageManagerRechecksRealPackageSignerSdkAndEmbeddedAbiHashes",
