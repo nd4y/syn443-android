@@ -44,6 +44,7 @@ def parse_run(output):
     cases = {}
     active = None
     source_lines = {}
+    failure_categories = {}
     reading_stack = False
     total = None
     finished = False
@@ -57,6 +58,19 @@ def parse_run(output):
         elif line.startswith('INSTRUMENTATION_STATUS: '):
             key, _, value = line.removeprefix('INSTRUMENTATION_STATUS: ').partition('=')
             reading_stack = key == 'stack' and active is not None
+            if reading_stack:
+                # Retain a fixed category only. The message and arbitrary class names
+                # can contain application or user data.
+                exception = value.partition(':')[0]
+                category = {
+                    'androidx.compose.ui.test.ComposeTimeoutException': 'compose_timeout',
+                    'java.lang.AssertionError': 'assertion',
+                    'java.lang.IllegalStateException': 'invalid_state',
+                    'junit.framework.AssertionFailedError': 'assertion',
+                    'org.junit.ComparisonFailure': 'assertion',
+                }.get(exception)
+                if category:
+                    failure_categories[active] = category
             if key in ('class', 'test', 'id', 'current', 'numtests'):
                 if finished or key in fields:
                     raise ValueError('Repeated or late instrumentation field')
@@ -101,6 +115,8 @@ def parse_run(output):
             tag = {-1: 'error', -2: 'failure', -3: 'skipped', -4: 'skipped'}[code]
             ET.SubElement(case, tag, message='AndroidJUnitRunner status ' + str(code))
             print(f'{tag}: {classname}.{method}')
+            if (classname, method) in failure_categories:
+                print(f'Test failure category: {failure_categories[classname, method]}')
             if (classname, method) in source_lines:
                 print(f'Test source line: {source_lines[classname, method]}')
     return suite
