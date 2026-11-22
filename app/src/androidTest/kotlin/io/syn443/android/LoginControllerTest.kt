@@ -43,6 +43,7 @@ import java.util.Base64
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -145,7 +146,9 @@ class LoginControllerTest {
         val refreshBodies=mutableListOf<String>()
         private val refreshReceipts=mutableMapOf<String,Pair<String,String>>()
         private val policies=mutableMapOf<String,String>()
-        private fun now()=System.currentTimeMillis()/1000*1000
+        // The issuer, API and their signed policy share a wall clock in this fixture.
+        @Volatile var clockAdvanceMs = 0L
+        private fun now()=(System.currentTimeMillis()+clockAdvanceMs)/1000*1000
         private fun reply(status:Int=200,text:String="{}",timeMs:Long=now())=Reply(status,mapOf(
             "content-type" to listOf("application/json; charset=utf-8"),
             "date" to listOf(DateTimeFormatter.ofPattern("EEE, dd MMM uuuu HH:mm:ss 'GMT'",Locale.US).withZone(ZoneOffset.UTC).format(Instant.ofEpochMilli(timeMs)))),text.toByteArray())
@@ -304,9 +307,9 @@ class LoginControllerTest {
         while(!predicate()) {check(SystemClock.elapsedRealtime()<end) {"isolated login timed out"};Thread.sleep(50)}
     }
     private inner class Fixture(val server:Server=Server(),val beforeQueue:(()->Unit)?=null,val reportVpnOn:(()->Boolean)?=null,
-        val testTrustAnchor:TrustAnchor?=null) {
+        val testTrustAnchor:TrustAnchor?=null,val monotonicMillis:()->Long=SystemClock::elapsedRealtime) {
         val namespace="test-"+UUID.randomUUID().toString()
-        var controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,anchor=testTrustAnchor,reportVpnOn=reportVpnOn)
+        var controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,anchor=testTrustAnchor,reportVpnOn=reportVpnOn,monotonicMillis=monotonicMillis)
         val journal=LoginJournal(context,namespace)
         fun idle()=until {!controller.status().getBoolean("busy")}
         fun begin():String {
@@ -327,14 +330,14 @@ class LoginControllerTest {
             return Identity.callback+"?"+Identity.form(mapOf("state" to checkNotNull(uri.getQueryParameter("state")),
                 "iss" to server.bootstrap.issuer,"code" to "synthetic-code"))
         }
-        fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,anchor=testTrustAnchor,reportVpnOn=reportVpnOn);controller.recover();idle()}
+        fun restart() {idle();controller.shutdownTest();controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,anchor=testTrustAnchor,reportVpnOn=reportVpnOn,monotonicMillis=monotonicMillis);controller.recover();idle()}
         fun legacyCache() {
             idle();controller.shutdownTest()
             val s=journal.snapshot();val p=LoginPayload.decode(journal.readProtected(s),s).copy(advertisedCapabilities=null)
             journal.prepare(s,p.encode()).use {prepared->journal.commit(s,LoginRecovery.capabilitiesRecorded(s,s.generation,prepared.hash),prepared)}
             server.capabilities[s.thumbprint]=IdentityOperation.requiredCapabilities
             server.capabilityVersions.remove(s.thumbprint)
-            controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,anchor=testTrustAnchor,reportVpnOn=reportVpnOn)
+            controller=LoginController.isolatedForTest(context,namespace,server,beforeQueue,anchor=testTrustAnchor,reportVpnOn=reportVpnOn,monotonicMillis=monotonicMillis)
         }
         fun cleanup() {
             server.release.countDown();server.releaseRevoke.countDown();server.releaseOverlayFetch.countDown();controller.cancel();idle();check(journal.snapshot().phase==LoginPhase.SIGNED_OUT)
@@ -353,7 +356,7 @@ class LoginControllerTest {
         }
     }
     private fun fixture(beforeQueue:(()->Unit)?=null,controlPanelOrigin:String="",reportVpnOn:(()->Boolean)?=null,
-        testTrustAnchor:TrustAnchor?=null,block:(Fixture)->Unit) {
+        testTrustAnchor:TrustAnchor?=null,monotonicMillis:()->Long=SystemClock::elapsedRealtime,block:(Fixture)->Unit) {
         check(android.os.Build.HARDWARE in setOf("ranchu","goldfish"))
         context.contentResolver.call("content://io.syn443.control".toUri(),"disconnect",null,null)
         until {
@@ -363,7 +366,7 @@ class LoginControllerTest {
                     it.optBoolean("engineStateKnown") && !it.getBoolean("engineActive")
             }
         }
-        val f=Fixture(server=Server(controlPanelOrigin),beforeQueue=beforeQueue,reportVpnOn=reportVpnOn,testTrustAnchor=testTrustAnchor)
+        val f=Fixture(server=Server(controlPanelOrigin),beforeQueue=beforeQueue,reportVpnOn=reportVpnOn,testTrustAnchor=testTrustAnchor,monotonicMillis=monotonicMillis)
         var failure:Throwable?=null
         try {
             f.controller.configure(Canonical.json.encodeToString(f.server.bootstrap));f.idle()
@@ -842,6 +845,8 @@ class LoginControllerTest {
                 pause.set(true);val accepted=caller.submit {f.controller.start(0)}
                 assertTrue(entered.await(3,TimeUnit.SECONDS))
                 assertTrue(f.controller.status().getBoolean("busy"))
+                val ticket = Identity.hash("synthetic telemetry consent".toByteArray())
+                assertFalse(kotlinx.coroutines.runBlocking { f.controller.deliverStoppedTelemetry(ticket) })
                 assertThrows(IllegalArgumentException::class.java) {f.controller.start(0)}
                 f.controller.cancel();assertTrue(f.controller.status().getBoolean("busy"))
                 pause.set(false);release.countDown();accepted.get(3,TimeUnit.SECONDS);f.idle()
@@ -1377,6 +1382,100 @@ class LoginControllerTest {
         assertEquals(1,f.server.activeKeys.size)
         val cleanup=f.server.paths.indexOf("/v1/identity/devices/revoke");assertTrue(cleanup>0 && cleanup<f.server.paths.lastIndexOf("/v1/devices/enroll"))
     }
+    @Test fun expiredFirstBrowserLinkCanRenewOnceWithoutRetiringItsKey() {
+        val at=AtomicLong(-1)
+        fixture(monotonicMillis={at.get().takeIf { it>=0 } ?: SystemClock.elapsedRealtime()}) { f->
+            val obsolete=f.begin()
+            val first=f.journal.snapshot()
+            val previousUrl=f.controller.browserUrl(first.generation)
+            val pending=checkNotNull(LoginPayload.decode(f.journal.readProtected(first),first).pending)
+            at.set(pending.startedElapsedMs+299_999)
+            assertTrue(f.controller.status().getBoolean("browserReady"))
+            assertFalse(f.controller.startReauthentication(first.generation,first.revision))
+            at.set(pending.startedElapsedMs+300_000)
+            assertFalse(f.controller.status().getBoolean("browserReady"))
+            assertTrue(f.controller.status().getBoolean("browserExpired"))
+            assertThrows(IllegalArgumentException::class.java) {f.controller.browserUrl(first.generation)}
+            assertTrue(f.controller.startReauthentication(first.generation,first.revision));f.idle()
+            val next=f.journal.snapshot()
+            assertTrue(next.revision>first.revision)
+            assertEquals(first.keyAlias,next.keyAlias)
+            assertEquals(first.thumbprint,next.thumbprint)
+            assertFalse(next.maybeRegistered)
+            assertFalse(f.controller.startReauthentication(first.generation,first.revision))
+            val fresh=f.controller.browserUrl(next.generation)
+            assertNotEquals(previousUrl,fresh)
+            f.controller.callback(obsolete);f.idle()
+            assertEquals(next,f.journal.snapshot())
+            assertEquals(fresh,f.controller.browserUrl(next.generation))
+            assertTrue(f.server.enrollBodies.isEmpty())
+            at.set(-1)
+        }
+    }
+
+    @Test fun expiredRegisteredBrowserKeepsOriginalDeviceOnRenewedLogin() {
+        val advance = AtomicLong(0)
+        fixture(monotonicMillis = { SystemClock.elapsedRealtime() + advance.get() }) { f ->
+            f.server.policyReady = true
+            f.controller.callback(f.begin()); f.idle()
+            val enrolled = f.journal.snapshot()
+            assertEquals(LoginPhase.POLICY_CACHED, enrolled.phase)
+            val publicKey = DeviceKey.open(enrolled.keyAlias).publicKey.encoded
+            f.server.policyStatus = 409
+            f.server.policyProblem = "reauthentication_required"
+            f.controller.retry(enrolled.generation); f.idle()
+            assertEquals(LoginPhase.NEEDS_REAUTH, f.journal.snapshot().phase)
+            val obsolete = f.repeatLogin()
+            val old = f.journal.snapshot()
+            val pending = checkNotNull(LoginPayload.decode(f.journal.readProtected(old), old).pending)
+            advance.set(300_000)
+            f.server.clockAdvanceMs = advance.get()
+            assertTrue(SystemClock.elapsedRealtime() + advance.get() >= pending.startedElapsedMs + 300_000)
+            assertTrue(f.controller.status().getBoolean("browserExpired"))
+            assertThrows(IllegalArgumentException::class.java) { f.controller.browserUrl(old.generation) }
+            val fresh = f.repeatLogin()
+            f.controller.callback(obsolete); f.idle()
+            assertEquals(LoginPhase.BROWSER, f.journal.snapshot().phase)
+            assertEquals(1, f.server.enrollBodies.size)
+            f.server.policyStatus = 200
+            // The previous policy's signed refresh deadline passed while the user was away.
+            f.server.policyRevision++
+            f.controller.callback(fresh); f.idle()
+            val restored = f.journal.snapshot()
+            assertEquals(LoginPhase.POLICY_CACHED, restored.phase)
+            assertEquals(enrolled.deviceId, restored.deviceId)
+            assertEquals(enrolled.keyAlias, restored.keyAlias)
+            assertEquals(enrolled.generation, restored.generation)
+            assertEquals(enrolled.thumbprint, restored.thumbprint)
+            assertArrayEquals(publicKey, DeviceKey.open(restored.keyAlias).publicKey.encoded)
+            assertEquals(2, f.server.enrollBodies.size)
+        }
+    }
+
+    @Test fun staleReviewedLogoutCannotStopVpnOrRetireAnEnrolledDevice() = fixture {f->
+        f.server.policyReady=true
+        val callback=f.begin()
+        val browser=f.journal.snapshot()
+        assertFalse(f.controller.status().getBoolean("registrationMayExist"))
+        f.controller.callback(callback)
+        f.idle()
+        val enrolled=f.journal.snapshot()
+        assertEquals(LoginPhase.POLICY_CACHED,enrolled.phase)
+        assertTrue(f.controller.status().getBoolean("registrationMayExist"))
+        var stops=0
+        assertFalse(f.controller.cancelReviewed(browser.generation,browser.revision) { stops++ })
+        assertFalse(f.controller.cancelReviewed(enrolled.generation+1,enrolled.revision) { stops++ })
+        assertEquals(0,stops)
+        assertEquals(enrolled,f.journal.snapshot())
+        assertEquals(enrolled.thumbprint,Identity.thumbprint(DeviceKey.open(enrolled.keyAlias).publicKey))
+        assertTrue(f.controller.cancelReviewed(enrolled.generation,enrolled.revision) { stops++ })
+        f.idle()
+        assertFalse(f.controller.cancelReviewed(enrolled.generation,enrolled.revision) { stops++ })
+        assertEquals(1,stops)
+        assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+        assertThrows(IllegalStateException::class.java) { DeviceKey.open(enrolled.keyAlias) }
+    }
+
     @Test fun unreadableJournalStillCancelsNetworkAndRetiresTheOwnedPrivateKey() = fixture {f->
         f.server.holdEnrollment=true;f.controller.callback(f.begin())
         assertTrue(f.server.enrollmentEntered.await(10,TimeUnit.SECONDS))

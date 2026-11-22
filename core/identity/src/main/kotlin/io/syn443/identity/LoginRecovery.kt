@@ -132,6 +132,11 @@ object LoginRecovery {
     fun canReauthenticate(s:LoginIntent)=s.method=="oidc" && s.deviceId.isNotEmpty() &&
         (s.phase==LoginPhase.NEEDS_REAUTH || s.phase==LoginPhase.BROWSER && s.reauthRevision>0)
 
+    fun renewFirstBrowser(s:LoginIntent,generation:Long):LoginIntent {
+        current(s,generation)
+        require(s.phase==LoginPhase.BROWSER && s.method=="oidc" && !s.maybeRegistered && s.reauthRevision==0L)
+        return revised(s)
+    }
     fun beginReauthentication(s:LoginIntent,generation:Long):LoginIntent {
         current(s,generation);require(canReauthenticate(s))
         return revised(s.copy(phase=LoginPhase.BROWSER,reauthRevision=next(s.revision)))

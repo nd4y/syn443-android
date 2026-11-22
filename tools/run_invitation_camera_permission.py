@@ -29,6 +29,21 @@ def camera_state(report):
     return granted == b'true', b'USER_SET' in {value.strip() for value in flags.split(b'|')}
 
 
+def installed_camera_state():
+    report = adb('shell', 'dumpsys', 'package', PACKAGE)
+    permission = b'android.permission.CAMERA'
+    if re.search(rb'(?m)^\s*android[.]permission[.]CAMERA:', report):
+        return camera_state(report)
+    # A fresh installation can list CAMERA only among requested permissions.
+    # Verify the target package and its actual denied grant before treating a
+    # missing runtime row as undecided. Only an explicit USER_SET row can pass denial.
+    name = re.escape(PACKAGE.encode('ascii'))
+    assert re.search(rb'(?m)^\s*Package \[' + name + rb'\] \(', report), 'No target package record'
+    assert re.search(rb'(?m)^[ \t]*' + re.escape(permission) + rb'[ \t]*\r?$', report), 'Camera request absent'
+    require_initial_camera_denied()
+    return False, False
+
+
 def camera_deny_target(nodes):
     prompts = [node for node in nodes if node.get('package') in PERMISSION_OWNERS
                and node.get('resource-id', '').endswith(':id/permission_message')]
@@ -51,7 +66,7 @@ def deny_camera():
     observed = set()
     while time.monotonic() < deadline:
         nodes = list(tree().iter('node'))
-        granted, user_set = camera_state(adb('shell', 'dumpsys', 'package', PACKAGE))
+        granted, user_set = installed_camera_state()
         assert not granted, 'Camera was granted during the denial scenario'
         target = camera_deny_target(nodes)
         observed.add((visible_owner(nodes), target is not None, user_set))
@@ -112,7 +127,7 @@ def main():
         assert re.findall(rb'(?m)^INSTRUMENTATION_RESULT: cameraPermission=(\w+)\s*$', report) == [b'denied']
         assert re.findall(rb'(?m)^INSTRUMENTATION_CODE: (-?\d+)\s*$', report) == [b'-1']
     require_initial_camera_denied()
-    assert camera_state(adb('shell', 'dumpsys', 'package', PACKAGE)) == (False, False), 'Camera must start without a user decision'
+    assert installed_camera_state() == (False, False), 'Camera must start without a user decision'
     adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
     adb('shell', 'wm', 'dismiss-keyguard')
     start = adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.EnrollmentActivity')

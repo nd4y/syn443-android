@@ -9,7 +9,8 @@ BOOTED = b'mProcessesReady=true mSystemReady=true mBooted=true mBooting=false'
 
 class FrameworkHeapTest(unittest.TestCase):
     def exercise(self, *, overrides=None, environment=None, stop_lost=False, start_lost=False,
-                 stop_stuck=False, same_pid=False, ready=True, root=True, ready_after=0, unroot_fails=False):
+                 stop_stuck=False, same_pid=False, ready=True, root=True, ready_after=0, unroot_fails=False,
+                 root_reply_lost=False, reconnect_fails=0):
         calls = []
         time = [0]
         state = ['running']
@@ -36,6 +37,10 @@ class FrameworkHeapTest(unittest.TestCase):
                 return b'0' if privileged[0] else b'2000'
             if args == ('root',):
                 privileged[0] = root
+                if root_reply_lost:
+                    raise subprocess.CalledProcessError(1, args)
+            if args == ('wait-for-device',) and calls.count(args) <= reconnect_fails:
+                raise subprocess.TimeoutExpired(args, 1)
             if args == ('unroot',) and not unroot_fails:
                 privileged[0] = False
             if args == ('shell', 'dumpsys', 'activity', '-a', 'processes') and time[0] < ready_after:
@@ -100,6 +105,14 @@ class FrameworkHeapTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 self.exercise(environment=env)
             self.assertFalse(self.calls)
+
+    def test_lost_adbd_root_reply_requires_current_privilege_before_restart(self):
+        calls = self.exercise(root_reply_lost=True, reconnect_fails=1)
+        self.assertEqual(1, calls.count(('root',)))
+        self.assertEqual(1, calls.count(('shell', 'stop')))
+        with self.assertRaisesRegex(AssertionError, 'root unavailable'):
+            self.exercise(root=False, root_reply_lost=True)
+        self.assertNotIn(('shell', 'stop'), self.calls)
 
     def test_root_failure_never_stops_framework(self):
         with self.assertRaisesRegex(AssertionError, 'root unavailable'):

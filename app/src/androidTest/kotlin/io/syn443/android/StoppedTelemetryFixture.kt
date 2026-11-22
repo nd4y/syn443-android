@@ -1,0 +1,70 @@
+package io.syn443.android
+
+import android.app.job.JobScheduler
+import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.SystemClock
+import androidx.work.NetworkType
+import androidx.work.WorkManager
+import io.syn443.android.vpn.StoppedTelemetryWorker
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
+
+/** Disposable Actions emulator only. Return the OS job number, never enrollment data. */
+internal object StoppedTelemetryFixture {
+    fun optInStopAndLocateJob(context: Context, stage:(String)->Unit): Bundle {
+        val uri = Uri.parse("content://io.syn443.control")
+        fun call(method: String, arg: String? = null) = checkNotNull(context.contentResolver.call(uri,method,arg,null))
+            .also { check(it.getBoolean("ok")) }
+        fun state(method: String) = JSONObject(checkNotNull(call(method).getString("json")))
+        stage("telemetry_opt_in")
+        val auth = state("auth-status")
+        check(auth.getBoolean("telemetryAvailable") && !auth.getBoolean("telemetryEnabled") && state("status").getBoolean("desiredOn"))
+        val work = WorkManager.getInstance(context)
+        val tag=StoppedTelemetryWorker::class.java.name
+        val previous=work.getWorkInfosByTag(tag).get(5,TimeUnit.SECONDS).map { it.id }.toSet()
+        call("auth-telemetry", auth.getLong("generation").toString() + ":true")
+        check(state("auth-status").getBoolean("telemetryEnabled"))
+        stage("telemetry_stop")
+        call("disconnect")
+        stage("telemetry_lookup_job")
+        val scheduler = checkNotNull(context.getSystemService(JobScheduler::class.java))
+        val deadline = SystemClock.elapsedRealtime() + 25_000
+        do {
+            val active = work.getWorkInfosByTag(tag).get(3,TimeUnit.SECONDS).filter { it.id !in previous && !it.state.isFinished }
+            check(active.size <= 1)
+            val item = active.singleOrNull()
+            if (item != null) {
+                check(item.periodicityInfo?.repeatIntervalMillis == 900_000L && item.initialDelayMillis == 900_000L)
+                check(item.constraints.requiredNetworkType == NetworkType.UNMETERED)
+                val jobs = if (Build.VERSION.SDK_INT >= 34) scheduler.pendingJobsInAllNamespaces
+                    else mapOf("" to scheduler.allPendingJobs)
+                for ((namespace, list) in jobs) {
+                    val job = list.singleOrNull {
+                        it.service.packageName == context.packageName && it.service.className.endsWith(".SystemJobService") &&
+                            it.extras.getString("EXTRA_WORK_SPEC_ID") == item.id.toString()
+                    } ?: continue
+                    val name = namespace.orEmpty()
+                    check(name.isEmpty() || name.matches(Regex("[A-Za-z0-9_.-]{1,80}")))
+                    // Finishing instrumentation can kill the app processes. Let the
+                    // requested Stop retire the real engine before ending the fixture.
+                    stage("telemetry_settle_stop")
+                    val vpn = state("status")
+                    if (vpn.opt("desiredOn") != false || vpn.optString("phase") != "Off" ||
+                        vpn.opt("engineStateKnown") != true || vpn.opt("engineActive") != false) continue
+                    val untilEligible = item.nextScheduleTimeMillis - System.currentTimeMillis()
+                    check(untilEligible in 1..900_000L)
+                    return Bundle().apply {
+                        putString("job", job.id.toString())
+                        putString("namespace", name)
+                        putString("untilEligibleMs", untilEligible.toString())
+                    }
+                }
+            }
+            SystemClock.sleep(100)
+        } while (SystemClock.elapsedRealtime() < deadline)
+        error("Scheduled telemetry work unavailable")
+    }
+}

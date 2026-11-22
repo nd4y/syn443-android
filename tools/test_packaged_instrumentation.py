@@ -23,6 +23,21 @@ END = 'INSTRUMENTATION_CODE: -1\n'
 
 
 class PackagedInstrumentationTest(unittest.TestCase):
+    def test_kotlin_lambda_reports_only_the_current_source_line(self):
+        for function in ("ExampleTest.secondCase$lambda$12", "ExampleTest.secondCase$lambda-12",
+                         "ExampleTest$secondCase$2.invoke"):
+            stack = ("INSTRUMENTATION_STATUS: stack=private message\n"
+                     "    at io.syn443.android.ExampleTest.firstCase$lambda$12(ExampleTest.kt:72)\n"
+                     f"    at io.syn443.android.{function}(ExampleTest.kt:81)\n"
+                     "    at io.syn443.android.ExampleTest.secondCase(ExampleTest.kt:90)\n")
+            failure = event("secondCase", 2, -2).replace("INSTRUMENTATION_STATUS_CODE:", stack + "INSTRUMENTATION_STATUS_CODE:")
+            displayed = io.StringIO()
+            with redirect_stdout(displayed):
+                parse_run(START + PASS + SECOND + failure + END)
+            self.assertIn("Test source line: 81", displayed.getvalue())
+            for private in ("private message", "lambda", "line: 72", "line: 90"):
+                self.assertNotIn(private, displayed.getvalue())
+
     def test_failure_location_contains_only_the_current_public_test_line(self):
         stack = ('INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: private fixture message\n'
                  '    at io.syn443.android.AnotherTest.other(AnotherTest.kt:92)\n'
@@ -41,6 +56,17 @@ class PackagedInstrumentationTest(unittest.TestCase):
                 suite = parse_run(START + PASS + SECOND + event('secondCase', 2, code) + END)
                 self.assertEqual([case.get('name') for case in suite], ['firstCase', 'secondCase'])
                 self.assertEqual([node.tag for node in suite[1]], [expected] if expected else [])
+
+    def test_runner_interruption_reports_progress_and_only_checked_in_names(self):
+        stopped = 'INSTRUMENTATION_RESULT: shortMsg=Process crashed.'
+        with self.assertRaisesRegex(ValueError, r'process_crashed; completed=1/2$'):
+            parse_run(START + PASS + SECOND + stopped)
+        active = START.replace('ExampleTest', 'AdminOperationRouteTest').replace(
+            'firstCase', 'explicitNativeSearchKeepsPrefixAcrossPagesAndForgetsItOnForegroundLoss')
+        with self.assertRaises(ValueError) as error:
+            parse_run(active + 'INSTRUMENTATION_RESULT: shortMsg=private synthetic detail')
+        self.assertIn('runner_stopped; completed=0/2; active=io.syn443.android.AdminOperationRouteTest.', str(error.exception))
+        self.assertNotIn('private synthetic detail', str(error.exception))
 
     def test_incomplete_reordered_duplicate_and_foreign_results_fail(self):
         last = event('secondCase', 2, 0)

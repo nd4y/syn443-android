@@ -79,6 +79,13 @@ import org.json.JSONObject
                 val duration = if (row.isNull("latencyMs")) "длительность неизвестна" else "длительность ${row.getLong("latencyMs")} мс"
                 Text("Возраст проверки ${age} с · $duration", Modifier.testTag("route-${i+1}-timing"))
             }
+            row.optJSONObject("durationDistribution")?.let { stats ->
+                Text(
+                    "Длительность проверок · за 15 мин успешно ${stats.getInt("samples")} · " +
+                        "p50 ${stats.getLong("p50Ms")} мс · p95 ${stats.getLong("p95Ms")} мс",
+                    Modifier.testTag("route-${i+1}-distribution"),
+                )
+            }
             val path=row.optJSONArray("measuredPath")
             if (path != null && path.length() > 0) {
                 val title = when (row.getString("state")) {

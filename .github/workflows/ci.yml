@@ -316,7 +316,8 @@ jobs:
     runs-on: ubuntu-24.04
     # Cold API37 image/tool preparation consumed 20+ minutes on a measured run.
     # Runtime activation/probe/restart deadlines remain unchanged.
-    timeout-minutes: 60
+    # Includes the unshortened first 15-minute WorkManager interval.
+    timeout-minutes: 80
     strategy:
       fail-fast: false
       matrix:

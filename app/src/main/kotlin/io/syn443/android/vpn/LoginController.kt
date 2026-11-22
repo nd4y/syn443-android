@@ -1,5 +1,8 @@
 package io.syn443.android.vpn
 
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+
 import io.syn443.android.support.EffectiveConfig
 
 import android.content.Context
@@ -32,15 +35,16 @@ import javax.net.ssl.TrustManagerFactory
 class LoginController private constructor(private val context:android.app.Application,
     private val namespace:String="device-login-v1",private val testExchange:IdentityExchange?=null,
     private val testBeforeQueue:(()->Unit)?=null,private val testTrustAnchor:TrustAnchor?=null,
-    private val testReportVpnOn:(()->Boolean)?=null,private val testVpnStopped:(()->Boolean)?=null) {
+    private val testReportVpnOn:(()->Boolean)?=null,private val testVpnStopped:(()->Boolean)?=null,
+    private val monotonicMillis:()->Long=SystemClock::elapsedRealtime) {
     companion object {
         @Volatile private var instance:LoginController?=null
         @Synchronized fun get(context:Context):LoginController = instance ?: LoginController(context.applicationContext as android.app.Application).also {instance=it}
         internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange,beforeQueue:(()->Unit)?=null,
-            anchor:TrustAnchor?=null,reportVpnOn:(()->Boolean)?=null):LoginController {
+            anchor:TrustAnchor?=null,reportVpnOn:(()->Boolean)?=null,monotonicMillis:()->Long=SystemClock::elapsedRealtime):LoginController {
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") && namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
             return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue,anchor,reportVpnOn,
-                testVpnStopped={
+                monotonicMillis=monotonicMillis, testVpnStopped={
                     val status=context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null)
                         ?.getString("json")?.let(::JSONObject)
                     status!=null && status.optString("phase")=="Off" && !status.optBoolean("desiredOn") &&
@@ -107,6 +111,8 @@ class LoginController private constructor(private val context:android.app.Applic
         if(namespace=="device-login-v1")"runtime-observation-v1" else "$namespace-runtime")}
     private var nextRuntimeElapsed=0L
     private val telemetryPurge=java.util.concurrent.atomic.AtomicBoolean()
+    @Volatile private var telemetryPressureSession: String? = null
+    private var nextTelemetryPressureElapsed=0L
     private var nextTelemetryElapsed=0L
     private val deviceSourceScope=java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
     private data class ChatTicket(val id:String,val generation:Long,val expires:Long,var state:String="pending",var body:String="",var reason:String="")
@@ -166,7 +172,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     private fun policyChanged() {runCatching {policyListener?.invoke()}}
     private fun boot()=Settings.Global.getInt(context.contentResolver,Settings.Global.BOOT_COUNT,-1).also {require(it>=0)}
-    private fun elapsed()=SystemClock.elapsedRealtime()
+    private fun elapsed()=monotonicMillis()
     private val pendingCommands=java.util.concurrent.atomic.AtomicInteger()
     private inner class Command(private val admitted:Long,private val block:()->Unit,private val quiet:Boolean=false):Runnable {
         private val completed=java.util.concurrent.atomic.AtomicBoolean()
@@ -332,15 +338,24 @@ class LoginController private constructor(private val context:android.app.Applic
             it.optBoolean("candidateValidated") || it.optBoolean("runtimeAuthorized")
         }
     }.getOrDefault(false)
+    // null includes a command which has not yet published its browser URL.
+    private fun browserCurrent(s:LoginIntent):Boolean? {
+        if (s.phase!=LoginPhase.BROWSER || browser?.first!=s.generation) return null
+        val active=cached?.takeIf { it.first==s } ?: return null
+        return active.second.pending?.current(s.generation,boot(),elapsed())
+    }
+
     fun status():JSONObject = runCatching {
         val s=journal.snapshot()
+        val linkCurrent=browserCurrent(s)
         val telemetry=telemetryFor(s)
         val telemetryScope=telemetry?.scope ?: cached?.takeIf {it.first.generation==s.generation &&
             it.first.sessionGeneration==s.sessionGeneration}?.second?.session?.let(::telemetryKey)
         JSONObject().put("phase",s.phase.name).put("method",s.method).put("generation",s.generation).put("configured",configured)
             .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("intentRevision",s.revision).put("canReauthenticate",LoginRecovery.canReauthenticate(s))
-            .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
+            .put("registrationMayExist",s.maybeRegistered)
+            .put("browserReady",linkCurrent==true).put("browserExpired",linkCurrent==false)
             .put("controlPanelConfigured",panelOrigin(s)!=null)
             .put("controlPanelAvailable",adminPanelUrl(s.generation)!=null)
             .put("telemetryAvailable",telemetry!=null)
@@ -445,7 +460,8 @@ class LoginController private constructor(private val context:android.app.Applic
         noVpn()
         return submitIfIdle(admit={
             val s=journal.snapshot()
-            if(s.generation!=generation || s.revision!=revision || !LoginRecovery.canReauthenticate(s))false
+            val canRenewFirst = !s.maybeRegistered && s.method=="oidc" && browserCurrent(s)==false
+            if(s.generation!=generation || s.revision!=revision || !(LoginRecovery.canReauthenticate(s) || canRenewFirst))false
             else {expected=s;true}
         },onAdmission={
             commandEpoch++;browser=null;chatTicket=null;activationDelivery=null;panelHint=null;panelPoll=null
@@ -453,11 +469,13 @@ class LoginController private constructor(private val context:android.app.Applic
         }) {
             noVpn()
             val old=payload(expected)
-            val next=LoginRecovery.beginReauthentication(expected,generation)
+            val registered=LoginRecovery.canReauthenticate(expected)
+            val next=if (registered) LoginRecovery.beginReauthentication(expected,generation)
+                else LoginRecovery.renewFirstBrowser(expected,generation)
             val pending=Identity.newPending(generation,expected.thumbprint,boot(),elapsed())
             val protected=LoginPayload(old.bootstrap,pending=pending,registration=RegisteredLogin.from(next))
             val ready=protect(expected,protected) {hash->next.copy(protectedHash=hash)}
-            synchronized(commands) {current(ready);browser=generation to Identity.authorization(old.bootstrap,pending,true)}
+            synchronized(commands) {current(ready);browser=generation to Identity.authorization(old.bootstrap,pending,registered)}
         }
     }
 
@@ -485,7 +503,8 @@ class LoginController private constructor(private val context:android.app.Applic
     /** Exact URL is returned only to this app's UI, not placed in the public status/log feed. */
     fun browserUrl(expectedGeneration:Long):String=synchronized(commands) {
         val s=journal.snapshot();require(s.generation==expectedGeneration && s.phase==LoginPhase.BROWSER)
-        requireNotNull(browser).also {require(it.first==s.generation)}.second
+        require(browserCurrent(s)==true)
+        requireNotNull(browser).second
     }
     /** Navigation metadata only; the browser obtains its own control-audience
      * session and fresh MFA. No device/user credential enters the URL. */
@@ -677,6 +696,7 @@ class LoginController private constructor(private val context:android.app.Applic
                 TelemetryAuthority(accepted.generation,accepted.sessionGeneration,telemetryKey(session))
             } else null
         }
+        reconcileTelemetrySchedule(response.technicalTelemetry)
         prepareOverlays(accepted,p,next,protocol,scope)
     }
     private fun persistAssignment(s:LoginIntent,p:LoginPayload,next:AssignmentState,target:LoginIntent=s,canCommit:()->Boolean={true}):LoginIntent {
@@ -961,8 +981,20 @@ class LoginController private constructor(private val context:android.app.Applic
         // A running/queued command already drains this flag. Do not consume the retirement slot.
         runCatching {submitIfIdle(quiet=true) {}}
     }
+    private fun disableTelemetryCapture() {
+        val session = telemetryCapture.activeConsent()?.session
+        telemetryCapture.disable()
+        if (session != null && namespace == "device-login-v1") runCatching { TelemetryWork.cancel(context, session) }
+    }
+    private fun reconcileTelemetrySchedule(enabled: Boolean) {
+        if (namespace != "device-login-v1") return
+        val consent = telemetryCapture.activeConsent() ?: return
+        runCatching {
+            if (enabled) TelemetryWork.schedule(context, consent.session) else TelemetryWork.cancel(context, consent.session)
+        }
+    }
     private fun eraseTechnicalTelemetryOnRetirement() {
-        runCatching {telemetryCapture.disable()}
+        runCatching {disableTelemetryCapture()}
         runCatching {telemetryDisk.erase()}
         runCatching {runtimeDisk.erase()}
     }
@@ -982,14 +1014,15 @@ class LoginController private constructor(private val context:android.app.Applic
                 nextRuntimeElapsed=0
             } else {
                 cancelTechnicalTelemetry()
-                telemetryCapture.disable()
+                disableTelemetryCapture()
                 purgeTechnicalTelemetryWhenIdle()
             }
             true
         }
-    }
+    }.also { changed -> if (changed && enabled) reconcileTelemetrySchedule(true) }
     private fun syncTechnicalTelemetry():Boolean {
-        if(!reportVpnOn())return false
+        val snapshot = state().read()
+        if (!(testReportVpnOn?.invoke() ?: snapshot.optBoolean("desiredOn"))) return false
         lateinit var expected:LoginIntent
         lateinit var authority:TelemetryAuthority
         lateinit var consent:TelemetryCapture.Consent
@@ -997,9 +1030,19 @@ class LoginController private constructor(private val context:android.app.Applic
             val state=journal.snapshot()
             val active=telemetryFor(state)
             val preference=active?.let {runCatching {telemetryCapture.consent(it.scope)}.getOrNull()}
-            if(active==null || preference==null || elapsed()<nextTelemetryElapsed)false
-            else {expected=state;authority=active;consent=preference;true}
-        },onAdmission={nextTelemetryElapsed=elapsed()+300_000}) {
+            if (active == null || preference == null) return@submitIfIdle false
+            val now = elapsed()
+            if (now < nextTelemetryElapsed) {
+                if (now < nextTelemetryPressureElapsed) return@submitIfIdle false
+                nextTelemetryPressureElapsed = now + TelemetryCapture.URGENT_MS
+                if (telemetryPressureSession != preference.session && !TelemetryCapture.hasNewPressure(snapshot, preference.through)) return@submitIfIdle false
+            }
+            expected=state;authority=active;consent=preference;true
+        },onAdmission={
+            val now = elapsed()
+            if (now >= nextTelemetryElapsed) nextTelemetryElapsed = now + TelemetryCapture.ROUTINE_MS
+            nextTelemetryPressureElapsed = now + TelemetryCapture.URGENT_MS
+        }) {
             fun currentConsent() {
                 current(expected)
                 require(telemetryFor(expected)==authority && telemetryCapture.consent(authority.scope)?.session==consent.session)
@@ -1016,11 +1059,22 @@ class LoginController private constructor(private val context:android.app.Applic
             queue=queue.expired(queueKey,now)
             currentConsent()
             if(queue!=old)telemetryDisk.write(queueKey,queue)
-            if(!telemetryCapture.recorded(consent,through))return@submitIfIdle
-            val batch=queue.peek(queueKey) ?: return@submitIfIdle
-            if(!telemetryCapture.attempted(consent,now) || !reportVpnOn())return@submitIfIdle
+            val batch = queue.peek(queueKey)
+            val urgent = TelemetryCapture.isUrgent(queue)
+            telemetryPressureSession = consent.session.takeIf { urgent }
+            if (!urgent && !telemetryCapture.recorded(consent,through)) return@submitIfIdle
+            if (batch == null || !reportVpnOn()) return@submitIfIdle
             val vpnGeneration=state().checkpoint().generation
             val physical=PhysicalIdentityRoute.capture(context,wifiOnly=true,unmeteredOnly=true)
+            physical.check()
+            val admitted = telemetryCapture.attempted(consent, now, batch, urgent)
+            synchronized(commands) {
+                currentConsent()
+                nextTelemetryElapsed = elapsed() + (telemetryCapture.routineDelay(consent, now) ?: return@submitIfIdle)
+            }
+            if (!admitted) return@submitIfIdle
+            if (urgent && !telemetryCapture.recorded(consent, through)) return@submitIfIdle
+            telemetryPressureSession = null
             val route=object:HttpRoute {
                 override fun resolve(host:String)=physical.resolve(host)
                 override fun bind(socket:java.net.Socket)=physical.bind(socket)
@@ -1035,12 +1089,107 @@ class LoginController private constructor(private val context:android.app.Applic
                     route.check()
                     if(protocol.uploadTechnicalTelemetry(batch,session,scope)) {
                         route.check()
-                        telemetryDisk.write(queueKey,queue.acknowledged(queueKey,batch))
+                        val remaining = queue.acknowledged(queueKey, batch)
+                        telemetryDisk.write(queueKey, remaining)
+                        telemetryPressureSession = consent.session.takeIf { TelemetryCapture.isUrgent(remaining) }
                     }
                 } finally {telemetryTransport.compareAndSet(scope,null)}
             }
         }
     }
+    internal fun ownsTelemetrySchedule(ticket: String): Boolean =
+        TelemetryWork.valid(ticket) && telemetryCapture.activeConsent()?.session == ticket
+
+    /** WorkManager awaits the controller's existing identity worker and cancels only its own socket. */
+    internal suspend fun deliverStoppedTelemetry(ticket: String): Boolean = suspendCancellableCoroutine { continuation ->
+        val owned = java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
+        continuation.invokeOnCancellation { owned.get()?.cancel() }
+        val admitted = submitIfIdle(quiet=true) {
+            val success = runCatching {
+                sendStoppedTelemetry(ticket, { continuation.isActive }, owned)
+            }.getOrDefault(false)
+            if (continuation.isActive) continuation.resume(success)
+        }
+        if (!admitted && continuation.isActive) continuation.resume(false)
+    }
+
+    private fun sendStoppedTelemetry(ticket: String, active: () -> Boolean,
+                                     owned: java.util.concurrent.atomic.AtomicReference<IdentityScope?>): Boolean {
+        if (!active() || !ownsTelemetrySchedule(ticket)) return true
+        val initial = journal.snapshot()
+        if (initial.phase != LoginPhase.POLICY_CACHED &&
+            !(initial.phase == LoginPhase.REFRESHING && initial.refreshReturnPhase == LoginPhase.POLICY_CACHED)) return true
+        val stopped = LifecycleAccess.engineStatus(context, state().read())
+        when (TelemetryWork.vpnState(stopped)) {
+            TelemetryWork.VpnState.ACTIVE -> return true
+            TelemetryWork.VpnState.UNKNOWN -> return false
+            TelemetryWork.VpnState.STOPPED -> Unit
+        }
+        val generation = stopped.getLong("generation")
+        val original = payload(initial)
+        val scopeKey = telemetryKey(checkNotNull(original.session))
+        val consent = telemetryCapture.consent(scopeKey)?.takeIf { it.session == ticket } ?: return true
+        val queueKey = Identity.hash(("syn443/telemetry-queue/" + scopeKey + "/" + ticket).toByteArray(Charsets.US_ASCII))
+        fun checkOwner() {
+            val identity = journal.snapshot()
+            check(active() && identity.generation == initial.generation && identity.reauthRevision == initial.reauthRevision &&
+                telemetryCapture.consent(scopeKey)?.session == ticket)
+            val vpn = LifecycleAccess.engineStatus(context, state().read())
+            check(TelemetryWork.vpnState(vpn) == TelemetryWork.VpnState.STOPPED && vpn.getLong("generation") == generation)
+        }
+        checkOwner()
+        val old = telemetryDisk.read(queueKey)
+        val (events, through) = telemetryCapture.sample(stopped, consent, io.syn443.android.BuildConfig.VERSION_CODE)
+        if (events.isEmpty() && old.entries.isEmpty()) {
+            return through == consent.through || telemetryCapture.recorded(consent, through)
+        }
+        val physical = PhysicalIdentityRoute.capture(context, wifiOnly=true, unmeteredOnly=true)
+        val route = object : HttpRoute {
+            override fun check() { checkOwner(); physical.check() }
+            override fun resolve(host: String): List<java.net.InetAddress> {
+                check()
+                return physical.resolve(host).also { check() }
+            }
+            override fun bind(socket: java.net.Socket) { check(); physical.bind(socket) }
+        }
+        route.check()
+        return withProtocol(initial, original.bootstrap, route) { protocol, scope ->
+            owned.set(scope)
+            try {
+                check(telemetryTransport.compareAndSet(null, scope))
+                route.check()
+                resumeSession(initial, original, protocol, scope, fetch=false)
+                val current = journal.snapshot()
+                check(current.phase == LoginPhase.POLICY_CACHED)
+                val p = payload(current)
+                val session = checkNotNull(p.session)
+                check(telemetryKey(session) == scopeKey)
+                val permission = protocol.policy(session, scope)
+                val previous = checkNotNull(journal.readAssignment(current))
+                val verified = Assignments.receive(previous, current, p, permission, boot(), elapsed())
+                Assignments.receipt(verified, current, p, boot(), elapsed())
+                route.check()
+                if (!permission.technicalTelemetry) return@withProtocol true
+                val now = permission.time.window(boot(),elapsed()).upperMs
+                var queue = old
+                for (event in events) queue = queue.offer(queueKey, event)
+                queue = queue.expired(queueKey, now)
+                if (queue != old) telemetryDisk.write(queueKey, queue)
+                if (!telemetryCapture.recorded(consent, through)) return@withProtocol true
+                val batch = queue.peek(queueKey) ?: return@withProtocol true
+                if (!telemetryCapture.attempted(consent, now, batch, urgent=false)) return@withProtocol true
+                route.check()
+                if (!protocol.uploadTechnicalTelemetry(batch,session,scope)) return@withProtocol false
+                route.check()
+                telemetryDisk.write(queueKey, queue.acknowledged(queueKey,batch))
+                true
+            } finally {
+                telemetryTransport.compareAndSet(scope,null)
+                owned.compareAndSet(scope,null)
+            }
+        }
+    }
+
     /** Reuse the supervisor's worker and consent; no new timer, wake lock or probe. */
     internal fun syncRuntimeObservation():Boolean {
         if(!reportVpnOn())return false
@@ -1312,6 +1461,16 @@ class LoginController private constructor(private val context:android.app.Applic
             else->resumeWorker(s)
         }
     }}
+    /** Compare the reviewed account before the caller changes VPN intent. */
+    internal fun cancelReviewed(generation:Long, revision:Long, stopVpn:()->Unit):Boolean = synchronized(commands) {
+        val current = journal.snapshot()
+        if (current.generation != generation || current.revision != revision ||
+            current.phase in setOf(LoginPhase.SIGNED_OUT, LoginPhase.RETIRING)) return@synchronized false
+        stopVpn()
+        cancel()
+        true
+    }
+
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
         commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;activationDelivery=null;panelHint=null;panelPoll=null;deviceSourcePollAfter=0;deviceSourceAuthority=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()

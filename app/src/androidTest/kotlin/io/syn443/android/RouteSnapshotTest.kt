@@ -1,5 +1,6 @@
 package io.syn443.android
 
+import io.syn443.android.vpn.RouteProbeDurations
 import io.syn443.android.vpn.RouteSnapshot
 import io.syn443.android.vpn.EngineConfig
 import io.syn443.android.vpn.LifecycleAccess
@@ -17,6 +18,60 @@ class RouteSnapshotTest {
     private fun report(request:String,ok:Boolean,running:Boolean=false)=JSONObject().put("request",JSONObject(request).getString("request")).put("running",running).put("results",org.json.JSONArray()
         .put(JSONObject().put("id","route-1").put("complete",true).put("ok",ok).put("code",if(ok)"ok" else "dial_failed").put("elapsedMs",5).put("sampledElapsedMs",android.os.SystemClock.elapsedRealtime()).put("path",org.json.JSONArray().put("route-1")))
         .put(JSONObject().put("id","route-2").put("complete",true).put("ok",false).put("code","ssh_banner_mismatch").put("elapsedMs",8).put("sampledElapsedMs",android.os.SystemClock.elapsedRealtime()).put("path",org.json.JSONArray().put("route-2")))).toString()
+    @Test fun applicationDurationsCountDistinctSuccessesAndRetireOnLossOfRouteEvidence() {
+        val owner = scope.copy(config = java.util.UUID.randomUUID().toString())
+        RouteSnapshot.configure(config, owner.config)
+        RouteSnapshot.owner(owner)
+        fun row(index: Int = 0) = RouteSnapshot.read(true, true, owner).getJSONArray("routes").getJSONObject(index)
+        fun sample(ms: Long, ok: Boolean = true, doubleRead: Boolean = false) {
+            val request = requireNotNull(RouteSnapshot.request(owner, force = true))
+            val result = JSONObject(report(request, ok, running = doubleRead))
+            result.getJSONArray("results").getJSONObject(0).put("elapsedMs", ms)
+            assertTrue(RouteSnapshot.update(owner, result.toString()))
+            if (doubleRead) assertTrue(RouteSnapshot.update(owner, result.put("running", false).toString()))
+        }
+        try {
+            sample(0, doubleRead = true)
+            assertFalse(row().has("durationDistribution"))
+            sample(51)
+            val stats = row().getJSONObject("durationDistribution")
+            assertEquals(2, stats.getInt("samples"))
+            assertEquals(0, stats.getLong("p50Ms"))
+            assertEquals(51, stats.getLong("p95Ms"))
+            assertFalse(row(1).has("durationDistribution"))
+            sample(700, ok = false)
+            assertFalse(row().has("durationDistribution"))
+            sample(19)
+            assertFalse(row().has("durationDistribution"))
+            sample(21)
+            assertTrue(row().has("durationDistribution"))
+            val later = android.os.SystemClock.elapsedRealtime() + 120_001
+            assertFalse(RouteSnapshot.readAt(true, true, owner, later).getJSONArray("routes").getJSONObject(0).has("durationDistribution"))
+            RouteSnapshot.owner(owner.copy(network = owner.network + 1))
+            assertFalse(row().has("durationDistribution"))
+        } finally { RouteSnapshot.owner(null) }
+    }
+
+    @Test fun routeDurationWindowBoundsSamplesLifetimeAndPathIdentity() {
+        var window: RouteProbeDurations? = null
+        val path = listOf("entry", "exit")
+        for (i in 1L..23L) {
+            window = RouteProbeDurations.append(window, path, "sample-$i", i, i)
+        }
+        val current = requireNotNull(window)
+        val stats = requireNotNull(current.summary(23))
+        assertEquals(20, stats.getInt("samples"))
+        assertEquals(13, stats.getLong("p50Ms"))
+        assertEquals(22, stats.getLong("p95Ms"))
+        val duplicate = RouteProbeDurations.append(current, path, "sample-23", 24, 1000)
+        assertSame(current, duplicate)
+        assertNull(current.summary(22))
+        assertEquals(2, requireNotNull(current.summary(900_021)).getInt("samples"))
+        assertNull(current.summary(900_022))
+        val moved = RouteProbeDurations.append(current, listOf("entry", "new-exit"), "next", 25, 9)
+        assertNull(moved.summary(25))
+    }
+
     @Test fun terminalOmissionAndDeadlineClearOnlyMissingMeasurements() {
         for (deadline in listOf(false, true)) {
             setup()
@@ -280,6 +335,17 @@ class RouteSnapshotTest {
             val unresolved = LifecycleAccess.engineStatus(saved().put("resumeRequired", true), false, present)
             assertTrue(unresolved.isNull("engineActive"));assertFalse(unresolved.getBoolean("engineStateKnown"))
         }
+        fun interruptedStop() = saved().put("desiredOn",false).put("phase","Off")
+        val physicallyStopped = LifecycleAccess.engineStatus(interruptedStop(), false, false, serviceAttached = false)
+        assertFalse(physicallyStopped.getBoolean("engineActive"))
+        assertTrue(physicallyStopped.getBoolean("engineStateKnown"))
+        assertEquals(7, physicallyStopped.getInt("generation"))
+        for (present in listOf(true, null)) {
+            assertTrue(LifecycleAccess.engineStatus(interruptedStop(), false, present, serviceAttached = false).isNull("engineActive"))
+        }
+        assertTrue(LifecycleAccess.engineStatus(interruptedStop(), false, false, serviceAttached = true).isNull("engineActive"))
+        assertTrue(LifecycleAccess.engineStatus(saved(), false, false, serviceAttached = false).isNull("engineActive"))
+        assertTrue(LifecycleAccess.engineStatus(interruptedStop().put("phase","Recovering"), false, false, serviceAttached = false).isNull("engineActive"))
         val live=LifecycleAccess.engineStatus(saved(),true,true)
         assertTrue(live.getBoolean("engineActive"));assertTrue(live.getBoolean("engineStateKnown"))
         val readyAfterHandshake=LifecycleAccess.engineStatus(JSONObject().put("engineActive",false),true,null)

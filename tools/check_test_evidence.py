@@ -95,6 +95,10 @@ if mode=="emulator":
     assert {
         ("io.syn443.android.RouteSnapshotTest", "terminalOmissionAndDeadlineClearOnlyMissingMeasurements"),
     } <= set(identities), "Missing route measurement consistency outcomes"
+    assert {("io.syn443.android.RouteSnapshotTest", name) for name in (
+        "applicationDurationsCountDistinctSuccessesAndRetireOnLossOfRouteEvidence",
+        "routeDurationWindowBoundsSamplesLifetimeAndPathIdentity",
+    )} <= set(identities), "Missing route duration distribution outcomes"
     assert {("io.syn443.android.VerifiedUpdateTest", name) for name in (
         "updateScreenShowsInstalledBuildAndCannotInstallWithoutAnAcceptedOffer",
         "packageManagerRechecksRealPackageSignerSdkAndEmbeddedAbiHashes",
@@ -103,6 +107,10 @@ if mode=="emulator":
         "systemProtectionsRequireFreshBooleanEvidenceForEachSetting",
         "unavailableSettingsExplainManualAccessAndAllowRetry",
     )} <= set(identities), "Missing system VPN protection outcomes"
+    assert {("io.syn443.android.EnrollmentAppLinkTest", name) for name in (
+        "browsableColdLaunchShowsOnlyLocalReviewAndDropsTheCarrier",
+        "redeliveredInvitationKeepsEditsAndDifferentLinkStartsItsOwnReview",
+    )} <= set(identities), "Missing incoming enrollment link outcomes"
     assert {("io.syn443.android.InvitationScannerTest", name) for name in (
         "liveDecoderRecognizesBothPolaritiesAndRejectsForeignPayloads",
         "liveCameraReadsCleanFrameWhenTheOrdinaryFinderCannotLocateItsThirdMarker",
@@ -332,9 +340,22 @@ if mode=="emulator":
         "assignedActivationCannotReusePriorScopeOrIncompleteRouteProof",
         "enrolledAssignedRoutesCommitWithOptionalFailure",
         "enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet",
-        "enrolledStopFencesPendingCandidateRouteSuccess","enrolledVersionUpgradeRetainsBindingPolicyAndRealTun"}
+        "enrolledStopFencesPendingCandidateRouteSuccess","enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn","enrolledVersionUpgradeRetainsBindingPolicyAndRealTun"}
     live_engine_required={"savedEngineCheckpointCannotClaimAnUnownedLiveProcess"}
     route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
+    account_telemetry_cases = {
+        ("AccountExitControlsTest", "registeredExitCanBeDismissedAndStaleConfirmationDisappears"),
+        ("AccountExitControlsTest", "pendingLoginCanBeCancelledAndUnreadableAccountHasNoUnlinkAction"),
+        ("LoginControllerTest", "staleReviewedLogoutCannotStopVpnOrRetireAnEnrolledDevice"),
+        ("LoginControllerTest", "expiredFirstBrowserLinkCanRenewOnceWithoutRetiringItsKey"),
+        ("LoginControllerTest", "expiredRegisteredBrowserKeepsOriginalDeviceOnRenewedLogin"),
+        ("LoginPilotTest", "browserReservationAndCancellationPreserveVpnAndDeleteTheKey"),
+        ("TechnicalTelemetryDiskTest", "criticalAndFullTelemetryBatchesUseOnlyCurrentConsentedEvents"),
+        ("TechnicalTelemetryDiskTest", "urgentAttemptHonorsPersistentSpacingExactHeadAndConsent"),
+        ("TechnicalTelemetryDiskTest", "stoppedTelemetryRequiresPositiveObservationThatEngineAndIntentAreOff"),
+    }
+    observed = {(case.get("classname"), case.get("name")) for case in cases}
+    assert {("io.syn443.android." + suite, name) for suite, name in account_telemetry_cases} <= observed, "Account/telemetry evidence missing"
     assert ("io.syn443.android.LoginControllerTest", "cachedPolicyRefreshUsesTheSignedDeadlineOrFiveMinuteLimit") in {(c.get("classname"),c.get("name")) for c in cases}, "Signed refresh deadline coverage missing"
     route_required.add("adbLocalConfigPreviewDoesNotWriteAndApplyFencesStaleBase")
     route_required.add("assignmentQuotedStringStreamingMatchesReferenceDefaultsEscapesAndUnicode")
@@ -821,6 +842,7 @@ ADAPTIVE_SEARCH_REQUIRED = [
     ('io.syn443.android.RouteSearchStatusTest', 'verifiedProjectionJoinsExactExistingTtlScopeReadinessAndFutureSampleGuards'),
     ('io.syn443.android.RouteSearchStatusTest', 'diagnosticProjectionCannotAuthorizeRequiredReadinessOrActivation'),
     ('io.syn443.android.RouteSearchStatusTest', 'failedOrExpiredPathAndAbsentLatencyHaveDistinctLabels'),
+    ('io.syn443.android.RouteSearchStatusTest', 'activeAdaptiveRouteShowsOnlyComparableConfirmedApplicationTimings'),
     ('io.syn443.android.RouteSearchStatusTest', 'copiedSixteenGroupProjectionRejectsOverflowForeignScopeAndClearsOnInvalidate'),
     ('io.syn443.android.RouteSearchStatusTest', 'finiteSearchLabelsNeverClaimNoRoutesAndRecompositionDispatchesNothing'),
 ]

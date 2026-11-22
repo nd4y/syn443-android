@@ -24,8 +24,9 @@ def integer(value):
     return bytes([2,len(raw)])+raw
 
 class Fixture:
-    def __init__(self,config, *, assigned_device=None):
+    def __init__(self,config, *, assigned_device=None, policy_ttl_seconds=600):
         self.assigned_device=assigned_device
+        self.policy_ttl_seconds=policy_ttl_seconds
         self.publisher=Publisher();self.root=Path(self.publisher.temp.name)
         self.rsa=self.root/'issuer.pem';self.cert=self.root/'tls.pem';self.tls_key=self.root/'tls-key.pem'
         subprocess.run([OPENSSL,'genpkey','-algorithm','RSA','-pkeyopt','rsa_keygen_bits:2048','-out',str(self.rsa)],check=True,capture_output=True)
@@ -42,6 +43,8 @@ class Fixture:
         self.authorization={};self.codes={};self.tokens={};self.sessions={};self.receipts={};self.refresh_receipts={};self.proofs=set()
         self.config=config;self.revision=1;self.policy_status=200;self.envelopes={};self.policy_requests=0;self.registrations=0
         self.activation_reports={}
+        self.telemetry_enabled=False
+        self.telemetry_receipts=[]
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
     def close(self):
         self.server.shutdown();self.server.server_close();self.thread.join(timeout=3);self.publisher.close()
@@ -113,6 +116,22 @@ class Fixture:
             return 200,session,{}
         assert token==session['accessToken']
         if parsed.path=='/v1/device/revoke':self.sessions.pop(thumb);return 204,None,{}
+        if parsed.path=='/v1/device/telemetry':
+            assert self.telemetry_enabled and method=='POST' and session['accessUntilMs']>int(time.time()*1000)
+            assert 0 < len(body) <= 16_384 and len(self.telemetry_receipts)<16
+            frame=json.loads(body)
+            assert set(frame)=={'schemaVersion','session','build','policyRevision','algorithmRevision','events'}
+            assert frame['schemaVersion']==1 and 1<=len(frame['events'])<=32
+            ids=[]
+            outcomes=[]
+            for event in frame['events']:
+                assert set(event)=={'id','atMs','elapsedMs','networkEpoch','kind','code','mode'}
+                assert isinstance(event['id'],str) and len(event['id'])==43
+                ids.append(event['id'])
+                outcomes.append((event['kind'],event['code']))
+            assert len(set(ids))==len(ids)
+            self.telemetry_receipts.append((time.monotonic(),outcomes))
+            return 200,{'schemaVersion':1,'eventIds':ids},{}
         if parsed.path=='/v1/device/policy/status':
             assert method=='POST' and len(body)<=1024 and session['accessUntilMs']>int(time.time()*1000)
             if self.policy_status!=200:return self.policy_status,{'code':'fixture_unavailable'},{}
@@ -137,10 +156,12 @@ class Fixture:
         key=(thumb,self.revision)
         if key not in self.envelopes:
             self.publisher.device=session['deviceId']
-            self.envelopes[key]=self.publisher.sign(self.config,revision=self.revision,key_thumbprint=thumb,
+            self.envelopes[key]=self.publisher.sign(self.config,revision=self.revision,key_thumbprint=thumb,ttl=self.policy_ttl_seconds,
                 degraded=getattr(self,'allow_degraded',False),checks=getattr(self,'policy_checks',None),
                 extra_capabilities=getattr(self,'extra_capabilities',()))
-        return 200,self.envelopes[key],{'Content-Type':'application/jose'}
+        headers={'Content-Type':'application/jose'}
+        if self.telemetry_enabled:headers['X-Syn443-Telemetry']='1'
+        return 200,self.envelopes[key],headers
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args):pass

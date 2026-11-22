@@ -33,7 +33,7 @@ import java.util.UUID
 /** Incoming content is preview-only. No key/code leaves this device before the
  * explicit binding confirmation and installation-root verification. */
 class EnrollmentActivity:ComponentActivity() {
-    private var incoming by mutableStateOf("")
+    private var incoming by mutableStateOf<String?>("")
     private var arrival by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState:Bundle?) {
@@ -62,12 +62,16 @@ class EnrollmentActivity:ComponentActivity() {
 
     private fun receive(source:Intent) {
         val raw=source.dataString?.takeIf {source.action==Intent.ACTION_VIEW}
-        incoming=when {
-            raw==null -> ""
-            raw.startsWith("syn443://") -> raw.takeIf {it.length<=BootstrapTrust.MAX_LINK}.orEmpty()
-            else -> runCatching {BootstrapTrust.unwrapAppLink(raw,BuildConfig.ENROLLMENT_LINK_HOST)}.getOrDefault("")
+        val next = when {
+            raw == null -> ""
+            raw.startsWith("syn443://") -> scannedInvitation(raw)
+            else -> runCatching { BootstrapTrust.unwrapAppLink(raw, BuildConfig.ENROLLMENT_LINK_HOST) }.getOrNull()
         }
-        intent=Intent(this,EnrollmentActivity::class.java)
+        intent = Intent(this, EnrollmentActivity::class.java)
+        // A messenger may redeliver the same link as HTTPS or as a custom URI.
+        // Keep the local review, including edits, when both resolve to the same invitation.
+        if (!next.isNullOrEmpty() && next == incoming) return
+        incoming = next
         arrival++
     }
 }
@@ -111,9 +115,10 @@ internal object InvitationQr {
     }
 }
 
-@Composable private fun EnrollmentScreen(initial:String,onStarted:(String?)->Unit) {
+@Composable private fun EnrollmentScreen(initial:String?,onStarted:(String?)->Unit) {
     val context=LocalContext.current;val scope=rememberCoroutineScope();val endpoint="content://io.syn443.control".toUri()
-    var link by remember {mutableStateOf(initial)};var message by remember {mutableStateOf("")}
+    var link by remember { mutableStateOf(initial.orEmpty()) }
+    var message by remember { mutableStateOf(if (initial == null) "Ссылка приглашения недействительна. Вставьте приглашение или отсканируйте QR-код." else "") }
     var ticket by remember {mutableStateOf("")};var preview by remember {mutableStateOf<JSONObject?>(null)}
     var busy by remember {mutableStateOf(false)};var rotation by remember {mutableStateOf("")};var showRotation by remember {mutableStateOf(false)}
     // Older versions captured a photo here. A process death could outlive its cleanup.
@@ -149,7 +154,7 @@ internal object InvitationQr {
     Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         Text("Привязка SYN443",style=MaterialTheme.typography.headlineMedium)
         Text("Проверьте сервис, затем выберите вход через Keycloak или ручную привязку с подтверждением администратора.")
-        OutlinedTextField(value=link,onValueChange={if(it.length<=BootstrapTrust.MAX_LINK){link=it;preview=null}},label={Text("Ссылка syn443://")},
+        OutlinedTextField(value=link,onValueChange={if(it.length<=BootstrapTrust.MAX_LINK){link=it;preview=null;message=""}},label={Text("Ссылка syn443://")},
             visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password,autoCorrectEnabled=false),modifier=Modifier.fillMaxWidth().testTag("invite-link"),enabled=!busy,maxLines=3)
         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             Button(enabled=!busy,onClick={runCatching {image.launch("image/*")}.onFailure {message="Не удалось открыть выбор изображения."}},modifier=Modifier.testTag("invite-image")){Text("QR из фото")}

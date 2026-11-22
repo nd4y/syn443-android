@@ -13,14 +13,38 @@ Only a committed acknowledgement with the exact submitted IDs in order
 removes the prefix. An empty success or mismatching acknowledgement leaves
 the queue intact.
 
-While the VPN is active, uploads are attempted at least five minutes apart
-on validated unmetered Wi-Fi. The DPoP proof covers the exact bounded batch
+While the VPN is active, ordinary batches use a five-minute interval on
+validated unmetered Wi-Fi. A full queue batch (32 events), an unexpected
+native service disconnect, a policy rollback or a recorded loss of VPN
+consent can request earlier delivery during the existing supervisor tick.
+Attempts stay at least one minute apart. An unacknowledged batch with the
+same first event retains its five-minute retry interval across process restarts.
+The controller records a lost service connection without guessing whether
+the process suffered a Java or native crash. The DPoP proof covers the exact bounded batch
 and the current device session. Stop or a change of physical route cancels
 in-flight work. Delivery failure does not affect route health or VPN intent.
 
 This pilot does not provide full probe metrics, compressed delivery, the
-shared traffic budget, background uploads while Off, analysis or operator
+shared traffic budget, analysis or operator
 dashboards. Device/server end-to-end acceptance remains separate.
+
+The hosted enrolled rollback scenario enables telemetry for its disposable
+test identity. The fixture verifies the actual authenticated request body,
+acknowledges its event IDs in order and measures the interval until it sees
+the rollback. The emulator must retain its enrollment and return online
+through the previous managed route.
+
+## Delivery with the VPN switched off
+
+Opting in schedules one periodic WorkManager request for that local consent.
+Android may defer the 15-minute interval. The job runs inside the identity
+controller on validated unmetered Wi-Fi. An empty queue and lifecycle ring
+require no network. For pending data the controller verifies the existing
+device, renews its session if necessary and reads the signed policy and
+current telemetry capability before attempting a batch. It never starts the
+VPN. An observed change in the stopped VPN generation, consent, physical
+network or account cancels the operation. A fresh opt-in receives a separate
+schedule. A stopped WorkManager request closes its own transport.
 
 ## Managed adaptive reselection
 

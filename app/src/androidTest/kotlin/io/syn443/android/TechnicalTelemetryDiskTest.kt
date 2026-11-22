@@ -1,6 +1,7 @@
 package io.syn443.android
 
 import androidx.test.platform.app.InstrumentationRegistry
+import io.syn443.android.vpn.TelemetryWork
 import io.syn443.android.vpn.TechnicalTelemetryDisk
 import io.syn443.android.vpn.StateStore
 import io.syn443.decision.NetworkMode
@@ -98,6 +99,86 @@ class TechnicalTelemetryDiskTest {
             assertEquals(listOf("wifi","unknown","wifi","unknown","unknown"),entries.map {it.event.mode})
             assertTrue(entries.all {it.event.path==null})
         } finally {capture.disable()}
+    }
+
+    @Test fun criticalAndFullTelemetryBatchesUseOnlyCurrentConsentedEvents() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val capture = TelemetryCapture(context, "test-pressure-" + UUID.randomUUID().toString().replace("-", ""))
+        val owner = Identity.random()
+        val start = 1_800_000_000_000L
+        fun row(seq: Int, code: String) = JSONObject().put("sequence",seq).put("code",code)
+            .put("phase","Recovering").put("elapsed",100).put("at",start).put("networkEpoch",1)
+            .put("message","unrelated diagnostic detail")
+        try {
+            capture.enable(owner, 1)
+            val consent = checkNotNull(capture.consent(owner))
+            fun verify(rows: List<JSONObject>, expected: Boolean): List<String> {
+                val snapshot = JSONObject().put("events", JSONArray(rows))
+                assertEquals(expected, TelemetryCapture.hasNewPressure(snapshot, consent.through))
+                val entries = capture.sample(snapshot, consent, 132).first
+                assertTrue(entries.all { it.event.path == null && it.event.mode == "unknown" })
+                assertEquals(expected, TelemetryCapture.isUrgent(TechnicalTelemetry.Snapshot(1,owner,entries)))
+                return entries.map { it.event.kind + "/" + it.event.code }
+            }
+            assertEquals(listOf("vpn/recovering"), verify(listOf(row(1,"native_disconnected"),row(2,"native_binding_died")),false))
+            assertEquals(listOf("engine/unexpected_exit","policy/rolled_back","vpn/permission_revoked"), verify(listOf(
+                row(2,"native_disconnected"),row(3,"policy_rollback"),row(4,"vpn_permission_revoked")),true))
+            verify((2..32).map { row(it,"ordinary") },false)
+            verify((2..33).map { row(it,"ordinary") },true)
+            val rows = (2..65).map { row(it,"ordinary") }
+            val entries = capture.sample(JSONObject().put("events",JSONArray(rows)),consent,132).first
+            val full = TechnicalTelemetry.Snapshot(1,owner,entries)
+            val second = full.acknowledged(owner,checkNotNull(full.peek(owner)))
+            assertTrue(TelemetryCapture.isUrgent(second))
+            assertFalse(TelemetryCapture.isUrgent(second.acknowledged(owner,checkNotNull(second.peek(owner)))))
+        } finally { capture.disable() }
+    }
+
+    @Test fun stoppedTelemetryRequiresPositiveObservationThatEngineAndIntentAreOff() {
+        val off = JSONObject().put("desiredOn",false).put("engineActive",false).put("generation",2).put("engineStateKnown",true)
+        fun observation(field: String, value: Any) =
+            TelemetryWork.vpnState(JSONObject(off.toString()).put(field, value))
+        assertEquals(TelemetryWork.VpnState.STOPPED, TelemetryWork.vpnState(off))
+        assertEquals(TelemetryWork.VpnState.ACTIVE, observation("engineActive", true))
+        assertEquals(TelemetryWork.VpnState.ACTIVE, observation("desiredOn", true))
+        for ((field, value) in listOf("engineStateKnown" to false, "engineActive" to JSONObject.NULL,
+                "engineActive" to "false", "generation" to -1, "desiredOn" to JSONObject.NULL)) {
+            assertEquals(TelemetryWork.VpnState.UNKNOWN, observation(field, value))
+        }
+    }
+
+    @Test fun urgentAttemptHonorsPersistentSpacingExactHeadAndConsent() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val namespace = "test-spacing-" + UUID.randomUUID().toString().replace("-", "")
+        val capture = TelemetryCapture(context, namespace)
+        val owner = Identity.random()
+        val now = 1_800_000_000_000L
+        try {
+            capture.enable(owner, 0)
+            val consent = checkNotNull(capture.consent(owner))
+            fun batch() = TechnicalTelemetry.Batch(1,consent.session,132,0,1,
+                listOf(TechnicalTelemetry.Event(Identity.random(),now,1,1,"engine","unexpected_exit","unknown")))
+            val first = batch()
+            val next = batch()
+            assertTrue(capture.attempted(consent,now,first,false))
+            val reopened = TelemetryCapture(context, namespace)
+            assertEquals(120_000L,reopened.routineDelay(consent,now+180_000))
+            assertFalse(reopened.attempted(consent,now-1,next,true))
+            assertFalse(reopened.attempted(consent,now+59_999,next,true))
+            assertFalse(reopened.attempted(consent,now+60_000,next,false))
+            assertFalse(reopened.attempted(consent,now+60_000,first,true))
+            assertTrue(reopened.attempted(consent,now+60_000,next,true))
+            assertEquals(60_000L,capture.routineDelay(consent,now+300_000))
+            assertEquals(0L,capture.routineDelay(consent,now+360_000))
+            assertFalse(capture.attempted(consent,now+359_999,next,true))
+            assertTrue(capture.attempted(consent,now+360_000,next,false))
+            assertFalse(reopened.attempted(consent,now+660_000,next.copy(session=Identity.random()),true))
+            capture.disable()
+            assertNull(reopened.routineDelay(consent,now+360_000))
+            assertFalse(reopened.attempted(consent,now+660_000,next,true))
+            capture.enable(owner,0)
+            assertFalse(reopened.attempted(consent,now+660_000,next,true))
+        } finally { capture.disable() }
     }
 
     @Test fun encryptedQueueRestartsWithoutExposingAnotherEnrollment() {
