@@ -28,7 +28,11 @@ def failure_summary():
     for name in ('activeRevision','lastKnownGoodRevision','candidateRevision','activationGeneration','maxRevision'):
         value=policy.get(name)
         if type(value) is int and 0<=value<=9007199254740991:safe_policy[name]=value
-    return {'desiredOn':state.get('desiredOn') is True,'engineActive':state.get('engineActive') is True,
+    def observed_bool(key):
+        value=state.get(key)
+        return value if type(value) is bool else None
+    return {'desiredOn':observed_bool('desiredOn'),'engineActive':observed_bool('engineActive'),
+        'engineStateKnown':observed_bool('engineStateKnown'),'offPhase':state.get('phase')=='Off',
         'intentGeneration':state.get('generation') if type(state.get('generation')) is int else None,
         'policy':safe_policy,'authBusy':auth.get('busy') is True,
         'controllerPresent':bool(pid(':controller')),'nativePresent':bool(pid(':engine'))}
