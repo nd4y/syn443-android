@@ -29,6 +29,8 @@ jobs:
       - run: python3 tools/check_installation_profile.py
       - run: python3 tools/check_public_data.py --history
       - run: bash tools/scan_secrets.sh
+      - name: Verify scanner cache integrity and offline reuse
+        run: bash tools/test_scanner_cache.sh
   documents:
     needs: public-data
     runs-on: ubuntu-24.04
