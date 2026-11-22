@@ -79,7 +79,7 @@ internal class VerifiedUpdate(private val context: Context) {
         val installed = InstalledReleaseContext(local.longVersionCode, android.os.Build.VERSION.SDK_INT,
             android.os.Build.SUPPORTED_ABIS.toList(), checkNotNull(remote.getStringArrayList("capabilities")),
             checkNotNull(remote.getString("evaluator")), checkNotNull(remote.getString("schema")))
-        val prior = floorStore(scope).read()?.let { Canonical.json.decodeFromString<ReleaseFloor>(it) }
+        val prior = floorStore(scope).read(rejectAbandonedWrite = true)?.let { Canonical.json.decodeFromString<ReleaseFloor>(it) }
         val approved = ReleaseAdmission.verify(envelope, authority.anchor, scope, installed, prior,
             TimeWindow(remote.getLong("lowerMs"), remote.getLong("upperMs")))
         UpdateOffer(envelope, approved, checkNotNull(remote.getString("binding")), checkNotNull(remote.getString("policy")))
@@ -156,9 +156,9 @@ internal class VerifiedUpdate(private val context: Context) {
             val current = revalidate(update.offer)
             val floor = floorStore(current.release.floor.scope)
             val raw = Canonical.json.encodeToString(current.release.floor)
-            if (floor.read() != raw) {
+            if (floor.read(rejectAbandonedWrite = true) != raw) {
                 floor.write(raw)
-                check(floor.read() == raw)
+                check(floor.read(rejectAbandonedWrite = true) == raw)
             }
         }
         return intent

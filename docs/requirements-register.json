@@ -3056,8 +3056,14 @@
     {
       "id": "AC24",
       "specRow": " Обновление APK/схемы, восстановление сервера из backup | Конфиг/identity сохранены при разрешённой миграции, rollback/restore действительно проверены |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "tools/run_enrolled_vpn.py",
+        "tools/verify_upgrade_fixture.py",
+        ".github/workflows/ci.yml"
+      ],
+      "implementationScope": "The Actions upgrade scenario installs a higher-version APK over an enrolled app, checks explicit Off and the existing committed policy, then signs a fresh policy request and reconnects through the real TUN with the original device binding.",
+      "remainingScope": "Hosted results for this revision, historical Android data schema migrations, release-signed physical upgrades and the combined server restore and rollback acceptance."
     },
     {
       "id": "AC25",

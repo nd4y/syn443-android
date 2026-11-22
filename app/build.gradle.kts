@@ -26,6 +26,12 @@ val prototypeAssets = tasks.register<PrototypeAssets>("preparePrototypeAssets") 
 androidComponents.onVariants { variant ->
     variant.sources.assets?.addGeneratedSourceDirectory(prototypeAssets, PrototypeAssets::outputDirectory)
 }
+if (providers.gradleProperty("syn443CiUpgrade").orNull == "true") {
+    require(providers.environmentVariable("GITHUB_ACTIONS").orNull == "true")
+    androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
+        variant.outputs.forEach { output -> output.versionCode.set(Math.addExact(output.versionCode.get(), 1)) }
+    }
+}
 val enrollmentLinkHost = providers.environmentVariable("SYN443_ENROLLMENT_LINK_HOST").orElse("").get()
     .ifBlank { "links.example.invalid" }
 val installationProfile = providers.environmentVariable("SYN443_INSTALLATION_PROFILE").orElse("").get()

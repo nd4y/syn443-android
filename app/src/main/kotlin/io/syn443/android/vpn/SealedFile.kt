@@ -22,9 +22,9 @@ class SealedFile(context: Context, name: String) {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    fun read(): String? {
+    fun read(rejectAbandonedWrite: Boolean = false): String? {
         if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) {
-            require(!File(file.baseFile.path + ".new").exists()) { "Incomplete sealed record" }
+            require(!rejectAbandonedWrite || !File(file.baseFile.path + ".new").exists()) { "Incomplete sealed record" }
             return null
         }
         val data = file.openRead().use { require(it.available() <= 2_097_152); it.readBytes() }
