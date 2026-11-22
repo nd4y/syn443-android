@@ -24,7 +24,8 @@ def integer(value):
     return bytes([2,len(raw)])+raw
 
 class Fixture:
-    def __init__(self,config):
+    def __init__(self,config, *, assigned_device=None):
+        self.assigned_device=assigned_device
         self.publisher=Publisher();self.root=Path(self.publisher.temp.name)
         self.rsa=self.root/'issuer.pem';self.cert=self.root/'tls.pem';self.tls_key=self.root/'tls-key.pem'
         subprocess.run([OPENSSL,'genpkey','-algorithm','RSA','-pkeyopt','rsa_keygen_bits:2048','-out',str(self.rsa)],check=True,capture_output=True)
@@ -95,7 +96,7 @@ class Fixture:
             assert self.tokens[token]==thumb;value=json.loads(body);assert digest(canonical(value['key']))==thumb
             if body not in self.receipts:
                 now=int(time.time()*1000);self.registrations+=1
-                session={'deviceId':secrets.token_urlsafe(32),'accessToken':secrets.token_urlsafe(32),'refreshToken':secrets.token_urlsafe(32),
+                session={'deviceId':self.assigned_device or secrets.token_urlsafe(32),'accessToken':secrets.token_urlsafe(32),'refreshToken':secrets.token_urlsafe(32),
                     'accessUntilMs':now+590000,'refreshUntilMs':now+86000000,'generation':0,'nonce':secrets.token_urlsafe(32)}
                 self.sessions[thumb]=session;self.receipts[body]=session.copy()
             return 200,self.receipts[body],{}

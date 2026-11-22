@@ -47,6 +47,11 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation):
     await_condition(vpn_stopped)
     before = call('status')
     assert before['desiredOn'] is False
+    from installer_cancel_ui import cancel_installer
+    cancel_installer(directory, next(iter(original))[1], installed_version, receipt['previous'])
+    assert call('auth-status')['generation'] == auth_generation and binding() == original and fixture.registrations == 1
+    assert vpn_stopped() and call('status')['generation'] == before['generation']
+    assert call('status')['policy']['activeRevision'] == 1
     response = adb('install', '-r', str(directory / 'new-debug.apk'), timeout=120)
     assert b'Success' in response.splitlines() and installed_version() == receipt['previous'] + 1
     adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
@@ -99,12 +104,21 @@ def main():
         nonlocal fixture
         if fixture:
             adb('reverse','--remove','tcp:'+str(fixture.server.server_port));fixture.close();fixture=None
-    def setup(pending=False):
+    def setup(pending=False, installer=False):
         nonlocal fixture
+        device=None
+        if installer:
+            if os.environ.get('GITHUB_ACTIONS')!='true' or adb('emu','avd','name').splitlines()!=[b'syn443-ci', b'OK']:
+                raise ValueError('Disposable installer emulator required')
+            from enrollment_fixture import decode
+            directory=Path(os.environ['RUNNER_TEMP'])/'upgrade-fixture'
+            envelope=(directory/'syn443-update.txt').read_text(encoding='ascii')
+            device=json.loads(decode(envelope.split('.')[1]))['scope']['deviceId']
+            assert b'Success' in adb('install','-r',str(directory/'installer-base.apk'),timeout=120).splitlines()
         logout();close_fixture();call('policy-test-reset');call('test-reset')
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
-        fixture=Fixture(config);fixture_port=fixture.server.server_port
+        fixture=Fixture(config,assigned_device=device);fixture_port=fixture.server.server_port
         fixture.pending_policy_requests=1 if pending else 0
         adb('reverse','tcp:'+str(fixture_port),'tcp:'+str(fixture_port))
         data=json.dumps(fixture.bootstrap(),separators=(',',':')).encode()
@@ -135,7 +149,8 @@ def main():
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
             try:
-                setup(name=='enrolledPendingAssignmentRetriesWhileVisible');before=proxy.progress;generation=call('auth-status')['generation']
+                setup(name=='enrolledPendingAssignmentRetriesWhileVisible',installer=name=='enrolledVersionUpgradeRetainsBindingPolicyAndRealTun')
+                before=proxy.progress;generation=call('auth-status')['generation']
                 if name=='enrolledPendingAssignmentRetriesWhileVisible':
                     assert fixture.policy_requests>=2 and fixture.registrations==1
                     assert call('status')['policy']['activeRevision']==1

@@ -256,6 +256,9 @@ jobs:
           python3 tools/verify_upgrade_fixture.py record "$base" "$fixture/new-debug.apk" public-evidence/build-manifest.json "$fixture/upgrade.json"
           python3 tools/check_apk.py "$fixture/new-debug.apk"
           python3 tools/check_apk_assets.py "$fixture/new-debug.apk"
+          python3 tools/prepare_installer_acceptance.py "$fixture" public-evidence/build-manifest.json
+          python3 tools/check_apk.py "$fixture/installer-base.apk"
+          python3 tools/check_apk_assets.py "$fixture/installer-base.apk"
           python3 tools/check_public_data.py "$fixture"
           bash tools/scan_secrets.sh "$fixture"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
