@@ -1192,14 +1192,28 @@
     {
       "id": "ALG-07",
       "text": "Скорость включает end-to-end latency через цепочку, setup time, p50/p95 прикладных проб и при разрешении отдельные throughput тесты. Сумма ping отдельных нод и ping телефона до входа не заменяют измерение полного пути. Массовый speedtest не нужен для повседневного выбора.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-search-status.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteProbeDurations.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSnapshotTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSearchStatusTest.kt"
+      ],
+      "implementationScope": "The route details report p50, p95 and sample count for recent, comparable successful application checks on the same observed path. The display reuses existing measurements and requires a fresh working route.",
+      "remainingScope": "Separate setup/throughput measurements and full scoring acceptance."
     },
     {
       "id": "ALG-08",
       "text": "Точность метрик задаётся числом проб, размером выборки, свежестью и confidence. Для устойчивого маршрута достаточно минимального подтверждения; сомнительные результаты запускают дополнительные проверки в бюджете. Больше измерений не является самостоятельной целью, если это не улучшает устойчивость выбора.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/route-search-status.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteProbeDurations.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSnapshotTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSearchStatusTest.kt"
+      ],
+      "implementationScope": "The route details report p50, p95 and sample count for recent, comparable successful application checks on the same observed path. The display reuses existing measurements and requires a fresh working route.",
+      "remainingScope": "Calibrated confidence and budgeted adaptive sampling across all supported check programs."
     },
     {
       "id": "ALG-09",

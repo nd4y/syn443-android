@@ -129,6 +129,42 @@ class RouteSearchStatusTest {
         assertEquals("WAITING_CONTEXT",search(row(scope)))
     }
 
+    @Test fun activeAdaptiveRouteShowsOnlyComparableConfirmedApplicationTimings() {
+        val raw = ManagedAdaptiveRoutesFairnessTest().config(choices = 1, publicExit = true)
+        val owner = RouteScope(1, 2, 3, "owner", Policy.hash(raw))
+        RouteSnapshot.configure(raw, owner.config)
+        RouteSnapshot.owner(owner)
+        fun display() = JSONObject().put("routeHealth", RouteSnapshot.read(true, true, owner))
+        fun sample(ms: Long, receipt: String, vararg hops: String) {
+            RouteSnapshot.adaptive(owner, "managed-00", true, "ok", ms, hops.toList(), receipt = receipt)
+        }
+        val state = mutableStateOf(display())
+        compose.setContent { MaterialTheme { RouteControls(state.value) { _, _ -> } } }
+        val summary = compose.onNodeWithTag("route-1-distribution")
+        compose.runOnIdle {
+            sample(30, "receipt-a", "first", "last")
+            sample(30, "receipt-a", "first", "last")
+            state.value = display()
+        }
+        summary.assertDoesNotExist()
+        compose.runOnIdle {
+            sample(70, "receipt-b", "first", "last")
+            state.value = display()
+        }
+        summary.assertTextEquals("Длительность проверок · за 15 мин успешно 2 · p50 30 мс · p95 70 мс")
+        compose.runOnIdle {
+            sample(12, "receipt-c", "first", "different")
+            state.value = display()
+        }
+        summary.assertDoesNotExist()
+        compose.runOnIdle {
+            sample(14, "receipt-d", "first", "different")
+            RouteSnapshot.adaptiveOwnerChanged(owner, setOf("managed-00"))
+            state.value = display()
+        }
+        summary.assertDoesNotExist()
+    }
+
     @Test fun failedOrExpiredPathAndAbsentLatencyHaveDistinctLabels() {
         val scope = configure()
         RouteSnapshot.adaptive(scope, "managed-00", true, "ok", 0, listOf("synthetic-hop"))

@@ -391,7 +391,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             group.clearImprovement();group.recheckFailed=false;group.failure=null
             memory?.record(checkNotNull(context),key(work.group,work.path),work.attempt,now,ProbeVerdict.VERIFIED)
             group.search=AdaptiveSearchState.VERIFIED
-            RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),true,"ok",work.latency,work.path.hops,work.checkPlan)
+            RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),true,"ok",work.latency,work.path.hops,work.checkPlan,work.receipt)
         } else if(work.action=="probe" && code in setOf("probe_unavailable","exit_mismatch","check_failed")) {
             val checkedAt=if(code=="check_failed") {
                 if(raw.optString("checkCode") !in checkedFailures)return

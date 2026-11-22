@@ -49,3 +49,18 @@ managed-chain physical behavior, LTE, battery or full autonomous routing. This
 candidate is version91 / `0.9.63-route-search-status`; version90 delivery and
 its earlier evidence remain separate. No device changes are part of source
 preparation.
+
+## End-to-end application probe duration
+
+An active route with a single HTTP or SSH banner check can show p50 and p95
+for its recent successful checks. Each observation measures an application
+probe through the concrete path. A managed adaptive path contributes its
+native probe duration once the engine confirms selection. Repeated delivery
+of the same receipt counts once.
+
+The route details show the sample count alongside both nearest-rank percentiles.
+The window uses up to 20 samples from the last 15 minutes and requires at least
+two. A changed path starts a new window. A failed or incomplete measurement,
+loss of the owner, or a configuration change clears the affected history.
+A stale latest measurement hides the distribution. The client reuses scheduled
+or manually requested probes and keeps these samples in process memory.

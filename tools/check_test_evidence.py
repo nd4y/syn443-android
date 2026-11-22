@@ -95,6 +95,10 @@ if mode=="emulator":
     assert {
         ("io.syn443.android.RouteSnapshotTest", "terminalOmissionAndDeadlineClearOnlyMissingMeasurements"),
     } <= set(identities), "Missing route measurement consistency outcomes"
+    assert {("io.syn443.android.RouteSnapshotTest", name) for name in (
+        "applicationDurationsCountDistinctSuccessesAndRetireOnLossOfRouteEvidence",
+        "routeDurationWindowBoundsSamplesLifetimeAndPathIdentity",
+    )} <= set(identities), "Missing route duration distribution outcomes"
     assert {("io.syn443.android.VerifiedUpdateTest", name) for name in (
         "updateScreenShowsInstalledBuildAndCannotInstallWithoutAnAcceptedOffer",
         "packageManagerRechecksRealPackageSignerSdkAndEmbeddedAbiHashes",
@@ -838,6 +842,7 @@ ADAPTIVE_SEARCH_REQUIRED = [
     ('io.syn443.android.RouteSearchStatusTest', 'verifiedProjectionJoinsExactExistingTtlScopeReadinessAndFutureSampleGuards'),
     ('io.syn443.android.RouteSearchStatusTest', 'diagnosticProjectionCannotAuthorizeRequiredReadinessOrActivation'),
     ('io.syn443.android.RouteSearchStatusTest', 'failedOrExpiredPathAndAbsentLatencyHaveDistinctLabels'),
+    ('io.syn443.android.RouteSearchStatusTest', 'activeAdaptiveRouteShowsOnlyComparableConfirmedApplicationTimings'),
     ('io.syn443.android.RouteSearchStatusTest', 'copiedSixteenGroupProjectionRejectsOverflowForeignScopeAndClearsOnInvalidate'),
     ('io.syn443.android.RouteSearchStatusTest', 'finiteSearchLabelsNeverClaimNoRoutesAndRecompositionDispatchesNothing'),
 ]
