@@ -16,6 +16,8 @@ through ADB shell. It does not open a management port.
 | `netbird-cancel --job-id <id>` | Request cancellation of the diagnostic job shown by status |
 | `netbird-view --section peers --page 1` | Select a read-only peer page; `--section diagnostics` selects result pages, page0..63 |
 | `vpn-start`, `vpn-stop`, `vpn-resume` | Submit a command to the durable VPN intent controller |
+| `mode-get` | Current observed mode, automatic/assigned/manual source, allowed alternatives and their maximum duration. An inactive controller returns `unavailable`. |
+| `mode-set --stamp <stamp> --mode WIFI --minutes 15` | Submit one temporary choice from the latest `mode-get`. Use `--mode AUTO --minutes 0` to clear a manual choice. Read `mode-get` again for the effective mode. |
 | `config-plan`, `config-apply` | Validate and optionally write an unmanaged local config while the VPN is fully Off |
 
 A successful command submission is not a successful connection. Read

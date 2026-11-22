@@ -3,6 +3,7 @@ package io.syn443.android
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import io.syn443.android.vpn.ManagedNetworkMode
+import io.syn443.android.vpn.OperatorNetworkMode
 import io.syn443.android.vpn.NetworkModeControls
 import io.syn443.decision.NetworkMode
 import io.syn443.policy.NetworkModePolicy
@@ -16,6 +17,41 @@ class ManagedNetworkModeTest {
     private val scope=ManagedNetworkMode.Scope(7,5,"native","config","authority",1)
     private val rule=NetworkModePolicy.parse(Policy.json.parseToJsonElement(
         """{"preferredMode":"HOME_WIFI","userModes":["WIFI","HOME_WIFI"],"maxOverrideMinutes":30}"""),true)
+
+    @Test fun operatorModeReceiptRequiresCurrentAllowedChoiceAndFreshObservation() {
+        val state = ManagedNetworkMode()
+        val status = org.json.JSONObject().put("desiredOn", true).put("generation", 7).put("networkEpoch", 5)
+        fun view(at: Long) = checkNotNull(state.observe(scope, rule, NetworkMode.HOME_WIFI, at, 120_000))
+        val first = view(1)
+        val report = OperatorNetworkMode.observe(status, first.json().put("private", "local-fixture"), 1)
+        assertFalse(report.has("private"))
+        fun rejected(argument: String) {
+            var called = false
+            assertThrows(IllegalArgumentException::class.java) {
+                OperatorNetworkMode.request(report, argument) { _, _, _ -> called = true; true }
+            }
+            assertFalse(called)
+        }
+        rejected(first.stamp + ":WIFI:31")
+        rejected(first.stamp + ":CELLULAR:1")
+        rejected(first.stamp + ":AUTO:0")
+        rejected("00000000-0000-0000-0000-000000000000:WIFI:1")
+        val receipt = OperatorNetworkMode.request(report, first.stamp + ":WIFI:2") { stamp, mode, duration ->
+            state.choose(first, stamp, mode, duration, 1)
+        }
+        assertTrue(receipt.getBoolean("admitted"))
+        assertFalse(receipt.has("effective"))
+        val current = view(2)
+        val manual = OperatorNetworkMode.observe(status, current.json(), 2)
+        assertEquals("WIFI", manual.getString("effective"))
+        assertEquals("manual", manual.getString("source"))
+        assertEquals(119_998L, manual.getLong("remainingMs"))
+        assertEquals("unavailable", OperatorNetworkMode.observe(status, current.json(), 120_000).getString("state"))
+        OperatorNetworkMode.request(manual, current.stamp + ":AUTO:0") { stamp, mode, duration ->
+            state.choose(current, stamp, mode, duration, 2)
+        }
+        assertEquals("assigned", view(3).source)
+    }
 
     @Test fun userChoicePrecedesAssignmentAndExpiresAtTheExactMonotonicBoundary() {
         val state=ManagedNetworkMode()

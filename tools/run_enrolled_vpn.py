@@ -182,6 +182,87 @@ def signed_program_failover(fixture, primary, generation):
             reserve.server_close()
 
 
+def enrolled_operator_mode(fixture, primary):
+    from policy_fixture import b64
+    if os.environ.get('GITHUB_ACTIONS') != 'true' or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']:
+        raise ValueError('Disposable Wi-Fi emulator required')
+    serial = adb('get-serialno').decode().strip()
+    if not re.fullmatch(r'emulator-[0-9]+', serial):
+        raise ValueError('Unexpected emulator identity')
+
+    def cli(operation, *options):
+        raw = subprocess.check_output([sys.executable, str(ROOT / 'tools/syn443ctl.py'), '--serial', serial,
+                                       operation, *options], timeout=20)
+        result = json.loads(raw)
+        assert result['schemaVersion'] == 1 and result['operation'] == operation
+        return result['result']
+
+    reserve = Server(('127.0.0.1', 0), RouteProxy)
+    reserve.ssh_ok, reserve.health_ok, reserve.delay, reserve.route_probes = True, True, 0, 0
+    port = reserve.server_address[1]
+    threading.Thread(target=reserve.serve_forever, daemon=True).start()
+    try:
+        adb('reverse', 'tcp:' + str(port), 'tcp:' + str(port))
+        route = copy.deepcopy(fixture.config)
+        base = route['outbounds'][0]
+        names = ['hop-%02d' % i for i in range(21)]
+        features = ['TCP', 'IPV4']
+        graph = {'schemaVersion': 1, 'edges': [], 'hops': [], 'templates': [{'id': 'one', 'slots': [names]}],
+                 'groups': [{'id': 'office', 'intent': 'INTERNAL', 'features': features, 'templates': ['one']}]}
+        catalogue = {}
+        for name in names:
+            eligible = name == names[-1]
+            graph['hops'].append({'id': name, 'entryModes': ['WIFI' if eligible else 'HOME_WIFI'],
+                                  'exitClass': 'INTERNAL', 'features': features})
+            catalogue[name] = dict(base, tag=name, server_port=port if eligible else primary.server_address[1])
+        def encode(document):
+            return b64(json.dumps(document, sort_keys=True, separators=(',', ':')).encode())
+        route['adaptive_routes'] = {'schemaVersion': 1, 'graphB64': encode(graph),
+                                    'catalogueB64': encode(catalogue), 'groups': {'office': 'managed-office'}}
+        route['outbounds'].append({'type': 'syn443-adaptive', 'tag': 'managed-office', 'group': 'office'})
+        route['route']['rules'] = [{'ip_cidr': ['203.0.113.10/32'], 'action': 'route', 'outbound': 'managed-office'}]
+        route['route_checks'] = [{'outbound': 'managed-office', 'required': True,
+                                  'checks': [{'method': 'ssh_banner', 'target': '192.0.2.9:22'}]}]
+        route['network_mode'] = {'preferredMode': 'AUTO', 'userModes': ['WIFI'], 'maxOverrideMinutes': 3}
+        fixture.extra_capabilities = ('route.health.v1', 'route.adaptive-tcp.v1', 'route.decision.v1', 'network.mode-selection.v1')
+        fixture.config = route
+        fixture.revision = 2
+        call('policy-refresh')
+
+        def working():
+            if not committed_online(call('status'), 2):
+                return False
+            return any(row.get('state') == 'working' and row.get('measuredPath') == [names[-1]]
+                       for row in call('routes-status')['routes'])
+
+        def mode(source):
+            result = cli('mode-get')
+            return result if (result.get('state') == 'observed' and result.get('effective') == 'WIFI'
+                              and result.get('source') == source and result.get('allowed') == ['WIFI']) else None
+
+        await_condition(working, 120)
+        exchange_through_proxy(reserve)
+        automatic = mode('automatic')
+        assert automatic and automatic['maxMinutes'] == 3
+        submitted = cli('mode-set', '--stamp', automatic['stamp'], '--mode', 'WIFI', '--minutes', '2')
+        assert submitted == {'admitted': True, 'generation': automatic['generation'], 'networkEpoch': automatic['networkEpoch']}
+        await_condition(lambda: mode('manual') and working(), 100)
+        exchange_through_proxy(reserve)
+        manual = mode('manual')
+        assert manual and manual['stamp'] != automatic['stamp'] and 0 < manual['remainingMs'] <= 120_000
+        cleared = cli('mode-set', '--stamp', manual['stamp'], '--mode', 'AUTO', '--minutes', '0')
+        assert cleared == submitted
+        await_condition(lambda: mode('automatic') and working(), 100)
+        exchange_through_proxy(reserve)
+        assert fixture.registrations == 1
+    finally:
+        try:
+            adb('reverse', '--remove', 'tcp:' + str(port))
+        finally:
+            reserve.shutdown()
+            reserve.server_close()
+
+
 def check_rejected_policies(fixture, proxy, generation):
     """Deliver each negative AC06 example over the normal, authenticated policy endpoint."""
     from policy_fixture import b64
@@ -346,7 +427,7 @@ def main():
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
            'enrolledStopFencesPendingCandidateRouteSuccess','enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn',
            'enrolledRejectedUpdatesRetainAuthorizedTunnel', 'enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun',
-           'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
+           'enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath', 'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
     if installer_only:
         names=['enrolledSystemInstallerCancelKeepsBoundPolicy']
     elif historical:
@@ -382,6 +463,8 @@ def main():
                     assert fixture.registrations==1
                 elif name=='enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun':
                     signed_program_failover(fixture, proxy, generation)
+                elif name=='enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath':
+                    enrolled_operator_mode(fixture, proxy)
                 elif name=='enrolledRejectedUpdatesRetainAuthorizedTunnel':
                     check_rejected_policies(fixture, proxy, generation)
                 elif name=='enrolledCandidateRegressionRollsBack':

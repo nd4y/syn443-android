@@ -24,6 +24,7 @@ METHODS = {
     "overlay-status": "overlay-status", "netbird-status": "status", "netbird-diagnose": "netbird-diagnose", "netbird-view": "netbird-view", "netbird-cancel": "netbird-cancel",
     "vpn-start": "connect", "vpn-stop": "disconnect", "vpn-resume": "resume",
     "resources": "resources", "engine-exits": "engine-exits", "health-workers": "health-workers",
+    "mode-get": "operator-mode-get", "mode-set": "operator-mode-set",
     "config-plan": "config-plan-file", "config-apply": "config-apply-file",
     "support-bundle-collect": "bundle-collect", "support-bundle-status": "bundle-status",
     "support-bundle-cancel": "bundle-cancel", "support-bundle-open": "bundle-open",
@@ -32,7 +33,7 @@ METHODS = {
 }
 OPERATIONS = ("capabilities", "status", "logs", "diagnostic-bundle", "routes-status",
               "routes-check", "routes-cancel", "overlay-status", "netbird-status", "netbird-diagnose", "netbird-view", "netbird-cancel",
-              "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply",
+              "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply", "mode-get", "mode-set",
               "support-bundle", "support-bundle-collect", "support-bundle-status",
               "support-bundle-cancel", "support-bundle-export")
 OVERLAY_PROVIDERS = ("netbird", "tailscale", "zerotier")
@@ -138,6 +139,49 @@ def overlay_health(provider, data):
     return data
 
 
+MODE_CHOICES = ("WIFI", "HOME_WIFI", "CELLULAR", "CELLULAR_RESTRICTED")
+MODE_STAMP = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def valid_mode_argument(value):
+    parts = value.split(":")
+    if len(parts) != 3 or not MODE_STAMP.fullmatch(parts[0]):
+        return False
+    mode, minutes = parts[1:]
+    return (mode == "AUTO" and minutes == "0") or (
+        mode in MODE_CHOICES and re.fullmatch(r"[1-9][0-9]{0,3}", minutes) is not None and int(minutes) <= 1440)
+
+
+def mode_reply(operation, data):
+    invalid = ControlError("invalid_reply", 5)
+    counters = {"generation", "networkEpoch"}
+    for key in counters & data.keys():
+        if type(data[key]) is not int or not 0 <= data[key] < 2**63:
+            raise invalid
+    if operation == "mode-set":
+        if set(data) != counters | {"admitted"} or data["admitted"] is not True:
+            raise invalid
+        return data
+    if data.get("state") == "unavailable" and set(data) <= counters | {"state"}:
+        return data
+    fields = counters | {"state", "effective", "source", "allowed", "maxMinutes", "stamp"}
+    if data.get("source") == "manual":
+        fields.add("remainingMs")
+        remaining = data.get("remainingMs")
+        if type(remaining) is not int or not 1 <= remaining <= 86_400_000:
+            raise invalid
+    if (set(data) != fields or data.get("state") != "observed" or
+            data["effective"] not in (*MODE_CHOICES, "UNKNOWN") or data["source"] not in ("automatic", "manual", "assigned") or
+            not isinstance(data["stamp"], str) or not MODE_STAMP.fullmatch(data["stamp"]) or
+            type(data["maxMinutes"]) is not int or not 0 <= data["maxMinutes"] <= 1440):
+        raise invalid
+    allowed = data["allowed"]
+    if (not isinstance(allowed, list) or len(allowed) > len(MODE_CHOICES) or
+            any(mode not in MODE_CHOICES for mode in allowed) or len(allowed) != len(set(allowed))):
+        raise invalid
+    return data
+
+
 class Device:
     def __init__(self, serial, timeout):
         if not re.fullmatch(r"[A-Za-z0-9_.:%\[\]-]{1,128}", serial) or serial.startswith("-"):
@@ -156,12 +200,13 @@ class Device:
             view = canonical_view(argument) if operation == "netbird-view" else None
             cancel = operation == "netbird-cancel" and support_hex(argument, 32)
             provider = operation == "overlay-status" and argument in OVERLAY_PROVIDERS
-            if not provider and not cancel and not route and not ticket and not bundle_id and not bundle_read and view is None:
+            mode_change = operation == "mode-set" and valid_mode_argument(argument)
+            if not mode_change and not provider and not cancel and not route and not ticket and not bundle_id and not bundle_read and view is None:
                 raise ControlError("invalid_arguments", 2)
             # adb shell joins arguments into an Android shell command. Our closed
             # ASCII view has no apostrophe; single quoting preserves JSON quotes.
             command.extend(["--arg", "'" + view + "'" if view is not None else argument])
-        elif operation in {"netbird-view", "netbird-cancel", "overlay-status"}:
+        elif operation in {"netbird-view", "netbird-cancel", "overlay-status", "mode-set"}:
             raise ControlError("invalid_arguments", 2)
         try:
             result = subprocess.run(command, capture_output=True, timeout=self.timeout, check=False)
@@ -711,6 +756,9 @@ def main(argv=None):
     parser.add_argument("operation", choices=OPERATIONS)
     parser.add_argument("--route")
     parser.add_argument("--provider", choices=OVERLAY_PROVIDERS)
+    parser.add_argument("--stamp")
+    parser.add_argument("--mode", choices=(*MODE_CHOICES, "AUTO"))
+    parser.add_argument("--minutes", type=int)
     parser.add_argument("--section", choices=("peers", "diagnostics"))
     parser.add_argument("--page", type=int, choices=range(64))
     parser.add_argument("--file")
@@ -743,6 +791,12 @@ def main(argv=None):
             args.operation != "config-apply" and (args.expected_revision is not None or args.expected_candidate is not None)
         ):
             raise ControlError("invalid_arguments", 2)
+        mode_fields = (args.stamp, args.mode, args.minutes)
+        if args.operation == "mode-set":
+            if any(value is None for value in mode_fields) or not valid_mode_argument(f"{args.stamp}:{args.mode}:{args.minutes}"):
+                raise ControlError("invalid_arguments", 2)
+        elif any(value is not None for value in mode_fields):
+            raise ControlError("invalid_arguments", 2)
         device = Device(args.serial, args.timeout)
         if args.operation in SUPPORT_OPERATIONS:
             connection = device.bundle_connection() if args.operation in {"support-bundle", "support-bundle-export"} else nullcontext()
@@ -753,11 +807,17 @@ def main(argv=None):
             operations = [
                 op for op in OPERATIONS
                 if (op not in CONFIG or state.get("localConfigControl") is True)
+                and (op not in {"mode-get", "mode-set"} or state.get("operatorNetworkMode") is True)
                 and (op != "overlay-status" or state.get("overlayProviderHealth") is True)
                 and (op != "netbird-cancel" or state.get("netbirdDiagnosticCancellation") is True)
             ]
             data = {"operations": operations, "access": "debug_adb_shell",
                     "device": {**numbers(state, NUMBERS), "unlocked": state.get("phase") != "NeedsUnlock"}}
+        elif args.operation in {"mode-get", "mode-set"}:
+            if not device.supports_type("network-mode", b"application/vnd.syn443.network-mode-v1"):
+                raise ControlError("unsupported_operation", 4)
+            argument = f"{args.stamp}:{args.mode}:{args.minutes}" if args.operation == "mode-set" else None
+            data = mode_reply(args.operation, device.call(args.operation, argument))
         elif args.operation == "diagnostic-bundle":
             data = bundle(device)
         elif args.operation == "logs" and args.follow_seconds:
