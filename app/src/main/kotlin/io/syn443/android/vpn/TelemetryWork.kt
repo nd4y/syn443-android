@@ -26,6 +26,10 @@ internal object TelemetryWork {
     const val CONSENT = "consent"
     private var scheduledSession: String? = null
     private val sessionFormat = Regex("[A-Za-z0-9_-]{43}")
+    fun knownStopped(state: org.json.JSONObject) =
+        state.opt("desiredOn") == false && state.opt("engineActive") == false &&
+            state.opt("engineStateKnown") == true && state.optLong("generation", -1) >= 0
+
     fun valid(session: String?) = session != null && sessionFormat.matches(session)
     fun name(session: String) = "technical-telemetry-" + session
 

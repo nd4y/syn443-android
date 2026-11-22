@@ -1072,9 +1072,9 @@ class LoginController private constructor(private val context:android.app.Applic
         val initial = journal.snapshot()
         if (initial.phase != LoginPhase.POLICY_CACHED &&
             !(initial.phase == LoginPhase.REFRESHING && initial.refreshReturnPhase == LoginPhase.POLICY_CACHED)) return true
-        val stopped = state().read()
-        if (stopped.optBoolean("desiredOn") || stopped.optBoolean("engineActive")) return true
-        val generation = stopped.optLong("generation")
+        val stopped = LifecycleAccess.engineStatus(context, state().read())
+        if (!TelemetryWork.knownStopped(stopped)) return true
+        val generation = stopped.getLong("generation")
         val original = payload(initial)
         val scopeKey = telemetryKey(checkNotNull(original.session))
         val consent = telemetryCapture.consent(scopeKey)?.takeIf { it.session == ticket } ?: return true
@@ -1083,8 +1083,8 @@ class LoginController private constructor(private val context:android.app.Applic
             val identity = journal.snapshot()
             check(active() && identity.generation == initial.generation && identity.reauthRevision == initial.reauthRevision &&
                 telemetryCapture.consent(scopeKey)?.session == ticket)
-            val vpn = state().read()
-            check(!vpn.optBoolean("desiredOn") && !vpn.optBoolean("engineActive") && vpn.optLong("generation") == generation)
+            val vpn = LifecycleAccess.engineStatus(context, state().read())
+            check(TelemetryWork.knownStopped(vpn) && vpn.getLong("generation") == generation)
         }
         checkOwner()
         val old = telemetryDisk.read(queueKey)

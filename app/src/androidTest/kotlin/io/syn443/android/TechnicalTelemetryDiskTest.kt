@@ -133,6 +133,15 @@ class TechnicalTelemetryDiskTest {
         } finally { capture.disable() }
     }
 
+    @Test fun stoppedTelemetryRequiresPositiveObservationThatEngineAndIntentAreOff() {
+        val off = JSONObject().put("desiredOn",false).put("engineActive",false).put("generation",2).put("engineStateKnown",true)
+        assertTrue(io.syn443.android.vpn.TelemetryWork.knownStopped(off))
+        for ((field,value) in listOf("engineActive" to true, "desiredOn" to true, "engineStateKnown" to false,
+                "engineActive" to JSONObject.NULL, "engineActive" to "false", "generation" to -1)) {
+            assertFalse(io.syn443.android.vpn.TelemetryWork.knownStopped(JSONObject(off.toString()).put(field,value)))
+        }
+    }
+
     @Test fun urgentAttemptHonorsPersistentSpacingExactHeadAndConsent() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val namespace = "test-spacing-" + UUID.randomUUID().toString().replace("-", "")
