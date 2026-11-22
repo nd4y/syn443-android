@@ -24,6 +24,11 @@ import java.util.UUID
 internal class ManagedAdaptiveRoutes private constructor(private val wire:AdaptiveRuntime,private val priorityTag:String,
     private val budget:AdaptiveStartAdmission) {
     private data class CurrentFailure(val path:PlannedPath,val attempt:Long,val completedAt:Long,val nativeEpoch:Long,val nativeScope:String)
+    // A hint only orders a future probe. Its timestamp is the original native measurement.
+    private data class WarmPath(val hops: List<String>, val measuredAt: Long) {
+        fun fresh(now: Long) = now - measuredAt in 0L until 120_000L
+    }
+
     private data class Group(var frontier:RouteFrontier?=null,var current:PlannedPath?=null,
         var emptyPages:Int=0,var onlyFenced:Boolean=true,var firstRetryAt:Long?=null,
         var measuredAt:Long=0,var latency:Long=0,var nextAt:Long=0,var exploreAt:Long=0,
@@ -31,6 +36,25 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         var improvementAt:Long=0,var recheckFailed:Boolean=false,
         var failure:CurrentFailure?=null,var selectionToken:Long=0,var hintSequence:Long=0,var urgentRecheck:Boolean=false,var forceCheck:Boolean=false,
         var search:AdaptiveSearchState=AdaptiveSearchState.WAITING_CONTEXT) {
+        private var nextHint: WarmPath? = null
+        var frontierHints: List<List<String>> = emptyList()
+            private set
+
+        fun prepareRecheck(now: Long, compatible: Boolean) {
+            val path = current
+            nextHint = when {
+                !compatible || recheckFailed || urgentRecheck || failure != null -> null
+                path != null -> WarmPath(path.hops.toList(), measuredAt).takeIf { it.fresh(now) }
+                else -> nextHint?.takeIf { it.fresh(now) }
+            }
+            frontierHints = emptyList()
+        }
+
+        fun beginFrontier(now: Long) {
+            frontierHints = listOfNotNull(nextHint?.takeIf { it.fresh(now) }?.hops)
+            nextHint = null
+        }
+
         fun clearImprovement() {
             improvementPath=null
             improvementCount=0
@@ -150,6 +174,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         stability.clear()
         memory=nextMemory;pending=null;pendingAdmission=null;nativeReady=false;nativeScope="";observedNativeScope="";drainingSince=null
         groupCursor=0;cpuYields.clear()
+        groups.values.forEach { it.prepareRecheck(lastNow, preserveFailures) }
         groups.values.forEach {it.frontier=null;it.current=null;it.measuredAt=0;it.nextAt=0;it.clearImprovement();it.recheckFailed=false;it.failure=null;it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false}
         groups.values.forEach {it.search=AdaptiveSearchState.WAITING_CONTEXT}
         RouteSnapshot.adaptiveOwnerChanged(scope,wire.groupTags().values.toSet())
@@ -231,7 +256,9 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         stability.clear()
         drainingSince=pending?.startedAt ?: drainingSince ?: now
         pendingAdmission=null
+        val mayRecheck = boundPhysicalPathToken != null && boundPolicy?.let { now < it.leaseDeadlineElapsed } == true
         groups.values.forEach {
+            it.prepareRecheck(now, mayRecheck)
             it.frontier=null;it.current=null;it.measuredAt=0;it.latency=0;it.nextAt=now;it.exploreAt=0
             it.clearImprovement();it.recheckFailed=false;it.failure=null
             it.selectionToken=0;it.hintSequence=0;it.urgentRecheck=false;it.forceCheck=false
@@ -525,7 +552,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         var exhausted=false
         if(candidate==null) {
             if(group.frontier==null) {
-                group.frontier=wire.graph.frontier(groupID,current,mode,emptyList(),now,600_000)
+                group.beginFrontier(now)
+                group.frontier=wire.graph.frontier(groupID,current,mode,group.frontierHints,now,600_000)
                 group.emptyPages=0;group.onlyFenced=true;group.firstRetryAt=null
             }
             var frontier=checkNotNull(group.frontier)
@@ -535,7 +563,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 // resume. Context/clock changes discard the hint, never borrow
                 // native proofs or reset admissions, memory or selected paths.
                 val position=frontier.checkpoint(current,now)
-                val resumed=position?.let {wire.graph.resumeFrontier(groupID,current,mode,emptyList(),now,600_000,it)}
+                val resumed=position?.let {wire.graph.resumeFrontier(groupID,current,mode,group.frontierHints,now,600_000,it)}
                 if(resumed==null) {
                     group.frontier=null
                     group.nextAt=now+if(group.current==null)60_000 else 300_000

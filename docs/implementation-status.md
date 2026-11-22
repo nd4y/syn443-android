@@ -377,3 +377,18 @@ preferences and databases. The normal APK also disables legacy full backup.
 The release fails if any selected XML grants access or cannot be resolved.
 Physical device migration and other NFR-04 clauses have separate acceptance.
 [Android backup rules](https://developer.android.com/identity/data/autobackup)
+
+
+## Rechecking the last working route
+
+When the native owner restarts on the same observed link, or Android updates
+that link's metadata under a compatible signed policy, the coordinator can
+probe the most recently working path first. It keeps one hop list per group
+for up to two minutes from the original measurement. The frontier checks the
+new context and removes duplicate candidates. A failed retry gives the other
+eligible paths their ordinary turn.
+
+The new context begins with no measured route, latency or traffic permission.
+The native engine must return a current probe result and confirm selection.
+A different link, changed policy authority, suspected failure or expired hint
+uses the normal cold search. This history is process-local.

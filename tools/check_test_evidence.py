@@ -1027,10 +1027,12 @@ PATH_CONTINUITY_REQUIRED = {'jvm': [('io.syn443.decision.RouteHealthContinuityTe
               ('io.syn443.android.AdaptivePathContinuityTest', 'changedTokenOwnerModeAndPolicyRejectNegativeCarry'),
               ('io.syn443.android.AdaptivePathContinuityTest', 'expiredLeaseBootAndClockCannotReviveCarriedHistory'),
               ('io.syn443.android.AdaptivePathContinuityTest',
-               'physicalContextRoundTripRequiresFreshAckAndKeepsAdmissionDebt')]}
+               'physicalContextRoundTripRequiresFreshAckAndKeepsAdmissionDebt'),
+              ('io.syn443.android.AdaptivePathContinuityTest', 'recentWorkingRouteIsRecheckedOnceBeforeResumingColdSearch'),
+              ('io.syn443.android.AdaptivePathContinuityTest', 'expiredForeignOrSuspectWorkingPathsCannotLeadTheNewSearch')]}
 if mode in PATH_CONTINUITY_REQUIRED:
     required = set(PATH_CONTINUITY_REQUIRED[mode])
-    assert len(required) == len(PATH_CONTINUITY_REQUIRED[mode]) == (3 if mode == "jvm" else 6), "Duplicate negative path continuity requirement"
+    assert len(required) == len(PATH_CONTINUITY_REQUIRED[mode]) == (3 if mode == "jvm" else 8), "Duplicate negative path continuity requirement"
     assert required <= set(identities), "Missing exact compatible negative path continuity outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/decision/src/test/kotlin/io/syn443/decision" if mode == "jvm" else "app/src/androidTest/kotlin/io/syn443/android"

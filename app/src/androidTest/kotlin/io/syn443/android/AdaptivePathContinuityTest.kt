@@ -33,8 +33,8 @@ class AdaptivePathContinuityTest {
         is JsonArray -> value.joinToString(",", "[", "]", transform = ::canonical)
         else -> value.toString()
     }
-    private fun config(groups: Int = 1): String {
-        val root = JSONObject(ManagedAdaptiveRoutesFairnessTest().config(choices = 1, groupCount = groups, publicExit = true))
+    private fun config(groups: Int = 1, choices: Int = 1): String {
+        val root = JSONObject(ManagedAdaptiveRoutesFairnessTest().config(choices = choices, groupCount = groups, publicExit = true))
         val wire = root.getJSONObject("adaptive_routes")
         val graph = JSONObject(Base64.getUrlDecoder().decode(wire.getString("graphB64")).toString(Charsets.UTF_8))
         val hops = graph.getJSONArray("hops")
@@ -330,6 +330,70 @@ class AdaptivePathContinuityTest {
             assertNull(h.tick(rejectedForkAt + 1_000))
             assertEquals(2, h.starts.size)
             h.assertNoPositive()
+        }
+    }
+
+    private fun Harness.selectSecondPath(): JSONObject {
+        ready(1_000)
+        val first = checkNotNull(tick(1_000))
+        assertEquals("hop-000", first.getJSONArray("hops").getString(0))
+        failed(first, 1_000)
+        val second = checkNotNull(tick(6_000))
+        assertEquals("hop-001", second.getJSONArray("hops").getString(0))
+        selected(second, 6_050)
+        assertTrue(view().getBoolean("requiredReady"))
+        return second
+    }
+
+    @Test fun recentWorkingRouteIsRecheckedOnceBeforeResumingColdSearch() {
+        for (restartNative in listOf(false, true)) {
+            Harness(config(choices = 2)).use { h ->
+                val old = h.selectSecondPath()
+                if (restartNative) {
+                    h.epoch++
+                    h.nativeScope = Policy.hash("synthetic-restarted-native")
+                    h.ready(7_000)
+                } else {
+                    h.metadata(7_000)
+                    h.metadata(7_100)
+                }
+                h.assertNoPositive()
+                val retry = checkNotNull(h.tick(11_000))
+                assertEquals("hop-001", retry.getJSONArray("hops").getString(0))
+                assertNotEquals(old.getString("request"), retry.getString("request"))
+                h.assertNoPositive()
+                h.failed(retry, 11_000)
+                val alternative = checkNotNull(h.tick(16_000))
+                assertEquals("hop-000", alternative.getJSONArray("hops").getString(0))
+                h.selected(alternative, 16_050)
+                assertTrue(h.view().getBoolean("requiredReady"))
+            }
+        }
+    }
+
+    @Test fun expiredForeignOrSuspectWorkingPathsCannotLeadTheNewSearch() {
+        for (reason in listOf("expired", "changed-link", "changed-policy", "suspect")) {
+            Harness(config(choices = 2)).use { h ->
+                h.selectSecondPath()
+                var next = 11_000L
+                when (reason) {
+                    "expired" -> {
+                        h.metadata(7_000)
+                        next = 127_000
+                    }
+                    "changed-link" -> h.rebind(7_000, nextToken = PhysicalPathToken())
+                    "changed-policy" -> h.rebind(7_000, nextBinding = h.binding(2, Policy.hash("other-program")))
+                    "suspect" -> {
+                        // A failed live recheck is sufficient to rule out warming this selection.
+                        val recheck = checkNotNull(h.tick(80_000))
+                        h.failed(recheck, 80_000)
+                        h.metadata(81_000)
+                        next = 86_000
+                    }
+                }
+                h.assertNoPositive()
+                assertEquals("hop-000", checkNotNull(h.tick(next)).getJSONArray("hops").getString(0))
+            }
         }
     }
 
