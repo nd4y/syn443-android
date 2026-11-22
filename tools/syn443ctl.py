@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded JSON client for the SYN443 debug ADB control provider."""
+"""Bounded JSON client for SYN443 Android operator access over ADB."""
 import argparse
 import base64
 from contextlib import contextmanager, nullcontext
@@ -18,6 +18,8 @@ import time
 import zipfile
 
 URI = "content://io.syn443.control"
+LOCAL_READ_URI = "content://io.syn443.operator.read"
+LOCAL_READ_OPERATIONS = ("capabilities", "status", "logs")
 METHODS = {
     "status": "status", "logs": "logs", "routes-status": "routes-status",
     "routes-check": "routes-check", "routes-cancel": "routes-cancel",
@@ -41,7 +43,7 @@ CONFIG = {"config-plan", "config-apply"}
 MAX_CONFIG = 262_144
 STAGE = "run-as io.syn443.android sh -c 'umask 077; base64 -d > no_backup/operator-local-config-{}.json'"
 CLEANUP = "run-as io.syn443.android rm -f no_backup/operator-local-config-{}.json"
-REJECTED = {"needs_unlock": 4, "command_rejected": 4, "unauthorized": 4}
+REJECTED = {"local_consent_required": 4, "needs_unlock": 4, "command_rejected": 4, "unauthorized": 4}
 NUMBERS = ("generation", "networkEpoch", "activationGeneration", "eventSequence")
 PHASES = {"Off", "NeedsLogin", "NeedsPermission", "NeedsUnlock", "NeedsAction", "NoNetwork",
           "Portal", "Detecting", "Connecting", "Online", "Degraded", "Recovering", "BlockedByPolicy"}
@@ -183,14 +185,18 @@ def mode_reply(operation, data):
 
 
 class Device:
-    def __init__(self, serial, timeout):
+    def __init__(self, serial, timeout, local_read=False):
         if not re.fullmatch(r"[A-Za-z0-9_.:%\[\]-]{1,128}", serial) or serial.startswith("-"):
             raise ControlError("invalid_serial", 2)
         self.serial, self.timeout = serial, timeout
+        self.local_read = local_read
 
     def call(self, operation, argument=None):
-        method = METHODS[operation]
-        command = ["adb", "-s", self.serial, "shell", "content", "call", "--uri", URI, "--method", method]
+        if self.local_read and (operation not in LOCAL_READ_OPERATIONS or argument is not None):
+            raise ControlError("unsupported_operation", 4)
+        method = operation if self.local_read else METHODS[operation]
+        uri = LOCAL_READ_URI if self.local_read else URI
+        command = ["adb", "-s", self.serial, "shell", "content", "call", "--uri", uri, "--method", method]
         if argument is not None:
             route = operation == "routes-check" and re.fullmatch(r"route-[1-9][0-9]?", argument)
             ticket = operation in CONFIG and re.fullmatch(r"(?:none|[0-9a-f]{64}):[0-9a-f]{64}:[0-9a-f]{32}", argument)
@@ -216,7 +222,7 @@ class Device:
             raise ControlError("adb_unavailable", 3) from err
         if len(result.stdout) > 262_144 or len(result.stderr) > 32_768:
             raise ControlError("reply_too_large", 5)
-        support = operation.startswith("support-bundle-")
+        support = self.local_read or operation.startswith("support-bundle-")
         try:
             output = result.stdout.decode("utf-8", errors="strict" if support else "replace")
         except UnicodeDecodeError as err:
@@ -751,6 +757,7 @@ class Arguments(argparse.ArgumentParser):
 
 def main(argv=None):
     parser = Arguments(description=__doc__)
+    parser.add_argument("--local-read", action="store_true", help="use the local 15-minute release diagnostics grant")
     parser.add_argument("--serial", required=True, help="explicit adb device serial")
     parser.add_argument("--timeout", type=int, choices=range(1, 61), default=12, metavar="1..60")
     parser.add_argument("operation", choices=OPERATIONS)
@@ -797,8 +804,25 @@ def main(argv=None):
                 raise ControlError("invalid_arguments", 2)
         elif any(value is not None for value in mode_fields):
             raise ControlError("invalid_arguments", 2)
-        device = Device(args.serial, args.timeout)
-        if args.operation in SUPPORT_OPERATIONS:
+        if args.local_read and args.operation not in LOCAL_READ_OPERATIONS:
+            raise ControlError("unsupported_operation", 4)
+        device = Device(args.serial, args.timeout, local_read=True) if args.local_read else Device(args.serial, args.timeout)
+        if args.local_read and args.operation == "capabilities":
+            value = device.call("capabilities")
+            if type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1 or value.get("operations") != list(LOCAL_READ_OPERATIONS):
+                raise ControlError("invalid_reply", 5)
+            data = {"access": "local_read_grant", "operations": list(LOCAL_READ_OPERATIONS)}
+        elif args.local_read and args.operation == "status":
+            value = device.call("status")
+            phase, reason = value.get("phase"), value.get("reason")
+            if type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1 or not isinstance(phase, str) or phase not in PHASES | {"unknown"}:
+                raise ControlError("invalid_reply", 5)
+            data = {**numbers(value, NUMBERS + ("attempt",)), "phase": phase,
+                    "reason": reason if isinstance(reason, str) and reason in EVENT_CODES else "unknown"}
+            for key in ("desiredOn", "engineActive", "resumeRequired"):
+                if type(value.get(key)) is bool:
+                    data[key] = value[key]
+        elif args.operation in SUPPORT_OPERATIONS:
             connection = device.bundle_connection() if args.operation in {"support-bundle", "support-bundle-export"} else nullcontext()
             with connection:
                 data = support_operation(device, args.operation, args.output, args.bundle_id)

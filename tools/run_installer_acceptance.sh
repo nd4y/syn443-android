@@ -13,6 +13,7 @@ esac
 test -z "$(adb -e shell pm list packages --user 0 io.syn443.android | tr -d '\r')"
 case "${1:---system-installer}" in
   --system-installer)
+    python3 tools/run_release_operator_consent.py
     base="$RUNNER_TEMP/base-debug.apk"
     driver=app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk ;;
   --historical)

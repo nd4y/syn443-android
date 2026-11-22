@@ -142,5 +142,6 @@ internal fun DiagnosticsRoute(
             },
             cancelling = cancelling,
         )
+        LocalOperatorReadControls()
     }
 }

@@ -2563,10 +2563,12 @@
       "status": "partial",
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/adb-control.md"
+        "docs/adb-control.md",
+        "tools/run_release_operator_consent.py",
+        "app/src/androidTest/kotlin/io/syn443/android/OperatorReadConsentTest.kt"
       ],
-      "implementationScope": "Existing same-UID/debug shell authorization and an explicit device selector; no listening port.",
-      "remainingScope": "Release opt-in and complete managed field and operation acceptance."
+      "implementationScope": "The ordinary release has a dedicated permission-protected shell-only read provider. Local explicit consent on the diagnostics screen admits passive status and redacted logs for fifteen minutes, with immediate revocation and process-local lifetime. The general controller continues to be private in release.",
+      "remainingScope": "Production mutation operations with per-operation authorization, managed-field enforcement and central audit."
     },
     {
       "id": "ADB-04",

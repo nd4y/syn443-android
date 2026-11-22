@@ -46,6 +46,14 @@ class ControlProvider : ContentProvider() {
             if(method=="status")putString("json",LifecycleAccess.lockedStatus().toString()) else putString("error","needs_unlock")
         }
         return try {
+            if (method == "operator-read-access") {
+                require(caller == Process.myUid() && extras == null)
+                val remaining = OperatorReadGrant.applyOwnerAction(requireNotNull(arg))
+                return Bundle().apply {
+                    putBoolean("ok", true)
+                    putString("json", org.json.JSONObject().put("remainingMs", remaining).toString())
+                }
+            }
             if (method == "operator-mode-get" || method == "operator-mode-set") {
                 require(io.syn443.android.BuildConfig.DEBUG && caller == 2000 && (extras == null || extras.isEmpty))
                 val state = StateStore.get(context).read()

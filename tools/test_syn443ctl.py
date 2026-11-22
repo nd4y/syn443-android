@@ -10,6 +10,27 @@ import syn443ctl
 
 
 class AdbControlTest(unittest.TestCase):
+    def test_local_grant_uses_only_the_separate_read_endpoint(self):
+        def invoke(operation, payload):
+            wire = ("Result: Bundle[{ok=true, json=" + json.dumps(payload) + "}]").encode()
+            with patch("syn443ctl.subprocess.run", return_value=subprocess.CompletedProcess([], 0, wire, b"")) as run, contextlib.redirect_stdout(io.StringIO()) as out:
+                code = syn443ctl.main(["--serial", "synthetic", "--local-read", operation])
+            self.assertEqual(run.call_args.args[0], ["adb", "-s", "synthetic", "shell", "content", "call", "--uri", syn443ctl.LOCAL_READ_URI, "--method", operation])
+            return code, json.loads(out.getvalue())
+        code, status = invoke("status", {"schemaVersion":1,"phase":"Online","reason":"required_https_ok","engineActive":True,
+                                         "generation":4,"networkEpoch":-1,"address":"sensitive fixture"})
+        self.assertEqual(code, 0)
+        self.assertEqual(status["result"], {"phase":"Online","reason":"required_https_ok","engineActive":True,"generation":4})
+        self.assertEqual(invoke("capabilities", {"schemaVersion":1,"operations":["capabilities","status","logs"]})[1]["result"]["access"], "local_read_grant")
+        self.assertEqual(invoke("capabilities", {"schemaVersion":1,"operations":["status","connect"]})[0], 5)
+        self.assertEqual(invoke("logs", {"events":[{"phase":"Recovering","code":"private fixture","target":"private fixture"}]})[1]["result"]["events"], [{"phase":"Recovering","code":"redacted"}])
+        with patch("syn443ctl.subprocess.run") as run, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(syn443ctl.main(["--serial", "synthetic", "--local-read", "vpn-start"]), 4)
+            run.assert_not_called()
+        with patch("syn443ctl.subprocess.run", return_value=subprocess.CompletedProcess([], 0, b"Result: Bundle[{ok=false, error=local_consent_required}]", b"")), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(syn443ctl.main(["--serial", "synthetic", "--local-read", "status"]), 4)
+            self.assertEqual(json.loads(out.getvalue())["error"], "local_consent_required")
+
     def test_network_mode_negotiates_then_issues_one_safe_serial_scoped_command(self):
         stamp = "00000000-0000-4000-8000-000000000001"
         receipt = {"admitted": True, "generation": 5, "networkEpoch": 2}

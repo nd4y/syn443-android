@@ -1193,3 +1193,10 @@ if mode in JOURNAL_REQUIRED:
         path = prefix / (classname.replace(".", "/") + ".kt")
         methods = re.findall(r"@Test\s+fun\s+(\w+)", path.read_text(encoding="utf-8"))
         assert len(methods) == len(set(methods)) == len(expected) and set(methods) == set(expected), "Structured journal test source inventory drift"
+
+if mode == "emulator":
+    operator_read = {("io.syn443.android.OperatorReadConsentTest", method) for method in (
+        "shellCanReadOnlyDuringAnExplicitLocalDiagnosticsGrant",
+        "monotonicReadWindowEndsAtItsDeadlineAndRejectsAnImpossibleClock",
+    )}
+    assert operator_read <= set(identities), "Missing ordinary operator read consent or deadline evidence"

@@ -93,6 +93,9 @@
         <receiver android:name=".vpn.BootReceiver" android:exported="false" android:process=":controller" android:directBootAware="true">
             <intent-filter><action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" /><action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
         </receiver>
+        <provider android:name=".vpn.OperatorReadProvider" android:authorities="io.syn443.operator.read"
+            android:exported="true" android:permission="android.permission.DUMP" android:grantUriPermissions="false"
+            android:process=":controller" />
         <provider android:name=".vpn.ControlProvider" android:authorities="io.syn443.control"
             android:exported="false" android:process=":controller" android:directBootAware="true" />
     </application>

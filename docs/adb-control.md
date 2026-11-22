@@ -1,4 +1,21 @@
-# ADB control for development builds
+# Android operator access over ADB
+
+## Read status and logs from the release app
+
+On the phone, open **Диагностический архив**. Under **Чтение через ADB**,
+tap **Разрешить на 15 минут**. From the computer already paired with Android,
+run `python3 tools/syn443ctl.py --serial <adb-serial> --local-read status`
+or replace `status` with `logs` or `capabilities`. Logs also support
+`--follow-seconds 60`. An unknown engine state omits `engineActive`.
+
+The grant expires after fifteen minutes. The owner can revoke it on the same
+screen. A controller restart also ends it. Exit code 4 with
+`local_consent_required` means the phone needs a fresh local grant.
+The separate read endpoint checks Android shell UID and returns a closed
+projection of VPN health and technical events. The CLI lists exactly the
+operations available through this grant.
+
+## Development controls
 
 Use `python3 tools/syn443ctl.py --serial <adb-serial> capabilities` to check
 access. The serial is mandatory so a command never targets whichever phone

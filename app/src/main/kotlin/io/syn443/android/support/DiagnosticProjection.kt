@@ -72,11 +72,14 @@ object DiagnosticProjection {
     }
     private fun known(source: JSONObject, name: String, allowed: Set<String>): String? =
         (source.opt(name) as? String)?.takeIf { it in allowed }
-    private fun health(source: JSONObject, link: JSONObject?): JSONObject = document().also { value ->
+    internal fun operatorStatus(source: JSONObject): JSONObject = document().also { value ->
         value.put("phase", known(source, "phase", phases) ?: "unknown")
         value.put("reason", known(source, "reason", eventCodes) ?: "unknown")
         numbers(source, value, "generation", "networkEpoch", "activationGeneration", "eventSequence", "attempt")
         booleans(source, value, "desiredOn", "engineActive", "resumeRequired")
+    }
+
+    private fun health(source: JSONObject, link: JSONObject?): JSONObject = operatorStatus(source).also { value ->
         if (source.opt("desiredOn") == true && link != null) {
             known(link, "transport", setOf("WIFI", "CELLULAR", "OTHER"))?.let { transport ->
                 val safe = JSONObject().put("transport", transport)
