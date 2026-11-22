@@ -62,6 +62,22 @@ class AdminControlTest {
         }
         assertEquals(count,f.calls.size)
     }
+    @Test fun deviceSearchBindsLiteralPrefixAndCursorInTheSignedBodyAndRejectsForeignRows() {
+        val f=AdminControlFixture()
+        val session=f.login()
+        val prefix="Z_A"
+        f.handler={f.reply(f.page(ids=listOf("z_a-02","z_a-03")))}
+        val page=f.client.listDevices("z_a-01",session,IdentityScope(),prefix)
+        assertEquals(listOf("z_a-02","z_a-03"),page.devices.map {it.device})
+        f.verify(f.calls.single(),session,"z_a-01",prefix)
+        f.handler={f.reply(f.page(ids=listOf("zBa")))}
+        AdminAuthFixture.failure(AdminFailure.INVALID_REPLY) {f.client.listDevices("",session,IdentityScope(),prefix)}
+        val before=f.calls.size
+        listOf("%","x.y","x".repeat(65),"А").forEach {
+            AdminAuthFixture.failure(AdminFailure.INVALID_REPLY) {f.client.listDevices("",session,IdentityScope(),it)}
+        }
+        assertEquals(before,f.calls.size)
+    }
     @Test fun configurationPreservesTheEntireUtf8ReplyAndRejectsMismatchedOuterMetadata() {
         val f=AdminControlFixture();val session=f.login()
         val original=" \n"+f.configuration()+"\n "
@@ -352,7 +368,7 @@ internal class AdminControlFixture(lifetime:Long=3600) {
             "code" to "synthetic-code","state" to pending.state,"iss" to oauth.metadata.issuer)),pending,7,issuer,IdentityScope())
     }
     fun claims(call:Call)=Identity.objectJSON(Policy.utf8(Policy.decode64(call.headers.getValue("DPoP").split('.')[1])))
-    fun verify(call:Call,session:AdminSession) {
+    fun verify(call:Call,session:AdminSession,after:String="",prefix:String="") {
         assertEquals("POST",call.method);assertEquals(oauth.metadata.apiOrigin+AdminControl.PATH,call.url)
         assertEquals("application/json",call.headers["Content-Type"]);assertEquals("DPoP "+session.accessToken,call.headers["Authorization"])
         assertFalse(call.headers.keys.any {it.equals("origin",true)})
@@ -361,8 +377,13 @@ internal class AdminControlFixture(lifetime:Long=3600) {
         assertEquals(1,envelope.getValue("version").jsonPrimitive.int);assertTrue(AdminIdentity.digest(envelope.getValue("requestId").jsonPrimitive.content))
         val action=envelope.getValue("action").jsonPrimitive.content
         val payload=envelope.getValue("payload").jsonObject
-        assertEquals(setOf(if(action=="configuration.devices.list")"after" else "id"),payload.keys)
-        assertEquals(if(action=="configuration.devices.list")"" else device,payload.values.single().jsonPrimitive.content)
+        val expected=buildJsonObject {
+            if(action=="configuration.devices.list") {
+                put("after",after)
+                if(prefix.isNotEmpty())put("prefix",prefix)
+            } else put("id",device)
+        }
+        assertEquals(expected,payload)
         assertEquals(if(action=="configuration.devices.list")32_768 else if(action=="configuration.inventory.get")524_288 else 4096,call.max)
         val raw=call.headers.getValue("DPoP").split('.')
         val header=Identity.objectJSON(Policy.utf8(Policy.decode64(raw[0])))

@@ -373,9 +373,10 @@ internal class AdminController private constructor(private val context:Applicati
         closeSession(retired.first);retired.second?.cancel()
         return if(schedule)enqueue {} else true
     }
-    fun readStart(id:String,expectedGeneration:Long,kind:String,target:String):Boolean {
+    fun readStart(id:String,expectedGeneration:Long,kind:String,target:String,prefix:String=""):Boolean {
         if(!operationID.matches(id) || target.length>64 || kind !in setOf("devices","configuration","runtime") ||
-            !(targetID.matches(target) || kind=="devices" && target.isEmpty()))return false
+            !(targetID.matches(target) || kind=="devices" && target.isEmpty()) ||
+            prefix.isNotEmpty() && (kind!="devices" || !targetID.matches(prefix)))return false
         val selected=synchronized(commands) {
             if(busy || retirementRequested || phase!=Phase.AUTHENTICATED || generation!=expectedGeneration)return false
             val owned=owner?.takeIf {it.session!=null} ?:return false
@@ -401,7 +402,7 @@ internal class AdminController private constructor(private val context:Applicati
                     }
                 }
                 val body=when(kind) {
-                    "devices"->owned.protocol.listDevices(target,session,scope).wireJson()
+                    "devices"->owned.protocol.listDevices(target,session,scope,prefix).wireJson()
                     "configuration"->owned.protocol.deviceConfiguration(target,session,scope).wireJson()
                     else->owned.protocol.deviceRuntime(target,session,scope).wireJson()
                 }.toByteArray(Charsets.UTF_8)

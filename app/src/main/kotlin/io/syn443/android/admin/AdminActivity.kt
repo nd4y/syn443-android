@@ -8,6 +8,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,12 +45,13 @@ internal data class AdminUiModel(val status:AdminUiStatus=AdminUiStatus(),val wo
     val page:AdminDevicesPage?=null,val after:String="",val selected:String="",
     val configuration:AdminDocument?=null,val runtime:AdminDocument?=null,
     val showConfiguration:Boolean=false,val showRuntime:Boolean=false,val message:String="",val editor:AdminEditorModel?=null,
-    val comparison:AdminComparisonModel?=null) {
+    val comparison:AdminComparisonModel?=null,val searchText:String="",val activePrefix:String="") {
     override fun toString()="AdminUiModel([redacted])"
 }
 internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={},val logout:()->Unit={},
     val refresh:()->Unit={},val page:(String)->Unit={},val select:(String)->Unit={},val web:()->Unit={},
-    val toggleConfiguration:()->Unit={},val toggleRuntime:()->Unit={},val edit:()->Unit={})
+    val toggleConfiguration:()->Unit={},val toggleRuntime:()->Unit={},val edit:()->Unit={},
+    val typePrefix:(String)->Unit={},val search:(String)->Unit={})
 
 @Composable internal fun AdminRoute(bridge:AdminUiBridge) {
     val context=LocalContext.current
@@ -91,10 +96,10 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         else model.copy(status=next)
         return next
     }
-    suspend fun loadPage(ticket:Long,generation:Long,after:String) {
-        val page=bridge.devices(generation,after)
+    suspend fun loadPage(ticket:Long,generation:Long,after:String,prefix:String) {
+        val page=bridge.devices(generation,after,prefix)
         if(current(ticket,generation) && model.status.phase==AdminUiPhase.AUTHENTICATED)
-            model=model.copy(page=page,after=after,selected="",configuration=null,runtime=null,
+            model=model.copy(page=page,after=after,activePrefix=prefix,selected="",configuration=null,runtime=null,
                 showConfiguration=false,showRuntime=false)
     }
     suspend fun refresh(ticket:Long,load:Boolean=true) {
@@ -105,7 +110,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
             delay(1000)
             next=status(ticket)
         }
-        if(load && next.phase==AdminUiPhase.AUTHENTICATED)loadPage(ticket,next.generation,"")
+        if(load && next.phase==AdminUiPhase.AUTHENTICATED)loadPage(ticket,next.generation,"",model.activePrefix)
     }
     DisposableEffect(lifecycle) {
         val observer=LifecycleEventObserver {_,_->
@@ -169,7 +174,19 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
             refresh(ticket,load=false)
         }},
         refresh={execute {refresh(it)}},
-        page={after->val generation=model.status.generation;execute {ticket->loadPage(ticket,generation,after)}},
+        page={after->val generation=model.status.generation;val prefix=model.activePrefix
+            execute {ticket->loadPage(ticket,generation,after,prefix)}},
+        typePrefix={text->if(text.length<=64)model=model.copy(searchText=text)},
+        search={prefix->
+            if(prefix.isEmpty() || AdminWire.id.matches(prefix)) {
+                val generation=model.status.generation
+                execute {ticket->
+                    model=model.copy(searchText=prefix,activePrefix=prefix,after="",page=null,selected="",
+                        configuration=null,runtime=null,showConfiguration=false,showRuntime=false)
+                    loadPage(ticket,generation,"",prefix)
+                }
+            }
+        },
         select={device->val generation=model.status.generation;execute {ticket->
             model=model.copy(selected=device,configuration=null,runtime=null,showConfiguration=false,showRuntime=false)
             val configuration=bridge.document(generation,AdminReadAction.CONFIGURATION,device)
@@ -260,8 +277,24 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         if(authenticated) {
             item {HorizontalDivider();Text("Доступные устройства",Modifier.testTag("admin-devices-title"),style=MaterialTheme.typography.titleLarge)}
             item {Text("Показаны последние полученные данные. Для нового чтения нажмите «Обновить». Права проверяются сервером. Отчёт о применении политики не является проверкой соединения.")}
+            item {
+                OutlinedTextField(model.searchText,actions.typePrefix,singleLine=true,enabled=!busy,
+                    keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Ascii,imeAction=ImeAction.Search),
+                    keyboardActions=KeyboardActions(onSearch={
+                        if(!busy && AdminWire.id.matches(model.searchText))actions.search(model.searchText)
+                    }),label={Text("Начало ID устройства")},modifier=Modifier.fillMaxWidth().testTag("admin-prefix"))
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    Button(onClick={actions.search(model.searchText)},enabled=!busy && AdminWire.id.matches(model.searchText),
+                        modifier=Modifier.testTag("admin-search")) {Text("Найти")}
+                    if(model.activePrefix.isNotEmpty() || model.searchText.isNotEmpty())
+                        TextButton(onClick={actions.search("")},enabled=!busy,modifier=Modifier.testTag("admin-search-reset")) {
+                            Text("Все устройства")
+                        }
+                }
+                if(model.activePrefix.isNotEmpty())Text("Поиск по началу ID «${model.activePrefix}»")
+            }
             if(model.page==null)item {Text("Список устройств ещё не загружен.",Modifier.testTag("admin-devices-unknown"))}
-            else if(model.page.devices.isEmpty())item {Text("У вас нет доступных устройств.",Modifier.testTag("admin-devices-empty"))}
+            else if(model.page.devices.isEmpty())item {Text(if(model.activePrefix.isEmpty())"У вас нет доступных устройств." else "Совпадений среди доступных устройств нет.",Modifier.testTag("admin-devices-empty"))}
             items(model.page?.devices.orEmpty(),key={"device-"+it.id}) {device->
                 OutlinedButton(onClick={actions.select(device.id)},enabled=!busy,modifier=Modifier.fillMaxWidth().testTag("admin-device-"+device.id)) {
                     Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(4.dp)) {

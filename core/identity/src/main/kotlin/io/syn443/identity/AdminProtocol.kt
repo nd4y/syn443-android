@@ -231,11 +231,11 @@ class AdminProtocol internal constructor(private val identity:AdminIdentity,priv
             if(it.window(boot(),elapsed()).upperMs>=expiry)throw AdminException(AdminFailure.REAUTHENTICATE)
         }
     }
-    private fun <T> controlRead(read:AdminControl.Read,target:String,current:AdminSession,scope:IdentityScope,
+    private fun <T> controlRead(read:AdminControl.Read,target:String,current:AdminSession,scope:IdentityScope,prefix:String="",
         parse:(JsonObject,TimeWindow,String)->T):T=checked {
         controlAccess(current)
         val guard=checkNotNull(admission)
-        val body=AdminControl.request(read,target)
+        val body=AdminControl.request(read,target,prefix)
         val prior=guard.priorTime()
         val trusted=if(prior==null)current.time else floor(current.time,prior)
         val started=start();val url=identity.metadata.apiOrigin+AdminControl.PATH
@@ -272,8 +272,10 @@ class AdminProtocol internal constructor(private val identity:AdminIdentity,priv
         controlAccess(current,accepted,admit=false)
         result
     }
-    fun listDevices(after:String,session:AdminSession,scope:IdentityScope):AdminDevicePage =
-        controlRead(AdminControl.Read.DEVICES,after,session,scope) {document,time,wire->AdminControl.devices(document,after,time,wire)}
+    fun listDevices(after:String,session:AdminSession,scope:IdentityScope,prefix:String=""):AdminDevicePage =
+        controlRead(AdminControl.Read.DEVICES,after,session,scope,prefix) {document,time,wire->
+            AdminControl.devices(document,after,time,wire,prefix)
+        }
     fun deviceConfiguration(id:String,session:AdminSession,scope:IdentityScope):AdminDeviceConfiguration =
         controlRead(AdminControl.Read.CONFIGURATION,id,session,scope) {document,time,wire->AdminControl.configuration(document,id,time,wire)}
     fun deviceRuntime(id:String,session:AdminSession,scope:IdentityScope):AdminDeviceRuntime =

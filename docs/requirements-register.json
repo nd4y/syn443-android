@@ -2164,7 +2164,7 @@
         "docs/mobile-admin-control-api.md",
         "docs/mobile-layered-editor-contract.md"
       ],
-      "remainingScope": "One-hand UX on the physical device, authenticated browser/Keycloak integration, initial assignment, changed-head rebase and complete quick-administration workflows remain required; source/presentation tests are not their acceptance.",
+      "remainingScope": "Native literal-prefix search now binds every page to the signed administrative request. One-hand UX on the physical device, authenticated browser/Keycloak integration, initial assignment, changed-head rebase and complete quick-administration workflows remain required; source/presentation tests are not their acceptance.",
       "implementationScope": "v88 source-pending coordinator and route tests cover explicit save/preview/publish, bounded review, encrypted restart recovery, unsaved-RAM removal and finite conflict/reauthentication presentation. All builds and executable suites remain GitHub Actions only."
     },
     {

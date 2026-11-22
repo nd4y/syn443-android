@@ -180,7 +180,8 @@ class ControlProvider : ContentProvider() {
                         putBoolean("ok",true)
                         when(method) {
                             "admin-read-start" -> putBoolean("admitted",admin.readStart(id,generation,
-                                requireNotNull(input.getString("action")),requireNotNull(input.getString("target"))))
+                                requireNotNull(input.getString("action")),requireNotNull(input.getString("target")),
+                                if(input.containsKey("prefix"))requireNotNull(input.getString("prefix")) else ""))
                             "admin-read-cancel" -> putBoolean("admitted",admin.readCancel(id,generation))
                             else -> {
                                 val result=admin.readResult(id,generation)

@@ -46,7 +46,7 @@ class AdminEditorRouteTest {
             recipients=if(review.isEmpty())emptyList() else listOf(device),
             diffSummaries=if(review.isEmpty())emptyList() else listOf("device: /synthetic (set)"))
         override suspend fun status():AdminUiStatus {reads+="status";return status}
-        override suspend fun devices(generation:Long,after:String):AdminDevicesPage {
+        override suspend fun devices(generation:Long,after:String,prefix:String):AdminDevicesPage {
             check(generation==status.generation && after.isEmpty());reads+="devices"
             return AdminDevicesPage(listOf(AdminDeviceRow(device,4,4,"Последний отчёт; соединение неизвестно")),"",1000)
         }

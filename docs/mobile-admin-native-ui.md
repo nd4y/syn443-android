@@ -6,7 +6,9 @@ bridge. It requires the independently integrated manifest/controller/API gates.
 No live login, mobile client registration, MFA, server ACL, physical UI or
 configuration publication is established by preparing these files.
 
-The screen offers administrative login/logout, a32-device authorized page with
+Use the device ID field to search the entire inventory visible to the current administrator. Tap Find or use the keyboard search action. Prefixes are case-insensitive. Underscores and hyphens match literally. Each request returns up to 32 devices and the next page uses the same prefix. Typing makes no network request. Select All devices to clear the search. Leaving the foreground clears both the text and the result.
+
+The screen offers administrative login/logout, a 32-device authorized page with
 an explicit after cursor, device selection, sequential configuration/runtime
 reads and the existing full web-panel shortcut. Pages replace previous pages;
 the UI does not accumulate an unbounded inventory. Configuration is read-only
