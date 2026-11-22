@@ -111,16 +111,20 @@ def main():
         data=json.dumps(fixture.bootstrap(),separators=(',',':')).encode()
         subprocess.run(['adb','-e','shell','-T','run-as',PACKAGE,'dd','of=no_backup/operator-identity.json'],input=data,capture_output=True,check=True,timeout=15)
         call('auth-bootstrap-file');await_condition(lambda:call('auth-status').get('configured') and not call('auth-status').get('busy'),20)
+        before=proxy.progress
         driver=subprocess.run(['adb','-e','shell','am','instrument','-w','-e','fixturePort',str(fixture_port),'-e','fixtureCa',fixture.ca,
-            *(['-e','fixtureTelemetry','true'] if telemetry=='foreground' else []),
-            PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=75)
+            *(['-e','fixtureTelemetry','stopped' if telemetry=='stopped' else 'true'] if telemetry else []),
+            PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=150 if telemetry=='stopped' else 75)
         result=driver.stdout.decode()
         if driver.returncode or 'synthetic_enrollment_verified' not in result or 'INSTRUMENTATION_CODE: -1' not in result:
-            import re
             stage=re.search(r'INSTRUMENTATION_RESULT: stage=([a-z_]{1,40})',result)
             state=call('auth-status');safe={k:v for k,v in state.items() if k in ('phase','reason') and isinstance(v,str) and re.fullmatch('[A-Z_]{0,64}',v)}
             raise AssertionError('Synthetic enrollment failed at '+(stage[1] if stage else 'driver_launch')+' '+json.dumps(safe))
         assert fixture.registrations==1 and not call('status')['desiredOn']
+        if telemetry=='stopped':
+            assert proxy.progress>before
+            await_condition(vpn_stopped)
+            return result
         adb('shell','am','start','-W','-n',PACKAGE+'/.MainActivity')
         before=proxy.progress;call('connect')
         await_condition(lambda:call('status').get('phase')=='Online' and call('status').get('policy',{}).get('phase')=='committed' and proxy.progress>before)
@@ -140,7 +144,7 @@ def main():
             try:
                 telemetry_modes={'enrolledCandidateRegressionRollsBack':'foreground',
                                  'enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':'stopped'}
-                setup(name=='enrolledPendingAssignmentRetriesWhileVisible',telemetry_modes.get(name))
+                driver_result=setup(name=='enrolledPendingAssignmentRetriesWhileVisible',telemetry_modes.get(name))
                 before=proxy.progress;generation=call('auth-status')['generation']
                 if name=='enrolledPendingAssignmentRetriesWhileVisible':
                     assert fixture.policy_requests>=2 and fixture.registrations==1
@@ -209,11 +213,8 @@ def main():
                         assert call('status')['generation']==generation_after and not call('status')['desiredOn'] and vpn_stopped()
                     proxy.delay=0
                 elif name=='enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':
-                    result=adb('shell','am','instrument','-w','-e','fixtureStopWithTelemetry','true',
-                               PACKAGE+'.test/io.syn443.android.EnrollmentDriver',timeout=45).decode()
-                    assert 'INSTRUMENTATION_CODE: -1' in result
-                    job=re.search(r'(?m)^INSTRUMENTATION_RESULT: job=([0-9]{1,10})\s*$',result)
-                    namespace=re.search(r'(?m)^INSTRUMENTATION_RESULT: namespace=([A-Za-z0-9_.-]{0,80})\r?$',result)
+                    job=re.search(r'(?m)^INSTRUMENTATION_RESULT: job=([0-9]{1,10})\s*$',driver_result)
+                    namespace=re.search(r'(?m)^INSTRUMENTATION_RESULT: namespace=([A-Za-z0-9_.-]{0,80})\r?$',driver_result)
                     assert job and namespace
                     await_condition(vpn_stopped)
                     stopped=call('status')['generation']
