@@ -43,6 +43,8 @@ class Fixture:
         self.authorization={};self.codes={};self.tokens={};self.sessions={};self.receipts={};self.refresh_receipts={};self.proofs=set()
         self.config=config;self.revision=1;self.policy_status=200;self.envelopes={};self.policy_requests=0;self.registrations=0
         self.activation_reports={}
+        self.policy_example=None
+        self.example_deliveries={}
         self.telemetry_enabled=False
         self.telemetry_receipts=[]
         self.telemetry_requests=0
@@ -163,7 +165,12 @@ class Fixture:
                 extra_capabilities=getattr(self,'extra_capabilities',()))
         headers={'Content-Type':'application/jose'}
         if self.telemetry_enabled:headers['X-Syn443-Telemetry']='1'
-        return 200,self.envelopes[key],headers
+        envelope = self.envelopes[key]
+        example = self.policy_example
+        if example is not None:
+            envelope = example
+            self.example_deliveries[example] = self.example_deliveries.get(example, 0) + 1
+        return 200,envelope,headers
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args):pass

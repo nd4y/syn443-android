@@ -82,6 +82,74 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=Fal
     assert call('status')['policy']['activeRevision'] == 2 and call('auth-status')['generation'] == auth_generation
 
 
+def check_rejected_policies(fixture, proxy, generation):
+    """Deliver each negative AC06 example over the normal, authenticated policy endpoint."""
+    from policy_fixture import b64
+
+    def committed(revision):
+        state = call('status')
+        policy = state.get('policy', {})
+        return (state.get('phase') == 'Online' and state.get('engineActive') is True and
+                policy.get('activeRevision') == revision and policy.get('phase') == 'committed')
+
+    def refresh_until(observed):
+        # Foreground reconciliation admits forced requests at a bounded rate.
+        last_request = None
+        def ready():
+            nonlocal last_request
+            if observed():
+                return True
+            now = time.monotonic()
+            if last_request is None or now - last_request >= 7:
+                call('policy-refresh')
+                last_request = now
+            return False
+        await_condition(ready, 75)
+
+    thumb, = fixture.sessions
+    device = fixture.sessions[thumb]['deviceId']
+    first = fixture.envelopes[(thumb, 1)]
+    fixture.revision = 2
+    refresh_until(lambda: committed(2))
+    engine = pid(':engine')
+    activation = call('status')['policy']['activationGeneration']
+    assert engine
+
+    next_policy = fixture.publisher.sign(fixture.config, revision=3, key_thumbprint=thumb)
+    header_text, payload_text, signature = next_policy.split('.')
+    header = json.loads(decode(header_text))
+    payload = json.loads(decode(payload_text))
+    damaged = bytearray(decode(signature))
+    damaged[0] ^= 1
+    invalid_signature = '.'.join([header_text, payload_text, b64(damaged)])
+    other_device = dict(payload, targetDevice='different-synthetic-recipient')
+    unsupported = dict(payload, requiredCapabilities=payload['requiredCapabilities'] + ['future.fixture.v1'])
+    examples = [invalid_signature, fixture.publisher.signed_document(header, other_device),
+                first, fixture.publisher.signed_document(header, unsupported)]
+
+    # The current policy remains valid for the whole exercise. Each example is
+    # served to this session, and a new successful proxy exchange must follow it.
+    fixture.policy_example = examples[0]
+    fixture.revision = 3
+    for example in examples:
+        deliveries = fixture.example_deliveries.get(example, 0)
+        fixture.policy_example = example
+        refresh_until(lambda: fixture.example_deliveries.get(example, 0) > deliveries and not call('auth-status')['busy'])
+        assert committed(2)
+        received_before = proxy.progress
+        await_condition(lambda: proxy.progress > received_before, 100)
+        assert committed(2) and pid(':engine') == engine
+        assert call('status')['policy']['activationGeneration'] == activation
+        assert fixture.registrations == 1 and set(fixture.sessions) == {thumb}
+        assert fixture.sessions[thumb]['deviceId'] == device and call('auth-status')['generation'] == generation
+        assert (thumb, 3) not in fixture.activation_reports
+
+    fixture.policy_example = None
+    refresh_until(lambda: committed(3))
+    assert fixture.registrations == 1 and fixture.sessions[thumb]['deviceId'] == device
+    assert call('auth-status')['generation'] == generation
+
+
 def failure_summary():
     state=call('status');auth=call('auth-status');policy=state.get('policy',{})
     phases={'unmanaged','unavailable','blocked','prepared','applying','committed','degraded','rolled_back','rejected','released'}
@@ -167,7 +235,7 @@ def main():
            'enrolledAssignedRoutesCommitWithOptionalFailure',
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
            'enrolledStopFencesPendingCandidateRouteSuccess','enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn',
-           'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
+           'enrolledRejectedUpdatesRetainAuthorizedTunnel', 'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
     if installer_only:
         names=['enrolledSystemInstallerCancelKeepsBoundPolicy']
     def observed_report(revision,outcome,selected):
@@ -199,6 +267,8 @@ def main():
                     before=proxy.progress
                     await_condition(lambda:call('auth-status').get('generation')==generation and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert fixture.registrations==1
+                elif name=='enrolledRejectedUpdatesRetainAuthorizedTunnel':
+                    check_rejected_policies(fixture, proxy, generation)
                 elif name=='enrolledCandidateRegressionRollsBack':
                     try:
                         await_condition(lambda:bool(fixture.telemetry_receipts),330)

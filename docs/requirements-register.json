@@ -3001,8 +3001,13 @@
     {
       "id": "AC06",
       "specRow": " Неверная подпись, чужой адресат, replay, несовместимая capability | Кандидат не активируется, предыдущая разрешённая версия работает |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "tools/run_policy_activation.py",
+        "tools/run_enrolled_vpn.py",
+        "tools/check_test_evidence.py"
+      ],
+      "remainingScope": "The enrolled emulator scenario serves four invalid or stale policy responses to an active session, checks subsequent proxy traffic and then issues a valid revision. Protected three-API evidence and the physical acceptance boundary are recorded separately."
     },
     {
       "id": "AC07",
