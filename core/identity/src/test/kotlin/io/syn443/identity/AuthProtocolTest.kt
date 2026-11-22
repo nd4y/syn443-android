@@ -51,6 +51,26 @@ class AuthProtocolTest {
         f.handler={_,_,_,_,_,_->late.cancel();json(204,text="")}
         error(AuthFailure.CANCELLED){f.client.reportRuntime(report,current,late)}
     }
+    @Test fun telemetryRetryAdviceAcceptsOnlyOneBoundedDeltaOnPressureResponses() {
+        val f = Fixture()
+        val session = f.current()
+        val batch = TechnicalTelemetry.Batch(1, Identity.random(), 52, 0, 1, listOf(
+            TechnicalTelemetry.Event(Identity.random(), now, 1, 0, "vpn", "online", "unknown")))
+        for (status in listOf(429, 503)) {
+            for ((fields, expected) in listOf(
+                emptyList<String>() to null, listOf("1") to 1, listOf("3600") to 3600,
+                listOf("0") to null, listOf("3601") to null, listOf("+5") to null,
+                listOf("1", "2") to null, listOf("9".repeat(50)) to null)) {
+                f.handler = { _, _, _, _, _, _ -> json(status).copy(headers = mapOf("retry-after" to fields)) }
+                val error = assertThrows(AuthException::class.java) { f.client.uploadTechnicalTelemetry(batch, session, IdentityScope()) }
+                assertEquals(if (status == 429) AuthFailure.THROTTLED else AuthFailure.UNAVAILABLE, error.reason)
+                assertEquals(expected, error.retryAfterSeconds)
+            }
+        }
+        f.handler = { _, _, _, _, _, _ -> json(403, extra = mapOf("retry-after" to "3600")) }
+        assertNull(assertThrows(AuthException::class.java) { f.client.uploadTechnicalTelemetry(batch, session, IdentityScope()) }.retryAfterSeconds)
+    }
+
     @Test fun technicalTelemetryIsProofBoundAndDisabledEndpointDoesNotAcknowledge() {
         val f=Fixture();val current=f.current()
         val batch=TechnicalTelemetry.Batch(1,Identity.random(),52,0,1,listOf(

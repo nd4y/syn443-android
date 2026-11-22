@@ -1050,7 +1050,8 @@ class LoginController private constructor(private val context:android.app.Applic
             currentConsent()
             val p=payload(expected)
             val session=checkNotNull(p.session)
-            val now=session.time.window(boot(),elapsed()).upperMs
+            val window=session.time.window(boot(),elapsed())
+            val now=window.upperMs
             val queueKey=Identity.hash(("syn443/telemetry-queue/"+authority.scope+"/"+consent.session).toByteArray(Charsets.US_ASCII))
             val old=telemetryDisk.read(queueKey)
             var queue=old
@@ -1065,12 +1066,20 @@ class LoginController private constructor(private val context:android.app.Applic
             if (!urgent && !telemetryCapture.recorded(consent,through)) return@submitIfIdle
             if (batch == null || !reportVpnOn()) return@submitIfIdle
             val vpnGeneration=state().checkpoint().generation
+            val wait = telemetryCapture.retryDelay(consent, window.lowerMs)
+            if (wait > 0) {
+                // The queue is durable. Keep collecting new events at the ordinary
+                // interval while the server's lower time bound blocks transmission.
+                if (urgent) telemetryCapture.recorded(consent, through)
+                synchronized(commands) { nextTelemetryElapsed = elapsed() + minOf(wait, TelemetryCapture.ROUTINE_MS) }
+                return@submitIfIdle
+            }
             val physical=PhysicalIdentityRoute.capture(context,wifiOnly=true,unmeteredOnly=true)
             physical.check()
-            val admitted = telemetryCapture.attempted(consent, now, batch, urgent)
+            val admitted = telemetryCapture.attempted(consent, now, batch, urgent, window.lowerMs)
             synchronized(commands) {
                 currentConsent()
-                nextTelemetryElapsed = elapsed() + (telemetryCapture.routineDelay(consent, now) ?: return@submitIfIdle)
+                nextTelemetryElapsed = elapsed() + (telemetryCapture.routineDelay(consent, now, window.lowerMs) ?: return@submitIfIdle)
             }
             if (!admitted) return@submitIfIdle
             if (urgent && !telemetryCapture.recorded(consent, through)) return@submitIfIdle
@@ -1087,7 +1096,7 @@ class LoginController private constructor(private val context:android.app.Applic
                 check(telemetryTransport.compareAndSet(null,scope))
                 try {
                     route.check()
-                    if(protocol.uploadTechnicalTelemetry(batch,session,scope)) {
+                    if(uploadTelemetryBatch(protocol,batch,session,scope,consent,now,route)) {
                         route.check()
                         val remaining = queue.acknowledged(queueKey, batch)
                         telemetryDisk.write(queueKey, remaining)
@@ -1097,6 +1106,20 @@ class LoginController private constructor(private val context:android.app.Applic
             }
         }
     }
+    private fun uploadTelemetryBatch(protocol: AuthProtocol, batch: TechnicalTelemetry.Batch,
+                                     session: SessionReply, scope: IdentityScope, consent: TelemetryCapture.Consent,
+                                     attemptMs: Long, route: HttpRoute, time: TrustedTime = session.time): Boolean {
+        return try {
+            protocol.uploadTechnicalTelemetry(batch, session, scope)
+        } catch (error: AuthException) {
+            val seconds = error.retryAfterSeconds ?: throw error
+            route.check()
+            val upper = time.window(boot(), elapsed()).upperMs
+            check(telemetryCapture.deferUpload(consent, batch, attemptMs, upper, seconds))
+            false
+        }
+    }
+
     internal fun ownsTelemetrySchedule(ticket: String): Boolean =
         TelemetryWork.valid(ticket) && telemetryCapture.activeConsent()?.session == ticket
 
@@ -1127,7 +1150,8 @@ class LoginController private constructor(private val context:android.app.Applic
         }
         val generation = stopped.getLong("generation")
         val original = payload(initial)
-        val scopeKey = telemetryKey(checkNotNull(original.session))
+        val cachedSession = checkNotNull(original.session)
+        val scopeKey = telemetryKey(cachedSession)
         val consent = telemetryCapture.consent(scopeKey)?.takeIf { it.session == ticket } ?: return true
         val queueKey = Identity.hash(("syn443/telemetry-queue/" + scopeKey + "/" + ticket).toByteArray(Charsets.US_ASCII))
         fun checkOwner() {
@@ -1138,6 +1162,10 @@ class LoginController private constructor(private val context:android.app.Applic
             check(TelemetryWork.vpnState(vpn) == TelemetryWork.VpnState.STOPPED && vpn.getLong("generation") == generation)
         }
         checkOwner()
+        // Across a process restart the stored deadline can be checked before
+        // refreshing a session or contacting the server. A new boot needs a fresh time anchor.
+        val cachedTime = runCatching { cachedSession.time.window(boot(), elapsed()) }.getOrNull()
+        if (cachedTime != null && telemetryCapture.retryDelay(consent, cachedTime.lowerMs) > 0) return true
         val old = telemetryDisk.read(queueKey)
         val (events, through) = telemetryCapture.sample(stopped, consent, io.syn443.android.BuildConfig.VERSION_CODE)
         if (events.isEmpty() && old.entries.isEmpty()) {
@@ -1170,16 +1198,17 @@ class LoginController private constructor(private val context:android.app.Applic
                 Assignments.receipt(verified, current, p, boot(), elapsed())
                 route.check()
                 if (!permission.technicalTelemetry) return@withProtocol true
-                val now = permission.time.window(boot(),elapsed()).upperMs
+                val window = permission.time.window(boot(),elapsed())
+                val now = window.upperMs
                 var queue = old
                 for (event in events) queue = queue.offer(queueKey, event)
                 queue = queue.expired(queueKey, now)
                 if (queue != old) telemetryDisk.write(queueKey, queue)
                 if (!telemetryCapture.recorded(consent, through)) return@withProtocol true
                 val batch = queue.peek(queueKey) ?: return@withProtocol true
-                if (!telemetryCapture.attempted(consent, now, batch, urgent=false)) return@withProtocol true
+                if (!telemetryCapture.attempted(consent, now, batch, urgent=false, trustedLowerMs=window.lowerMs)) return@withProtocol true
                 route.check()
-                if (!protocol.uploadTechnicalTelemetry(batch,session,scope)) return@withProtocol false
+                if (!uploadTelemetryBatch(protocol,batch,session,scope,consent,now,route,permission.time)) return@withProtocol false
                 route.check()
                 telemetryDisk.write(queueKey, queue.acknowledged(queueKey,batch))
                 true

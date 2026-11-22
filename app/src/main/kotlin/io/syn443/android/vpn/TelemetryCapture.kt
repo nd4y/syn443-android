@@ -69,15 +69,31 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
             }
     }
 
-    @Synchronized fun routineDelay(value: Consent, nowMs: Long): Long? {
-        val latest = consent(value.scope)?.takeIf { it.session == value.session } ?: return null
-        if (latest.attemptedAt == 0L) return 0
-        return ROUTINE_MS - (nowMs - latest.attemptedAt).coerceIn(0, ROUTINE_MS)
+    @Synchronized fun retryDelay(value: Consent, trustedLowerMs: Long): Long {
+        if (consent(value.scope)?.session != value.session) return 0
+        return (prefs.getLong("retryUntil", 0) - trustedLowerMs).coerceIn(0L, 3_600_000L)
     }
 
-    @Synchronized fun attempted(value: Consent, nowMs: Long, batch: TechnicalTelemetry.Batch, urgent: Boolean): Boolean {
+    @Synchronized fun deferUpload(value: Consent, batch: TechnicalTelemetry.Batch, attemptMs: Long,
+                                  receivedUpperMs: Long, seconds: Int): Boolean {
+        val latest = consent(value.scope) ?: return false
+        if (latest.session != value.session || batch.session != value.session || latest.attemptedAt != attemptMs ||
+            batch.events.firstOrNull()?.id != prefs.getString("attemptFirst", null) ||
+            receivedUpperMs < attemptMs || seconds !in 1..3600 || receivedUpperMs > Long.MAX_VALUE - 3_600_000L) return false
+        val until = maxOf(prefs.getLong("retryUntil", 0), receivedUpperMs + seconds * 1000L)
+        return commit { putLong("retryUntil", until) }
+    }
+
+    @Synchronized fun routineDelay(value: Consent, nowMs: Long, trustedLowerMs: Long = nowMs): Long? {
+        val latest = consent(value.scope)?.takeIf { it.session == value.session } ?: return null
+        if (latest.attemptedAt == 0L) return 0
+        return maxOf(retryDelay(value, trustedLowerMs), ROUTINE_MS - (nowMs - latest.attemptedAt).coerceIn(0, ROUTINE_MS))
+    }
+
+    @Synchronized fun attempted(value: Consent, nowMs: Long, batch: TechnicalTelemetry.Batch, urgent: Boolean, trustedLowerMs: Long = nowMs): Boolean {
         val latest = consent(value.scope) ?: return false
         if (latest.session != value.session || batch.session != latest.session || nowMs <= 0 || nowMs < latest.attemptedAt) return false
+        if (retryDelay(value, trustedLowerMs) > 0) return false
         val first = batch.events.firstOrNull()?.id ?: return false
         // A failed or ambiguously acknowledged batch keeps its ordinary retry interval across restarts.
         val interval = if (urgent && first != prefs.getString("attemptFirst", null)) URGENT_MS else ROUTINE_MS

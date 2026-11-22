@@ -19,6 +19,12 @@ native service disconnect, a policy rollback or a recorded loss of VPN
 consent can request earlier delivery during the existing supervisor tick.
 Attempts stay at least one minute apart. An unacknowledged batch with the
 same first event retains its five-minute retry interval across process restarts.
+A quota response (HTTP 429) or a busy upload service (HTTP 503) may supply
+one decimal Retry-After delay from 1 to 3600 seconds. The controller retains
+the unacknowledged batch and stores that deadline with the local consent. An
+urgent event and a restarted worker observe the same deadline. A fresh opt-in
+starts a new queue. Other account and policy requests keep their own schedules.
+
 The controller records a lost service connection without guessing whether
 the process suffered a Java or native crash. The DPoP proof covers the exact bounded batch
 and the current device session. Stop or a change of physical route cancels

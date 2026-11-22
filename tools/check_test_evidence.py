@@ -233,6 +233,7 @@ if mode=="identity":
     assert runtime_required <= {(c.get("classname"),c.get("name")) for c in cases}, "Runtime wire/queue evidence missing"
     assert {
         ("io.syn443.identity.AuthProtocolTest","technicalTelemetryIsProofBoundAndDisabledEndpointDoesNotAcknowledge"),
+        ("io.syn443.identity.AuthProtocolTest","telemetryRetryAdviceAcceptsOnlyOneBoundedDeltaOnPressureResponses"),
         ("io.syn443.identity.TelemetryTest","acknowledgmentRemovesOnlyTheOriginalPrefixAndNeverAnotherScope"),
         ("io.syn443.identity.TelemetryTest","queueCapsBatchesAndExpiresOldEvidenceWithoutReordering"),
     } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required telemetry queue or wire cases missing"
@@ -352,6 +353,7 @@ if mode=="emulator":
         ("LoginPilotTest", "browserReservationAndCancellationPreserveVpnAndDeleteTheKey"),
         ("TechnicalTelemetryDiskTest", "criticalAndFullTelemetryBatchesUseOnlyCurrentConsentedEvents"),
         ("TechnicalTelemetryDiskTest", "urgentAttemptHonorsPersistentSpacingExactHeadAndConsent"),
+        ("TechnicalTelemetryDiskTest", "serverQuotaSurvivesRecreationAndCannotDelayAnotherConsentSession"),
         ("TechnicalTelemetryDiskTest", "stoppedTelemetryRequiresPositiveObservationThatEngineAndIntentAreOff"),
     }
     observed = {(case.get("classname"), case.get("name")) for case in cases}
