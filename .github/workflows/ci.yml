@@ -219,12 +219,23 @@ jobs:
           path: ${{ runner.temp }}/syn443-release-input/
           if-no-files-found: error
           retention-days: 14
+      - name: Check out the approved Control Plane release tool
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: nd4y/syn443-control-plane
+          ref: 655e923ffc0eb9a91f6fb90941ab48d11728a77d
+          path: .release-verification
+          persist-credentials: false
+      - name: Build offline delivery verifier
+        working-directory: .release-verification
+        run: GOTOOLCHAIN=local GOWORK=off go build -mod=readonly -trimpath -o "$RUNNER_TEMP/apk-release" ./cmd/apk-release
       - name: Verify a signed release with a disposable fixture certificate
         run: |
           python3 tools/exercise_signed_apk.py \
             "$RUNNER_TEMP/syn443-release-input/app-release-unsigned.apk" \
             "$RUNNER_TEMP/syn443-release-input/inventory.json" \
-            "$ANDROID_HOME/build-tools/36.0.0/apksigner" "$RUNNER_TEMP/signing-acceptance.json"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" "$RUNNER_TEMP/signing-acceptance.json" \
+            --release-tool "$RUNNER_TEMP/apk-release"
           python3 tools/check_public_data.py "$RUNNER_TEMP/signing-acceptance.json"
           bash tools/scan_secrets.sh "$RUNNER_TEMP/signing-acceptance.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -2857,6 +2857,7 @@
       "status": "partial",
       "evidence": [
         "tools/verify_signed_apk.py",
+        "tools/exercise_release_delivery.py",
         "tools/exercise_signed_apk.py",
         "docs/release-packaging.md",
         ".github/workflows/ci.yml",
@@ -2864,8 +2865,8 @@
         "tools/release_input.py",
         "tools/test_release_input.py"
       ],
-      "implementationScope": "The normal release build and packaged manifest run through GitHub Actions. The unsigned signing input carries the package/version, min/target SDK, exact file and native library hashes, ABI, engine and contract lock inventories. ZIP and ELF alignment are verified for 16 KiB pages.",
-      "remainingScope": "Signed final distribution manifest, channel and signer trust, migration eligibility, operating-system installer and acceptance of a real release update on the enrolled phone."
+      "implementationScope": "The normal release build and packaged manifest run through GitHub Actions. The unsigned signing input carries the package/version, min/target SDK, exact file and native library hashes, ABI, engine and contract lock inventories. ZIP and ELF alignment are verified for 16 KiB pages. The independent SDK signing receipt and final package bytes feed the offline Control Plane release signer. Its public verifier checks the same APK and recipient, accepts an identical retry and rejects another device, an older revision, or a different APK with the same certificate.",
+      "remainingScope": "Android client trust and update delivery, installer consent and migration on the same enrolled device; production release key operations and distribution."
     },
     {
       "id": "ENG-04",
