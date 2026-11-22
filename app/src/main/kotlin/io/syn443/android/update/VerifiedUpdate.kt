@@ -111,7 +111,10 @@ internal class VerifiedUpdate(private val context: Context) {
 
     @Suppress("DEPRECATION")
     internal fun verifyArchive(file: File, apk: ReleaseArtifact, signerCertificate: String) {
-        val info = checkNotNull(pm.getPackageArchiveInfo(file.path, PackageManager.GET_SIGNING_CERTIFICATES))
+        // Android 10 only collects archive certificates when GET_SIGNATURES is also set.
+        // Read the current signer from SigningInfo, including on those releases.
+        val flags = PackageManager.GET_SIGNATURES or PackageManager.GET_SIGNING_CERTIFICATES
+        val info = checkNotNull(pm.getPackageArchiveInfo(file.path, flags))
         val app = checkNotNull(info.applicationInfo)
         require(info.packageName == context.packageName && info.packageName == apk.packageName &&
             info.longVersionCode == apk.versionCode && app.minSdkVersion == apk.minSdk && app.targetSdkVersion == apk.targetSdk &&
