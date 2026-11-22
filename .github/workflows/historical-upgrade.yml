@@ -6,6 +6,12 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      wifi_run:
+        description: Optional project CI run to replay the signed Wi-Fi selection on a disposable emulator
+        type: string
+      wifi_source:
+        description: Exact ancestor commit of the archived application and instrumentation driver
+        type: string
       candidate_run:
         description: Protected CI run with the newer version (latest successful by default)
         type: string
@@ -88,3 +94,40 @@ jobs:
             ${{ runner.temp }}/historical-upgrade/result.xml
           if-no-files-found: error
           retention-days: 14
+
+  wifi-replay:
+    name: Replay signed Wi-Fi on an archived APK
+    if: github.event_name == 'workflow_dispatch' && inputs.wifi_run != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify archived build and driver
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WIFI_RUN: ${{ inputs.wifi_run }}
+          WIFI_SOURCE: ${{ inputs.wifi_source }}
+        run: python3 tools/archived_wifi_inputs.py
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+        env:
+          SYN443_CI_AVD: syn443-ci
+        with:
+          avd-name: syn443-ci
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          ram-size: 3072M
+          disk-size: 6G
+          cores: 2
+          disable-animations: true
+          emulator-options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim -no-metrics
+          script: bash tools/replay_signed_wifi.sh

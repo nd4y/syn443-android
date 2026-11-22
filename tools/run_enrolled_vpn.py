@@ -368,6 +368,9 @@ def enrolled_operator_mode(fixture):
         call('policy-refresh')
 
         applying_search = set()
+        replay_details = set()
+        def args_replay():
+            return sys.argv[1:] == ['--wifi-only']
         last_route_sample = 0.0
 
         def working():
@@ -380,6 +383,14 @@ def enrolled_operator_mode(fixture):
                 search = row.get('search', {}).get('state')
                 known = ('WAITING_CONTEXT', 'SEARCHING', 'BUDGET_WAIT', 'SEARCH_INCOMPLETE', 'VERIFIED')
                 applying_search.add(search if search in known else 'unknown')
+                if args_replay():
+                    phase = row.get('state')
+                    detail = (search if search in known else 'unknown',
+                              phase if phase in ('unknown','unavailable','checking','working','failed') else 'unknown',
+                              reserve.route_probes > 0, reserve.progress > 0, row.get('measuredPath') == [wifi_hop])
+                    if detail not in replay_details:
+                        replay_details.add(detail)
+                        print('Applying Wi-Fi candidate (search, route, probe, application check, expected hop):',detail,flush=True)
             if not committed_online(status, 2):
                 return False
             return any(row.get('state') == 'working' and row.get('measuredPath') == [wifi_hop]
@@ -535,7 +546,7 @@ def main():
     assert PACKAGE+'.test/io.syn443.android.EnrollmentDriver' in adb('shell','pm','list','instrumentation').decode(),'Test APK enrollment driver is not installed'
     suite=ET.Element('testsuite',name='SYN443 enrolled native VPN')
     args=sys.argv[1:]
-    if args not in ([], ['--system-installer'], ['--historical']):
+    if args not in ([], ['--system-installer'], ['--historical'], ['--wifi-only']):
         raise ValueError('Unexpected enrollment scenario')
     installer_only=args==['--system-installer']
     historical=args==['--historical']
@@ -543,6 +554,8 @@ def main():
          else ROOT/'app/build/outputs/androidTest-results/external/TEST-enrolled-vpn.xml')
     if historical:
         out=upgrade_directory(historical=True)/'result.xml'
+    if args == ['--wifi-only']:
+        out = Path(os.environ['RUNNER_TEMP']) / 'wifi-replay' / 'result.xml'
     proxy=Server(('127.0.0.1',0),RouteProxy);threading.Thread(target=proxy.serve_forever,daemon=True).start()
     proxy.ssh_ok=True;proxy.delay=0;proxy.health_ok=True;proxy.route_probes=0
     port=proxy.server_address[1];adb('reverse','tcp:'+str(port),'tcp:'+str(port))
@@ -609,6 +622,8 @@ def main():
         names=['enrolledSystemInstallerCancelKeepsBoundPolicy']
     elif historical:
         names=['enrolledHistoricalUpgradeKeepsOriginalBindingAndPayload']
+    elif args == ['--wifi-only']:
+        names = ['enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath']
     def observed_report(revision,outcome,selected):
         return any(r['policyRevision']==revision and r['outcome']==outcome and r['activePolicyRevision']==selected
                    for r in list(fixture.activation_reports.values()))
