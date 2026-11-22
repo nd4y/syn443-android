@@ -1149,8 +1149,11 @@
     {
       "id": "ALG-02",
       "text": "Права доступа, обязательный traffic class/exit, TLS-валидация, anti-leak правила и capabilities - жёсткие ограничения. Затем порядок оптимизации: стабильность и восстановление; энергозатраты; скорость; точность оценки дополнительных метрик. Понижение точности не разрешает ложный Connected или отключение проверки сертификата.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md#setup-cost-for-a-common-exit-path"
+      ],
+      "remainingScope": "The adaptive coordinator compares extra proxy sessions for signed paths with a common exit suffix after independent stability checks. On-device radio and battery measurements remain open."
     },
     {
       "id": "ALG-03",
@@ -1185,9 +1188,10 @@
       "text": "Энергетическая цена включает число и объём проб, новые DNS/TCP/TLS handshakes, radio wakeups по доступным оценкам, keepalive и число активных резервов. Она сравнивается при сопоставимой стабильности. Допускаются оценки/классы стоимости; измерение джоулей для каждого маршрута не предполагается.",
       "status": "partial",
       "evidence": [
-        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms"
+        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms",
+        "docs/managed-adaptive-runtime.md#setup-cost-for-a-common-exit-path"
       ],
-      "remainingScope": "Local adaptive TCP admission and passive recheck source only. Exact Actions/native race/Android/device acceptance, common SDK/diagnostic/telemetry governor, broader modes and failure correlation remain separate requirements."
+      "remainingScope": "Local adaptive TCP admission and passive recheck source only. Exact Actions/native race/Android/device acceptance, common SDK/diagnostic/telemetry governor, broader modes and failure correlation remain separate requirements. The adaptive coordinator compares extra proxy sessions for signed paths with a common exit suffix after independent stability checks. On-device radio and battery measurements remain open."
     },
     {
       "id": "ALG-07",
@@ -3272,8 +3276,11 @@
     {
       "id": "AC48",
       "specRow": " Прямой путь и цепочки при разных history/energy/latency/confidence | Жёсткие фильтры и лексикографический порядок соблюдены, стоимость/квота не подменяют безопасность или exit |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/managed-adaptive-runtime.md#setup-cost-for-a-common-exit-path"
+      ],
+      "remainingScope": "The adaptive coordinator compares extra proxy sessions for signed paths with a common exit suffix after independent stability checks. On-device radio and battery measurements remain open."
     },
     {
       "id": "AC49",
