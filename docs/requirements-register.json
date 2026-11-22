@@ -939,8 +939,14 @@
     {
       "id": "AUTO-04",
       "text": "При проблеме сначала локализуется слой отказа. Перезапуск всего VPN не является первым действием при недоступном одиночном сайте или необязательном туннеле. Допустимы смена кандидата, пересоздание затронутого транспорта, обновление DNS состояния, реконнект NetBird и ограниченный перезапуск native-процесса. Границы независимого запуска/восстановления и блокировки приватных назначений обязательны по REC-03, включая адаптацию fail-fast запуска движка.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/m1-vpn.md",
+        "app/src/androidTest/kotlin/io/syn443/android/VpnLifecycleTest.kt",
+        "native/engine-netbird/deferred_test.go"
+      ],
+      "implementationScope": "An unconfigured optional NetBird adapter leaves the managed VPN owner running. The existing proxy continues serving application traffic. Named emulator coverage compares actual default-proxy requests before and after routing two private destinations to that adapter.",
+      "remainingScope": "Other transport-specific recovery actions, full layered fault localization and field acceptance remain open."
     },
     {
       "id": "AUTO-05",
@@ -1010,8 +1016,16 @@
     {
       "id": "AUTO-10",
       "text": "Для управляемых назначений задаётся fail-closed либо явно разрешённый direct fallback. Недоступность прокси не разрешает произвольный прямой выход. Для недоступного приватного назначения запрещён скрытый переход в общий прокси или direct по REC-03. Полная защита при падении/остановке приложения требует системного always-on/lockdown; приложение показывает, включена ли она, и соблюдает ENG-01/02.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/m1-vpn.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteControls.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/SystemVpnProtectionTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/VpnLifecycleTest.kt",
+        "native/bridge/private_adaptive_outbound_test.go"
+      ],
+      "implementationScope": "Private overlay rules retain ownership when enrollment is unavailable. The Android VPN details display the two system protection settings independently from current platform evidence. The native adapter also rejects unadmitted connections instead of borrowing an existing direct outbound.",
+      "remainingScope": "Publication of every direct-fallback policy variant, all private traffic classes and physical interruption coverage remain open."
     },
     {
       "id": "REC-01",

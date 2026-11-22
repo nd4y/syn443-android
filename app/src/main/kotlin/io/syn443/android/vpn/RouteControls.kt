@@ -1,5 +1,6 @@
 package io.syn443.android.vpn
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
@@ -8,6 +9,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -98,12 +103,43 @@ import org.json.JSONObject
         val enabled=status.optBoolean("desiredOn") && status.optBoolean("engineActive") && routes!=null && (0 until routes.length()).any {routes.getJSONObject(it).optBoolean("configured")}
         Button(onClick={command("routes-check",null)},enabled=enabled && health?.optBoolean("running")!=true,modifier=Modifier.testTag("routes-check")){Text("Проверить маршруты")}
         if(health?.optBoolean("running")==true)Button(onClick={command("routes-cancel",null)},modifier=Modifier.testTag("routes-cancel")){Text("Отменить проверку маршрутов")}
-        val os=status.optJSONObject("osPolicy")
-        Text(if(os?.optBoolean("known")==true)"Android: Always-on=${os.optBoolean("alwaysOn")}; блокировка без VPN=${os.optBoolean("lockdown")}" else "Android: состояние Always-on/lockdown неизвестно без активного VPN",Modifier.testTag("os-vpn-policy"))
-        Text("Stop сохраняет выключенное намерение. Системный lockdown при этом может блокировать сеть.")
-        Button(onClick={context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS))},modifier=Modifier.testTag("vpn-system-settings")){Text("Настройки VPN в Android")}
+        SystemVpnProtection(status.optJSONObject("osPolicy")) {
+            context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
+        }
     }
 }
+
+@Composable
+internal fun SystemVpnProtection(policy: JSONObject?, openSettings: () -> Unit) {
+    val known = policy?.opt("known") == true
+    val alwaysOn = if (known) policy?.opt("alwaysOn") as? Boolean else null
+    val lockdown = if (known) policy?.opt("lockdown") as? Boolean else null
+    var settingsUnavailable by remember { mutableStateOf(false) }
+    Column(modifier = Modifier.testTag("os-vpn-policy")) {
+        Text(when (alwaysOn) {
+            true -> "Постоянный VPN включён"
+            false -> "Постоянный VPN выключен"
+            null -> "Состояние постоянного VPN неизвестно"
+        })
+        Text(when (lockdown) {
+            true -> "Android блокирует соединения без VPN. Блокировка сохраняется при остановке SYN443."
+            false -> "Блокировка соединений без VPN выключена в Android."
+            null -> "Состояние блокировки соединений без VPN неизвестно. Его можно проверить в настройках Android."
+        })
+        Button(onClick = {
+            settingsUnavailable = try {
+                openSettings()
+                false
+            } catch (_: ActivityNotFoundException) {
+                true
+            } catch (_: SecurityException) {
+                true
+            }
+        }, modifier = Modifier.testTag("vpn-system-settings")) { Text("Настройки VPN в Android") }
+        if (settingsUnavailable) Text("Откройте системные настройки и найдите раздел VPN.")
+    }
+}
+
 internal fun routeFailureLabel(reason: String, cause: RouteFailureCause?): String = when (cause) {
     RouteFailureCause.DNS_NOT_FOUND -> "DNS не нашёл имя узла"
     RouteFailureCause.DNS_TIMEOUT -> "Истекло время ожидания ответа DNS"

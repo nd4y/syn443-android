@@ -95,6 +95,10 @@ if mode=="emulator":
     assert {
         ("io.syn443.android.RouteSnapshotTest", "terminalOmissionAndDeadlineClearOnlyMissingMeasurements"),
     } <= set(identities), "Missing route measurement consistency outcomes"
+    assert {("io.syn443.android.SystemVpnProtectionTest", name) for name in (
+        "systemProtectionsRequireFreshBooleanEvidenceForEachSetting",
+        "unavailableSettingsExplainManualAccessAndAllowRetry",
+    )} <= set(identities), "Missing system VPN protection outcomes"
     assert {("io.syn443.android.InvitationScannerTest", name) for name in (
         "liveDecoderRecognizesBothPolaritiesAndRejectsForeignPayloads",
         "liveCameraReadsCleanFrameWhenTheOrdinaryFinderCannotLocateItsThirdMarker",
