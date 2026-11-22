@@ -48,7 +48,13 @@ internal object StoppedTelemetryFixture {
                     } ?: continue
                     val name = namespace.orEmpty()
                     check(name.isEmpty() || name.matches(Regex("[A-Za-z0-9_.-]{1,80}")))
-                    return Bundle().apply { putString("job", job.id.toString()); putString("namespace", name) }
+                    val untilEligible = item.nextScheduleTimeMillis - System.currentTimeMillis()
+                    check(untilEligible in 1..900_000L)
+                    return Bundle().apply {
+                        putString("job", job.id.toString())
+                        putString("namespace", name)
+                        putString("untilEligibleMs", untilEligible.toString())
+                    }
                 }
             }
             SystemClock.sleep(100)

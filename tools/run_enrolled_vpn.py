@@ -164,7 +164,9 @@ def main():
                 elif name=='enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':
                     job=re.search(r'(?m)^INSTRUMENTATION_RESULT: job=([0-9]{1,10})\s*$',driver_result)
                     namespace=re.search(r'(?m)^INSTRUMENTATION_RESULT: namespace=([A-Za-z0-9_.-]{0,80})\r?$',driver_result)
-                    assert job and namespace
+                    until_eligible=re.search(r'(?m)^INSTRUMENTATION_RESULT: untilEligibleMs=([0-9]{1,6})\s*$',driver_result)
+                    assert job and namespace and until_eligible and 0<int(until_eligible[1])<=900_000
+                    due=time.monotonic()+int(until_eligible[1])/1000
                     await_condition(vpn_stopped)
                     stopped=call('status')['generation']
                     assert not fixture.telemetry_receipts
@@ -174,10 +176,17 @@ def main():
                     await_condition(lambda:pid(':controller')!=old,30)
                     cmd=['shell','cmd','jobscheduler','run','-f','-u','0']
                     if namespace[1]:cmd+=['-n',namespace[1]]
-                    # Run the actual WorkManager periodic JobScheduler entry early on the disposable emulator.
-                    # The production worker still checks physical Wi-Fi, consent, identity and VPN Off.
-                    adb(*cmd,PACKAGE,job[1])
-                    await_condition(lambda:any(('vpn','off') in events for _,events in fixture.telemetry_receipts),90)
+                    # JobScheduler can launch a service early, but WorkManager independently
+                    # checks the first eligible wall-clock time for periodic work. Preserve the
+                    # entire production interval, including session token refresh while stopped.
+                    def received_off():
+                        return any(('vpn','off') in events for _,events in fixture.telemetry_receipts)
+                    print('Waiting for the first eligible periodic telemetry upload',flush=True)
+                    while not received_off() and time.monotonic()<due:
+                        time.sleep(min(5,max(0,due-time.monotonic())))
+                    if not received_off():
+                        adb(*cmd,PACKAGE,job[1])
+                    await_condition(received_off,120)
                     assert vpn_stopped() and call('status')['generation']==stopped
                     assert fixture.registrations==1 and call('auth-status')['generation']==generation
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
