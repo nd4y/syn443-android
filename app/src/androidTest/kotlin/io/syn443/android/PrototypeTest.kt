@@ -75,7 +75,13 @@ class PrototypeTest {
         compose.onNodeWithTag("routes-title").assertDoesNotExist()
         compose.onNodeWithTag("prototype").assertDoesNotExist()
         compose.onNodeWithTag("vpn-details").performScrollTo().performClick()
-        compose.onNodeWithTag("routes-title").performScrollTo().assertIsDisplayed()
+        val heading = compose.onNodeWithTag("routes-title")
+        compose.waitUntil(8_000) { heading.isDisplayed() }
+        heading.assertIsDisplayed()
+        compose.onNodeWithTag("vpn-details").performScrollTo().performClick()
+        heading.assertDoesNotExist()
+        compose.activityRule.scenario.recreate()
+        heading.assertDoesNotExist()
     }
 }
 

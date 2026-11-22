@@ -14,16 +14,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.syn443.recovery.RouteFailureCause
 import org.json.JSONObject
 
-@Composable fun RouteControls(status:JSONObject,command:(String,String?)->Unit) {
+@Composable fun RouteControls(status:JSONObject,headingModifier:Modifier=Modifier,command:(String,String?)->Unit) {
     val context=LocalContext.current
     Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
-        Text("Маршруты",Modifier.testTag("routes-title"))
+        Text("Маршруты", headingModifier.testTag("routes-title").semantics { heading() })
         val health=status.optJSONObject("routeHealth")
         val routes=health?.optJSONArray("routes")
         health?.optJSONObject("decisionShadow")?.let { comparison ->
