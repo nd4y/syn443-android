@@ -43,7 +43,10 @@ jobs:
       - run: python3 tools/check_documents.py
       - run: python3 tools/check_contracts.py
       - run: python3 -m unittest discover -s tools -p 'test_*.py'
-      - run: bash -n tools/run_emulator_tests.sh tools/prepare_android_tools.sh
+      - run: |
+          bash -n tools/run_emulator_tests.sh
+          bash -n tools/prepare_android_tools.sh
+          bash -n tools/run_installer_acceptance.sh
       - run: python3 -m unittest discover -s tools -p test_emulator_policy_ui.py
       - run: python3 -m unittest discover -s tools -p test_emulator_heap.py
   native:
@@ -80,7 +83,7 @@ jobs:
   jvm-and-apk:
     needs: [public-data, native]
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -264,6 +267,36 @@ jobs:
           path: ${{ runner.temp }}/upgrade-fixture/
           if-no-files-found: error
           retention-days: 7
+      - name: Prepare a runner-local signed offer for the system installer
+        run: |
+          set -euo pipefail
+          case_dir="$RUNNER_TEMP/syn443-installer-private"
+          mkdir -m 700 "$case_dir"
+          cp "$RUNNER_TEMP/upgrade-fixture/"{upgrade.json,new-debug.apk} "$case_dir/"
+          python3 tools/prepare_installer_acceptance.py "$case_dir" public-evidence/build-manifest.json
+          python3 tools/check_apk.py "$case_dir/installer-base.apk"
+          python3 tools/check_apk_assets.py "$case_dir/installer-base.apk"
+      - name: Enable KVM for the installer acceptance emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Cancel verified update in the Android system installer
+        uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+        env:
+          SYN443_CI_AVD: syn443-ci
+        with:
+          avd-name: syn443-ci
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          ram-size: 3072M
+          cores: 2
+          disk-size: 6G
+          disable-animations: true
+          emulator-options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim -no-metrics
+          script: bash tools/run_installer_acceptance.sh
   workflow-lint:
     needs: public-data
     runs-on: ubuntu-24.04

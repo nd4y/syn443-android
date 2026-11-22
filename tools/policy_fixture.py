@@ -56,6 +56,9 @@ class Publisher:
             assert key_thumbprint is not None and operation == 'configure'
             assert {'route.health.v1', 'route.failover.v1'} <= set(extra_capabilities) and isinstance(config.get('route_failover'), dict)
         payload['requiredCapabilities'].extend(extra_capabilities)
+        return self.signed_document(header, payload)
+
+    def signed_document(self, header, payload):
         canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
         content = b64(canonical(header)) + '.' + b64(canonical(payload))
         der = subprocess.check_output([OPENSSL, 'dgst', '-sha256', '-sign', str(self.key)], input=content.encode())
