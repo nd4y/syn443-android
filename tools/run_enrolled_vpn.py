@@ -7,7 +7,7 @@ import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
-from enrollment_fixture import Fixture
+from enrollment_fixture import Fixture, decode
 from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
 from run_route_lifecycle import RouteProxy
 
@@ -58,7 +58,10 @@ def main():
         logout();close_fixture();call('policy-test-reset');call('test-reset')
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
-        fixture=Fixture(config);fixture_port=fixture.server.server_port
+        # The first eligible periodic job is 15 minutes after opt-in. Its signed
+        # assignment must still be valid when the ten-minute access token rotates.
+        fixture=Fixture(config,policy_ttl_seconds=3600) if telemetry=='stopped' else Fixture(config)
+        fixture_port=fixture.server.server_port
         fixture.telemetry_enabled=telemetry is not None
         fixture.pending_policy_requests=1 if pending else 0
         adb('reverse','tcp:'+str(fixture_port),'tcp:'+str(fixture_port))
@@ -170,7 +173,14 @@ def main():
                     namespace=re.search(r'(?m)^INSTRUMENTATION_RESULT: namespace=([A-Za-z0-9_.-]{0,80})\r?$',driver_result)
                     until_eligible=re.search(r'(?m)^INSTRUMENTATION_RESULT: untilEligibleMs=([0-9]{1,6})\s*$',driver_result)
                     assert job and namespace and until_eligible and 0<int(until_eligible[1])<=900_000
-                    due=time.monotonic()+int(until_eligible[1])/1000
+                    remaining_ms=int(until_eligible[1])
+                    due=time.monotonic()+remaining_ms/1000
+                    deadline_ms=int(time.time()*1000)+remaining_ms
+                    signed_policy,=fixture.envelopes.values()
+                    policy=json.loads(decode(signed_policy.split('.')[1]))
+                    session,=fixture.sessions.values()
+                    assert session['accessUntilMs'] < deadline_ms
+                    assert policy['offlineUntilMs'] > deadline_ms+120_000, 'assignment expires before worker acceptance'
                     await_condition(vpn_stopped)
                     stopped=call('status')['generation']
                     assert not fixture.telemetry_receipts
@@ -190,7 +200,16 @@ def main():
                         time.sleep(min(5,max(0,due-time.monotonic())))
                     if not received_off():
                         adb(*cmd,PACKAGE,job[1])
-                    await_condition(received_off,120)
+                    try:
+                        await_condition(received_off,120)
+                    except Exception:
+                        # Expose only receiver counts, never credentials, device IDs or events.
+                        print('Stopped telemetry observation:', {
+                            'registrations': fixture.registrations, 'policyRequests': fixture.policy_requests,
+                            'sessionRefreshed': any(s['generation']>0 for s in fixture.sessions.values()),
+                            'batches': len(fixture.telemetry_receipts)}, flush=True)
+                        raise
+                    assert len(fixture.sessions)==1 and next(iter(fixture.sessions.values()))['generation']>0
                     assert vpn_stopped() and call('status')['generation']==stopped
                     assert fixture.registrations==1 and call('auth-status')['generation']==generation
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
