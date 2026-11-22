@@ -10,6 +10,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.json.JSONObject
 
+/** A signed absolute deadline and time since the previous request are independent clocks. */
+internal fun assignmentRefreshDue(sinceLastMs:Long,untilSignedDeadlineMs:Long?,force:Boolean):Boolean {
+    if(force)return sinceLastMs>=5_000
+    return sinceLastMs>=300_000 || sinceLastMs>=30_000 && (untilSignedDeadlineMs==null || untilSignedDeadlineMs<=0)
+}
+
 /** An already accepted policy can lose its permit while the VPN is off. */
 internal fun needsForegroundRenewal(phase:String,reason:String,assignment:JSONObject?):Boolean =
     phase=="POLICY_CACHED" && reason in setOf("","TRANSPORT","THROTTLED","UNAVAILABLE","PENDING") &&

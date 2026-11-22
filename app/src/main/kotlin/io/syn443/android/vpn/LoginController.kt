@@ -931,18 +931,21 @@ class LoginController private constructor(private val context:android.app.Applic
             current(expected);resumeWorker(expected)
         }
     }
-    internal fun refreshAssignment(force:Boolean):Boolean {
+    internal fun refreshAssignment(force:Boolean, visibleGeneration:Long?=null):Boolean {
         val s=journal.snapshot()
         if(s.phase !in setOf(LoginPhase.POLICY_CACHED,LoginPhase.REFRESHING))return false
-        val interval=if(force)5_000L else runCatching {
+        if(visibleGeneration!=null && (s.generation!=visibleGeneration || reportVpnOn()))return false
+        val remaining=if(force)null else runCatching {
             val view=assignedRuntime.read(s);val raw=view.state.journal.active ?: view.state.journal.candidate
             val policy=checkNotNull(assignedRuntime.allowed(s,raw))
-            (policy.payload.refreshAfterMs-checkNotNull(view.state.time).window(boot(),elapsed()).upperMs).coerceIn(30_000,300_000)
-        }.getOrDefault(30_000L)
-        if(elapsed()-lastAssignmentFetch<interval)return !force &&
+            policy.payload.refreshAfterMs-checkNotNull(view.state.time).window(boot(),elapsed()).upperMs
+        }.getOrNull()
+        val previous=lastAssignmentFetch
+        if(!assignmentRefreshDue(elapsed()-previous,remaining,force))return !force && visibleGeneration==null &&
             (refreshOverlayCredential() || reportActivation() || syncDeviceSubscription() || syncTechnicalTelemetry() || syncRuntimeObservation())
         if(runCatching {assignedRuntime.read(s).state.journal.phase=="applying"}.getOrDefault(false))return false
-        return submitIfIdle(onAdmission={lastAssignmentFetch=elapsed()}) {
+        return submitIfIdle(admit={journal.isCurrent(s) && lastAssignmentFetch==previous},
+            onAdmission={lastAssignmentFetch=elapsed()}) {
             current(s);resumeWorker(s)
         }
     }

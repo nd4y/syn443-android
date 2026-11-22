@@ -671,8 +671,16 @@
     {
       "id": "PROV-07",
       "text": "Онлайн-устройство при доступном канале получает новую политику в пределах 5 минут, если не задан иной интервал. Отзыв сессии применяется при следующем обращении; принудительный отзыв уже выданного доступа требует поддержки конечного сервера. Офлайн-мгновенный отзыв не обещается.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginControls.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/ControlProvider.kt",
+        "tools/run_enrolled_vpn.py",
+        "app/src/androidTest/kotlin/io/syn443/android/LoginControllerTest.kt"
+      ],
+      "implementationScope": "The active VPN supervisor and a visible enrolled client share signed-deadline admission with a five-minute default cap. The user can explicitly fetch an assignment with VPN Off. The higher-version emulator drill receives a new signed revision before reconnecting with the same device.",
+      "remainingScope": "Convergence timing across a real cohort, suspended-device delivery, explicit operator interval overrides and external endpoint revocation."
     },
     {
       "id": "PROV-08",

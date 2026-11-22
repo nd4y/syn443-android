@@ -50,19 +50,25 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation):
     response = adb('install', '-r', str(directory / 'new-debug.apk'), timeout=120)
     assert b'Success' in response.splitlines() and installed_version() == receipt['previous'] + 1
     adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
-    state = call('status')
-    assert state['desiredOn'] is False and state['generation'] == before['generation'] and vpn_stopped()
-    assert state['policy'].get('activeRevision') == 1 and call('auth-status')['generation'] == auth_generation
+    def restored_off():
+        state = call('status')
+        assert state['desiredOn'] is False and state['generation'] == before['generation'] and vpn_stopped()
+        return state['policy'].get('activeRevision') == 1 and not call('auth-status')['busy']
+    await_condition(restored_off)
+    assert call('auth-status')['generation'] == auth_generation
     # The fixture counts policy requests only after verifying the signed DPoP proof, nonce and access token.
     requests = fixture.policy_requests
-    call('policy-refresh')
-    await_condition(lambda: fixture.policy_requests > requests)
+    fixture.revision = 2
+    await_condition(lambda: call('policy-refresh').get('admitted') is True, 30)
+    await_condition(lambda: fixture.policy_requests > requests and call('status')['policy'].get('desiredRevision') == 2)
+    assert call('status')['desiredOn'] is False and vpn_stopped()
     progress = proxy.progress
     call('connect')
     await_condition(lambda: call('status')['phase'] == 'Online' and
+                    call('status')['policy'].get('activeRevision') == 2 and
                     call('status')['policy'].get('phase') == 'committed' and proxy.progress > progress)
     assert binding() == original and fixture.registrations == 1
-    assert call('status')['policy']['activeRevision'] == 1 and call('auth-status')['generation'] == auth_generation
+    assert call('status')['policy']['activeRevision'] == 2 and call('auth-status')['generation'] == auth_generation
 
 
 def failure_summary():
