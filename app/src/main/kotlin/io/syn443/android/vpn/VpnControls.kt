@@ -221,7 +221,9 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
         if (detailsOpen) {
             val heading = remember { BringIntoViewRequester() }
             var headingPlaced by remember { mutableStateOf(false) }
-            RouteControls(status, Modifier.bringIntoViewRequester(heading).onGloballyPositioned { headingPlaced = true }) { method, arg ->
+            RouteControls(status, routeHeading = {
+                RouteHeading(Modifier.bringIntoViewRequester(heading).onGloballyPositioned { headingPlaced = true })
+            }) { method, arg ->
                 command(method, arg)
             }
             // Only the tap requests a reveal. Polls and restored scroll positions keep their place.
