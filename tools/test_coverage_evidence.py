@@ -235,14 +235,14 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual(1, len(declarations))
         required = ast.literal_eval(declarations[0].value)
         expected = set()
-        for name, count in [('ManagedAdaptiveSearchStatusTest', 6), ('RouteSearchStatusTest', 7)]:
+        for name, count in [('ManagedAdaptiveSearchStatusTest', 6), ('RouteSearchStatusTest', 8)]:
             path = root / 'app/src/androidTest/kotlin/io/syn443/android' / (name + '.kt')
             methods = re.findall(r'@Test\s+fun\s+(\w+)', path.read_text(encoding='utf-8'))
             self.assertEqual(count, len(methods))
             self.assertEqual(count, len(set(methods)))
             expected.update(('io.syn443.android.' + name, method) for method in methods)
-        self.assertEqual(13, len(required))
-        self.assertEqual(13, len(set(required)))
+        self.assertEqual(14, len(required))
+        self.assertEqual(14, len(set(required)))
         self.assertEqual(expected, set(required))
         self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=524\n')
         self.assertRegex(source, r'elif mode=="identity":\n(?:    [^\n]*\n)*?    minimum=249\n')
