@@ -51,3 +51,10 @@ tasks.check { dependsOn(tasks.jacocoTestReport, tasks.jacocoTestCoverageVerifica
 
 // Keep evidence available even when the unchanged coverage gate rejects a build.
 tasks.jacocoTestCoverageVerification { mustRunAfter(tasks.jacocoTestReport) }
+
+tasks.register<JavaExec>("verifyReleaseDelivery") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    doFirst { environment("SYN443_RELEASE_FIXTURE_DIR", providers.environmentVariable("SYN443_RELEASE_FIXTURE_DIR").get()) }
+    mainClass.set("io.syn443.identity.ReleaseDeliveryFixture")
+}

@@ -23,7 +23,10 @@ class SealedFile(context: Context, name: String) {
         }.generateKey()
     }
     fun read(): String? {
-        if (!file.baseFile.exists()) return null
+        if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) {
+            require(!File(file.baseFile.path + ".new").exists()) { "Incomplete sealed record" }
+            return null
+        }
         val data = file.openRead().use { require(it.available() <= 2_097_152); it.readBytes() }
         require(data.size in 29..2_097_152 && data[0].toInt() == 12)
         return Cipher.getInstance("AES/GCM/NoPadding").run {

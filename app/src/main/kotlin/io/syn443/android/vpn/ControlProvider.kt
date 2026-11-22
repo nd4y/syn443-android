@@ -85,6 +85,10 @@ class ControlProvider : ContentProvider() {
             initializeUnlocked()
             val store = StateStore.get(context)
             when (method) {
+                "release-context" -> {
+                    require(caller == Process.myUid() && arg == null && extras == null)
+                    return LoginController.get(context).releaseContext()
+                }
                 "network-mode" -> {
                     require(caller==Process.myUid() && extras==null && arg!=null && arg.length<=96)
                     val values=arg.split('|')

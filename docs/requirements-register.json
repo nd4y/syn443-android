@@ -2840,6 +2840,11 @@
       "text": "Release manifest подписан, включает package/signing identity, versionCode, channel, ABI/SDK, engine/evaluator/schema capabilities, hash/size и совместимость миграции. Установка требует штатного действия Android; отказ/отсрочка не удаляет рабочую разрешённую конфигурацию. Обновление сохраняет intent, enrollment, drafts и identity. Поддельная/неподходящая сборка отклоняется до установки.",
       "status": "partial",
       "evidence": [
+        "core/identity/src/main/kotlin/io/syn443/identity/ReleaseAdmission.kt",
+        "core/identity/src/test/kotlin/io/syn443/identity/ReleaseAdmissionTest.kt",
+        "app/src/main/kotlin/io/syn443/android/update/VerifiedUpdate.kt",
+        "app/src/main/kotlin/io/syn443/android/update/UpdateActivity.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/VerifiedUpdateTest.kt",
         "tools/verify_signed_apk.py",
         "tools/exercise_release_delivery.py",
         "tools/exercise_signed_apk.py",
@@ -2849,8 +2854,8 @@
         "tools/release_input.py",
         "tools/test_release_input.py"
       ],
-      "implementationScope": "The normal release build and packaged manifest run through GitHub Actions. The unsigned signing input carries the package/version, min/target SDK, exact file and native library hashes, ABI, engine and contract lock inventories. ZIP and ELF alignment are verified for 16 KiB pages. The independent SDK signing receipt and final package bytes feed the offline Control Plane release signer. Its public verifier checks the same APK and recipient, accepts an identical retry and rejects another device, an older revision, or a different APK with the same certificate.",
-      "remainingScope": "Android client trust and update delivery, installer consent and migration on the same enrolled device; production release key operations and distribution."
+      "implementationScope": "The normal release build and packaged manifest run through GitHub Actions. The unsigned signing input carries the package/version, min/target SDK, exact file and native library hashes, ABI, engine and contract lock inventories. ZIP and ELF alignment are verified for 16 KiB pages. The independent SDK signing receipt and final package bytes feed the offline Control Plane release signer. Its public verifier checks the same APK and recipient, accepts an identical retry and rejects another device, an older revision, or a different APK with the same certificate. The mobile entry verifies a release against the APK-provisioned authority, installed signer, registered device and current policy. The Android package manager and native library hashes are checked before explicit system installation.",
+      "remainingScope": "Production key operations, remote distribution, real human installation consent, enrolled-device migration and failure recovery across release versions."
     },
     {
       "id": "ENG-04",

@@ -7,6 +7,13 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <application
@@ -38,6 +45,11 @@
         <activity android:name="com.journeyapps.barcodescanner.CaptureActivity" tools:node="remove" />
         <activity android:name=".chat.SupportActivity" android:exported="false" />
         <activity android:name=".support.DiagnosticsActivity" android:exported="false" />
+        <activity android:name=".update.UpdateActivity" android:exported="false" />
+        <provider android:name=".update.UpdatePackageProvider" android:authorities="io.syn443.update.apk"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_apk_paths" />
+        </provider>
         <activity android:name=".admin.AdminActivity" android:exported="false" />
         <activity android:name=".admin.AdminCallbackActivity" android:exported="true" android:excludeFromRecents="true" android:noHistory="true">
             <intent-filter>

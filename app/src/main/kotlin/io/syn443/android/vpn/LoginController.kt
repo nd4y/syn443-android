@@ -295,6 +295,36 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     /** Memory/public-intent reads only. Never call StateStore, Keystore or network in this block. */
     internal fun <T> assignedRead(block:(LoginIntent)->T):T=synchronized(commands) {block(journal.snapshot())}
+    /** Same-UID UI projection. Only facts from the live registered session and committed policy leave the controller. */
+    internal fun releaseContext():android.os.Bundle {
+        val root = BootstrapTrust.installationProfile(io.syn443.android.BuildConfig.INSTALLATION_PROFILE).releaseAuthority
+            ?: error("Release channel unavailable")
+        val currentBoot = boot()
+        return assignedRead { login ->
+            val owned = checkNotNull(cached)
+            require(activeAdminContext(login) && adminContextBinding(login) == adminContextBinding(owned.first))
+            val session = checkNotNull(owned.second.session)
+            require(session.session.deviceId == login.deviceId && session.keyThumbprint == login.thumbprint &&
+                session.authority == login.authority && root.appliesTo(owned.second.bootstrap))
+            val view = assignedRuntime.read(login)
+            require(view.state.journal.phase in setOf("committed", "rolled_back", "degraded"))
+            val now = elapsed()
+            val time = session.time.window(currentBoot, now)
+            require(time.upperMs < session.session.accessUntilMs)
+            val policy = checkNotNull(view.permit).authorized(login, view.state, currentBoot, now).payload
+            android.os.Bundle().apply {
+                putBoolean("ok", true)
+                putString("device", login.deviceId)
+                putString("binding", adminContextBinding(login))
+                putString("policy", policy.contentHash)
+                putString("evaluator", policy.algorithmRevision)
+                putString("schema", "policy-v" + policy.schemaVersion)
+                putStringArrayList("capabilities", ArrayList(policy.requiredCapabilities))
+                putLong("lowerMs", time.lowerMs)
+                putLong("upperMs", time.upperMs)
+            }
+        }
+    }
     internal fun ownsPolicy()=runCatching {journal.snapshot().phase!=LoginPhase.SIGNED_OUT}.getOrDefault(true)
     fun allowsConnect():Boolean = runCatching {
         val s=journal.snapshot()

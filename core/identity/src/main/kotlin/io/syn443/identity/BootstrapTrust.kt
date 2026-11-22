@@ -49,7 +49,8 @@ import java.util.Base64
 @Serializable data class InstallationUpgrade(val previousAnchor:TrustAnchor,val rotation:RootRotation)
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable data class InstallationProfile(val schemaVersion:Int,val anchor:TrustAnchor,val service:String,
-    @EncodeDefault(EncodeDefault.Mode.NEVER) val upgrade:InstallationUpgrade?=null) {
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val upgrade:InstallationUpgrade?=null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val releaseAuthority:ReleaseAuthority?=null) {
     override fun toString()="InstallationProfile([redacted])"
 }
 data class InviteLink(val serviceId:String,val origin:String,val code:String,val manifest:String) {
@@ -78,16 +79,21 @@ object BootstrapTrust {
             require(it.anchor.lastTransition.isEmpty() && it.service.length in 1..MAX_MANIFEST)
             validateAnchor(it.anchor)
             when(it.schemaVersion) {
-                1 -> require("upgrade" !in document)
-                2 -> {
-                    val upgrade=requireNotNull(it.upgrade)
-                    val previous=upgrade.previousAnchor
-                    validateAnchor(previous)
-                    require(previous.lastTransition.isEmpty() && previous.epoch==it.anchor.epoch-1 &&
-                        previous.id!=it.anchor.id && previous.spki!=it.anchor.spki)
-                    require(upgrade.rotation.previous.length in 1..MAX_MANIFEST && upgrade.rotation.next.length in 1..MAX_MANIFEST)
+                1 -> require("upgrade" !in document && "releaseAuthority" !in document)
+                2 -> require(it.upgrade != null && "releaseAuthority" !in document)
+                3 -> {
+                    val release = requireNotNull(it.releaseAuthority)
+                    release.validate(it.anchor, it.upgrade?.previousAnchor)
+                    require("upgrade" !in document || it.upgrade != null)
                 }
                 else -> error("Unsupported installation profile")
+            }
+            it.upgrade?.let { upgrade ->
+                val previous=upgrade.previousAnchor
+                validateAnchor(previous)
+                require(previous.lastTransition.isEmpty() && previous.epoch==it.anchor.epoch-1 &&
+                    previous.id!=it.anchor.id && previous.spki!=it.anchor.spki)
+                require(upgrade.rotation.previous.length in 1..MAX_MANIFEST && upgrade.rotation.next.length in 1..MAX_MANIFEST)
             }
         }
     }
@@ -129,7 +135,7 @@ object BootstrapTrust {
         require(descriptor.roots.size in 1..4)
         descriptor.roots.forEach {(id,spki)->require(identifier.matches(id) && spki!=anchor.spki);publicKey(spki)}
     }
-    private fun signed(raw:String,type:String,anchor:TrustAnchor):String {
+    internal fun signed(raw:String,type:String,anchor:TrustAnchor):String {
         require(raw.length in 1..MAX_MANIFEST && raw.all {it.code<128})
         validateAnchor(anchor)
         val parts=raw.split('.');require(parts.size==3 && parts[0].length<=512)
