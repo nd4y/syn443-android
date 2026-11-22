@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -23,11 +24,15 @@ def stopped_rollback_recovered(controller,generation):
         state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
         not call('auth-status')['busy'])
 
-def check_enrolled_upgrade(fixture, proxy, auth_generation):
+def upgrade_directory(system_installer):
+    return Path(os.environ['RUNNER_TEMP']) / ('syn443-installer-private' if system_installer else 'upgrade-fixture')
+
+
+def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=False):
     if (os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('SYN443_CI_AVD') != 'syn443-ci'
             or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']):
         raise ValueError('This APK upgrade requires the disposable CI emulator')
-    directory = Path(os.environ['RUNNER_TEMP']) / 'upgrade-fixture'
+    directory = upgrade_directory(system_installer)
     receipt = json.loads((directory / 'upgrade.json').read_bytes())
 
     def installed_version():
@@ -47,11 +52,12 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation):
     await_condition(vpn_stopped)
     before = call('status')
     assert before['desiredOn'] is False
-    from installer_cancel_ui import cancel_installer
-    cancel_installer(directory, next(iter(original))[1], installed_version, receipt['previous'])
-    assert call('auth-status')['generation'] == auth_generation and binding() == original and fixture.registrations == 1
-    assert vpn_stopped() and call('status')['generation'] == before['generation']
-    assert call('status')['policy']['activeRevision'] == 1
+    if system_installer:
+        from installer_cancel_ui import cancel_installer
+        cancel_installer(directory, next(iter(original))[1], installed_version, receipt['previous'])
+        assert call('auth-status')['generation'] == auth_generation and binding() == original and fixture.registrations == 1
+        assert vpn_stopped() and call('status')['generation'] == before['generation']
+        assert call('status')['policy']['activeRevision'] == 1
     response = adb('install', '-r', str(directory / 'new-debug.apk'), timeout=120)
     assert b'Success' in response.splitlines() and installed_version() == receipt['previous'] + 1
     adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.MainActivity')
@@ -92,7 +98,12 @@ def main():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish'),'Emulator only'
     assert PACKAGE+'.test/io.syn443.android.EnrollmentDriver' in adb('shell','pm','list','instrumentation').decode(),'Test APK enrollment driver is not installed'
     suite=ET.Element('testsuite',name='SYN443 enrolled native VPN')
-    out=ROOT/'app/build/outputs/androidTest-results/external/TEST-enrolled-vpn.xml'
+    args=sys.argv[1:]
+    if args not in ([], ['--system-installer']):
+        raise ValueError('Unexpected enrollment scenario')
+    installer_only=bool(args)
+    out=(Path(os.environ['RUNNER_TEMP'])/'syn443-installer-private'/'result.xml' if installer_only
+         else ROOT/'app/build/outputs/androidTest-results/external/TEST-enrolled-vpn.xml')
     proxy=Server(('127.0.0.1',0),RouteProxy);threading.Thread(target=proxy.serve_forever,daemon=True).start()
     proxy.ssh_ok=True;proxy.delay=0;proxy.health_ok=True;proxy.route_probes=0
     port=proxy.server_address[1];adb('reverse','tcp:'+str(port),'tcp:'+str(port))
@@ -111,7 +122,7 @@ def main():
             if os.environ.get('GITHUB_ACTIONS')!='true' or adb('emu','avd','name').splitlines()!=[b'syn443-ci', b'OK']:
                 raise ValueError('Disposable installer emulator required')
             from enrollment_fixture import decode
-            directory=Path(os.environ['RUNNER_TEMP'])/'upgrade-fixture'
+            directory=upgrade_directory(True)
             envelope=(directory/'syn443-update.txt').read_text(encoding='ascii')
             device=json.loads(decode(envelope.split('.')[1]))['scope']['deviceId']
             assert b'Success' in adb('install','-r',str(directory/'installer-base.apk'),timeout=120).splitlines()
@@ -142,6 +153,8 @@ def main():
            'enrolledAssignedRoutesCommitWithOptionalFailure',
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
            'enrolledStopFencesPendingCandidateRouteSuccess', 'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
+    if installer_only:
+        names=['enrolledSystemInstallerCancelKeepsBoundPolicy']
     def observed_report(revision,outcome,selected):
         return any(r['policyRevision']==revision and r['outcome']==outcome and r['activePolicyRevision']==selected
                    for r in list(fixture.activation_reports.values()))
@@ -149,7 +162,7 @@ def main():
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
             try:
-                setup(name=='enrolledPendingAssignmentRetriesWhileVisible',installer=name=='enrolledVersionUpgradeRetainsBindingPolicyAndRealTun')
+                setup(name=='enrolledPendingAssignmentRetriesWhileVisible',installer=installer_only)
                 before=proxy.progress;generation=call('auth-status')['generation']
                 if name=='enrolledPendingAssignmentRetriesWhileVisible':
                     assert fixture.policy_requests>=2 and fixture.registrations==1
@@ -209,8 +222,8 @@ def main():
                         await_condition(lambda:stopped_rollback_recovered(controller,generation_after),45)
                         assert call('status')['generation']==generation_after and not call('status')['desiredOn'] and vpn_stopped()
                     proxy.delay=0
-                elif name=='enrolledVersionUpgradeRetainsBindingPolicyAndRealTun':
-                    check_enrolled_upgrade(fixture, proxy, generation)
+                elif name in ('enrolledVersionUpgradeRetainsBindingPolicyAndRealTun','enrolledSystemInstallerCancelKeepsBoundPolicy'):
+                    check_enrolled_upgrade(fixture, proxy, generation, system_installer=installer_only)
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
                     fixture.policy_status=403;call('policy-refresh')
                     await_condition(lambda:call('auth-status').get('phase')=='NEEDS_REAUTH' and
