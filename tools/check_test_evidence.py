@@ -335,6 +335,17 @@ if mode=="emulator":
         "enrolledStopFencesPendingCandidateRouteSuccess","enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn","enrolledVersionUpgradeRetainsBindingPolicyAndRealTun"}
     live_engine_required={"savedEngineCheckpointCannotClaimAnUnownedLiveProcess"}
     route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
+    account_telemetry_cases = {
+        ("AccountExitControlsTest", "registeredExitCanBeDismissedAndStaleConfirmationDisappears"),
+        ("AccountExitControlsTest", "pendingLoginCanBeCancelledAndUnreadableAccountHasNoUnlinkAction"),
+        ("LoginControllerTest", "staleReviewedLogoutCannotStopVpnOrRetireAnEnrolledDevice"),
+        ("LoginPilotTest", "browserReservationAndCancellationPreserveVpnAndDeleteTheKey"),
+        ("TechnicalTelemetryDiskTest", "criticalAndFullTelemetryBatchesUseOnlyCurrentConsentedEvents"),
+        ("TechnicalTelemetryDiskTest", "urgentAttemptHonorsPersistentSpacingExactHeadAndConsent"),
+        ("TechnicalTelemetryDiskTest", "stoppedTelemetryRequiresPositiveObservationThatEngineAndIntentAreOff"),
+    }
+    observed = {(case.get("classname"), case.get("name")) for case in cases}
+    assert {("io.syn443.android." + suite, name) for suite, name in account_telemetry_cases} <= observed, "Account/telemetry evidence missing"
     assert ("io.syn443.android.LoginControllerTest", "cachedPolicyRefreshUsesTheSignedDeadlineOrFiveMinuteLimit") in {(c.get("classname"),c.get("name")) for c in cases}, "Signed refresh deadline coverage missing"
     route_required.add("adbLocalConfigPreviewDoesNotWriteAndApplyFencesStaleBase")
     route_required.add("assignmentQuotedStringStreamingMatchesReferenceDefaultsEscapesAndUnicode")
