@@ -71,6 +71,25 @@ def check_upgrade(upgrade, anchor: dict) -> None:
         raise ValueError("invalid root transition")
 
 
+def administrative_endpoints(value):
+    protocol = {"clientId": "syn443-control-mobile", "audience": "syn443-control-api",
+                "assuranceAcr": "urn:syn443:loa:2"}
+    if (not isinstance(value, dict) or set(value) != set(protocol) | {"issuer", "apiOrigin"}
+            or any(value[k] != v for k, v in protocol.items())):
+        raise ValueError("unexpected administrative bootstrap")
+    for key in ("issuer", "apiOrigin"):
+        address = value[key]
+        if not isinstance(address, str) or not address.startswith("https://") or len(address) > 2048 or not address.isascii():
+            raise ValueError("invalid administrative endpoint")
+        parsed = urlsplit(address)
+        if (parsed.geturl() != address or (key == "apiOrigin" and parsed.path)
+                or (parsed.path and (not parsed.path.startswith("/") or any(
+                    segment in (".", "..") or not re.fullmatch(r"[A-Za-z0-9._~!$&'()*+,;=:@-]+", segment)
+                    for segment in parsed.path[1:].split("/"))))):
+            raise ValueError("invalid administrative endpoint")
+    return (value["issuer"], value["apiOrigin"])
+
+
 def check_profile(raw: str) -> None:
     profile = public_object(decode(raw, 12_000))
     version = profile.get("schemaVersion")
@@ -84,7 +103,7 @@ def check_profile(raw: str) -> None:
     descriptor = public_object(signed_body(profile["service"], "syn443-bootstrap+jws", anchor))
     expected = {"schemaVersion", "audience", "rootEpoch", "revision", "serviceId", "issuer",
                 "clientId", "apiOrigin", "roots", "issuedAt", "notBefore", "expires"}
-    if not expected <= set(descriptor) or set(descriptor) - (expected | {"controlPanelOrigin"}):
+    if not expected <= set(descriptor) or set(descriptor) - (expected | {"controlPanelOrigin", "adminBootstrap"}):
         raise ValueError("unexpected service descriptor fields")
     if version == 2 and (not isinstance(descriptor["roots"], dict)
                          or profile["upgrade"]["previousAnchor"]["spki"] in descriptor["roots"].values()):
@@ -92,6 +111,8 @@ def check_profile(raw: str) -> None:
     endpoints = [descriptor["issuer"], descriptor["apiOrigin"]]
     if descriptor.get("controlPanelOrigin"):
         endpoints.append(descriptor["controlPanelOrigin"])
+    if "adminBootstrap" in descriptor:
+        endpoints.extend(administrative_endpoints(descriptor["adminBootstrap"]))
     for endpoint in endpoints:
         url = urlsplit(endpoint)
         host = url.hostname or ""
