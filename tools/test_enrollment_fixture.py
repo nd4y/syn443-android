@@ -56,7 +56,8 @@ class EnrollmentFixtureTest(unittest.TestCase):
         path='/realms/test/protocol/openid-connect/token'
         status,tokens,_=f.request('POST',path,self.proof('POST',path,form),form);self.assertTrue(status==200)
         with self.assertRaises(KeyError):f.request('POST',path,self.proof('POST',path,form),form)
-        path='/v1/devices/enroll';body=canonical({'key':self.jwk,'requestId':secrets.token_urlsafe(32)})
+        path='/v1/devices/enroll';body=canonical({'key':self.jwk,'requestId':secrets.token_urlsafe(32),
+            'capabilities':['engine-config.v1','tun.lease.v1','policy.keybound.v2']})
         status,session,_=f.request('POST',path,self.proof('POST',path,body,tokens['access_token']),body)
         self.assertTrue(status==200 and session['generation']==0)
         path='/v1/device/policy';status,envelope,headers=f.request('GET',path,self.proof('GET',path,token=session['accessToken'],nonce=session['nonce']),None)
