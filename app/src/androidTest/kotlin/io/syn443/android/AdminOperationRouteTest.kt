@@ -122,6 +122,8 @@ class AdminOperationRouteTest {
         compose.onNodeWithTag("admin-prefix").performTextInput("Z_A")
         compose.runOnIdle {assertEquals(listOf("" to ""),bridge.searches.toList())}
         compose.onNodeWithTag("admin-prefix").performImeAction()
+        scroll(container, "admin-prefix")
+        compose.onNodeWithTag("admin-prefix").assertIsNotFocused()
         waitEnabled(container,"admin-devices-next")
         compose.onNodeWithTag("admin-devices-next").performClick()
         waitEnabled(container,"admin-device-z_a-32")
@@ -133,8 +135,11 @@ class AdminOperationRouteTest {
         compose.runOnIdle {
             assertEquals(listOf("" to "", "" to "Z_A", "z_a-31" to "Z_A", "" to ""), bridge.searches.toList())
         }
+        compose.onNodeWithTag("admin-status").assertIsDisplayed()
         waitEnabled(container,"admin-device-"+bridge.device)
+        compose.onNodeWithTag("admin-device-"+bridge.device).assertIsDisplayed()
         scroll(container,"admin-prefix")
+        compose.onNodeWithTag("admin-prefix").assertIsNotFocused()
         compose.onNodeWithTag("admin-prefix").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText,AnnotatedString("")))
         compose.runOnIdle {assertEquals("" to "",bridge.searches.last())}
     }

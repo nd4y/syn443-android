@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -55,12 +56,14 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
 
 @Composable internal fun AdminRoute(bridge:AdminUiBridge) {
     val context=LocalContext.current
+    val focusManager = LocalFocusManager.current
     val lifecycle=(context as LifecycleOwner).lifecycle
     val scope=rememberCoroutineScope()
     val toolbar=MaterialTheme.colorScheme.surface.toArgb()
     val navigation=MaterialTheme.colorScheme.background.toArgb()
     var model by remember {mutableStateOf(AdminUiModel())}
     var visible by remember(lifecycle, bridge) { mutableStateOf(false) }
+    var foregroundSession by remember(lifecycle, bridge) { mutableLongStateOf(0L) }
     var operation by remember {mutableStateOf<Job?>(null)}
     var sequence by remember {mutableStateOf(0L)}
     fun current(ticket:Long,generation:Long?=null)=visible && sequence==ticket &&
@@ -123,6 +126,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> if (!visible) {
+                    foregroundSession++
                     visible = true
                     // Reopen the inventory even when STOP and START occur between frames.
                     execute { ticket -> refresh(ticket) }
@@ -188,6 +192,7 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
         typePrefix={text->if(text.length<=64)model=model.copy(searchText=text)},
         search={prefix->
             if(prefix.isEmpty() || AdminWire.id.matches(prefix)) {
+                focusManager.clearFocus()
                 val generation=model.status.generation
                 execute {ticket->
                     model=model.copy(searchText=prefix,activePrefix=prefix,after="",page=null,selected="",
@@ -221,7 +226,11 @@ internal data class AdminUiActions(val login:()->Unit={},val browser:()->Unit={}
     )
     val editor=model.editor
     val comparison=model.comparison
-    if(editor==null)AdminScreen(model,actions)
+    if (!visible) return
+    if (editor == null) key(foregroundSession) {
+        // A retained search field or lazy-list position belongs to the previous visit.
+        AdminScreen(model, actions)
+    }
     else if(comparison!=null)AdminComparisonScreen(comparison,AdminComparisonActions(
         page={section,offset->comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.PAGE,section,offset)},
         detail={row,side,page->comparisonCommand(io.syn443.android.vpn.AdminEditorCoordinator.ComparisonKind.DETAIL,comparison.section,
