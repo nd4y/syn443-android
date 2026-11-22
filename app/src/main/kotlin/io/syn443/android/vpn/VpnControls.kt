@@ -9,6 +9,9 @@ import android.net.VpnService
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -46,6 +49,7 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
     var statusAvailable by remember { mutableStateOf<Boolean?>(null) }
     var message by remember { mutableStateOf("") }
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
+    var revealOnOpen by remember { mutableStateOf(false) }
     var resources by remember { mutableStateOf<JSONObject?>(null) }
     var resourcesBusy by remember { mutableStateOf(false) }
     var exits by remember { mutableStateOf<JSONObject?>(null) }
@@ -206,12 +210,24 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
         account(statusAvailable==true && phase=="Off" && desiredOn==false &&
             status.optBoolean("engineStateKnown") && !status.optBoolean("engineActive"))
         TextButton(
-            onClick = { detailsOpen = !detailsOpen },
+            onClick = {
+                revealOnOpen = !detailsOpen
+                detailsOpen = !detailsOpen
+            },
             modifier = Modifier.testTag("vpn-details").semantics {
                 stateDescription = if (detailsOpen) "Раскрыто" else "Свёрнуто"
             },
         ) { Text(if (detailsOpen) "Скрыть диагностику" else "Маршруты и диагностика") }
         if (detailsOpen) {
+            val heading = remember { BringIntoViewRequester() }
+            var headingPlaced by remember { mutableStateOf(false) }
+            RouteControls(status, routeHeading = {
+                RouteHeading(Modifier.bringIntoViewRequester(heading).onGloballyPositioned { headingPlaced = true })
+            }) { method, arg ->
+                command(method, arg)
+            }
+            // Only the tap requests a reveal. Polls and restored scroll positions keep their place.
+            if (revealOnOpen && headingPlaced) LaunchedEffect(Unit) { heading.bringIntoView() }
             if (statusAvailable == true && desiredOn == true) PhysicalLinkDetails(status.optJSONObject("physicalLink"))
             if (statusAvailable == true && desiredOn == true) {
                 for (detail in internetDnsFailures(status.optJSONObject("internetChecks"))) Text(detail)
@@ -227,7 +243,6 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
             }
             val overlay = status.optJSONObject("netbird")
             if (overlay != null) NetBirdControls(overlay) { method, arg -> command(method, arg) }
-            RouteControls(status){method,arg->command(method,arg)}
             if (visible && statusAvailable == true) {
                 key(status.optString("configRevision"), status.optLong("generation"), status.optLong("networkEpoch"),
                     policy?.optString("source"), policy?.optString("phase"), policy?.optString("activeRevision"),

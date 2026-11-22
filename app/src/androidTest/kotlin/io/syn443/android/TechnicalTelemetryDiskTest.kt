@@ -147,6 +147,39 @@ class TechnicalTelemetryDiskTest {
         }
     }
 
+    @Test fun serverQuotaSurvivesRecreationAndCannotDelayAnotherConsentSession() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val namespace = "test-quota-" + UUID.randomUUID().toString().replace("-", "")
+        val capture = TelemetryCapture(context, namespace)
+        val owner = Identity.random()
+        val now = 1_800_000_000_000L
+        try {
+            capture.enable(owner, 0)
+            val consent = checkNotNull(capture.consent(owner))
+            fun batch() = TechnicalTelemetry.Batch(1, consent.session, 132, 0, 1, listOf(
+                TechnicalTelemetry.Event(Identity.random(), now, 1, 1, "engine", "unexpected_exit", "unknown")))
+            val first = batch()
+            val next = batch()
+            assertTrue(capture.attempted(consent, now, first, false))
+            assertFalse(capture.deferUpload(consent, next, now, now, 3600))
+            assertFalse(capture.deferUpload(consent, first, now - 1, now, 3600))
+            assertFalse(capture.deferUpload(consent, first, now, now, 3601))
+            assertTrue(capture.deferUpload(consent, first, now, now + 1000, 3600))
+            val reopened = TelemetryCapture(context, namespace)
+            val boundary = now + 3_601_000
+            assertEquals(1L, reopened.routineDelay(consent, boundary + 100, boundary - 1))
+            assertFalse(reopened.attempted(consent, boundary + 100, next, true, boundary - 1))
+            assertFalse(reopened.attempted(consent, boundary + 100, first, false, boundary - 1))
+            assertTrue(reopened.attempted(consent, boundary + 101, first, false, boundary))
+            reopened.disable()
+            reopened.enable(owner, 0)
+            val replacement = checkNotNull(reopened.consent(owner))
+            assertNotEquals(consent.session, replacement.session)
+            assertFalse(capture.deferUpload(consent, first, now, now, 3600))
+            assertEquals(0L, reopened.retryDelay(replacement, now))
+        } finally { capture.disable() }
+    }
+
     @Test fun urgentAttemptHonorsPersistentSpacingExactHeadAndConsent() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val namespace = "test-spacing-" + UUID.randomUUID().toString().replace("-", "")

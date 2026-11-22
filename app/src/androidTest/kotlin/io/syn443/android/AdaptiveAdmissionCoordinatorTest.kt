@@ -156,7 +156,7 @@ class AdaptiveAdmissionCoordinatorTest {
             admission.now = now
             controller.rejectAdmission(rejection, now)
         }
-        fun view() = RouteSnapshot.read(true, true, scope)
+        fun view() = RouteSnapshot.readAt(true, true, scope, admission.now)
         override fun close() { RouteSnapshot.owner(null); RouteSnapshot.configure(null, "") }
     }
 

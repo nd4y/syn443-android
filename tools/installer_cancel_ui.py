@@ -27,6 +27,40 @@ def app_text(label, **options):
     return node(lambda n:n.get("package")==PACKAGE and n.get("text")==label,**options)
 
 
+def home_update_control():
+    # MainActivity can resume below the update entry. Find the top of its
+    # scrollable content first, then traverse down using overlapping viewports.
+    deadline = time.monotonic() + 65
+    seeking_top = True
+    previous = None
+    while time.monotonic() < deadline:
+        app_nodes = [item for item in tree().iter("node") if item.get("package") == PACKAGE]
+        target = next((item for item in app_nodes if item.get("enabled") == "true"
+                       and item.get("text") == "Обновление приложения"), None)
+        if target is not None:
+            return target
+        scroll = next((item for item in app_nodes if item.get("scrollable") == "true"), None)
+        if scroll is None:
+            time.sleep(.2)
+            continue
+        bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", scroll.get("bounds", ""))
+        if bounds is None:
+            raise AssertionError("Main scrolling surface has no usable bounds")
+        labels = [(item.get("text"), item.get("bounds")) for item in app_nodes if item.get("text")]
+        if seeking_top and (any(label == "Secure Your Network" for label, _ in labels) or
+                            labels and labels == previous):
+            seeking_top = False
+        previous = labels
+        left, top, right, bottom = map(int, bounds.groups())
+        x = str((left + right) // 2)
+        upper = str(top + (bottom - top) // 4)
+        lower = str(top + (bottom - top) * 3 // 4)
+        start, end = (upper, lower) if seeking_top else (lower, upper)
+        adb("shell", "input", "swipe", x, start, x, end, "420")
+        time.sleep(.2)
+    raise AssertionError("Update action not found on the main scrolling surface")
+
+
 def document(name):
     def picker(n):
         return n.get("package","").endswith(".documentsui")
@@ -72,7 +106,7 @@ def cancel_installer(directory, enrolled_device, installed_version, expected_ver
         try:
             adb("shell","appops","set",PACKAGE,"REQUEST_INSTALL_PACKAGES","allow")
             adb("shell","am","start","-W","-n",PACKAGE+"/.MainActivity")
-            tap(app_text("Обновление приложения",scroll=True))
+            tap(home_update_control())
             tap(app_text("Выбрать манифест обновления"))
             document(files[0])
             tap(app_text("Выбрать APK"))

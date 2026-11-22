@@ -80,9 +80,14 @@ class AdaptivePathContinuityTest {
             .put("scope", nativeScope).put("policyScope", policyScope).put("ready", true)
             .put("group", "").put("hops", JSONArray()).put("code", "idle").put("elapsedMs", 0)
             .put("probeMs", 0).put("receipt", "").put("groupSelected", false).put("workAgeMs", 0)
-        fun report(value: JSONObject, now: Long) = controller.report(value, now, dispatch)
+        private var displayTime = 0L
+        fun report(value: JSONObject, now: Long) {
+            displayTime = now
+            controller.report(value, now, dispatch)
+        }
         fun ready(now: Long) = report(status(), now)
         fun tick(now: Long): JSONObject? {
+            displayTime = now
             val before = commands.size
             controller.tick(now, false, false, dispatch)
             val probe = commands.drop(before).singleOrNull { it.getString("command") == "start" }
@@ -140,7 +145,7 @@ class AdaptivePathContinuityTest {
             assertSame(pathToken, same)
             rebind(now, nextToken = same)
         }
-        fun view() = RouteSnapshot.read(true, true, scope)
+        fun view() = RouteSnapshot.readAt(true, true, scope, displayTime)
         fun assertNoPositive() {
             val view = view()
             assertFalse(view.getBoolean("requiredReady"))

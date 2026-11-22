@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 enum class AuthFailure { CANCELLED, TRANSPORT, INVALID_REPLY, ACCESS_DENIED, REAUTHENTICATE, SESSION_EXPIRED, CONFLICT, PENDING, THROTTLED, UNAVAILABLE }
-class AuthException(val reason:AuthFailure):Exception(reason.name)
+class AuthException(val reason:AuthFailure, val retryAfterSeconds: Int? = null):Exception(reason.name)
 
 interface ProofKey { val publicKey:ECPublicKey; fun sign(input:ByteArray):ByteArray }
 fun interface IdentityExchange {
@@ -199,6 +199,12 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
             if(path=="/v1/device/control-panel" && reply.status==404)throw ControlPanelUnavailable()
             if(DeviceSubscription.isClaim(path) && reply.status==404)throw DeviceSubscriptionUnavailable()
             if(path==TechnicalTelemetry.PATH && reply.status==404)throw TelemetryUnavailable()
+            if (path == TechnicalTelemetry.PATH && (reply.status == 429 || reply.status == 503)) {
+                val header = reply.headers["retry-after"]?.singleOrNull()
+                val seconds = header?.takeIf { it.length in 1..4 && it.all { c -> c in '0'..'9' } }
+                    ?.toIntOrNull()?.takeIf { it in 1..3600 }
+                throw AuthException(if (reply.status == 429) AuthFailure.THROTTLED else AuthFailure.UNAVAILABLE, seconds)
+            }
             if(path==RuntimeObservation.PATH && reply.status==404)throw RuntimeObservationUnavailable()
             if(path=="/v1/chat/self" && reply.status==404)throw AuthException(AuthFailure.UNAVAILABLE)
             status(reply,if(path.endsWith("/revoke") || path=="/v1/device/policy/status" || path==RuntimeObservation.PATH || sourceLimit!=null ||

@@ -140,9 +140,14 @@ class ManagedAdaptiveRoutesTest {
             JSONObject().put("request", "").put("running", running).put("nativeEpoch", nativeEpoch).put("scope", native)
                 .put("policyScope", policy).put("ready", ready).put("group", "").put("hops", JSONArray())
                 .put("code", "idle").put("elapsedMs", 0).put("probeMs", 0).put("receipt", "").put("groupSelected", false).put("workAgeMs", 0)
-        fun report(frame: JSONObject, now: Long) = controller.report(frame, now, dispatch)
+        private var displayTime = 0L
+        fun report(frame: JSONObject, now: Long) {
+            displayTime = now
+            controller.report(frame, now, dispatch)
+        }
         fun ready(now: Long = 1000) = report(status(), now)
         fun tick(now: Long, unmetered: Boolean = true, explore: Boolean = true): JSONObject? {
+            displayTime = now
             val before = commands.size
             controller.tick(now, unmetered, explore, dispatch)
             return commands.drop(before).singleOrNull { it.getString("command") == "start" }
@@ -161,8 +166,45 @@ class ManagedAdaptiveRoutesTest {
             report(result(probe, "selected", latency, selected = true), now)
         }
         fun starts(): List<JSONObject> = commands.filter { it.getString("command") == "start" }
-        fun view(): JSONObject = RouteSnapshot.read(true, true, scope)
+        fun view(): JSONObject = RouteSnapshot.readAt(true, true, scope, displayTime)
         override fun close() { RouteSnapshot.owner(null); RouteSnapshot.configure(null, "") }
+    }
+
+    @Test fun delayedSelectionKeepsTheProbeTimeForStatusAndMaintenance() {
+        // The payload completes at 1.2s. The bridge is polled at 3s, and selection
+        // is acknowledged at 10s. None of those later events renews the payload.
+        Harness(config(choices = 1)).use { h ->
+            h.ready(1_000)
+            val probe = checkNotNull(h.tick(1_000))
+            h.report(h.result(probe, "verified").put("checkCompletedBootMs", 1_200L), 3_000)
+            assertEquals("commit", h.commands.last().getString("command"))
+            h.report(h.result(probe, "selected", selected = true).put("checkCompletedBootMs", 10_000L), 10_000)
+            val row = h.view().getJSONArray("routes").getJSONObject(0)
+            assertEquals(8_800L, row.getLong("ageMs"))
+            assertTrue(h.view().getBoolean("requiredReady"))
+            assertTrue(RouteSnapshot.readAt(true, true, h.scope, 121_200).getBoolean("requiredReady"))
+            assertFalse(RouteSnapshot.readAt(true, true, h.scope, 121_201).getBoolean("requiredReady"))
+            assertNull(h.tick(61_199, unmetered = false))
+            assertNotNull(h.tick(61_200, unmetered = false))
+        }
+    }
+
+    @Test fun malformedCompletionCannotSelectAndOlderReceiptsAgeFromStart() {
+        for (bad in listOf<Any>(0L, 999L, 3_001L, "1200", 1_200.5, JSONObject.NULL)) {
+            Harness(config(choices = 1)).use { h ->
+                h.ready(1_000)
+                val probe = checkNotNull(h.tick(1_000))
+                h.report(h.result(probe, "verified").put("checkCompletedBootMs", bad), 3_000)
+                assertEquals("discard", h.commands.last().getString("command"))
+                assertFalse(h.view().getBoolean("requiredReady"))
+            }
+        }
+        Harness(config(choices = 1)).use { h ->
+            h.ready(1_000)
+            val probe = checkNotNull(h.tick(1_000))
+            h.selected(probe, 8_000)
+            assertEquals(7_000L, h.view().getJSONArray("routes").getJSONObject(0).getLong("ageMs"))
+        }
     }
 
     private fun prepareHealthy(h: Harness, latency: Long = 100): JSONObject {

@@ -56,6 +56,13 @@ Initial recovery takes priority over maintenance. The coordinator bounds attempt
 to8/minute and128/hour across its groups and context rebinds. Healthy metered
 maintenance confirms the current route. Optional unmetered exploration requires
 adequate battery and no power-saving mode. The active path stays selected for at least 60 seconds during voluntary optimization.
+The coordinator timestamps successful observations when the native payload check
+finishes on the Android boot clock. Waiting for the selection acknowledgement does
+not extend the freshness window in route status or defer the next routine check.
+A receipt without a timestamp uses its request start. A receipt with a malformed
+or out-of-window timestamp is discarded. The hold time for a newly selected path
+still starts when the selection is acknowledged.
+
 A reserve must improve latency by at least 20% and more than 15 ms on three consecutive
 checks against a fresh baseline. A stale baseline schedules a check of the current path.
 An independently confirmed outage can use a freshly verified replacement immediately. Native

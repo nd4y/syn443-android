@@ -47,7 +47,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     }
     private data class Pending(val request:String,val group:String,val path:PlannedPath,val attempt:Long,val startedAt:Long,
         val nativeEpoch:Long,val nativeScope:String,var action:String="probe",var latency:Long=0,var receipt:String="",var retries:Int=0,
-         var recovery:CurrentFailure?=null,var checkPlan:JSONObject?=null,var retryUntil:Long?=null)
+         var recovery:CurrentFailure?=null,var checkPlan:JSONObject?=null,var retryUntil:Long?=null,var measuredAt:Long=startedAt)
     private data class PendingAdmission(val request:String,val group:String,val path:PlannedPath,val attempt:Long,
         val startedAt:Long,val context:Context,val scope:RouteScope?,val mode:NetworkMode,
         val nativeEpoch:Long,val nativeScope:String,val leaseDeadlineElapsed:Long?,val explore:Boolean,
@@ -349,20 +349,22 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             val elapsed=raw.optLong("probeMs",-1);if(elapsed !in 0..11999)return
             work.latency=elapsed
             work.receipt=receipt
-            if(retryExpired) {
+            // Earlier native reports have no completion stamp. Starting the request
+            // gives a conservative upper bound on their age.
+            val completedAt = if (raw.has("checkCompletedBootMs")) safeInteger(raw, "checkCompletedBootMs") else work.startedAt
+            if (retryExpired || completedAt == null || completedAt !in work.startedAt..now) {
                 work.action="discard"
                 send(frame("discard").put("request",work.request).put("receipt",receipt),now,dispatch)
                 return
             }
+            work.measuredAt = completedAt
             work.checkPlan=RouteSnapshot.adaptiveDiagnostic(currentScope,wire.groupTags().getValue(work.group),raw.optJSONObject("checkPlan"),"TRUE")
             val active = group.current
             val same = active?.id == work.path.id
             if(same) {group.failure=null;group.recheckFailed=false}
             work.recovery=recoveryFailure(group,work,now)
             val candidateKey = key(work.group, work.path)
-            // A matching terminal report is consumed once. Use the start as a conservative
-            // lower time bound because a positive native receipt has no completion stamp.
-            val sampled = stability.observe(candidateKey, work.attempt, work.startedAt, now, ProbeVerdict.VERIFIED)
+            val sampled = stability.observe(candidateKey, work.attempt, work.measuredAt, now, ProbeVerdict.VERIFIED)
             val incumbentDegraded = group.current?.let { stability.quality(key(work.group, it), now) } == PathStabilityHistory.Quality.DEGRADED
             val activeFresh=now-group.measuredAt in 0..120_000
             val faster=activeFresh && elapsed+15<group.latency && elapsed*5<=group.latency*4
@@ -398,14 +400,17 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             }
             val changed=group.current?.id!=work.path.id
             replacedSelectedPath = changed && group.current != null
-            group.current=work.path;group.measuredAt=now;group.latency=work.latency;group.nextAt=now+maintenanceCadence
+            group.current=work.path
+            group.measuredAt=work.measuredAt
+            group.latency=work.latency
+            group.nextAt=work.measuredAt+maintenanceCadence
             group.selectionToken=safeInteger(raw,"selectionToken") ?: 0;group.hintSequence=0;group.urgentRecheck=false;group.forceCheck=false
             if(changed)group.selectedAt=now
             if(changed || group.exploreAt==0L)group.exploreAt=now+300_000
             group.clearImprovement();group.recheckFailed=false;group.failure=null
             memory?.record(checkNotNull(context),key(work.group,work.path),work.attempt,now,ProbeVerdict.VERIFIED)
             group.search=AdaptiveSearchState.VERIFIED
-            RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),true,"ok",work.latency,work.path.hops,work.checkPlan,work.receipt)
+            RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),true,"ok",work.latency,work.path.hops,work.checkPlan,work.receipt,work.measuredAt)
         } else if(work.action=="probe" && code in setOf("probe_unavailable","exit_mismatch","check_failed")) {
             val checkedAt=if(code=="check_failed") {
                 if(raw.optString("checkCode") !in checkedFailures)return
@@ -430,7 +435,12 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             if(group.current==null || group.current?.id==work.path.id) {
                 group.search=AdaptiveSearchState.SEARCH_INCOMPLETE
                 RouteSnapshot.adaptive(currentScope,wire.groupTags().getValue(work.group),false,code,null,emptyList(),
-                    RouteSnapshot.adaptiveDiagnostic(currentScope,wire.groupTags().getValue(work.group),raw.optJSONObject("checkPlan"),if(code=="probe_unavailable")"UNKNOWN" else "FALSE"))
+                    RouteSnapshot.adaptiveDiagnostic(currentScope,wire.groupTags().getValue(work.group),raw.optJSONObject("checkPlan"),if(code=="probe_unavailable")"UNKNOWN" else "FALSE"),
+                    measuredAt=when (code) {
+                        "check_failed" -> checkedAt
+                        "exit_mismatch" -> work.startedAt
+                        else -> now
+                    })
             }
         } else if(work.action=="discard" && code=="discarded") {
             group.nextAt=when {
