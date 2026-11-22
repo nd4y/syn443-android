@@ -7,6 +7,7 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.core.content.FileProvider
+import androidx.core.net.toUri
 import io.syn443.android.BuildConfig
 import io.syn443.android.vpn.SealedFile
 import io.syn443.identity.*
@@ -68,7 +69,7 @@ internal class VerifiedUpdate(private val context: Context) {
     }
 
     fun preview(envelope: String): UpdateOffer = synchronized(journalLock) {
-        val remote = checkNotNull(context.contentResolver.call(Uri.parse("content://io.syn443.control"), "release-context", null, null))
+        val remote = checkNotNull(context.contentResolver.call("content://io.syn443.control".toUri(), "release-context", null, null))
         require(remote.getBoolean("ok"))
         val local = installedPackage()
         val installedCertificate = checkNotNull(local.signingInfo).apkContentsSigners.single().toByteArray()
