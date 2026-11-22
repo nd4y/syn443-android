@@ -67,6 +67,12 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
             }
     }
 
+    @Synchronized fun routineDelay(value: Consent, nowMs: Long): Long? {
+        val latest = consent(value.scope)?.takeIf { it.session == value.session } ?: return null
+        if (latest.attemptedAt == 0L) return 0
+        return ROUTINE_MS - (nowMs - latest.attemptedAt).coerceIn(0, ROUTINE_MS)
+    }
+
     @Synchronized fun attempted(value: Consent, nowMs: Long, batch: TechnicalTelemetry.Batch, urgent: Boolean): Boolean {
         val latest = consent(value.scope) ?: return false
         if (latest.session != value.session || batch.session != latest.session || nowMs <= 0 || nowMs < latest.attemptedAt) return false

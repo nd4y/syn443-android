@@ -1004,7 +1004,12 @@ class LoginController private constructor(private val context:android.app.Applic
             val vpnGeneration=state().checkpoint().generation
             val physical=PhysicalIdentityRoute.capture(context,wifiOnly=true,unmeteredOnly=true)
             physical.check()
-            if (!telemetryCapture.attempted(consent, now, batch, urgent)) return@submitIfIdle
+            val admitted = telemetryCapture.attempted(consent, now, batch, urgent)
+            synchronized(commands) {
+                currentConsent()
+                nextTelemetryElapsed = elapsed() + (telemetryCapture.routineDelay(consent, now) ?: return@submitIfIdle)
+            }
+            if (!admitted) return@submitIfIdle
             if (urgent && !telemetryCapture.recorded(consent, through)) return@submitIfIdle
             telemetryPressureSession = null
             val route=object:HttpRoute {
