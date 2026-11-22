@@ -254,11 +254,33 @@ class ControlProvider : ContentProvider() {
                 "auth-callback" -> {
                     require(caller==Process.myUid());LoginController.get(context).callback(requireNotNull(arg))
                 }
-                "auth-cancel" -> {
-                    try {store.serialized {
-                        store.update {store.put(it,Recovery.command(store.checkpoint(it),false));OsIntentGate.command(context,it,false);it.put("phase","Off")}
-                        LoginController.get(context).cancel()
-                    }} finally {context.startService(Intent(context,TunnelService::class.java).setAction(TunnelService.RECONCILE))}
+                "auth-cancel", "auth-reviewed-cancel" -> {
+                    val reviewed = method == "auth-reviewed-cancel"
+                    val stamp = if (reviewed) {
+                        require(caller == Process.myUid() && extras == null)
+                        val parts = requireNotNull(arg).split(':', limit = 3)
+                        require(parts.size == 2)
+                        parts[0].toLong() to parts[1].toLong()
+                    } else null
+                    var reconcile = false
+                    try {
+                        val accepted = store.serialized {
+                            val controller = LoginController.get(context)
+                            fun stopVpn() {
+                                reconcile = true
+                                store.update {
+                                    store.put(it,Recovery.command(store.checkpoint(it),false))
+                                    OsIntentGate.command(context,it,false)
+                                    it.put("phase","Off")
+                                }
+                            }
+                            if (stamp != null) controller.cancelReviewed(stamp.first, stamp.second, ::stopVpn)
+                            else { stopVpn(); controller.cancel(); true }
+                        }
+                        if (reviewed) return Bundle().apply { putBoolean("ok",accepted) }
+                    } finally {
+                        if (reconcile) context.startService(Intent(context,TunnelService::class.java).setAction(TunnelService.RECONCILE))
+                    }
                 }
                 "engine-exits" -> {
                     require(arg == null || (io.syn443.android.BuildConfig.DEBUG && caller == 2000 && arg.toIntOrNull()?.let { it > 0 } == true))

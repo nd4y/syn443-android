@@ -310,6 +310,7 @@ class LoginController private constructor(private val context:android.app.Applic
         JSONObject().put("phase",s.phase.name).put("method",s.method).put("generation",s.generation).put("configured",configured)
             .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("intentRevision",s.revision).put("canReauthenticate",LoginRecovery.canReauthenticate(s))
+            .put("registrationMayExist",s.maybeRegistered)
             .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
             .put("controlPanelConfigured",panelOrigin(s)!=null)
             .put("controlPanelAvailable",adminPanelUrl(s.generation)!=null)
@@ -1279,6 +1280,16 @@ class LoginController private constructor(private val context:android.app.Applic
             else->resumeWorker(s)
         }
     }}
+    /** Compare the reviewed account before the caller changes VPN intent. */
+    internal fun cancelReviewed(generation:Long, revision:Long, stopVpn:()->Unit):Boolean = synchronized(commands) {
+        val current = journal.snapshot()
+        if (current.generation != generation || current.revision != revision ||
+            current.phase in setOf(LoginPhase.SIGNED_OUT, LoginPhase.RETIRING)) return@synchronized false
+        stopVpn()
+        cancel()
+        true
+    }
+
     /** Caller serializes this with VPN Stop. No network/Keystore wait is on this path. */
     fun cancel():LoginIntent = synchronized(commands) {
         commandEpoch++;browser=null;chatTicket=null;invitePreview=null;invitePair="";inviteState="";val previous=cached;cached=null;activationDelivery=null;panelHint=null;panelPoll=null;deviceSourcePollAfter=0;deviceSourceAuthority=null;clearOverlays();assignedRuntime.clear();discardQueued();policyChanged()

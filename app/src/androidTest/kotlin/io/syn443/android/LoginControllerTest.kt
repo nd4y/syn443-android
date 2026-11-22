@@ -1363,6 +1363,30 @@ class LoginControllerTest {
         assertEquals(1,f.server.activeKeys.size)
         val cleanup=f.server.paths.indexOf("/v1/identity/devices/revoke");assertTrue(cleanup>0 && cleanup<f.server.paths.lastIndexOf("/v1/devices/enroll"))
     }
+    @Test fun staleReviewedLogoutCannotStopVpnOrRetireAnEnrolledDevice() = fixture {f->
+        f.server.policyReady=true
+        val callback=f.begin()
+        val browser=f.journal.snapshot()
+        assertFalse(f.controller.status().getBoolean("registrationMayExist"))
+        f.controller.callback(callback)
+        f.idle()
+        val enrolled=f.journal.snapshot()
+        assertEquals(LoginPhase.POLICY_CACHED,enrolled.phase)
+        assertTrue(f.controller.status().getBoolean("registrationMayExist"))
+        var stops=0
+        assertFalse(f.controller.cancelReviewed(browser.generation,browser.revision) { stops++ })
+        assertFalse(f.controller.cancelReviewed(enrolled.generation+1,enrolled.revision) { stops++ })
+        assertEquals(0,stops)
+        assertEquals(enrolled,f.journal.snapshot())
+        assertEquals(enrolled.thumbprint,Identity.thumbprint(DeviceKey.open(enrolled.keyAlias).publicKey))
+        assertTrue(f.controller.cancelReviewed(enrolled.generation,enrolled.revision) { stops++ })
+        f.idle()
+        assertFalse(f.controller.cancelReviewed(enrolled.generation,enrolled.revision) { stops++ })
+        assertEquals(1,stops)
+        assertEquals(LoginPhase.SIGNED_OUT,f.journal.snapshot().phase)
+        assertThrows(IllegalStateException::class.java) { DeviceKey.open(enrolled.keyAlias) }
+    }
+
     @Test fun unreadableJournalStillCancelsNetworkAndRetiresTheOwnedPrivateKey() = fixture {f->
         f.server.holdEnrollment=true;f.controller.callback(f.begin())
         assertTrue(f.server.enrollmentEntered.await(10,TimeUnit.SECONDS))

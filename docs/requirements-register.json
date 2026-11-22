@@ -310,6 +310,8 @@
       "text": "Выйти из аккаунта и выключить VPN - разные действия. Выход удаляет локальные сессии и секреты приложения, завершает VPN и снимает локальную регистрацию; серверный отзыв выполняется идемпотентно. Системные настройки Android пользователь меняет средствами ОС.",
       "status": "partial",
       "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginControls.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AccountExitControlsTest.kt",
         "docs/enrollment-pilot.md",
         "docs/identity-lifecycle.md",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
