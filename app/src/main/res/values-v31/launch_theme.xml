@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Syn443Window" parent="Syn443WindowBase">
+        <item name="android:windowSplashScreenBackground">@color/syn443_surface</item>
+    </style>
+</resources>

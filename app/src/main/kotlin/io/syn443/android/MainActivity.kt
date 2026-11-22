@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            Syn443Theme {
                 Surface(Modifier.fillMaxSize()) { Home(intent.getLongExtra("syn443.consentGeneration", -1)) }
             }
         }

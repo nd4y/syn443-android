@@ -1,5 +1,6 @@
 package io.syn443.android.chat
 
+import io.syn443.android.Syn443Theme
 import android.content.Intent
 import io.syn443.identity.ChatRefreshGate
 import android.os.Bundle
@@ -51,7 +52,7 @@ class SupportActivity:ComponentActivity() {
         var prepared by mutableStateOf(false)
         // Install the root during onCreate. Cache preparation must not attach a
         // new Compose root later, after the resumed window has begun drawing.
-        setContent {MaterialTheme(colorScheme=darkColorScheme()) {Surface(Modifier.fillMaxSize()) {
+        setContent {Syn443Theme {Surface(Modifier.fillMaxSize()) {
             if(prepared)SupportChat(incidentRequested) { incidentRequested = false }
             else Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
                 Text("Подготовка чата",Modifier.testTag("chat-preparing"))

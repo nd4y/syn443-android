@@ -1,11 +1,19 @@
 package io.syn443.android
 
+import android.content.Context
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Color as AndroidColor
+import android.os.Build
+import android.view.ContextThemeWrapper
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -21,13 +29,50 @@ class PrototypeTest {
         compose.onNodeWithTag("resource-status").assertTextContains("без фонового сбора", substring = true)
     }
 
+    @Test fun launchWindowUsesTheSameDarkSurfaceInBothSystemModes() {
+        val app = compose.activity.applicationContext
+        val activities = requireNotNull(app.packageManager
+            .getPackageInfo(app.packageName, PackageManager.GET_ACTIVITIES).activities)
+        assertTrue(activities.isNotEmpty())
+        val attributes = mutableListOf(android.R.attr.windowBackground, android.R.attr.statusBarColor,
+            android.R.attr.navigationBarColor)
+        if (Build.VERSION.SDK_INT >= 31) attributes += android.R.attr.windowSplashScreenBackground
+        for (mode in listOf(Configuration.UI_MODE_NIGHT_NO, Configuration.UI_MODE_NIGHT_YES)) {
+            val config = Configuration(app.resources.configuration)
+            config.uiMode = (config.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or mode
+            val configured = app.createConfigurationContext(config)
+            val expected = configured.getColor(R.color.syn443_surface)
+            assertEquals(255, AndroidColor.alpha(expected))
+            assertTrue(AndroidColor.luminance(expected) < 0.1f)
+            for (activity in activities) {
+                val window: Context = ContextThemeWrapper(configured, activity.themeResource)
+                val colors = window.obtainStyledAttributes(attributes.toIntArray())
+                try {
+                    for (index in attributes.indices) assertEquals(activity.name, expected, colors.getColor(index, 0))
+                } finally {
+                    colors.recycle()
+                }
+                val icons = window.obtainStyledAttributes(intArrayOf(android.R.attr.windowLightStatusBar,
+                    android.R.attr.windowLightNavigationBar, android.R.attr.forceDarkAllowed))
+                try {
+                    for (index in 0 until icons.length()) assertTrue(activity.name, !icons.getBoolean(index, true))
+                } finally {
+                    icons.recycle()
+                }
+            }
+        }
+    }
+
     @OptIn(ExperimentalTestApi::class)
     @Test fun darkThemeByDefault() {
         compose.onNodeWithTag("prototype").assertDoesNotExist()
         val screen = compose.onRoot().captureToImage()
         // Read the exact same background pixel without copying the whole screen
         // into a second multi-megabyte IntArray on low-memory Android images.
-        val background = screen.toPixelMap(startX=1,startY=screen.height-2,width=1,height=1)[0,0].luminance()
+        val rendered = screen.toPixelMap(startX=1,startY=screen.height-2,width=1,height=1)[0,0]
+        assertEquals("Rendered home surface differs from the launch window",
+            compose.activity.getColor(R.color.syn443_surface), rendered.toArgb())
+        val background = rendered.luminance()
         assertTrue("Default surface is not dark", background < 0.1f)
         val title = compose.onNodeWithText("SYN443").captureToImage().toPixelMap()
         var foreground = 0f

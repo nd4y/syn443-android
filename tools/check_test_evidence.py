@@ -168,6 +168,8 @@ if mode=="emulator":
         (c.get("classname"),c.get("name")) for c in cases}, "Required actual ART heap case missing"
     assert {
         ("io.syn443.android.PrototypeTest", "homeShowsVpnBeforeAccountAndKeepsToolsCollapsed"),
+        ("io.syn443.android.PrototypeTest", "darkThemeByDefault"),
+        ("io.syn443.android.PrototypeTest", "launchWindowUsesTheSameDarkSurfaceInBothSystemModes"),
         ("io.syn443.android.VpnPrimaryActionTest", "startRequiresKnownReadyStateAndStopDoesNotRequireReadiness"),
         ("io.syn443.android.VpnPrimaryActionTest", "statusRequiresCurrentEngineProofAndKeepsUnrecognizedIntentVisible"),
     } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required VPN home UI cases missing"

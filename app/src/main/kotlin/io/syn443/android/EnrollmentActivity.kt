@@ -41,7 +41,7 @@ class EnrollmentActivity:ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         receive(intent)
         setContent {
-            MaterialTheme(colorScheme=darkColorScheme()) {
+            Syn443Theme {
                 Surface(Modifier.fillMaxSize()) {
                     key(arrival) {
                         EnrollmentScreen(incoming) { browser ->

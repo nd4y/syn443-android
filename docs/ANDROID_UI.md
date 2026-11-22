@@ -11,6 +11,12 @@ emulators explicitly use light system mode and check rendered dark-background lu
 title contrast (at least 4.5:1), bounds below system bars and interactive controls.
 Physical validation is recorded privately; raw screenshots and device logs stay outside GitHub.
 
+The application manifest supplies one dark window theme for every activity. Android
+12 and later use the same opaque color for the system splash. The seven Compose
+activities read this color for their background and surface. The instrumentation
+suite resolves each installed activity's theme in both light and dark resource
+configurations and compares the rendered home surface with the launch color.
+
 The home screen places the current VPN state and one primary action above account and
 support actions. Connect requires a known status. Stop stays available while the user
 intends the VPN to run, including recovery and permission waits. A rejected Connect does
