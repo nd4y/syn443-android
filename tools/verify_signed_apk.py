@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -42,6 +43,15 @@ def signer_digest(apksigner, path):
     return certs[0][1].lower()
 
 
+def require_alignment(apksigner, apk):
+    # Use the same SDK build-tools installation for both checks.
+    zipalign = Path(apksigner).with_name("zipalign.exe" if os.name == "nt" else "zipalign")
+    result = subprocess.run([str(zipalign), "-c", "-P", "16", "4", str(apk)],
+                            capture_output=True, timeout=120)
+    if result.returncode:
+        raise ValueError("APK ZIP alignment check failed")
+
+
 def entries(archive):
     info = archive.infolist()
     files = {item.filename: item for item in info}
@@ -77,6 +87,7 @@ def verify(unsigned, signed, expected_input, expected_signer, apksigner):
         if signer_digest(apksigner, signed_copy) != expected_signer:
             raise ValueError("release signer mismatch")
         compare_payloads(unsigned_copy, signed_copy)
+        require_alignment(apksigner, signed_copy)
     return {"schemaVersion": 1, "kind": "verified-apk-signing", "unsigned": source,
             "signed": result, "signerCertificateSha256": expected_signer}
 
