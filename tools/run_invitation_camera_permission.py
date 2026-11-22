@@ -7,6 +7,29 @@ from emulator_policy_ui import tap, tree
 from run_vpn_process_faults import PACKAGE, ROOT, adb
 
 
+def require_initial_camera_denied():
+    # PackageManager reads the installed permission without starting or stopping
+    # the target process immediately before its first visible Activity.
+    user = adb('shell', 'am', 'get-current-user').strip()
+    assert re.fullmatch(rb'[0-9]{1,5}', user), 'Unknown emulator user'
+    result = adb('shell', 'dumpsys', 'package', 'check-permission',
+                 'android.permission.CAMERA', PACKAGE, user.decode('ascii')).strip()
+    assert result == b'-1', 'Expected PackageManager to report camera permission denied'
+
+
+def visible_owner(nodes):
+    packages = {n.get('package') for n in nodes}
+    if PACKAGE in packages:
+        return 'enrollment'
+    if packages & {'com.google.android.permissioncontroller','com.android.permissioncontroller','com.android.packageinstaller'}:
+        return 'permission'
+    if packages & {'com.android.launcher3','com.google.android.apps.nexuslauncher'}:
+        return 'launcher'
+    if 'com.android.systemui' in packages:
+        return 'system_ui'
+    return 'other'
+
+
 def find_node(predicate, stage, reveal=False):
     deadline = time.monotonic() + 45
     observed = set()
@@ -16,7 +39,7 @@ def find_node(predicate, stage, reveal=False):
         if len(matches) == 1:
             return matches[0]
         owned = [node for node in nodes if node.get('package') == PACKAGE]
-        observed.add(('enrollment' if owned else 'system', len(matches)))
+        observed.add((visible_owner(nodes), len(matches)))
         panes = [node for node in owned if node.get('scrollable') == 'true']
         if reveal and not matches and len(panes) == 1:
             bounds = [int(value) for value in re.findall(r'\d+', panes[0].get('bounds', ''))]
@@ -35,12 +58,10 @@ def main():
                      PACKAGE + '.test/io.syn443.android.EnrollmentDriver')
         assert re.findall(rb'(?m)^INSTRUMENTATION_RESULT: cameraPermission=(\w+)\s*$', report) == [b'denied']
         assert re.findall(rb'(?m)^INSTRUMENTATION_CODE: (-?\d+)\s*$', report) == [b'-1']
-    require_denied()
+    require_initial_camera_denied()
     adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
     adb('shell', 'wm', 'dismiss-keyguard')
-    # The read-only instrumentation above uses the target app process. Start
-    # from a new Activity process after the OS has finished tearing it down.
-    start = adb('shell', 'am', 'start', '-S', '-W', '-n', PACKAGE + '/.EnrollmentActivity')
+    start = adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.EnrollmentActivity')
     assert re.search(rb'(?m)^Status: ok\s*$', start), 'The enrollment Activity did not start'
     try:
         def label(text):
