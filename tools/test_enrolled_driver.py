@@ -4,11 +4,34 @@ from contextlib import ExitStack
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
-from run_enrolled_vpn import stopped_rollback_recovered, failure_summary, logout, committed_online, enrolled_management_outage
+from run_enrolled_vpn import stopped_rollback_recovered, failure_summary, logout, committed_online, enrolled_management_outage, prepare_emulator_wifi
 from run_vpn_process_faults import ControlUnavailable
 
 
 class SignedPolicyReadinessTest(unittest.TestCase):
+    def test_wifi_reassociation_requires_disposable_emulator_and_new_app_uid_observation(self):
+        def fixture(states, scan):
+            observations = iter(states)
+            def respond(*args, **kwargs):
+                if args == ("emu","avd","name"): return b"syn443-ci\nOK"
+                if args == ("shell","getprop","ro.hardware"): return b"ranchu"
+                if args == ("shell","getprop","ro.build.version.sdk"): return b"35"
+                if args[:3] == ("shell","am","instrument"):
+                    return b"INSTRUMENTATION_RESULT: wifiEligibility="+next(observations)+b"\nINSTRUMENTATION_CODE: -1"
+                if args == ("shell","cmd","wifi","list-scan-results"): return scan
+                return b""
+            with patch.dict(os.environ, {"GITHUB_ACTIONS":"true","SYN443_CI_AVD":"syn443-ci"}), patch("run_enrolled_vpn.adb",side_effect=respond) as adb, patch("run_enrolled_vpn.time.sleep"):
+                prepare_emulator_wifi()
+            return [c.args for c in adb.call_args_list]
+        no_change = fixture([b"eligible"], b"")
+        self.assertFalse(any("svc" in c or "cmd" in c for c in no_change))
+        recovered = fixture([b"missing",b"unvalidated",b"eligible"], b"AndroidWifi")
+        self.assertIn(("shell","cmd","wifi","connect-network","AndroidWifi","open"), recovered)
+        self.assertFalse(any("connect-network" in c for c in fixture([b"unvalidated",b"eligible"], b"unrelated")))
+        with patch.dict(os.environ, {"GITHUB_ACTIONS":"false"}), patch("run_enrolled_vpn.adb") as adb:
+            with self.assertRaises(AssertionError): prepare_emulator_wifi()
+            adb.assert_not_called()
+
     def test_online_during_publication_is_incomplete_until_the_engine_and_revision_match(self):
         online = {'phase': 'Online', 'engineActive': True}
         for partial in (None, {}, {'phase': 'committed'}, {'phase': 'committed', 'activeRevision': 1},

@@ -14,6 +14,49 @@ from enrollment_fixture import Fixture, decode
 from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
 from run_route_lifecycle import RouteProxy
 
+def prepare_emulator_wifi():
+    """Reassociate the disposable AVD if previous reboot cases left its Wi-Fi ineligible."""
+    assert os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("SYN443_CI_AVD") == "syn443-ci"
+    assert adb("emu","avd","name").splitlines() == [b"syn443-ci",b"OK"]
+    assert adb("shell","getprop","ro.hardware").strip() in (b"ranchu",b"goldfish")
+
+    def observe():
+        raw = adb("shell","am","instrument","-w","-e","observeFixtureWifi","true",
+                  PACKAGE+".test/io.syn443.android.EnrollmentDriver",timeout=25)
+        match = re.search(rb"INSTRUMENTATION_RESULT: wifiEligibility=(eligible|missing|unavailable|unvalidated|metered|unstable)\b", raw)
+        assert match and b"INSTRUMENTATION_CODE: -1" in raw, "No app-UID Wi-Fi observation"
+        return match[1].decode()
+
+    status = observe()
+    if status == "eligible":
+        return
+    print("Preparing disposable Wi-Fi after reboot; observed "+status,flush=True)
+    adb("shell","svc","wifi","disable")
+    time.sleep(2)
+    adb("shell","svc","wifi","enable")
+    # The virtual access point is open. Only select its emulator-provided name
+    # if the Android Wi-Fi service itself lists it. Never adopt an arbitrary SSID.
+    sdk = int(adb("shell","getprop","ro.build.version.sdk").strip())
+    if sdk >= 30:
+        adb("shell","cmd","wifi","start-scan")
+        time.sleep(3)
+        scan = adb("shell","cmd","wifi","list-scan-results").decode(errors="replace")
+        if re.search(r"\bAndroidWifi\b", scan):
+            adb("shell","cmd","wifi","connect-network","AndroidWifi","open")
+    end = time.monotonic()+50
+    observations = []
+    while True:
+        status = observe()
+        if status == "eligible":
+            print("App UID confirmed validated unmetered Wi-Fi after reassociation",flush=True)
+            return
+        if not observations or observations[-1] != status:
+            observations.append(status)
+        if time.monotonic() >= end:
+            raise AssertionError("Disposable Wi-Fi eligibility after reassociation: "+",".join(observations))
+        time.sleep(2)
+
+
 def stopped_rollback_recovered(controller,generation):
     # A provider read is the explicit recreation request. An empty PID must
     # never short-circuit that read when no foreground UI is polling for us.
@@ -466,6 +509,8 @@ def main():
             assert b'Success' in adb('install','-r',str(directory/'installer-base.apk'),timeout=120).splitlines()
         logout(fresh_install=historical or installer)
         close_fixture();call('policy-test-reset');call('test-reset')
+        if telemetry:
+            prepare_emulator_wifi()
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
         # Keep the assignment valid for the first periodic job while the access token rotates.
