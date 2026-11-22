@@ -16,7 +16,7 @@ class StructuredEventTest {
         val phases = setOf("Off", "NeedsLogin", "NeedsPermission", "NeedsUnlock", "NeedsAction", "NoNetwork", "Portal",
             "Detecting", "Connecting", "Online", "Degraded", "Recovering", "BlockedByPolicy")
         val codes = """
-            awaiting_identity_release configuration_invalid configuration_or_capability_invalid controller_recreated
+            awaiting_identity_release captive_portal configuration_invalid configuration_or_capability_invalid controller_recreated
             dns_resolution_failed dns_timeout explicit_resume_required health_policy_not_authorized managed_route_recheck
             native_bind_failed native_binding_died native_binding_timeout native_died native_disconnected native_handshake_failed
             native_ipc_failed native_late_start native_lease_update_failed native_null_binding native_progress_timeout
@@ -45,6 +45,7 @@ class StructuredEventTest {
         assertEquals(EventChannel.DNS, EventCode.DNS_TIMEOUT.channel)
         assertEquals(EventChannel.SELECTOR, EventCode.MANAGED_ROUTE_RECHECK.channel)
         assertEquals(EventChannel.NETWORK, EventCode.NETWORK_CHANGED.channel)
+        assertEquals(EventChannel.NETWORK, EventCode.fromWire("captive_portal").channel)
         assertEquals(EventChannel.PROVISIONING, EventCode.CONFIGURATION_INVALID.channel)
         assertEquals(EventChannel.NETBIRD, EventCode.OVERLAY_MATERIAL_CHANGED.channel)
     }

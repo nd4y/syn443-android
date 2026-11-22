@@ -164,12 +164,20 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
             null -> "VPN"
         }, Modifier.testTag("vpn-intent"), style = MaterialTheme.typography.titleMedium)
         VpnStatusSummary(status, statusAvailable, accountPolicyBlocked)
+        if (statusAvailable==true && desiredOn==true) NetworkModeControls(status.optJSONObject("physicalLink")?.optJSONObject("modeSelection")) { stamp, mode, minutes ->
+            command("network-mode","$stamp|$mode|$minutes")
+        }
         VpnPrimaryAction(
             desiredOn = desiredOn,
             connectEnabled = statusAvailable == true && !accountPolicyBlocked,
             onConnect = ::requestConnect,
             onStop = { command("disconnect")?.let(::updateIntent) },
         )
+        TextButton(onClick = {
+            context.startActivity(android.content.Intent(context, io.syn443.android.chat.SupportActivity::class.java)
+                .putExtra(io.syn443.android.chat.SupportActivity.REPORT_PROBLEM, true)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        }, modifier = Modifier.testTag("report-problem")) { Text("Сообщить о проблеме") }
         if (statusAvailable == true && desiredOn == true) {
             if (phase == "NeedsPermission") TextButton(onClick = {
                 val intent = VpnService.prepare(context)
@@ -327,6 +335,15 @@ internal fun VpnStatusSummary(status: JSONObject, available: Boolean?, accountPo
         }
     }
     Text(label, Modifier.testTag("vpn-status").semantics { liveRegion = LiveRegionMode.Polite })
+    if (available == true && status.opt("desiredOn") == true && known && active &&
+        phase in setOf("Online", "Degraded", "Recovering")) {
+        val overlay = status.optJSONObject("netbird")
+        if (overlay?.opt("configuredInRunningProfile") == true) {
+            val summary = NetBirdConnectionState.entries.firstOrNull { it.name == overlay.opt("connectionState") }
+                ?: NetBirdConnectionState.UNKNOWN
+            Text(summary.label, Modifier.testTag("vpn-netbird-summary").semantics { liveRegion = LiveRegionMode.Polite })
+        }
+    }
 }
 
 @Composable

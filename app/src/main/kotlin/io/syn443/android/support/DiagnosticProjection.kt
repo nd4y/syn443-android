@@ -15,7 +15,7 @@ object DiagnosticProjection {
         "Portal", "Detecting", "Connecting", "Online", "Degraded", "Recovering", "BlockedByPolicy")
     // Same closed lifecycle codes as the bounded syn443ctl diagnostic projection.
     private val eventCodes = setOf(
-        "awaiting_identity_release", "configuration_invalid", "configuration_or_capability_invalid",
+        "awaiting_identity_release", "captive_portal", "configuration_invalid", "configuration_or_capability_invalid",
         "controller_recreated", "dns_resolution_failed", "dns_timeout", "explicit_resume_required",
         "health_policy_not_authorized", "managed_route_recheck", "native_bind_failed", "native_binding_died",
         "native_binding_timeout", "native_died", "native_disconnected", "native_handshake_failed", "native_ipc_failed",
@@ -35,7 +35,7 @@ object DiagnosticProjection {
     private val diagnosticStates = setOf("idle", "preparing", "running", "completed", "partial", "cancelled", "unavailable", "no_peers")
 
     fun project(state: JSONObject, overlay: JSONObject?, checks: JSONObject?, exits: JSONObject?,
-        versionName: String, versionCode: Int, sdk: Int): List<DiagnosticArchive.Component> {
+        versionName: String, versionCode: Int, sdk: Int, physicalLink: JSONObject? = null): List<DiagnosticArchive.Component> {
         val versions = if (versionName.length <= 96 && version.matches(versionName) && versionCode > 0 && sdk in 1..9999)
             json(DiagnosticArchive.Name.VERSIONS, document().put("versionName", versionName).put("versionCode", versionCode).put("sdk", sdk))
         else missing(DiagnosticArchive.Name.VERSIONS, DiagnosticArchive.Reason.INVALID_SOURCE, DiagnosticArchive.State.ERROR)
@@ -43,7 +43,7 @@ object DiagnosticProjection {
             .put("maxEvents", MAX_ROWS).put("effectiveConfig", "ready_engine_projection").put("nativeStacks", "unsupported"))
         return listOf(versions, capabilities,
             missing(DiagnosticArchive.Name.EFFECTIVE_CONFIG),
-            json(DiagnosticArchive.Name.HEALTH, health(state)), events(state),
+            json(DiagnosticArchive.Name.HEALTH, health(state, physicalLink)), events(state),
             observation(DiagnosticArchive.Name.CHECKS, checks?.let(::checkProjection)),
             observation(DiagnosticArchive.Name.OVERLAY, overlay?.let(::overlayProjection)),
             exits?.let { json(DiagnosticArchive.Name.CRASHES, crashes(it)) } ?: missing(DiagnosticArchive.Name.CRASHES),
@@ -71,11 +71,19 @@ object DiagnosticProjection {
     }
     private fun known(source: JSONObject, name: String, allowed: Set<String>): String? =
         (source.opt(name) as? String)?.takeIf { it in allowed }
-    private fun health(source: JSONObject): JSONObject = document().also { value ->
+    private fun health(source: JSONObject, link: JSONObject?): JSONObject = document().also { value ->
         value.put("phase", known(source, "phase", phases) ?: "unknown")
         value.put("reason", known(source, "reason", eventCodes) ?: "unknown")
         numbers(source, value, "generation", "networkEpoch", "activationGeneration", "eventSequence", "attempt")
         booleans(source, value, "desiredOn", "engineActive", "resumeRequired")
+        if (source.opt("desiredOn") == true && link != null) {
+            known(link, "transport", setOf("WIFI", "CELLULAR", "OTHER"))?.let { transport ->
+                val safe = JSONObject().put("transport", transport)
+                booleans(link, safe, "ipv4Address", "ipv4Default", "ipv6Address", "ipv6Default")
+                if (transport == "WIFI") known(link, "homeProof", setOf("verified", "unconfirmed"))?.let { safe.put("homeProof", it) }
+                value.put("physicalLink", safe)
+            }
+        }
         (source.opt("policy") as? JSONObject)?.let { policy ->
             val safe = JSONObject()
             numbers(policy, safe, "activationGeneration")

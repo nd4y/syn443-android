@@ -28,7 +28,7 @@ type privateAdaptiveOwner struct {
 	stopParent            func() bool
 	nonce                 [32]byte
 	epoch                 uint64
-	homeUntilBootMS       int64
+	modeUntilBootMS       int64
 	policyScope, wireHash string
 	scope, mode           string
 	ready, closed, busy   bool
@@ -46,6 +46,7 @@ type privateAdaptiveOwnerReport struct {
 	Running              bool                     `json:"running"`
 	NativeEpoch          uint64                   `json:"nativeEpoch"`
 	Scope                string                   `json:"scope"`
+	ModeUntilBootMS      int64                    `json:"modeUntilBootMs,omitempty"`
 	HomeUntilBootMS      int64                    `json:"homeProofUntilBootMs,omitempty"`
 	PolicyScope          string                   `json:"policyScope"`
 	Ready                bool                     `json:"ready"`
@@ -145,7 +146,7 @@ func (o *privateAdaptiveOwner) currentLocked() bool {
 	p := o.hub.pool
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return !o.hub.closed && p.homeCurrent() && o.hub.scope == o.scope && o.hub.mode == o.mode && !p.closed && p.ctx.Err() == nil &&
+	return !o.hub.closed && p.modeCurrent() && o.hub.scope == o.scope && o.hub.mode == o.mode && !p.closed && p.ctx.Err() == nil &&
 		p.scope == o.scope && privateManagedLease(p.lease)
 }
 
@@ -170,7 +171,7 @@ func (o *privateAdaptiveOwner) invalidate() bool {
 		return false
 	}
 	o.ready = false
-	o.homeUntilBootMS = 0
+	o.modeUntilBootMS = 0
 	if o.cancelWork != nil {
 		o.cancelWork()
 	}
@@ -193,10 +194,10 @@ func (o *privateAdaptiveOwner) invalidate() bool {
 }
 
 func (o *privateAdaptiveOwner) configure(expectedEpoch uint64, policyScope, mode string) bool {
-	return o.configureHomeDeadline(expectedEpoch, policyScope, mode, 0)
+	return o.configureModeDeadline(expectedEpoch, policyScope, mode, 0)
 }
 
-func (o *privateAdaptiveOwner) configureHomeDeadline(expectedEpoch uint64, policyScope, mode string, deadline int64) bool {
+func (o *privateAdaptiveOwner) configureModeDeadline(expectedEpoch uint64, policyScope, mode string, deadline int64) bool {
 	if !privateScopeID.MatchString(policyScope) || !privateAdaptiveMode(mode) {
 		return false
 	}
@@ -206,10 +207,10 @@ func (o *privateAdaptiveOwner) configureHomeDeadline(expectedEpoch uint64, polic
 		return false
 	}
 	if o.ready && o.policyScope == policyScope && o.mode == mode {
-		if !o.hub.setHomeDeadline(o.scope, mode, deadline) {
+		if !o.hub.setModeDeadline(o.scope, mode, deadline) {
 			return false
 		}
-		o.homeUntilBootMS = deadline
+		o.modeUntilBootMS = deadline
 		return o.currentLocked()
 	}
 	if o.cancelWork != nil {
@@ -221,11 +222,11 @@ func (o *privateAdaptiveOwner) configureHomeDeadline(expectedEpoch uint64, polic
 		o.ready = false
 		return false
 	}
-	if !o.hub.setHomeDeadline(scope, mode, deadline) {
+	if !o.hub.setModeDeadline(scope, mode, deadline) {
 		o.ready = false
 		return false
 	}
-	o.homeUntilBootMS = deadline
+	o.modeUntilBootMS = deadline
 	o.scope, o.ready = scope, true
 	o.resetReportLocked("idle")
 	if !o.currentLocked() {
@@ -388,7 +389,11 @@ func (o *privateAdaptiveOwner) snapshot() string {
 	report.CheckPlan = report.CheckPlan.clone()
 	report.NativeEpoch, report.Scope, report.Running, report.Ready = o.epoch, o.scope, o.busy, o.currentLocked()
 	report.PolicyScope = o.policyScope
-	report.HomeUntilBootMS = o.homeUntilBootMS
+	if o.mode == "HOME_WIFI" {
+		report.HomeUntilBootMS = o.modeUntilBootMS
+	} else {
+		report.ModeUntilBootMS = o.modeUntilBootMS
+	}
 	if report.Code == "check_failed" {
 		now := o.hub.pool.lease.clock()
 		if !report.Ready || report.CheckCompletedBootMS <= 0 || now < report.CheckCompletedBootMS || now-report.CheckCompletedBootMS > 30_000 {

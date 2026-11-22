@@ -617,6 +617,15 @@ func TestPrivateAdaptiveHubBusyAndStopRequireActualOwnerExit(t *testing.T) {
 }
 
 func TestExpiredHomeProofBlocksNewAdaptiveTrafficAtTheActualNativeDial(t *testing.T) {
+	requireAdaptiveModeExpiryAtActualDial(t, "HOME_WIFI")
+}
+
+func TestTemporaryWiFiModeExpiryClosesExistingAndNewNativeFlows(t *testing.T) {
+	requireAdaptiveModeExpiryAtActualDial(t, "WIFI")
+}
+
+func requireAdaptiveModeExpiryAtActualDial(t *testing.T, mode string) {
+	t.Helper()
 	c, metadata, plans, paths, address := privateAdaptiveOneHopInputs(t, 1)
 	var graph map[string]json.RawMessage
 	if err := json.Unmarshal(metadata, &graph); err != nil {
@@ -627,24 +636,29 @@ func TestExpiredHomeProofBlocksNewAdaptiveTrafficAtTheActualNativeDial(t *testin
 		t.Fatal(err)
 	}
 	for _, hop := range hops {
-		hop["entryModes"] = []string{"HOME_WIFI"}
+		hop["entryModes"] = []string{mode}
 	}
 	graph["hops"] = privateAdaptiveMarshal(t, hops)
 	h, clock := privateAdaptiveNewHub(t, c, privateAdaptiveMarshal(t, graph), plans, 4)
 	scope := strings.Repeat("b", 64)
-	if !h.changeScope(scope, "HOME_WIFI") {
+	if !h.changeScope(scope, mode) {
 		t.Fatal("scope not replaced")
 	}
 	until := clock.Load() + 15_000
-	if h.setHomeDeadline(scope, "HOME_WIFI", clock.Load()+180_001) || h.setHomeDeadline(scope, "HOME_WIFI", clock.Load()) ||
-		h.setHomeDeadline(strings.Repeat("c", 64), "HOME_WIFI", until) {
+	if h.setModeDeadline(scope, mode, clock.Load()+180_001) || h.setModeDeadline(scope, mode, clock.Load()) ||
+		h.setModeDeadline(strings.Repeat("c", 64), mode, until) {
 		t.Fatal("invalid home proof accepted")
 	}
-	if result, e := h.prepareProbe(context.Background(), "inside", paths[0]); result != nil || e != errPrivatePath {
-		t.Fatal("unauthorized home probe")
+	if mode == "HOME_WIFI" {
+		if result, e := h.prepareProbe(context.Background(), "inside", paths[0]); result != nil || e != errPrivatePath {
+			t.Fatal("unauthorized home probe")
+		}
 	}
-	if !h.setHomeDeadline(scope, "HOME_WIFI", until) {
+	if !h.setModeDeadline(scope, mode, until) {
 		t.Fatal("fresh home proof not applied")
+	}
+	if h.setModeDeadline(scope, mode, 0) {
+		t.Fatal("active time limit removed in the same scope")
 	}
 	receipt, err := h.prepareProbe(context.Background(), "inside", paths[0])
 	if err != nil || !h.commit(receipt, 1000) {
@@ -659,11 +673,11 @@ func TestExpiredHomeProofBlocksNewAdaptiveTrafficAtTheActualNativeDial(t *testin
 	// Renewing on the same physical scope keeps a live TCP connection usable.
 	oldUntil := until
 	until += 1000
-	if !h.setHomeDeadline(scope, "HOME_WIFI", until) {
+	if !h.setModeDeadline(scope, mode, until) {
 		t.Fatal("valid renewal refused")
 	}
 	clock.Store(oldUntil)
-	h.expireHome(scope, oldUntil)
+	h.expireMode(scope, oldUntil)
 	privateAdaptiveEcho(t, conn, "still-authorized")
 	blocked, err := h.dialTCP("inside", context.Background(), "tcp", M.ParseSocksaddr(address))
 	if err != nil {
@@ -676,7 +690,7 @@ func TestExpiredHomeProofBlocksNewAdaptiveTrafficAtTheActualNativeDial(t *testin
 	if n, err := conn.Write([]byte("expired")); n != 0 || err != errPrivatePath {
 		t.Fatal("established home flow still writable", n, err)
 	}
-	h.expireHome(scope, until)
+	h.expireMode(scope, until)
 	select {
 	case err := <-result:
 		if err == nil {
@@ -685,7 +699,7 @@ func TestExpiredHomeProofBlocksNewAdaptiveTrafficAtTheActualNativeDial(t *testin
 	case <-time.After(2 * time.Second):
 		t.Fatal("blocked home read survived shared expiry")
 	}
-	if h.setHomeDeadline(scope, "HOME_WIFI", until+1000) {
+	if h.setModeDeadline(scope, mode, until+1000) {
 		t.Fatal("expired proof revived the previous selection")
 	}
 	if conn, e := h.dialTCP("inside", context.Background(), "tcp", M.ParseSocksaddr(address)); conn != nil || e != errPrivatePath {

@@ -99,12 +99,24 @@ object Assignments {
     /** No configuration can be consumed until the matching durable receipt was acknowledged. */
     fun authorized(state:AssignmentState,login:LoginIntent,payload:LoginPayload,boot:Int,elapsed:Long,
                    candidate:Boolean=false):Verified {
-        bound(state,login,payload)
-        require(login.phase==LoginPhase.POLICY_CACHED || login.phase==LoginPhase.REFRESHING && login.refreshReturnPhase==LoginPhase.POLICY_CACHED)
-        require(login.policyHash==Identity.hash(checkNotNull(state.journal.desired).toByteArray(Charsets.UTF_8)))
         val raw=if(candidate) {
             require(state.journal.phase in setOf("prepared","applying"));state.journal.candidate
         } else state.journal.active
+        return verifiedJournalEntry(state,login,payload,boot,elapsed,raw)
+    }
+
+    /** Historical metadata cannot serve engine bytes or create a runtime permit. */
+    data class LastWorkingPolicy(val configRevision:Long,val algorithmRevision:String,val offlineUntilMs:Long)
+
+    fun lastWorkingPolicy(state:AssignmentState,login:LoginIntent,payload:LoginPayload,boot:Int,elapsed:Long):LastWorkingPolicy {
+        val value=verifiedJournalEntry(state,login,payload,boot,elapsed,state.journal.lastGood).payload
+        return LastWorkingPolicy(value.revision,value.algorithmRevision,value.offlineUntilMs)
+    }
+
+    private fun verifiedJournalEntry(state:AssignmentState,login:LoginIntent,payload:LoginPayload,boot:Int,elapsed:Long,raw:String?):Verified {
+        bound(state,login,payload)
+        require(login.phase==LoginPhase.POLICY_CACHED || login.phase==LoginPhase.REFRESHING && login.refreshReturnPhase==LoginPhase.POLICY_CACHED)
+        require(login.policyHash==Identity.hash(checkNotNull(state.journal.desired).toByteArray(Charsets.UTF_8)))
         val value=verify(checkNotNull(raw),login,payload,checkNotNull(state.time),boot,elapsed)
         require(value.payload.revision>=state.journal.floor && value.payload.securityEpoch>=state.journal.epoch)
         return value

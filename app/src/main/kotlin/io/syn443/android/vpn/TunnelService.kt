@@ -98,6 +98,11 @@ class TunnelService : VpnService() {
     private val homeWiFi = HomeWiFiMonitor(SystemClock::elapsedRealtime)
     private val homeWorker = lazy { HomeWiFiWorker { fn -> handler.post { fn() } } }
     private var lastHomeDeadline = 0L
+    private val modeChoices = ManagedNetworkMode()
+    @Volatile private var modeReport: ManagedNetworkMode.View? = null
+    private var appliedMode: NetworkMode? = null
+    private var appliedManualExpiry = 0L
+    private var manualNativeDeadline = 0L
     private data class HomeReport(val generation:Long,val epoch:Long,val engine:String,val until:Long)
     @Volatile private var homeReport:HomeReport? = null
 
@@ -109,12 +114,31 @@ class TunnelService : VpnService() {
         return HomeProofScope(path,link.handle,binding.revision,binding.semanticAuthority,binding.boot)
     }
 
-    private fun adaptiveMode(): NetworkMode? {
+    private fun detectedMode(): NetworkMode? {
         val transport = probeContext?.network?.transport ?: return null
         if (transport == PhysicalTransport.WIFI && homeWiFi.deadline(homeScope(adaptivePolicy())) > 0)
             return NetworkMode.HOME_WIFI
         return transport.adaptiveNetworkMode()
     }
+
+    private fun modeView(policy: AdaptivePolicyBinding, starting:Boolean=false): ManagedNetworkMode.View? {
+        val path = routeScope() ?: return null
+        val detected = detectedMode() ?: return null
+        if ((!starting && !ownsReadyEngine(path.intent)) || destroyed || retiring || !Recovery.current(store.checkpoint(), path.intent)) return null
+        val scope = ManagedNetworkMode.Scope(path.intent, path.network, path.engine, policy.contentHash, policy.semanticAuthority, policy.boot)
+        return modeChoices.observe(scope, policy.modeSelection, detected, SystemClock.elapsedRealtime(), policy.leaseDeadlineElapsed)
+    }
+
+    internal fun requestNetworkMode(stamp: String, mode: String, minutes: Int): Boolean {
+        if (stamp != modeReport?.stamp) return false
+        return handler.post {
+            val policy = adaptivePolicy() ?: return@post
+            val view = modeView(policy) ?: return@post
+            if (modeChoices.choose(view, stamp, mode, minutes, SystemClock.elapsedRealtime())) adaptiveTick()
+        }
+    }
+
+    private fun adaptiveMode() = adaptivePolicy()?.let { modeView(it)?.effective }
 
     private fun updateHomeProof(policy: AdaptivePolicyBinding): Long {
         val scope = homeScope(policy)
@@ -138,22 +162,32 @@ class TunnelService : VpnService() {
         val scope=routeScope() ?: return
         val session=token ?: return
         val policy=adaptivePolicy() ?: run {
-            homeWiFi.observe(null);homeReport=null
-            if(lastHomeDeadline>0) {
-                lastHomeDeadline=0L
+            homeWiFi.observe(null);homeReport=null;modeReport=null
+            modeChoices.clear()
+            if(lastHomeDeadline>0 || appliedManualExpiry>0) {
+                lastHomeDeadline=0L;appliedMode=null;appliedManualExpiry=0L;manualNativeDeadline=0L
                 if(host?.invalidateAdaptiveContext(session)!=true)retire(true)
             }
             return
         }
         val deadline=updateHomeProof(policy)
-        val mode=adaptiveMode() ?: return
+        val view=modeView(policy) ?: run { modeReport=null;return }
+        val mode=view.effective
+        val now=SystemClock.elapsedRealtime()
         val homeWasActive=lastHomeDeadline>0
-        if (homeWasActive != (mode == NetworkMode.HOME_WIFI) ||
+        if (appliedMode!=null && (appliedMode!=mode || appliedManualExpiry!=view.until) ||
+            homeWasActive != (mode == NetworkMode.HOME_WIFI) ||
             homeWasActive && SystemClock.elapsedRealtime()>=lastHomeDeadline) {
             if (host?.invalidateAdaptiveContext(session)!=true) { retire(true);return }
         }
+        if (appliedManualExpiry!=view.until || manualNativeDeadline-now<60_000L) {
+            manualNativeDeadline=if(view.until>now) minOf(view.until,now+180_000L) else 0L
+        }
+        appliedMode=mode;appliedManualExpiry=view.until
         lastHomeDeadline=if(mode==NetworkMode.HOME_WIFI)deadline else 0L
-        routes.homeProofUntil=deadline
+        routes.homeProofUntil=if(mode==NetworkMode.HOME_WIFI && view.until>0) minOf(deadline,view.until) else deadline
+        routes.modeOverrideUntil=if(mode!=NetworkMode.HOME_WIFI)manualNativeDeadline else 0L
+        modeReport=view
         routes.bind(scope,mode,policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
         if(force)routes.force()
         val power=getSystemService(android.os.PowerManager::class.java)
@@ -226,6 +260,9 @@ class TunnelService : VpnService() {
             val proof=homeReport
             if (proof != null && proof.generation==generation && proof.epoch==networkEpoch && proof.engine==token)
                 link.put("homeProof",if(SystemClock.elapsedRealtime()<proof.until)"verified" else "unconfirmed")
+            modeReport?.takeIf { it.scope.generation==generation && it.scope.epoch==networkEpoch && it.scope.engine==token &&
+                SystemClock.elapsedRealtime()<it.validUntil && (it.effective!=NetworkMode.HOME_WIFI || proof!=null && SystemClock.elapsedRealtime()<proof.until) }
+                ?.let { link.put("modeSelection",it.json()) }
         } else null
 
     private var registered = false
@@ -405,6 +442,7 @@ class TunnelService : VpnService() {
             if(!revoked)retire(true)
         }
         homeWiFi.observe(null);homeReport=null;lastHomeDeadline=0L
+        modeChoices.clear();modeReport=null;appliedMode=null;appliedManualExpiry=0L;manualNativeDeadline=0L
         LoginController.get(this).cancelOptionalNetworkWork()
         // Use the same outer lock as the final enrolled activation commit. A queued
         // encrypted write cannot confirm proof after a newer network epoch publishes.
@@ -413,6 +451,7 @@ class TunnelService : VpnService() {
             networkWaitReason=waiting
             network = selected
             epoch++
+            OverlaySnapshot.clear()
             selectedLinkReport = if (selected != null && context != null)
                 networkObservations[selected]?.families?.let { PhysicalLinkReport(epoch, context.network.transport, it) }
                 else null
@@ -538,7 +577,7 @@ class TunnelService : VpnService() {
             adaptiveRoutes=ManagedAdaptiveRoutes.read(raw) {ControllerProbeBudget.get(this)}
             val routeSelection = adaptiveRoutes?.let {routes->
                 val policy=checkNotNull(adaptivePolicy())
-                routes.bind(checkNotNull(routeScope()),checkNotNull(adaptiveMode()),policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
+                routes.bind(checkNotNull(routeScope()),checkNotNull(modeView(policy,starting=true)).effective,policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
                 routes.controlFrame()
             } ?: if (pendingLeaseDeadline > 0) RouteSnapshot.nativeSelectionPlan(runningConfigHash) else ""
             startingConfig = summary?.let { ReadyConfig(cp.generation, it) }
@@ -576,10 +615,14 @@ class TunnelService : VpnService() {
             if (addresses.isEmpty()) return ""
             return "$name ${iface.index} ${iface.mtu} ${iface.isUp} true false ${iface.isPointToPoint} ${iface.supportsMulticast()}|$addresses"
         }
-        override fun overlayState(session: String, raw: String) { handler.post {
-            if (session == token && Recovery.current(store.checkpoint(), boundGeneration) && !retiring)
-                runCatching { OverlaySnapshot.update(raw) }
-        } }
+        override fun overlayState(session: String, raw: String) {
+            val observedEpoch = epoch
+            handler.post {
+                if (observedEpoch == epoch && session == token && !retiring &&
+                    Recovery.current(store.checkpoint(), boundGeneration))
+                    runCatching { OverlaySnapshot.update(raw, boundGeneration, observedEpoch) }
+            }
+        }
         override fun overlayIdentity(session:String,raw:String) {
             if(raw.length !in 3..512)return
             handler.post {
@@ -596,7 +639,9 @@ class TunnelService : VpnService() {
             val rejected=parsed?.let {AdaptiveHandoff.parseRejection(it)}
             if(rejected!=null) {
                 val policy=adaptivePolicy() ?: return@post
-                val mode=adaptiveMode() ?: return@post
+                val view=modeView(policy) ?: return@post
+                val mode=view.effective
+                if(appliedMode!=mode || appliedManualExpiry!=view.until) {adaptiveTick();return@post}
                 RouteSnapshot.owner(scope)
                 adaptiveRoutes?.let {routes->
                     routes.bind(scope,mode,policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
@@ -608,7 +653,9 @@ class TunnelService : VpnService() {
             val adaptive=parsed?.optJSONObject("adaptive")
             if(adaptive!=null) {
                 val policy=adaptivePolicy() ?: return@post
-                val mode=adaptiveMode() ?: return@post
+                val view=modeView(policy) ?: return@post
+                val mode=view.effective
+                if(appliedMode!=mode || appliedManualExpiry!=view.until) {adaptiveTick();return@post}
                 RouteSnapshot.owner(scope)
                 adaptiveRoutes?.let {routes->
                     routes.bind(scope,mode,policy,SystemClock.elapsedRealtime(),physicalPathContinuity.currentToken)
@@ -764,6 +811,7 @@ class TunnelService : VpnService() {
     }.getOrDefault(false)
     private fun retire(heavy: Boolean) {
         homeWiFi.observe(null);homeReport=null;lastHomeDeadline=0L
+        modeChoices.clear();modeReport=null;appliedMode=null;appliedManualExpiry=0L;manualNativeDeadline=0L
         startingConfig = null
         ReadyConfig.publish(null)
         PolicyChecks.invalidate()

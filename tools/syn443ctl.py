@@ -44,7 +44,7 @@ NUMBERS = ("generation", "networkEpoch", "activationGeneration", "eventSequence"
 PHASES = {"Off", "NeedsLogin", "NeedsPermission", "NeedsUnlock", "NeedsAction", "NoNetwork",
           "Portal", "Detecting", "Connecting", "Online", "Degraded", "Recovering", "BlockedByPolicy"}
 EVENT_CODES = {
-    "awaiting_identity_release", "configuration_invalid", "configuration_or_capability_invalid",
+    "awaiting_identity_release", "captive_portal", "configuration_invalid", "configuration_or_capability_invalid",
     "controller_recreated", "dns_resolution_failed", "dns_timeout", "explicit_resume_required",
     "health_policy_not_authorized", "managed_route_recheck", "native_bind_failed", "native_binding_died",
     "native_binding_timeout", "native_died", "native_disconnected", "native_handshake_failed", "native_ipc_failed",
@@ -282,6 +282,18 @@ def bundle(device):
     phase = state.get("phase")
     safe["phase"] = phase if isinstance(phase, str) and phase in PHASES else "unknown"
     safe.update({k: state[k] for k in ("desiredOn", "engineActive", "resumeRequired") if type(state.get(k)) is bool})
+    reason = state.get("reason")
+    if isinstance(reason, str) and reason in EVENT_CODES:
+        safe["reason"] = reason
+    link = state.get("physicalLink")
+    if state.get("desiredOn") is True and isinstance(link, dict) and link.get("transport") in ("WIFI", "CELLULAR", "OTHER"):
+        physical = {"transport": link["transport"]}
+        for key in ("ipv4Address", "ipv4Default", "ipv6Address", "ipv6Default"):
+            if type(link.get(key)) is bool:
+                physical[key] = link[key]
+        if link["transport"] == "WIFI" and link.get("homeProof") in ("verified", "unconfirmed"):
+            physical["homeProof"] = link["homeProof"]
+        safe["physicalLink"] = physical
     checks = state.get("policyChecks")
     if isinstance(checks, dict) and type(checks.get("current")) is bool:
         safe["policyChecks"] = {"current": checks["current"], **numbers(checks, ("ageMs",))}

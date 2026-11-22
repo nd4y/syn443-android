@@ -599,10 +599,10 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual(2, len(assignments))
         values = {node.targets[0].id: ast.literal_eval(node.value) for node in assignments}
         required = values['SUPPORT_BUNDLE_REQUIRED']
-        self.assertEqual([8,9,10,6,6,2,1,2], [len(methods) for methods in required.values()])
+        self.assertEqual([8,9,10,7,6,2,1,2], [len(methods) for methods in required.values()])
         all_cases = {(owner, name) for owner, methods in required.items() for name in methods}
         all_cases.add(values['SUPPORT_BUNDLE_EXTERNAL_REQUIRED'])
-        self.assertEqual(45, len(all_cases))
+        self.assertEqual(46, len(all_cases))
         block, = [node for node in tree.body if isinstance(node, ast.If) and
                   any(isinstance(child, ast.Name) and child.id == 'SUPPORT_BUNDLE_REQUIRED' for child in ast.walk(node))]
         self.assertIsInstance(block, ast.If)

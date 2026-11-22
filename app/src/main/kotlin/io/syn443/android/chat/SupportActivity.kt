@@ -34,14 +34,28 @@ import org.json.JSONObject
 import java.io.File
 
 class SupportActivity:ComponentActivity() {
+    companion object { internal const val REPORT_PROBLEM = "io.syn443.reportProblem" }
+    private var incidentRequested by mutableStateOf(false)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(REPORT_PROBLEM, false)) incidentRequested = true
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(REPORT_PROBLEM, incidentRequested)
+    }
+
     override fun onCreate(savedInstanceState:Bundle?) {super.onCreate(savedInstanceState)
+        incidentRequested = savedInstanceState?.getBoolean(REPORT_PROBLEM) ?: intent.getBooleanExtra(REPORT_PROBLEM, false)
         var prepared by mutableStateOf(false)
         // Install the root during onCreate. Cache preparation must not attach a
         // new Compose root later, after the resumed window has begun drawing.
         // Keep chat operations behind preparation so cleanup cannot delete a
         // file created by this instance of the screen.
         setContent {MaterialTheme(colorScheme=darkColorScheme()) {Surface(Modifier.fillMaxSize()) {
-            if(prepared)SupportChat()
+            if(prepared)SupportChat(incidentRequested) { incidentRequested = false }
             else Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
                 Text("Подготовка чата",Modifier.testTag("chat-preparing"))
             }
@@ -75,7 +89,7 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
     else->ChatRefreshGate.Result.TRANSIENT_FAILURE
 }
 
-@Composable private fun SupportChat() {
+@Composable private fun SupportChat(incidentRequested: Boolean, closeIncident: () -> Unit) {
     val context=LocalContext.current;val scope=rememberCoroutineScope();val mutex=remember {Mutex()}
     val lifecycle=(context as LifecycleOwner).lifecycle
     var visible by remember {mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))}
@@ -101,6 +115,34 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
     var refreshNonce by remember {mutableStateOf(0L)}
     var retryReady by remember {mutableStateOf(false)}
     var download by remember {mutableStateOf<JSONObject?>(null)}
+    var incidentPreview by remember { mutableStateOf<SupportIncident?>(null) }
+    var incidentOwner by remember { mutableStateOf(-1L) }
+    var incidentError by remember { mutableStateOf<String?>(null) }
+    var incidentNotice by remember(generation) { mutableStateOf("") }
+    var unaddressed by remember(generation) { mutableStateOf(emptyList<String>()) }
+    var incidentSaving by remember { mutableStateOf(false) }
+    fun currentIncidentOwner(): Long {
+        val auth = context.contentResolver.call("content://io.syn443.control".toUri(), "auth-status", null, null)
+            ?.getString("json")?.let(::JSONObject) ?: return -1
+        return if (auth.optString("phase") in setOf("PROVISIONING", "POLICY_CACHED", "REFRESHING"))
+            auth.optLong("generation", -1) else -1
+    }
+    LaunchedEffect(incidentRequested) {
+        incidentPreview = null
+        incidentError = null
+        incidentOwner = -1
+        if (incidentRequested) {
+            val (owner, report) = withContext(Dispatchers.IO) {
+                val owner = runCatching(::currentIncidentOwner).getOrDefault(-1L)
+                val status = runCatching { context.contentResolver.call("content://io.syn443.control".toUri(),
+                    "status", null, null)?.getString("json")?.let(::JSONObject) }.getOrNull()
+                owner to if (owner >= 0) SupportIncident.capture(status) else null
+            }
+            incidentOwner = owner
+            incidentPreview = report
+            if (owner < 0) incidentError = "Для обращения войдите в SYN443."
+        }
+    }
     val busy=operation?.isActive==true
     DisposableEffect(lifecycle) {
         val observer=LifecycleEventObserver {_,_->
@@ -158,7 +200,10 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
     }
     suspend fun sendPending(id:String) {
         val api=requireNotNull(client);val db=requireNotNull(store)
-        ChatTransfer.send(api,db,id) {status=it}
+        val delivered = ChatTransfer.send(api,db,id) {status=it}
+        if (incidentNotice.contains("SYN-" + id.take(12)) && delivered.opt("clientId") == id)
+            incidentNotice = "Обращение SYN-" + id.take(12) + " доставлено."
+
         pending=currentDrafts(withContext(Dispatchers.IO) {db.drafts()})
         status="Отправлено";refresh()
     }
@@ -224,15 +269,23 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
                                 store=opened;client=ChatClient(context,next)
                             }
                             // Keep the generation-bound queue visible while the server is unavailable.
-                            pending=currentDrafts(withContext(Dispatchers.IO) {requireNotNull(store).drafts()})
+                            val local = withContext(Dispatchers.IO) { requireNotNull(store).drafts() }
+                            unaddressed = local.filter { it.second.opt("incident") == true && it.second.opt("conversation") == "" }.map { it.first }
+                            pending=currentDrafts(local)
                             val own=requireNotNull(client).objectCall("self")
                             val permittedAdmin=own.getBoolean("admin")
                             if(admin && !permittedAdmin) {selectConversation("");inbox=ChatInboxWindow();files=emptyList();text=TextFieldValue()}
                             admin=permittedAdmin
-                            if(!admin)conversation=own.getJSONObject("conversation").getString("id")
+                            val ownId = own.getJSONObject("conversation").getString("id")
+                            withContext(Dispatchers.IO) { requireNotNull(store).bindOwnIncidents(own) }
+                            unaddressed = emptyList()
+                            if(!admin)conversation=ownId
                             if(admin && conversation.isEmpty() && !inbox.historical) refreshInbox(false)
                             refresh()
-                            val eligible=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}.filter {admin || it.second.getString("conversation")==conversation}
+                            val eligible=withContext(Dispatchers.IO) {requireNotNull(store).drafts()}.filter { (_, draft) ->
+                                val target = draft.getString("conversation")
+                                target.isNotEmpty() && if (draft.opt("incident") == true) target == ownId else admin || target == conversation
+                            }
                             pending=currentDrafts(eligible)
                             if(eligible.isNotEmpty() && android.os.SystemClock.elapsedRealtime()>=nextAttempt) {
                                 nextAttempt=android.os.SystemClock.elapsedRealtime()+30_000
@@ -257,15 +310,55 @@ private fun refreshResult(e:Exception)=when(chatCode(e)) {
             delay(10_000)
         }
     }
+    if (incidentRequested) {
+        val sameOwner = incidentOwner >= 0 && generation == incidentOwner
+        val db = store
+        val report = incidentPreview
+        IncidentPreview(report, incidentSaving,
+            incidentError ?: if (incidentOwner >= 0 && generation >= 0 && !sameOwner) "Учётная запись изменилась." else null,
+            canSubmit = sameOwner && db != null, submit = {
+                if (!incidentSaving && sameOwner && db != null && report != null) {
+                    val submittedOwner = incidentOwner
+                    incidentSaving = true
+                    scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) {
+                                check(currentIncidentOwner() == submittedOwner)
+                                db.queueIncident(report)
+                            }
+                            if (generation == submittedOwner && db === store) {
+                                unaddressed = (unaddressed + report.clientId).distinct()
+                                incidentNotice = "Обращение SYN-" + report.clientId.take(12) +
+                                    " сохранено. Чат отправит его при подключении."
+                                closeIncident()
+                                manualRefresh = true
+                                refreshNonce++
+                            }
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { incidentError = "Сохранить обращение не удалось. Попробуйте ещё раз." }
+                        finally { incidentSaving = false }
+                    }
+                }
+            }, dismiss = closeIncident)
+    }
     Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text("Чат с администратором",style=MaterialTheme.typography.headlineSmall,modifier=Modifier.testTag("chat-title"))
         Text(status,Modifier.testTag("chat-status"))
+        if (incidentNotice.isNotEmpty()) Text(incidentNotice, Modifier.testTag("incident-queued"))
+        for (id in unaddressed) {
+            if (!incidentNotice.contains("SYN-" + id.take(12)))
+                Text("Ожидает подключения - обращение SYN-" + id.take(12), Modifier.testTag("incident-offline"))
+        }
+
         if(connectionProblem)TextButton(
             onClick={manualRefresh=true;refreshNonce++},
             enabled=retryReady && !busy && !refreshRunning,
             modifier=Modifier.testTag("chat-retry"),
         ) {Text("Повторить подключение")}
         Text("Сообщения доступны администраторам сервиса. Файлы до 25 МБ.",style=MaterialTheme.typography.bodySmall)
+        if (visible && admin && conversation.isEmpty()) client?.let { api -> key(api) {
+            AdminIncidentLookup { ref -> api.objectCall("incident/lookup", JSONObject().put("reference", ref)) }
+        } }
         if(admin) {
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 Button(onClick={selectConversation(""); run { if (!inbox.historical) refreshInbox(false) }},

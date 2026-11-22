@@ -115,6 +115,19 @@ if mode=="emulator":
         ('io.syn443.android.ManagedAdaptiveRoutesTest', 'nativeHomeAdmissionNeedsTheExactLiveDeadlineAcrossRenewalAndExpiry'),
         ('io.syn443.android.HomeWiFiProofTest', 'staleHomeProofCannotCrossLinkAuthorityTimeOrRetryBudget'),
     } <= set(identities), "Missing signed home Wi-Fi proof outcomes"
+    assert ("io.syn443.android.ChatUiTest", "existingChatAcceptsIncidentEntryAndDismissalSurvivesRecreation") in identities
+    assert ("io.syn443.android.LoginControllerTest", "assignedActivationPersistsBeforeUseAndCommitsAcrossControllerRestart") in identities
+    assert {("io.syn443.android.OfflineSupportIncidentTest", name) for name in (
+        "snapshotOnlyContainsClosedFactsAndDropsObsoleteEngineEvidence",
+        "encryptedOfflineReportSurvivesReopenAndOnlyBindsOnceToSelf",
+        "administratorLookupWillNotDisplayAWrongOrLateIncident",
+        "previewRequiresExplicitSubmissionAndAllowsCancelWithoutAnAccount",
+    )} <= set(identities), "Missing offline incident outcomes"
+    assert {("io.syn443.android.ManagedNetworkModeTest", name) for name in (
+        "userChoicePrecedesAssignmentAndExpiresAtTheExactMonotonicBoundary",
+        "changedPhysicalNetworkAuthorityOrExpiredLeaseRetireTheChoiceAndItsCommands",
+        "screenShowsAssignedSourceAndAcceptsOnlyThePermittedDurationAndMode",
+    )} <= set(identities), "Missing managed network mode outcomes"
     required_storage_outcomes = {
         ("io.syn443.android.AttachmentStorageFailureTest", "failedWritePreservesSourceAndReleasesScratchBeforeRetry"),
         ("io.syn443.android.AttachmentStorageFailureTest", "boundedOutboxFullRollsBackPartialFileAndAllowsRetry"),
@@ -825,7 +838,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
               ('io.syn443.android.RouteCheckPlanTest',
                'unknownCancelledAndForeignDiagnosticNeverBecomeFailedProxyOrWorkingRoute'),
               ('io.syn443.android.RouteCheckPlanTest',
-               'legacyArraysAndEnrollmentAdvertisementStayUnchangedWhenEvaluatorIsImplemented'),
+               'legacyArraysRemainCompatibleWhenNewEnrollmentsAdvertiseNamedChecks'),
               ('io.syn443.android.RouteCheckPlanTest', 'readOnlyPlanLabelsAreFiniteAndRecompositionDoesNotDispatch'),
               ('io.syn443.android.RouteCheckPlanTest',
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
@@ -994,7 +1007,7 @@ SUPPORT_BUNDLE_REQUIRED = {'io.syn443.android.DiagnosticArchiveTest': ['storedAr
                                                    'foreignFilesAndSymlinkFilesOrDirectoriesArePreservedAndFailClosed',
                                                    'blockedReadKeepsItsSingleSlotAndCancelledVerifiedBytesCannotPublish',
                                                    'failedSourcesAtomicWriteFailuresAndOverLimitComponentsNeverAutoRetry'],
- 'io.syn443.android.SupportBundleSourcesTest': ['passiveCaptureLeavesItsSourcesUnchangedAndRunsEachSupplierOnce',
+ 'io.syn443.android.SupportBundleSourcesTest': ['offlineArchiveContainsOnlyCurrentPhysicalFactsAndTypedPortalReason', 'passiveCaptureLeavesItsSourcesUnchangedAndRunsEachSupplierOnce',
                                                 'changedContextRejectsCapturedHealthChecksAndOverlayWithoutRepeatingWork',
                                                 'missingOrFailingSourcesBecomePartialWithoutRawExceptionText',
                                                 'stateFileReadRejectsOversizeDepthUtf8TrailingAndSymlinkWithoutModifyingFiles',
@@ -1014,7 +1027,7 @@ SUPPORT_BUNDLE_EXTERNAL_REQUIRED = ('io.syn443.android.SupportBundleProtocolTest
 if mode == "emulator":
     required = {(owner, name) for owner, names in SUPPORT_BUNDLE_REQUIRED.items() for name in names}
     required.add(SUPPORT_BUNDLE_EXTERNAL_REQUIRED)
-    assert len(required) == 45, "Duplicate support bundle requirement"
+    assert len(required) == 46, "Duplicate support bundle requirement"
     assert required <= set(identities), "Missing exact offline support archive outcomes"
     for owner, expected in SUPPORT_BUNDLE_REQUIRED.items():
         path = root / "app/src/androidTest/kotlin/io/syn443/android" / (owner.rsplit(".", 1)[1] + ".kt")

@@ -83,7 +83,7 @@ data class PolicyReply(val envelope:String,val time:TrustedTime,val deviceSource
         // The base remains valid for old immutable retry bodies. New installs
         // advertise implemented optional modules without rewriting old requests.
         val supportedCapabilities=requiredCapabilities+listOf("overlay.credentials.v1","route.health.v1","route.failover.v1",
-            io.syn443.policy.Policy.RESERVE_PROBE_COOLDOWN,io.syn443.policy.Policy.ROUTE_EXIT_IP,io.syn443.policy.Policy.ROUTE_EXIT_COUNTRY,io.syn443.policy.Policy.ROUTE_DECISION,io.syn443.policy.Policy.ROUTE_ADAPTIVE_TCP,io.syn443.policy.Policy.ROUTE_HTTPS_STATUS,io.syn443.policy.Policy.HOME_WIFI_PROOF)
+            io.syn443.policy.Policy.RESERVE_PROBE_COOLDOWN,io.syn443.policy.Policy.ROUTE_EXIT_IP,io.syn443.policy.Policy.ROUTE_EXIT_COUNTRY,io.syn443.policy.Policy.ROUTE_DECISION,io.syn443.policy.Policy.ROUTE_ADAPTIVE_TCP,io.syn443.policy.Policy.ROUTE_CHECK_PLAN,io.syn443.policy.Policy.ROUTE_HTTPS_STATUS,io.syn443.policy.Policy.HOME_WIFI_PROOF, io.syn443.policy.Policy.NETWORK_MODE_SELECTION)
         fun enroll(key:ECPublicKey)=IdentityOperation("/v1/devices/enroll",Canonical.encode(buildJsonObject {
             put("requestId",Identity.random());put("key",Identity.jwk(key));put("capabilities",JsonArray(supportedCapabilities.map(::JsonPrimitive)))
         }))
@@ -416,7 +416,7 @@ class AuthProtocol(bootstrap:Bootstrap,private val key:ProofKey,private val exch
     /** One bounded chunk/operation; the controller rechecks the account before every call. */
     fun chat(action:String,body:String,current:SessionReply,scope:IdentityScope):String=checked {
         bound(current)
-        require(action in setOf("self","inbox","messages","send","read","uploads/begin","uploads/part","uploads/status","uploads/complete","uploads/cancel","download"))
+        require(action in setOf("self","inbox","incident/lookup","messages","send","read","uploads/begin","uploads/part","uploads/status","uploads/complete","uploads/cancel","download"))
         require(body.toByteArray(Charsets.UTF_8).size<=if(action=="uploads/part")360_448 else 32_768)
         require(Canonical.parse(body) is JsonObject)
         require(current.time.window(boot(),elapsed()).upperMs<current.session.accessUntilMs)

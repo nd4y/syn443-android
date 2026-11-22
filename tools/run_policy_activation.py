@@ -194,7 +194,9 @@ def main():
                 elif name.startswith('baselineOutage'):
                     proxy.allowed = False; stage(publisher.sign(config, revision=2, degraded=True))
                     await_condition(lambda: call('status')['policy']['phase'] == 'degraded', 65)
-                    assert call('status')['policy']['activeRevision'] == 2 and call('status')['policy']['lastKnownGoodRevision'] == 1
+                    policy_status = call('status')['policy']
+                    assert policy_status['activeRevision'] == 2 and policy_status['lastKnownGoodRevision'] == 1
+                    assert policy_status['lastKnownGoodPair'] == {'configRevision': 1, 'algorithmRevision': 'm1-local-v1'}
                 elif name.startswith('stopFences'):
                     stage(publisher.sign(config, revision=2)); stop()
                     snapshot = call('status')['policy']['activeRevision']; time.sleep(12)

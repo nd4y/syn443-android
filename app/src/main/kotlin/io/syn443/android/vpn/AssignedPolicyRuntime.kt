@@ -27,7 +27,8 @@ internal class AssignedPolicyRuntime(private val boot:()->Int,private val elapse
     }
     internal class Prepared internal constructor(val login:LoginIntent,val state:AssignmentState,val candidate:Verified?,
         val candidateDeadline:Long,val permit:AssignmentPermit?,
-        val candidateBinding:AdaptivePolicyBinding?,val permitBinding:AdaptivePolicyBinding?) {
+        val candidateBinding:AdaptivePolicyBinding?,val permitBinding:AdaptivePolicyBinding?,
+        val lastWorking:Assignments.LastWorkingPolicy?=null) {
         override fun toString()="AssignedPolicyView([redacted])"
     }
     @Volatile private var value:Prepared?=null
@@ -62,11 +63,17 @@ internal class AssignedPolicyRuntime(private val boot:()->Int,private val elapse
                 val roots=Canonical.encode(JsonObject(payload.bootstrap.roots.mapValues {JsonPrimitive(it.value)}))
                 Policy.hash("syn443/adaptive-strict-envelope/v1\n"+value.envelope+"\n"+login.authority+"\n"+roots)
             }
-            return AdaptivePolicyBinding(value.payload.revision,value.payload.contentHash,authority,deadline,currentBoot,value.homeProof)
+            return AdaptivePolicyBinding(value.payload.revision,value.payload.contentHash,authority,deadline,currentBoot,value.homeProof,value.modeSelection)
         }
         val candidateBinding=binding(candidate,candidateDeadline)
         val permitBinding=permit?.let {binding(it.authorized(login,state,currentBoot,now),it.deadlineElapsed)}
-        return Prepared(login,state,candidate,candidateDeadline,permit,candidateBinding,permitBinding)
+        val lastWorking = state.journal.lastGood?.let { raw ->
+            val known = candidate?.takeIf { it.envelope == raw }
+                ?: permit?.authorized(login,state,currentBoot,now)?.takeIf { it.envelope == raw }
+            if (known != null) known.payload.let { Assignments.LastWorkingPolicy(it.revision,it.algorithmRevision,it.offlineUntilMs) }
+            else runCatching { Assignments.lastWorkingPolicy(state,login,payload,currentBoot,now) }.getOrNull()
+        }
+        return Prepared(login,state,candidate,candidateDeadline,permit,candidateBinding,permitBinding,lastWorking)
     }
     /** Caller must hold its current-generation fence; preparation never holds that lock. */
     fun publish(prepared:Prepared) {value=prepared}
@@ -85,6 +92,14 @@ internal class AssignedPolicyRuntime(private val boot:()->Int,private val elapse
     }
     fun contains(login:LoginIntent,state:AssignmentState):Boolean = runCatching {current(login).state==state}.getOrDefault(false)
     fun read(login:LoginIntent):Prepared = current(login)
+    fun lastWorkingPolicy(login:LoginIntent,expected:AssignmentState):Assignments.LastWorkingPolicy? = runCatching {
+        val view=current(login)
+        require(view.state==expected)
+        val pair=checkNotNull(view.lastWorking)
+        val window=checkNotNull(view.state.time).window(boot(),elapsed())
+        require(window.upperMs < pair.offlineUntilMs)
+        pair
+    }.getOrNull()
     fun allowed(login:LoginIntent,raw:String?):Verified? = runCatching {
         val view=current(login);require(raw!=null)
         val now=elapsed();val currentBoot=boot()

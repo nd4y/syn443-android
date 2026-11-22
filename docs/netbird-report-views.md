@@ -110,3 +110,17 @@ projection, parser, ownership and UI cases. Source CI, protected merge/main CI,
 and an installed Xperia USB/Wi-Fi check are separate stages. Large real Cloud
 rosters, full SDK memory bounds, the shared resource governor, LTE, battery,
 natural Doze and endurance remain separate open requirements.
+
+## Control connection on the home screen
+
+A running VPN profile that includes NetBird shows a separate line below the VPN
+state. It describes the module, the management and signal connections, and the
+direct or VLESS transport when the two reported mode fields agree. Individual
+peer reachability and resource probes remain in route diagnostics. An optional
+offline peer has no effect on the main VPN state.
+
+Only the current engine generation and physical network epoch can supply a
+connection status. A network change discards the cached report. Cached SDK
+data from before that boundary, observations older than 25 seconds and unknown
+channel fields display a wait for fresh data. Rendering uses the existing
+controller snapshot and starts no additional network requests.

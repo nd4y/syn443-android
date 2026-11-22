@@ -85,6 +85,14 @@ class ControlProvider : ContentProvider() {
             initializeUnlocked()
             val store = StateStore.get(context)
             when (method) {
+                "network-mode" -> {
+                    require(caller==Process.myUid() && extras==null && arg!=null && arg.length<=96)
+                    val values=arg.split('|')
+                    require(values.size==3 && values[0].length==36 && values[1] in setOf("AUTO","WIFI","HOME_WIFI","CELLULAR","CELLULAR_RESTRICTED"))
+                    val minutes=values[2].toIntOrNull() ?: throw IllegalArgumentException("invalid_duration")
+                    require(minutes in 0..1440 && LifecycleAccess.requestNetworkMode(values[0],values[1],minutes))
+                    return Bundle().apply {putBoolean("ok",true)}
+                }
                 "admin-status" -> {
                     require(caller==Process.myUid() && arg==null)
                     return Bundle().apply {putBoolean("ok",true);putString("json",AdminController.get(context).status().toString())}
@@ -444,7 +452,7 @@ class ControlProvider : ContentProvider() {
                     result.put("policyRetryAt", Recovery.replacementReadyAt(store.checkpoint(result), System.currentTimeMillis()))
                 }
                 val os=LifecycleAccess.policy(context)
-                val overlay = OverlaySnapshot.forStatus(result.optLong("generation", -1), result.opt("desiredOn") == true, result.opt("engineActive") == true)
+                val overlay = OverlaySnapshot.forStatus(result.optLong("generation", -1), result.optLong("networkEpoch", -1), result.opt("desiredOn") == true, result.opt("engineActive") == true)
                 result.put("netbird", overlay).put("policy", RuntimePolicies(context).status()).put("routeHealth",RouteSnapshot.view(result)).put("osPolicy",os)
                 result.put("policyChecks",PolicyChecks.view(result.optLong("generation"),result.optLong("networkEpoch"),
                     result.getJSONObject("policy").optLong("activationGeneration"),result.optBoolean("engineActive")))

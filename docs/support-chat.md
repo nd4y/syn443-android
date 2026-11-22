@@ -56,3 +56,21 @@ crash, frozen-host and Wi-Fi return checks also recovered. This does not establi
 zero transient failures or bounded recovery for every network. This is a draft
 implementation, not production deployment. LTE, natural Doze, unplugged energy,
 long endurance and the complete M1/M2 release gate have not been accepted.
+
+## Report a problem
+
+The phone home screen opens an incident preview. It shows the user intent,
+corroborated VPN phase, counts of route check outcomes, a bounded fault category
+and the active revision. Its last-known-good configuration and algorithm come
+from the same authorized envelope that passed activation checks. The report has a short public
+reference derived from the full idempotency key. Unknown and stale evidence
+are shown explicitly. Hostnames, raw logs, addresses, account identifiers,
+provider names, chat files and the diagnostic archive are excluded.
+
+Confirming saves the displayed text in the generation-bound encrypted SQLite
+outbox, even if the server is offline. Reopening the chat shows the reference.
+On reconnection the authenticated self response supplies the destination.
+An administrator viewing another conversation still queues their own report
+to their own conversation. Delivery uses the normal SQL-backed message path
+and checks the exact server receipt. The full diagnostic archive remains a
+separate user action.

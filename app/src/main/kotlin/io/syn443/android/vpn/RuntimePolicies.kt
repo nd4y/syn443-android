@@ -9,6 +9,11 @@ import io.syn443.policy.Journal
 import io.syn443.policy.Verified
 import org.json.JSONObject
 
+/** Both public coordinates come from the same still-authorized committed envelope. */
+internal fun Verified?.lastGoodPair(): JSONObject? = this?.payload?.takeIf { it.operation == "configure" }?.let {
+    JSONObject().put("configRevision", it.revision).put("algorithmRevision", it.algorithmRevision)
+}
+
 /** The legacy operator journal and enrolled journal are exclusive authorities, never mirrors. */
 internal class RuntimePolicies(private val context:Context,
     private val controller:()->LoginController={LoginController.get(context)}) {
@@ -100,10 +105,17 @@ internal class RuntimePolicies(private val context:Context,
     fun status():JSONObject {
         if(!login.ownsPolicy())return legacy.status()
         val d=read();val j=d.journal
+        val lastGood=runCatching {login.assignedRead { s ->
+            require(login.assignedRuntime.ticket(s)==d.ticket)
+            val state=login.assignedRuntime.read(s).state
+            require(state.journal==j)
+            login.assignedRuntime.lastWorkingPolicy(s,state)
+        }}.getOrNull()
         // Revision metadata is read only from worker-verified values. No envelope parsing here.
         return JSONObject().put("managed",true).put("source","account").put("phase",j.phase).put("reason",j.reason)
             .put("desiredRevision",j.maxRevision).put("activeRevision",allowed(j.active,d)?.payload?.revision)
-            .put("lastKnownGoodRevision",allowed(j.lastGood,d)?.payload?.revision)
+            .put("lastKnownGoodRevision",lastGood?.configRevision).put("lastKnownGoodPair",lastGood?.let {
+                JSONObject().put("configRevision",it.configRevision).put("algorithmRevision",it.algorithmRevision) })
             .put("candidateRevision",allowed(j.candidate,d)?.payload?.revision)
             .put("activationGeneration",j.activationGeneration).put("securityEpoch",j.epoch).put("revocationFloor",j.floor)
             .put("maxRevision",j.maxRevision)

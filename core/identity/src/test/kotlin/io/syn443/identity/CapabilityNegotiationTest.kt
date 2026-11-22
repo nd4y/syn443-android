@@ -36,4 +36,18 @@ class CapabilityNegotiationTest {
         assertEquals(CapabilityRequestState.REJECTED,CapabilityNegotiation.response(reply("rejected",error="capability_conflict"),op))
         for(text in listOf(reply("applied"),reply("queued",hash=op.proposedHash),reply("approved",2,op.proposedHash),reply("approved",1,Identity.hash("different".toByteArray())),reply("approved",1,op.proposedHash,id=Identity.random()),reply("rejected",error="arbitrary-detail")))fail {CapabilityNegotiation.response(text,op)}
     }
+
+    @Test fun installedClientAddsNamedRouteChecksToTheSameApprovedCapabilityHead() {
+        val all = IdentityOperation.supportedCapabilities
+        val capability = io.syn443.policy.Policy.ROUTE_CHECK_PLAN
+        val before = CapabilityNegotiation.snapshot(raw(all - capability, version = 1))
+        val operation = requireNotNull(CapabilityNegotiation.operation("device/scope", before, all))
+        val body = Identity.objectJSON(operation.body)
+        assertEquals(before.hash, body.getValue("previousHash").jsonPrimitive.content)
+        assertEquals(all.sorted(), body.getValue("capabilities").jsonArray.map { it.jsonPrimitive.content })
+        assertTrue(capability in all)
+        assertEquals(operation, CapabilityNegotiation.operation("device/scope", before, all))
+        val after = CapabilityNegotiation.snapshot(raw(all, version = operation.expectedVersion))
+        assertNull(CapabilityNegotiation.operation("device/scope", after, all))
+    }
 }

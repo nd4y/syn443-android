@@ -123,4 +123,22 @@ class AdaptivePolicyTest {
             assertThrows(IllegalArgumentException::class.java){verify(withEngine(issued,engineWith(invalid)))}
         }
     }
+
+    @Test fun signedModeSelectionRequiresCapabilityBoundsAndAnAssignedHomeProof() {
+        val fields="""{"preferredMode":"WIFI","userModes":["WIFI"],"maxOverrideMinutes":60}"""
+        fun engineWith(value:String)=engine().replaceFirst("{","""{"network_mode":$value,""")
+        val base=payload(engineWith(fields))
+        rejected {verify(base)}
+        val issued=base.copy(requiredCapabilities=base.requiredCapabilities+Policy.NETWORK_MODE_SELECTION)
+        val rule=checkNotNull(verify(issued).modeSelection)
+        assertEquals("WIFI",rule.preferredMode)
+        assertEquals(setOf("WIFI"),rule.userModes)
+        assertEquals(60,rule.maxOverrideMinutes)
+        rejected {verify(withEngine(issued,engine()))}
+        for(bad in listOf("null",fields.replace("60","0"),fields.replace("60","1441"),
+            fields.replace("60","null"),fields.replace("WIFI","HOME_WIFI"),fields.replace("60","\"60\""),
+            fields.replace("[\"WIFI\"]","[\"WIFI\",\"WIFI\"]"),fields.replaceFirst("{","""{"force":true,"""))) {
+            rejected {verify(withEngine(issued,engineWith(bad)))}
+        }
+    }
 }

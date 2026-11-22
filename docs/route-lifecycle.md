@@ -242,3 +242,21 @@ checks. An exit-country mismatch identifies a failed country condition.
 In an active VPN, the route diagnostic screen offers a check on each supported row. The equivalent ADB command is `routes-check --route route-2`. The action applies to the displayed configuration, VPN session and physical network. If these change, refresh the list and select the route again.
 
 For a managed adaptive route the scheduler queues the selected group. Repeated requests before the next eligible check coalesce. Other groups keep their deadlines and the usual capacity, cooldown and energy limits still apply. The button confirms submission. A route's status changes when the engine supplies measurement evidence. Retrieving cooldown details does not change the scheduler's clock.
+
+## Measuring proxy recovery in Actions
+
+Each emulator run declares two samples before starting the existing two-hop
+VPN fault suite. One restores the ingress proxy and one restores the egress
+proxy. Timing starts when the fixture releases that hop. It ends once the
+terminal proxy has served a fresh HTTP 204, Android reports Online, and the
+original engine and VPN intent generation are still current.
+The synthetic endpoint uses the assigned proxy chain. The deadline is 110 s
+per sample. The report rounds elapsed time up to whole milliseconds.
+
+Download the corresponding Android recovery evidence artifact for the API
+level. Its JSON includes both planned hops, success within deadline, timeout,
+other failure, late completion or incomplete observation. P95 uses nearest rank
+over the planned denominator. An unobserved rank has a null value. One run with
+two samples measures this proxy restoration fixture only. Physical handovers,
+cold route search, external service outages and battery tests need their own
+declared campaigns.

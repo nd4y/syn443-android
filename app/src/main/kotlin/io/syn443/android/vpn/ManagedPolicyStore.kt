@@ -156,6 +156,7 @@ class ManagedPolicyStore private constructor(context: Context) {
         JSONObject().put("managed", d.binding != null).put("phase", j.phase).put("reason", j.reason)
             .put("desiredRevision", revision(j.desired)).put("activeRevision", revision(j.active))
             .put("lastKnownGoodRevision", revision(j.lastGood)).put("candidateRevision", revision(j.candidate))
+            .put("lastKnownGoodPair", runCatching { allowed(j.lastGood,d).lastGoodPair() }.getOrNull())
             .put("activationGeneration", j.activationGeneration).put("securityEpoch", j.epoch).put("revocationFloor", j.floor)
             .put("maxRevision", j.maxRevision)
     }.getOrElse { JSONObject().put("managed", true).put("phase", "blocked").put("reason", "policy_store_unavailable") }

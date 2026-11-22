@@ -27,7 +27,7 @@ type privatePathPool struct {
 	cancel          context.CancelFunc
 	stopParent      func() bool
 	lease           *leaseGuard
-	homeUntilBootMS atomic.Int64 // 0 ordinary network; -1 home scope awaiting proof
+	modeUntilBootMS atomic.Int64 // Zero is unrestricted by mode time, -1 awaits mandatory home proof.
 	scope           string
 	configured      int
 	capacity        int
@@ -109,11 +109,11 @@ func newPrivatePathPool(parent context.Context, scope string, capacity int, leas
 
 // Called before and after flow I/O as well as while admitting a new route.
 // Reading the deadline requires no hub lock while an individual flow owns the pool.
-func (p *privatePathPool) homeCurrent() bool {
+func (p *privatePathPool) modeCurrent() bool {
 	if p == nil {
 		return false
 	}
-	deadline := p.homeUntilBootMS.Load()
+	deadline := p.modeUntilBootMS.Load()
 	if deadline == 0 {
 		return true
 	}
