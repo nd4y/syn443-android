@@ -326,7 +326,7 @@ if mode=="emulator":
         "assignedActivationCannotReusePriorScopeOrIncompleteRouteProof",
         "enrolledAssignedRoutesCommitWithOptionalFailure",
         "enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet",
-        "enrolledStopFencesPendingCandidateRouteSuccess"}
+        "enrolledStopFencesPendingCandidateRouteSuccess","enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn"}
     live_engine_required={"savedEngineCheckpointCannotClaimAnUnownedLiveProcess"}
     route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
     route_required.add("adbLocalConfigPreviewDoesNotWriteAndApplyFencesStaleBase")

@@ -2,6 +2,7 @@
 import base64
 import copy
 import json
+import re
 import subprocess
 import threading
 import time
@@ -48,20 +49,20 @@ def main():
         nonlocal fixture
         if fixture:
             adb('reverse','--remove','tcp:'+str(fixture.server.server_port));fixture.close();fixture=None
-    def setup(pending=False,telemetry=False):
+    def setup(pending=False,telemetry=None):
         nonlocal fixture
         logout();close_fixture();call('policy-test-reset');call('test-reset')
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
         fixture=Fixture(config);fixture_port=fixture.server.server_port
-        fixture.telemetry_enabled=telemetry
+        fixture.telemetry_enabled=telemetry is not None
         fixture.pending_policy_requests=1 if pending else 0
         adb('reverse','tcp:'+str(fixture_port),'tcp:'+str(fixture_port))
         data=json.dumps(fixture.bootstrap(),separators=(',',':')).encode()
         subprocess.run(['adb','-e','shell','-T','run-as',PACKAGE,'dd','of=no_backup/operator-identity.json'],input=data,capture_output=True,check=True,timeout=15)
         call('auth-bootstrap-file');await_condition(lambda:call('auth-status').get('configured') and not call('auth-status').get('busy'),20)
         driver=subprocess.run(['adb','-e','shell','am','instrument','-w','-e','fixturePort',str(fixture_port),'-e','fixtureCa',fixture.ca,
-            *(['-e','fixtureTelemetry','true'] if telemetry else []),
+            *(['-e','fixtureTelemetry','true'] if telemetry=='foreground' else []),
             PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=75)
         result=driver.stdout.decode()
         if driver.returncode or 'synthetic_enrollment_verified' not in result or 'INSTRUMENTATION_CODE: -1' not in result:
@@ -78,7 +79,7 @@ def main():
            'enrolledLogoutRetiresFrozenNativeBeforeAcknowledging',
            'enrolledAssignedRoutesCommitWithOptionalFailure',
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
-           'enrolledStopFencesPendingCandidateRouteSuccess']
+           'enrolledStopFencesPendingCandidateRouteSuccess','enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn']
     def observed_report(revision,outcome,selected):
         return any(r['policyRevision']==revision and r['outcome']==outcome and r['activePolicyRevision']==selected
                    for r in list(fixture.activation_reports.values()))
@@ -86,7 +87,9 @@ def main():
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
             try:
-                setup(name=='enrolledPendingAssignmentRetriesWhileVisible',telemetry=name=='enrolledCandidateRegressionRollsBack')
+                telemetry_modes={'enrolledCandidateRegressionRollsBack':'foreground',
+                                 'enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':'stopped'}
+                setup(name=='enrolledPendingAssignmentRetriesWhileVisible',telemetry_modes.get(name))
                 before=proxy.progress;generation=call('auth-status')['generation']
                 if name=='enrolledPendingAssignmentRetriesWhileVisible':
                     assert fixture.policy_requests>=2 and fixture.registrations==1
@@ -154,6 +157,28 @@ def main():
                         await_condition(lambda:stopped_rollback_recovered(controller,generation_after),45)
                         assert call('status')['generation']==generation_after and not call('status')['desiredOn'] and vpn_stopped()
                     proxy.delay=0
+                elif name=='enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':
+                    result=adb('shell','am','instrument','-w','-e','fixtureStopWithTelemetry','true',
+                               PACKAGE+'.test/io.syn443.android.EnrollmentDriver',timeout=45).decode()
+                    assert 'INSTRUMENTATION_CODE: -1' in result
+                    job=re.search(r'(?m)^INSTRUMENTATION_RESULT: job=([0-9]{1,10})\s*$',result)
+                    namespace=re.search(r'(?m)^INSTRUMENTATION_RESULT: namespace=([A-Za-z0-9_.-]{0,80})\r?$',result)
+                    assert job and namespace
+                    await_condition(vpn_stopped)
+                    stopped=call('status')['generation']
+                    assert not fixture.telemetry_receipts
+                    adb('shell','input','keyevent','KEYCODE_HOME')
+                    old=pid(':controller');assert old
+                    call('fault-controller')
+                    await_condition(lambda:pid(':controller')!=old,30)
+                    cmd=['shell','cmd','jobscheduler','run','-f','-u','0']
+                    if namespace[1]:cmd+=['-n',namespace[1]]
+                    # Run the actual WorkManager periodic JobScheduler entry early on the disposable emulator.
+                    # The production worker still checks physical Wi-Fi, consent, identity and VPN Off.
+                    adb(*cmd,PACKAGE,job[1])
+                    await_condition(lambda:any(('vpn','off') in events for _,events in fixture.telemetry_receipts),90)
+                    assert vpn_stopped() and call('status')['generation']==stopped
+                    assert fixture.registrations==1 and call('auth-status')['generation']==generation
                 elif name=='enrolledRevocationStopsNativeWithoutLocalFallback':
                     fixture.policy_status=403;call('policy-refresh')
                     await_condition(lambda:call('auth-status').get('phase')=='NEEDS_REAUTH' and
