@@ -24,10 +24,22 @@ def stopped_rollback_recovered(controller,generation):
         state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
         not call('auth-status')['busy'])
 
-def exchange_through_proxy(via):
-    before = via.progress
-    result = adb('shell', r"printf 'GET /generate_204 HTTP/1.1\r\nHost: fixture.invalid\r\nConnection: close\r\n\r\n' | toybox nc -w 5 203.0.113.10 80")
-    assert result.startswith(b'HTTP/1.1 204 ') and via.progress>before, 'Scoped HTTP exchange did not reach expected proxy'
+def exchange_through_proxy(proxy):
+    # Keep the client half-open while the application UID reads the reply.
+    # A pipe directly into toybox nc can close its input before the peer responds.
+    proxy.payload_received = threading.Event()
+    try:
+        command = (r"(printf 'GET /syn443-payload HTTP/1.1\\r\\nHost: fixture.invalid\\r\\n"
+                   r"Connection: close\\r\\n\\r\\n'; sleep 3) | run-as " + PACKAGE +
+                   " toybox nc -w 5 203.0.113.10 80")
+        response = adb('shell', '-T', command, timeout=12)
+        confirmed = proxy.payload_received.wait(1)
+        status = re.match(rb'HTTP/1\\.1 ([0-9]{3}) ', response)
+        if not confirmed or status is None or status[1] != b'204':
+            raise AssertionError('Application payload: expected proxy received=%s, HTTP status=%s' %
+                                 (confirmed, status[1].decode() if status else 'absent'))
+    finally:
+        proxy.payload_received = None
 
 
 def upgrade_directory(system_installer=False, historical=False):
