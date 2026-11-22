@@ -339,6 +339,8 @@ if mode=="emulator":
         ("AccountExitControlsTest", "registeredExitCanBeDismissedAndStaleConfirmationDisappears"),
         ("AccountExitControlsTest", "pendingLoginCanBeCancelledAndUnreadableAccountHasNoUnlinkAction"),
         ("LoginControllerTest", "staleReviewedLogoutCannotStopVpnOrRetireAnEnrolledDevice"),
+        ("LoginControllerTest", "expiredFirstBrowserLinkCanRenewOnceWithoutRetiringItsKey"),
+        ("LoginControllerTest", "expiredRegisteredBrowserKeepsOriginalDeviceOnRenewedLogin"),
         ("LoginPilotTest", "browserReservationAndCancellationPreserveVpnAndDeleteTheKey"),
         ("TechnicalTelemetryDiskTest", "criticalAndFullTelemetryBatchesUseOnlyCurrentConsentedEvents"),
         ("TechnicalTelemetryDiskTest", "urgentAttemptHonorsPersistentSpacingExactHeadAndConsent"),

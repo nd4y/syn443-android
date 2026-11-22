@@ -35,15 +35,16 @@ import javax.net.ssl.TrustManagerFactory
 class LoginController private constructor(private val context:android.app.Application,
     private val namespace:String="device-login-v1",private val testExchange:IdentityExchange?=null,
     private val testBeforeQueue:(()->Unit)?=null,private val testTrustAnchor:TrustAnchor?=null,
-    private val testReportVpnOn:(()->Boolean)?=null,private val testVpnStopped:(()->Boolean)?=null) {
+    private val testReportVpnOn:(()->Boolean)?=null,private val testVpnStopped:(()->Boolean)?=null,
+    private val monotonicMillis:()->Long=SystemClock::elapsedRealtime) {
     companion object {
         @Volatile private var instance:LoginController?=null
         @Synchronized fun get(context:Context):LoginController = instance ?: LoginController(context.applicationContext as android.app.Application).also {instance=it}
         internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange,beforeQueue:(()->Unit)?=null,
-            anchor:TrustAnchor?=null,reportVpnOn:(()->Boolean)?=null):LoginController {
+            anchor:TrustAnchor?=null,reportVpnOn:(()->Boolean)?=null,monotonicMillis:()->Long=SystemClock::elapsedRealtime):LoginController {
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") && namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
             return LoginController(context.applicationContext as android.app.Application,namespace,exchange,beforeQueue,anchor,reportVpnOn,
-                testVpnStopped={
+                monotonicMillis=monotonicMillis, testVpnStopped={
                     val status=context.contentResolver.call("content://io.syn443.control".toUri(),"status",null,null)
                         ?.getString("json")?.let(::JSONObject)
                     status!=null && status.optString("phase")=="Off" && !status.optBoolean("desiredOn") &&
@@ -171,7 +172,7 @@ class LoginController private constructor(private val context:android.app.Applic
     }
     private fun policyChanged() {runCatching {policyListener?.invoke()}}
     private fun boot()=Settings.Global.getInt(context.contentResolver,Settings.Global.BOOT_COUNT,-1).also {require(it>=0)}
-    private fun elapsed()=SystemClock.elapsedRealtime()
+    private fun elapsed()=monotonicMillis()
     private val pendingCommands=java.util.concurrent.atomic.AtomicInteger()
     private inner class Command(private val admitted:Long,private val block:()->Unit,private val quiet:Boolean=false):Runnable {
         private val completed=java.util.concurrent.atomic.AtomicBoolean()
@@ -337,8 +338,16 @@ class LoginController private constructor(private val context:android.app.Applic
             it.optBoolean("candidateValidated") || it.optBoolean("runtimeAuthorized")
         }
     }.getOrDefault(false)
+    // null includes a command which has not yet published its browser URL.
+    private fun browserCurrent(s:LoginIntent):Boolean? {
+        if (s.phase!=LoginPhase.BROWSER || browser?.first!=s.generation) return null
+        val active=cached?.takeIf { it.first==s } ?: return null
+        return active.second.pending?.current(s.generation,boot(),elapsed())
+    }
+
     fun status():JSONObject = runCatching {
         val s=journal.snapshot()
+        val linkCurrent=browserCurrent(s)
         val telemetry=telemetryFor(s)
         val telemetryScope=telemetry?.scope ?: cached?.takeIf {it.first.generation==s.generation &&
             it.first.sessionGeneration==s.sessionGeneration}?.second?.session?.let(::telemetryKey)
@@ -346,7 +355,7 @@ class LoginController private constructor(private val context:android.app.Applic
             .put("busy",pendingCommands.get()>0).put("reason",error)
             .put("intentRevision",s.revision).put("canReauthenticate",LoginRecovery.canReauthenticate(s))
             .put("registrationMayExist",s.maybeRegistered)
-            .put("browserReady",s.phase==LoginPhase.BROWSER && browser?.first==s.generation)
+            .put("browserReady",linkCurrent==true).put("browserExpired",linkCurrent==false)
             .put("controlPanelConfigured",panelOrigin(s)!=null)
             .put("controlPanelAvailable",adminPanelUrl(s.generation)!=null)
             .put("telemetryAvailable",telemetry!=null)
@@ -451,7 +460,8 @@ class LoginController private constructor(private val context:android.app.Applic
         noVpn()
         return submitIfIdle(admit={
             val s=journal.snapshot()
-            if(s.generation!=generation || s.revision!=revision || !LoginRecovery.canReauthenticate(s))false
+            val canRenewFirst = !s.maybeRegistered && s.method=="oidc" && browserCurrent(s)==false
+            if(s.generation!=generation || s.revision!=revision || !(LoginRecovery.canReauthenticate(s) || canRenewFirst))false
             else {expected=s;true}
         },onAdmission={
             commandEpoch++;browser=null;chatTicket=null;activationDelivery=null;panelHint=null;panelPoll=null
@@ -459,11 +469,13 @@ class LoginController private constructor(private val context:android.app.Applic
         }) {
             noVpn()
             val old=payload(expected)
-            val next=LoginRecovery.beginReauthentication(expected,generation)
+            val registered=LoginRecovery.canReauthenticate(expected)
+            val next=if (registered) LoginRecovery.beginReauthentication(expected,generation)
+                else LoginRecovery.renewFirstBrowser(expected,generation)
             val pending=Identity.newPending(generation,expected.thumbprint,boot(),elapsed())
             val protected=LoginPayload(old.bootstrap,pending=pending,registration=RegisteredLogin.from(next))
             val ready=protect(expected,protected) {hash->next.copy(protectedHash=hash)}
-            synchronized(commands) {current(ready);browser=generation to Identity.authorization(old.bootstrap,pending,true)}
+            synchronized(commands) {current(ready);browser=generation to Identity.authorization(old.bootstrap,pending,registered)}
         }
     }
 
@@ -491,7 +503,8 @@ class LoginController private constructor(private val context:android.app.Applic
     /** Exact URL is returned only to this app's UI, not placed in the public status/log feed. */
     fun browserUrl(expectedGeneration:Long):String=synchronized(commands) {
         val s=journal.snapshot();require(s.generation==expectedGeneration && s.phase==LoginPhase.BROWSER)
-        requireNotNull(browser).also {require(it.first==s.generation)}.second
+        require(browserCurrent(s)==true)
+        requireNotNull(browser).second
     }
     /** Navigation metadata only; the browser obtains its own control-audience
      * session and fresh MFA. No device/user credential enters the URL. */

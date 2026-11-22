@@ -60,6 +60,8 @@ import org.json.JSONObject
         }
     }
     val canReauthenticate=status.optBoolean("canReauthenticate")
+    val browserExpired=phase=="BROWSER" && status.optBoolean("browserExpired")
+    val canRestartLogin=canReauthenticate || browserExpired && !status.optBoolean("registrationMayExist",true)
     val reason=status.optString("reason")
     val panelConfigured=status.optBoolean("controlPanelConfigured")
     LaunchedEffect(visible,generation,panelConfigured) {
@@ -84,7 +86,7 @@ import org.json.JSONObject
             "SIGNED_OUT"->"Выполните вход через Keycloak"
             "RESERVED"->"Подготовка защищённого входа"
             "INVITING"->when(status.optString("inviteState")){"pending_approval"->"Ожидается подтверждение администратора";"provisioning"->"Подтверждено. Подготавливается конфигурация";else->"Ручная привязка устройства"}
-            "BROWSER"->"Вход продолжается в браузере"
+            "BROWSER"->if(browserExpired) "Срок ссылки для входа истёк. Начните вход заново." else "Вход продолжается в браузере"
             "EXCHANGING","AUTHENTICATED","CLEANUP","ENROLLING"->"Проверка доступа и регистрация устройства"
             "PROVISIONING"->"Устройство зарегистрировано. Ожидается конфигурация от сервера."
             "POLICY_CACHED"->if(status.optJSONObject("assignedPolicy")?.let {it.optBoolean("candidateValidated") || it.optBoolean("runtimeAuthorized")}==true)
@@ -109,14 +111,14 @@ import org.json.JSONObject
             if(command("auth-start",generation.toString())?.getBoolean("ok")==true)launchGeneration=generation+1
             else message="Не удалось начать вход. Сначала остановите VPN."
         }},modifier=Modifier.testTag("auth-start")) {Text("Войти")}
-        if(canReauthenticate && !vpnStopped)
+        if(canRestartLogin && !vpnStopped)
             Text("Отключите VPN, чтобы открыть Keycloak. После входа подключите VPN снова.",Modifier.testTag("auth-reauth-stop-required"))
-        if(canReauthenticate)Button(enabled=vpnStopped && !status.optBoolean("busy"),onClick={scope.launch {
+        if(canRestartLogin)Button(enabled=vpnStopped && !status.optBoolean("busy"),onClick={scope.launch {
             if(command("auth-reauth","$generation:$revision")?.getBoolean("ok")==true) {
                 launchAfterRevision=revision;launchGeneration=generation;message=""
             } else message="Не удалось начать повторный вход. Повторите попытку."
         }},modifier=Modifier.testTag("auth-reauth")) {Text(if(phase=="BROWSER")"Начать вход заново" else "Войти снова через Keycloak")}
-        if(phase=="BROWSER")Button(enabled=status.optBoolean("browserReady") && (!canReauthenticate || vpnStopped),onClick={
+        if(phase=="BROWSER" && !browserExpired)Button(enabled=status.optBoolean("browserReady") && (!canReauthenticate || vpnStopped),onClick={
             launchAfterRevision=null;launchGeneration=generation
         },modifier=Modifier.testTag("auth-open")) {Text("Продолжить вход")}
         val awaitingPermit=needsForegroundRenewal(phase,reason,status.optJSONObject("assignedPolicy"))
