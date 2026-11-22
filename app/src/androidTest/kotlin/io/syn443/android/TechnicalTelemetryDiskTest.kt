@@ -1,6 +1,7 @@
 package io.syn443.android
 
 import androidx.test.platform.app.InstrumentationRegistry
+import io.syn443.android.vpn.TelemetryWork
 import io.syn443.android.vpn.TechnicalTelemetryDisk
 import io.syn443.android.vpn.StateStore
 import io.syn443.decision.NetworkMode
@@ -135,10 +136,14 @@ class TechnicalTelemetryDiskTest {
 
     @Test fun stoppedTelemetryRequiresPositiveObservationThatEngineAndIntentAreOff() {
         val off = JSONObject().put("desiredOn",false).put("engineActive",false).put("generation",2).put("engineStateKnown",true)
-        assertTrue(io.syn443.android.vpn.TelemetryWork.knownStopped(off))
-        for ((field,value) in listOf("engineActive" to true, "desiredOn" to true, "engineStateKnown" to false,
-                "engineActive" to JSONObject.NULL, "engineActive" to "false", "generation" to -1)) {
-            assertFalse(io.syn443.android.vpn.TelemetryWork.knownStopped(JSONObject(off.toString()).put(field,value)))
+        fun observation(field: String, value: Any) =
+            TelemetryWork.vpnState(JSONObject(off.toString()).put(field, value))
+        assertEquals(TelemetryWork.VpnState.STOPPED, TelemetryWork.vpnState(off))
+        assertEquals(TelemetryWork.VpnState.ACTIVE, observation("engineActive", true))
+        assertEquals(TelemetryWork.VpnState.ACTIVE, observation("desiredOn", true))
+        for ((field, value) in listOf("engineStateKnown" to false, "engineActive" to JSONObject.NULL,
+                "engineActive" to "false", "generation" to -1, "desiredOn" to JSONObject.NULL)) {
+            assertEquals(TelemetryWork.VpnState.UNKNOWN, observation(field, value))
         }
     }
 
