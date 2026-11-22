@@ -107,6 +107,8 @@ class LoginController private constructor(private val context:android.app.Applic
         if(namespace=="device-login-v1")"runtime-observation-v1" else "$namespace-runtime")}
     private var nextRuntimeElapsed=0L
     private val telemetryPurge=java.util.concurrent.atomic.AtomicBoolean()
+    @Volatile private var telemetryPressureSession: String? = null
+    private var nextTelemetryPressureElapsed=0L
     private var nextTelemetryElapsed=0L
     private val deviceSourceScope=java.util.concurrent.atomic.AtomicReference<IdentityScope?>()
     private data class ChatTicket(val id:String,val generation:Long,val expires:Long,var state:String="pending",var body:String="",var reason:String="")
@@ -956,7 +958,8 @@ class LoginController private constructor(private val context:android.app.Applic
         }
     }
     private fun syncTechnicalTelemetry():Boolean {
-        if(!reportVpnOn())return false
+        val snapshot = state().read()
+        if (!(testReportVpnOn?.invoke() ?: snapshot.optBoolean("desiredOn"))) return false
         lateinit var expected:LoginIntent
         lateinit var authority:TelemetryAuthority
         lateinit var consent:TelemetryCapture.Consent
@@ -964,9 +967,19 @@ class LoginController private constructor(private val context:android.app.Applic
             val state=journal.snapshot()
             val active=telemetryFor(state)
             val preference=active?.let {runCatching {telemetryCapture.consent(it.scope)}.getOrNull()}
-            if(active==null || preference==null || elapsed()<nextTelemetryElapsed)false
-            else {expected=state;authority=active;consent=preference;true}
-        },onAdmission={nextTelemetryElapsed=elapsed()+300_000}) {
+            if (active == null || preference == null) return@submitIfIdle false
+            val now = elapsed()
+            if (now < nextTelemetryElapsed) {
+                if (now < nextTelemetryPressureElapsed) return@submitIfIdle false
+                nextTelemetryPressureElapsed = now + TelemetryCapture.URGENT_MS
+                if (telemetryPressureSession != preference.session && !TelemetryCapture.hasNewPressure(snapshot, preference.through)) return@submitIfIdle false
+            }
+            expected=state;authority=active;consent=preference;true
+        },onAdmission={
+            val now = elapsed()
+            if (now >= nextTelemetryElapsed) nextTelemetryElapsed = now + TelemetryCapture.ROUTINE_MS
+            nextTelemetryPressureElapsed = now + TelemetryCapture.URGENT_MS
+        }) {
             fun currentConsent() {
                 current(expected)
                 require(telemetryFor(expected)==authority && telemetryCapture.consent(authority.scope)?.session==consent.session)
@@ -983,11 +996,17 @@ class LoginController private constructor(private val context:android.app.Applic
             queue=queue.expired(queueKey,now)
             currentConsent()
             if(queue!=old)telemetryDisk.write(queueKey,queue)
-            if(!telemetryCapture.recorded(consent,through))return@submitIfIdle
-            val batch=queue.peek(queueKey) ?: return@submitIfIdle
-            if(!telemetryCapture.attempted(consent,now) || !reportVpnOn())return@submitIfIdle
+            val batch = queue.peek(queueKey)
+            val urgent = TelemetryCapture.isUrgent(queue)
+            telemetryPressureSession = consent.session.takeIf { urgent }
+            if (!urgent && !telemetryCapture.recorded(consent,through)) return@submitIfIdle
+            if (batch == null || !reportVpnOn()) return@submitIfIdle
             val vpnGeneration=state().checkpoint().generation
             val physical=PhysicalIdentityRoute.capture(context,wifiOnly=true,unmeteredOnly=true)
+            physical.check()
+            if (!telemetryCapture.attempted(consent, now, batch, urgent)) return@submitIfIdle
+            if (urgent && !telemetryCapture.recorded(consent, through)) return@submitIfIdle
+            telemetryPressureSession = null
             val route=object:HttpRoute {
                 override fun resolve(host:String)=physical.resolve(host)
                 override fun bind(socket:java.net.Socket)=physical.bind(socket)
@@ -1002,7 +1021,9 @@ class LoginController private constructor(private val context:android.app.Applic
                     route.check()
                     if(protocol.uploadTechnicalTelemetry(batch,session,scope)) {
                         route.check()
-                        telemetryDisk.write(queueKey,queue.acknowledged(queueKey,batch))
+                        val remaining = queue.acknowledged(queueKey, batch)
+                        telemetryDisk.write(queueKey, remaining)
+                        telemetryPressureSession = consent.session.takeIf { TelemetryCapture.isUrgent(remaining) }
                     }
                 } finally {telemetryTransport.compareAndSet(scope,null)}
             }

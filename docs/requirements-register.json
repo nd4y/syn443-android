@@ -1837,10 +1837,13 @@
       "text": "При работающем foreground VPN типовая отправка - раз в 5 минут или при достижении размера пакета; критические события пытаются отправиться раньше. При остановленном VPN используется WorkManager с окном от 15 минут и без гарантии точного расписания. Android может откладывать такие задания. [WorkManager](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work).",
       "status": "partial",
       "evidence": [
-        "docs/technical-telemetry.md"
+        "docs/technical-telemetry.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/TelemetryCapture.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/LoginController.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/TechnicalTelemetryDiskTest.kt"
       ],
-      "implementationScope": "Foreground active VPN scheduler with a five-minute minimum interval and unmetered Wi-Fi.",
-      "remainingScope": "Critical-event expedited delivery, Android WorkManager and end-to-end acceptance."
+      "implementationScope": "Foreground supervisor on validated unmetered Wi-Fi. Ordinary deliveries are five minutes apart. New critical or full batches may use a one-minute floor, with durable same-prefix retry suppression.",
+      "remainingScope": "Android WorkManager while Off and end-to-end acceptance against an enrolled telemetry service."
     },
     {
       "id": "TEL-12",

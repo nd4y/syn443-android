@@ -13,8 +13,14 @@ Only a committed acknowledgement with the exact submitted IDs in order
 removes the prefix. An empty success or mismatching acknowledgement leaves
 the queue intact.
 
-While the VPN is active, uploads are attempted at least five minutes apart
-on validated unmetered Wi-Fi. The DPoP proof covers the exact bounded batch
+While the VPN is active, ordinary batches use a five-minute interval on
+validated unmetered Wi-Fi. A full queue batch (32 events), an unexpected
+native service disconnect, a policy rollback or a recorded loss of VPN
+consent can request earlier delivery during the existing supervisor tick.
+Attempts stay at least one minute apart. An unacknowledged batch with the
+same first event retains its five-minute retry interval across process restarts.
+The controller records a lost service connection without guessing whether
+the process suffered a Java or native crash. The DPoP proof covers the exact bounded batch
 and the current device session. Stop or a change of physical route cancels
 in-flight work. Delivery failure does not affect route health or VPN intent.
 

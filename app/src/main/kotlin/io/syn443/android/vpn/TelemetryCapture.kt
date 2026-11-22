@@ -34,10 +34,47 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
         if(latest.session!=value.session || through<latest.through)return false
         return commit {putLong("through",through)}
     }
-    @Synchronized fun attempted(value:Consent,nowMs:Long):Boolean {
-        val latest=consent(value.scope) ?: return false
-        if(latest.session!=value.session || nowMs<latest.attemptedAt || latest.attemptedAt>0 && nowMs-latest.attemptedAt<300_000)return false
-        return commit {putLong("attempt",nowMs)}
+    companion object {
+        const val ROUTINE_MS = 300_000L
+        const val URGENT_MS = 60_000L
+
+        private fun criticalEvent(code: String) = when (code) {
+            "native_disconnected" -> "engine" to "unexpected_exit"
+            "policy_rollback" -> "policy" to "rolled_back"
+            "vpn_permission_revoked" -> "vpn" to "permission_revoked"
+            else -> null
+        }
+
+        /** Only inspect the existing, bounded lifecycle ring on an existing supervisor tick. */
+        fun hasNewPressure(snapshot: JSONObject, through: Long): Boolean {
+            val events = snapshot.optJSONArray("events") ?: return false
+            var pending = 0
+            for (i in 0 until minOf(events.length(), 64)) {
+                val row = events.optJSONObject(i) ?: continue
+                if (row.optLong("sequence") <= through) continue
+                pending++
+                if (criticalEvent(row.optString("code")) != null || pending >= TechnicalTelemetry.MAX_BATCH) return true
+            }
+            return false
+        }
+
+        fun isUrgent(queue: TechnicalTelemetry.Snapshot): Boolean =
+            queue.entries.size >= TechnicalTelemetry.MAX_BATCH || queue.entries.any {
+                val event = it.event
+                (event.kind == "engine" && event.code == "unexpected_exit") ||
+                    (event.kind == "policy" && event.code == "rolled_back") ||
+                    (event.kind == "vpn" && event.code == "permission_revoked")
+            }
+    }
+
+    @Synchronized fun attempted(value: Consent, nowMs: Long, batch: TechnicalTelemetry.Batch, urgent: Boolean): Boolean {
+        val latest = consent(value.scope) ?: return false
+        if (latest.session != value.session || batch.session != latest.session || nowMs <= 0 || nowMs < latest.attemptedAt) return false
+        val first = batch.events.firstOrNull()?.id ?: return false
+        // A failed or ambiguously acknowledged batch keeps its ordinary retry interval across restarts.
+        val interval = if (urgent && first != prefs.getString("attemptFirst", null)) URGENT_MS else ROUTINE_MS
+        if (latest.attemptedAt > 0 && nowMs - latest.attemptedAt < interval) return false
+        return commit { putLong("attempt", nowMs); putString("attemptFirst", first) }
     }
     fun sample(state:JSONObject,consent:Consent,build:Int):Pair<List<TechnicalTelemetry.Queued>,Long> {
         val rows=state.optJSONArray("events") ?: return emptyList<TechnicalTelemetry.Queued>() to consent.through
@@ -48,7 +85,8 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
             val sequence=row.optLong("sequence")
             if(sequence<=through)continue
             through=sequence
-            val (kind,code)=when(row.optString("code")) {
+            val eventCode = row.optString("code")
+            val (kind,code)=criticalEvent(eventCode) ?: when(eventCode) {
                 "dns_resolution_failed" -> "probe" to "dns_failure"
                 "dns_timeout" -> "probe" to "dns_timeout"
                 "tcp_timeout" -> "probe" to "tcp_timeout"
@@ -56,7 +94,6 @@ internal class TelemetryCapture(context:Context,namespace:String="technical-tele
                 "tls_failed" -> "probe" to "tls_failure"
                 "transport_eof" -> "probe" to "transport_eof"
                 "managed_route_recheck", "adaptive_route_reselected" -> "route" to "reselected"
-                "vpn_permission_revoked" -> "vpn" to "permission_revoked"
                 else -> when(row.optString("phase")) {
                     "Online" -> "vpn" to "online"
                     "Degraded" -> "vpn" to "degraded"
