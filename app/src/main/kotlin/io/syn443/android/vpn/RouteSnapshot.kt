@@ -377,7 +377,6 @@ object RouteSnapshot {
             failoverAdmission = null
             failoverShadow = null
             reserveRecovery = null
-            confirmingFailure = false
         }
         val context=failoverContext(scope,algorithm)
         fun evaluator(version:FailoverAlgorithm, tuning:io.syn443.policy.VerifiedFailoverProgram? = null) = FailoverAdmission(failoverContext(scope,version),plan.intent,plan.members.toSet(),comparison,

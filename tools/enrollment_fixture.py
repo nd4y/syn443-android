@@ -162,7 +162,7 @@ class Fixture:
             self.publisher.device=session['deviceId']
             self.envelopes[key]=self.publisher.sign(self.config,revision=self.revision,key_thumbprint=thumb,ttl=self.policy_ttl_seconds,
                 degraded=getattr(self,'allow_degraded',False),checks=getattr(self,'policy_checks',None),
-                extra_capabilities=getattr(self,'extra_capabilities',()))
+                extra_capabilities=getattr(self,'extra_capabilities',()), decision_program=getattr(self,'decision_program',None))
         headers={'Content-Type':'application/jose'}
         if self.telemetry_enabled:headers['X-Syn443-Telemetry']='1'
         envelope = self.envelopes[key]

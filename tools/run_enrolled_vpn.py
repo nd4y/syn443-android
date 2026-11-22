@@ -82,6 +82,66 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=Fal
     assert call('status')['policy']['activeRevision'] == 2 and call('auth-status')['generation'] == auth_generation
 
 
+def signed_program_failover(fixture, primary, generation):
+    reserve = Server(('127.0.0.1', 0), RouteProxy)
+    reserve.ssh_ok, reserve.health_ok, reserve.delay, reserve.route_probes = True, True, 0, 0
+    port = reserve.server_address[1]
+    threading.Thread(target=reserve.serve_forever, daemon=True).start()
+    try:
+        adb('reverse', 'tcp:'+str(port), 'tcp:'+str(port))
+        route = copy.deepcopy(fixture.config)
+        preferred = route['outbounds'][0]['tag']
+        members = [preferred, 'reserve']
+        route['outbounds'] += [dict(route['outbounds'][0], tag='reserve', server_port=port),
+            {'type':'selector', 'tag':'internal', 'outbounds':members, 'interrupt_exist_connections':False}]
+        route['route']['rules'] = [{'ip_cidr':['192.0.2.9/32','203.0.113.10/32'], 'action':'route', 'outbound':'internal'}]
+        route['route_checks'] = [{'outbound':tag,'required':tag=='internal',
+            'checks':[{'method':'ssh_banner','target':'192.0.2.9:22'}]} for tag in ['internal',*members]]
+        route['route_failover'] = {'selector':'internal','network_mode':'wifi','intent':'INTERNAL','members':members}
+        fixture.extra_capabilities = ('route.health.v1','route.failover.v1')
+        fixture.decision_program = {'revision':7,'confirmations':4,'minSwitchIntervalMs':120000}
+        fixture.config = route
+        fixture.revision = 2
+        call('policy-refresh')
+        def active():
+            status = call('status')
+            return (status.get('phase')=='Online' and status['policy']['activeRevision']==2 and
+                    status['policy']['phase']=='committed')
+        def measured(member):
+            rows = call('routes-status')['routes']
+            by_tag = {row['label']:row for row in rows}
+            if member not in by_tag or 'internal' not in by_tag:
+                return False
+            group = by_tag['internal']
+            return group['state']=='working' and group['measuredPath']==[group['id'],by_tag[member]['id']]
+        def exchange(via):
+            before = via.progress
+            result = adb('shell', r"printf 'GET /generate_204 HTTP/1.1\r\nHost: fixture.invalid\r\nConnection: close\r\n\r\n' | toybox nc -w 5 203.0.113.10 80")
+            assert result.startswith(b'HTTP/1.1 204 ') and via.progress>before, 'Scoped HTTP exchange did not reach expected proxy'
+        await_condition(lambda: active() and measured(preferred), 100)
+        exchange(primary)
+        original = pid(':engine')
+        activation = call('status')['policy']['activationGeneration']
+        assert original and fixture.registrations==1
+        thumb, = fixture.sessions
+        original_device = fixture.sessions[thumb]['deviceId']
+        before = reserve.route_probes
+        primary.ssh_ok = False
+        # No check or switch command is issued after the outage.
+        await_condition(lambda: measured('reserve'), 240)
+        assert reserve.route_probes >= before+4, 'Reserve lacked a successful comparator for four batches'
+        exchange(reserve)
+        assert active() and pid(':engine')==original and call('status')['policy']['activationGeneration']==activation
+        assert call('auth-status')['generation']==generation and fixture.registrations==1 and fixture.sessions[thumb]['deviceId']==original_device
+    finally:
+        primary.ssh_ok = True
+        try:
+            adb('reverse','--remove','tcp:'+str(port))
+        finally:
+            reserve.shutdown()
+            reserve.server_close()
+
+
 def check_rejected_policies(fixture, proxy, generation):
     """Deliver each negative AC06 example over the normal, authenticated policy endpoint."""
     from policy_fixture import b64
@@ -246,7 +306,8 @@ def main():
            'enrolledAssignedRoutesCommitWithOptionalFailure',
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
            'enrolledStopFencesPendingCandidateRouteSuccess','enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn',
-           'enrolledRejectedUpdatesRetainAuthorizedTunnel', 'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
+           'enrolledRejectedUpdatesRetainAuthorizedTunnel', 'enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun',
+           'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
     if installer_only:
         names=['enrolledSystemInstallerCancelKeepsBoundPolicy']
     def observed_report(revision,outcome,selected):
@@ -278,6 +339,8 @@ def main():
                     before=proxy.progress
                     await_condition(lambda:call('auth-status').get('generation')==generation and call('status').get('phase')=='Online' and proxy.progress>before)
                     assert fixture.registrations==1
+                elif name=='enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun':
+                    signed_program_failover(fixture, proxy, generation)
                 elif name=='enrolledRejectedUpdatesRetainAuthorizedTunnel':
                     check_rejected_policies(fixture, proxy, generation)
                 elif name=='enrolledCandidateRegressionRollsBack':

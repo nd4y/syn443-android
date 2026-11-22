@@ -466,6 +466,7 @@ if mode=="emulator":
         "enrolledSignedAssignmentStartsRealTun", "enrolledControllerDeathRecoversAuthorizedCache",
         "enrolledCandidateRegressionRollsBack", "enrolledRevocationStopsNativeWithoutLocalFallback",
         "enrolledLogoutRetiresFrozenNativeBeforeAcknowledging", "enrolledRejectedUpdatesRetainAuthorizedTunnel",
+        "enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun",
         "pendingPollFencesStaleGenerationAndCannotReviveLogout",
         "enrolledPendingAssignmentRetriesWhileVisible"}
     required |= {"encryptedRuntimeRetrySurvivesRestartAndConsentWithdrawalRetainsOnlyItsCursor",
