@@ -65,6 +65,16 @@ class ControlProvider : ContentProvider() {
                 }
                 return Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
             }
+            if (method == "overlay-status") {
+                require(extras == null || extras.isEmpty)
+                val result = OverlayProviderHealth.read(requireNotNull(arg)) {
+                    val state = StateStore.get(context).read()
+                    LifecycleAccess.engineStatus(context, state)
+                    OverlaySnapshot.forStatus(state.optLong("generation", -1), state.optLong("networkEpoch", -1),
+                        state.opt("desiredOn") == true, state.opt("engineActive") == true)
+                }
+                return Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
+            }
             if (method == "route-explain") {
                 require(caller == Process.myUid() && arg != null && arg.length <= 2048 && extras == null)
                 val query = LocalRouteQuery.parse(arg)
@@ -502,7 +512,7 @@ class ControlProvider : ContentProvider() {
             if (method == "status") {
                 LifecycleAccess.engineStatus(context,result)
                 result.put("physicalLink", LifecycleAccess.physicalLink(result) ?: org.json.JSONObject.NULL)
-                result.put("netbirdDiagnosticCancellation", true)
+                result.put("netbirdDiagnosticCancellation", true).put("overlayProviderHealth", true)
                 result.put("localConfigControl",io.syn443.android.BuildConfig.DEBUG)
                 if (result.optString("reason") == "policy_waiting_restart_budget" && result.optBoolean("desiredOn")) {
                     result.put("policyRetryAt", Recovery.replacementReadyAt(store.checkpoint(result), System.currentTimeMillis()))
@@ -524,8 +534,11 @@ class ControlProvider : ContentProvider() {
     }
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? = null
     override fun getType(uri: Uri): String? =
-        if (io.syn443.android.BuildConfig.DEBUG && uri.toString() == "content://io.syn443.control/support-bundle-session")
-            "application/vnd.syn443.bundle-session-v1" else null
+        if (!io.syn443.android.BuildConfig.DEBUG) null else when (uri.toString()) {
+            "content://io.syn443.control/support-bundle-session" -> "application/vnd.syn443.bundle-session-v1"
+            "content://io.syn443.control/overlay-status" -> "application/vnd.syn443.overlay-status-v1"
+            else -> null
+        }
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0

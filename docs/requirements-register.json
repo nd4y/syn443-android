@@ -859,7 +859,9 @@
         "app/src/androidTest/kotlin/io/syn443/android/NetBirdReportTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/NetBirdPagingUiTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/NetBirdProfileStateTest.kt",
-        "docs/implementation-status.md#common-probe-failure-and-netbird-status"
+        "docs/implementation-status.md#common-probe-failure-and-netbird-status",
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlayProviderHealth.kt",
+        "docs/adb-control.md"
       ]
     },
     {
@@ -3247,8 +3249,12 @@
     {
       "id": "AC42",
       "specRow": " Запросы на planned panel/overlay типы и неподдержанную цепочку | Структурированный not_implemented/unsupported, нет upstream запроса, бинарника или ложного Connected; реальная интеграция x-ui/3x-ui/Tailscale/ZeroTier не требуется |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/kotlin/io/syn443/android/vpn/OverlayProviderHealth.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/NetBirdProfileStateTest.kt",
+        "docs/adb-control.md"
+      ]
     },
     {
       "id": "AC43",

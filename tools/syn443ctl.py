@@ -21,7 +21,7 @@ URI = "content://io.syn443.control"
 METHODS = {
     "status": "status", "logs": "logs", "routes-status": "routes-status",
     "routes-check": "routes-check", "routes-cancel": "routes-cancel",
-    "netbird-status": "status", "netbird-diagnose": "netbird-diagnose", "netbird-view": "netbird-view", "netbird-cancel": "netbird-cancel",
+    "overlay-status": "overlay-status", "netbird-status": "status", "netbird-diagnose": "netbird-diagnose", "netbird-view": "netbird-view", "netbird-cancel": "netbird-cancel",
     "vpn-start": "connect", "vpn-stop": "disconnect", "vpn-resume": "resume",
     "resources": "resources", "engine-exits": "engine-exits", "health-workers": "health-workers",
     "config-plan": "config-plan-file", "config-apply": "config-apply-file",
@@ -31,10 +31,11 @@ METHODS = {
     "support-bundle-shell-state": "bundle-shell-state", "support-bundle-shell-release": "bundle-shell-release",
 }
 OPERATIONS = ("capabilities", "status", "logs", "diagnostic-bundle", "routes-status",
-              "routes-check", "routes-cancel", "netbird-status", "netbird-diagnose", "netbird-view", "netbird-cancel",
+              "routes-check", "routes-cancel", "overlay-status", "netbird-status", "netbird-diagnose", "netbird-view", "netbird-cancel",
               "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply",
               "support-bundle", "support-bundle-collect", "support-bundle-status",
               "support-bundle-cancel", "support-bundle-export")
+OVERLAY_PROVIDERS = ("netbird", "tailscale", "zerotier")
 CONFIG = {"config-plan", "config-apply"}
 MAX_CONFIG = 262_144
 STAGE = "run-as io.syn443.android sh -c 'umask 077; base64 -d > no_backup/operator-local-config-{}.json'"
@@ -117,6 +118,26 @@ def canonical_view(raw):
         raise ControlError("invalid_arguments", 2) from err
 
 
+def overlay_health(provider, data):
+    base = {"schemaVersion", "provider", "implementation"}
+    if (type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 1 or
+            data.get("provider") != provider):
+        raise ControlError("invalid_reply", 5)
+    if provider in ("tailscale", "zerotier"):
+        if set(data) == base and data.get("implementation") == "not_implemented":
+            return data
+        raise ControlError("invalid_reply", 5)
+    states = ("unknown", "off", "starting", "recovering", "needs_action", "unavailable",
+              "management_unavailable", "signal_unavailable", "connected")
+    if (provider != "netbird" or set(data) != base | {"configured", "control", "controlTransport"} or
+            data["implementation"] != "available" or type(data["configured"]) not in (bool, type(None)) or
+            data["control"] not in states or data["controlTransport"] not in ("direct", "vless", "unknown") or
+            (data["configured"] is not True and data["control"] != "unknown") or
+            (data["control"] != "connected" and data["controlTransport"] != "unknown")):
+        raise ControlError("invalid_reply", 5)
+    return data
+
+
 class Device:
     def __init__(self, serial, timeout):
         if not re.fullmatch(r"[A-Za-z0-9_.:%\[\]-]{1,128}", serial) or serial.startswith("-"):
@@ -134,12 +155,13 @@ class Device:
             bundle_read = operation == "support-bundle-read" and re.fullmatch(r"[0-9a-f]{32}:(?:0|[1-9][0-9]{0,5})", argument) and int(argument.split(":")[1]) <= SUPPORT_MAX
             view = canonical_view(argument) if operation == "netbird-view" else None
             cancel = operation == "netbird-cancel" and support_hex(argument, 32)
-            if not cancel and not route and not ticket and not bundle_id and not bundle_read and view is None:
+            provider = operation == "overlay-status" and argument in OVERLAY_PROVIDERS
+            if not provider and not cancel and not route and not ticket and not bundle_id and not bundle_read and view is None:
                 raise ControlError("invalid_arguments", 2)
             # adb shell joins arguments into an Android shell command. Our closed
             # ASCII view has no apostrophe; single quoting preserves JSON quotes.
             command.extend(["--arg", "'" + view + "'" if view is not None else argument])
-        elif operation in {"netbird-view", "netbird-cancel"}:
+        elif operation in {"netbird-view", "netbird-cancel", "overlay-status"}:
             raise ControlError("invalid_arguments", 2)
         try:
             result = subprocess.run(command, capture_output=True, timeout=self.timeout, check=False)
@@ -182,12 +204,11 @@ class Device:
             raise ControlError("invalid_reply", 5)
         return data
 
-    @contextmanager
-    def bundle_connection(self):
+    def supports_type(self, path, expected):
         # gettype is passive even on older clients; an unknown call() would initialize their VPN state.
         adb = ["adb", "-s", self.serial, "shell", "content"]
         try:
-            reply = subprocess.run(adb + ["gettype", "--uri", URI + "/support-bundle-session"],
+            reply = subprocess.run(adb + ["gettype", "--uri", URI + "/" + path],
                                    capture_output=True, timeout=self.timeout, check=False)
         except subprocess.TimeoutExpired as err:
             raise ControlError("adb_timeout", 3) from err
@@ -197,11 +218,17 @@ class Device:
             raise ControlError("adb_failed", 3)
         kind = reply.stdout.strip()
         if kind == b"Result: null":
+            return False
+        if kind != b"Result: " + expected:
+            raise ControlError("invalid_reply", 5)
+        return True
+
+    @contextmanager
+    def bundle_connection(self):
+        if not self.supports_type("support-bundle-session", b"application/vnd.syn443.bundle-session-v1"):
             yield False  # Older APKs retain their original protocol.
             return
-        if kind != b"Result: application/vnd.syn443.bundle-session-v1":
-            raise ControlError("invalid_reply", 5)
-
+        adb = ["adb", "-s", self.serial, "shell", "content"]
         client = secrets.token_hex(16)
         try:
             holder = subprocess.Popen(adb + ["call", "--uri", URI, "--method", "bundle-shell-hold", "--arg", client],
@@ -683,6 +710,7 @@ def main(argv=None):
     parser.add_argument("--timeout", type=int, choices=range(1, 61), default=12, metavar="1..60")
     parser.add_argument("operation", choices=OPERATIONS)
     parser.add_argument("--route")
+    parser.add_argument("--provider", choices=OVERLAY_PROVIDERS)
     parser.add_argument("--section", choices=("peers", "diagnostics"))
     parser.add_argument("--page", type=int, choices=range(64))
     parser.add_argument("--file")
@@ -701,6 +729,8 @@ def main(argv=None):
         if (args.output is not None) != (args.operation in {"support-bundle", "support-bundle-export"}) or (
             (args.bundle_id is not None) != (args.operation in {"support-bundle-status", "support-bundle-cancel", "support-bundle-export"})
         ) or (args.bundle_id is not None and not support_hex(args.bundle_id, 32)):
+            raise ControlError("invalid_arguments", 2)
+        if (args.provider is not None) != (args.operation == "overlay-status"):
             raise ControlError("invalid_arguments", 2)
         if (args.job_id is not None) != (args.operation == "netbird-cancel") or (args.job_id is not None and not support_hex(args.job_id, 32)):
             raise ControlError("invalid_arguments", 2)
@@ -723,6 +753,7 @@ def main(argv=None):
             operations = [
                 op for op in OPERATIONS
                 if (op not in CONFIG or state.get("localConfigControl") is True)
+                and (op != "overlay-status" or state.get("overlayProviderHealth") is True)
                 and (op != "netbird-cancel" or state.get("netbirdDiagnosticCancellation") is True)
             ]
             data = {"operations": operations, "access": "debug_adb_shell",
@@ -732,6 +763,10 @@ def main(argv=None):
         elif args.operation == "logs" and args.follow_seconds:
             follow(device, args.follow_seconds, 2.0)
             return 0
+        elif args.operation == "overlay-status":
+            if not device.supports_type("overlay-status", b"application/vnd.syn443.overlay-status-v1"):
+                raise ControlError("unsupported_by_device", 4)
+            data = overlay_health(args.provider, device.call(args.operation, args.provider))
         elif args.operation == "netbird-cancel":
             data = device.call(args.operation, args.job_id)
         elif args.operation == "netbird-view":

@@ -10,6 +10,7 @@ import io.syn443.android.vpn.NetBirdConnectionState
 import io.syn443.android.vpn.VpnStatusSummary
 import java.time.Instant
 import io.syn443.android.vpn.NetBirdControls
+import io.syn443.android.vpn.OverlayProviderHealth
 import io.syn443.android.vpn.OverlaySnapshot
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -18,6 +19,53 @@ import org.junit.Test
 
 class NetBirdProfileStateTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun plannedProvidersNeverInspectNetBirdAndReturnOnlyTheirAvailability() {
+        val resolver = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        val uri = android.net.Uri.parse("content://io.syn443.control")
+        for (provider in listOf("tailscale", "zerotier")) {
+            val reply = OverlayProviderHealth.read(provider) { error("unexpected snapshot read") }
+            assertEquals(setOf("schemaVersion", "provider", "implementation"), reply.keys().asSequence().toSet())
+            assertEquals(1, reply.getInt("schemaVersion"))
+            assertEquals(provider, reply.getString("provider"))
+            assertEquals("not_implemented", reply.getString("implementation"))
+            val bundle = requireNotNull(resolver.call(uri, "overlay-status", provider, null))
+            assertTrue(bundle.getBoolean("ok"))
+            val observed = JSONObject(requireNotNull(bundle.getString("json")))
+            assertEquals(reply.keys().asSequence().toSet(), observed.keys().asSequence().toSet())
+            assertEquals(provider, observed.getString("provider"))
+            assertEquals("not_implemented", observed.getString("implementation"))
+        }
+        assertTrue(runCatching { OverlayProviderHealth.read("other") { error("unexpected snapshot read") } }
+            .exceptionOrNull() is IllegalArgumentException)
+    }
+
+    @Test fun overlayControlTransportRequiresMatchingNetBirdEvidenceAndNeverClaimsAPeerPath() {
+        val overlay = JSONObject().put("configuredInRunningProfile", true)
+            .put("proxy", "private-fixture").put("peer_state", JSONObject().put("names", "private-fixture"))
+        fun observed(value: String): JSONObject {
+            overlay.put("connectionState", value)
+            return OverlayProviderHealth.read("netbird") { overlay }
+        }
+        for ((input, control, path) in listOf(
+            Triple("DIRECT", "connected", "direct"), Triple("VLESS", "connected", "vless"),
+            Triple("CONTROL", "connected", "unknown"), Triple("NO_SIGNAL", "signal_unavailable", "unknown"),
+            Triple("UNKNOWN", "unknown", "unknown"), Triple("unexpected", "unknown", "unknown")
+        )) {
+            val report = observed(input)
+            assertEquals(setOf("schemaVersion", "provider", "implementation", "configured", "control", "controlTransport"),
+                report.keys().asSequence().toSet())
+            assertEquals(true, report.getBoolean("configured"))
+            assertEquals(control, report.getString("control"))
+            assertEquals(path, report.getString("controlTransport"))
+            assertFalse(report.toString().contains("private-fixture"))
+        }
+        overlay.put("configuredInRunningProfile", false)
+        assertEquals("unknown", observed("VLESS").getString("control"))
+        overlay.remove("configuredInRunningProfile")
+        assertTrue(observed("DIRECT").isNull("configured"))
+        assertEquals("unknown", observed("DIRECT").getString("controlTransport"))
+    }
 
     @Test fun runningProfileEvidenceRequiresAReadyCurrentOwnerAndSuppressesRetiredRows() {
         fun ready(type: String) = ReadyConfig(8, EffectiveConfig.fromRendered(

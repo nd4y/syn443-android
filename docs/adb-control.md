@@ -11,6 +11,7 @@ through ADB shell. It does not open a management port.
 | `logs` | Bounded technical event history; `--follow-seconds 60` emits changed snapshots as JSON Lines |
 | `diagnostic-bundle` | Redacted state, captive-portal events, current transport and IP-family availability, activation-check freshness, route totals and process counters; no peer names, profiles, config or credentials |
 | `routes-status`, `routes-check`, `routes-cancel` | Current results, request checks, or cancel; add `--route route-2` to check just one route |
+| `overlay-status --provider NAME` | Accepts `netbird`, `tailscale` and `zerotier`. Planned modules return `not_implemented`. NetBird reports management and signal status. Read peer data paths with `netbird-view`. |
 | `netbird-status`, `netbird-diagnose` | Overlay status or request diagnostics |
 | `netbird-cancel --job-id <id>` | Request cancellation of the diagnostic job shown by status |
 | `netbird-view --section peers --page 1` | Select a read-only peer page; `--section diagnostics` selects result pages, page0..63 |
