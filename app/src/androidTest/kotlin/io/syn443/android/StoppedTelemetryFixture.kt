@@ -48,6 +48,12 @@ internal object StoppedTelemetryFixture {
                     } ?: continue
                     val name = namespace.orEmpty()
                     check(name.isEmpty() || name.matches(Regex("[A-Za-z0-9_.-]{1,80}")))
+                    // Finishing instrumentation can kill the app processes. Let the
+                    // requested Stop retire the real engine before ending the fixture.
+                    stage("telemetry_settle_stop")
+                    val vpn = state("status")
+                    if (vpn.opt("desiredOn") != false || vpn.optString("phase") != "Off" ||
+                        vpn.opt("engineStateKnown") != true || vpn.opt("engineActive") != false) continue
                     val untilEligible = item.nextScheduleTimeMillis - System.currentTimeMillis()
                     check(untilEligible in 1..900_000L)
                     return Bundle().apply {
