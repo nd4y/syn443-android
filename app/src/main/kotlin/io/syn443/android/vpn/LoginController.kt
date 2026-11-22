@@ -1063,7 +1063,7 @@ class LoginController private constructor(private val context:android.app.Applic
             }.getOrDefault(false)
             if (continuation.isActive) continuation.resume(success)
         }
-        if (!admitted && continuation.isActive) continuation.resume(true)
+        if (!admitted && continuation.isActive) continuation.resume(false)
     }
 
     private fun sendStoppedTelemetry(ticket: String, active: () -> Boolean,
@@ -1073,7 +1073,11 @@ class LoginController private constructor(private val context:android.app.Applic
         if (initial.phase != LoginPhase.POLICY_CACHED &&
             !(initial.phase == LoginPhase.REFRESHING && initial.refreshReturnPhase == LoginPhase.POLICY_CACHED)) return true
         val stopped = LifecycleAccess.engineStatus(context, state().read())
-        if (!TelemetryWork.knownStopped(stopped)) return true
+        when (TelemetryWork.vpnState(stopped)) {
+            TelemetryWork.VpnState.ACTIVE -> return true
+            TelemetryWork.VpnState.UNKNOWN -> return false
+            TelemetryWork.VpnState.STOPPED -> Unit
+        }
         val generation = stopped.getLong("generation")
         val original = payload(initial)
         val scopeKey = telemetryKey(checkNotNull(original.session))
@@ -1084,7 +1088,7 @@ class LoginController private constructor(private val context:android.app.Applic
             check(active() && identity.generation == initial.generation && identity.reauthRevision == initial.reauthRevision &&
                 telemetryCapture.consent(scopeKey)?.session == ticket)
             val vpn = LifecycleAccess.engineStatus(context, state().read())
-            check(TelemetryWork.knownStopped(vpn) && vpn.getLong("generation") == generation)
+            check(TelemetryWork.vpnState(vpn) == TelemetryWork.VpnState.STOPPED && vpn.getLong("generation") == generation)
         }
         checkOwner()
         val old = telemetryDisk.read(queueKey)
