@@ -157,6 +157,10 @@ func StartDiagnostics() string {
 // The nil production path has no callback. Tests can order a physical epoch
 // change precisely after watcher retirement, without a scheduling sleep.
 func startDiagnostics(afterSnapshot func(bool)) string {
+	return startDiagnosticJob(afterSnapshot, 2*time.Minute, 12*time.Second)
+}
+
+func startDiagnosticJob(afterSnapshot func(bool), totalLimit, peerLimit time.Duration) string {
 	o := activeOutbound()
 	if o == nil {
 		return unavailableDiagnosticReport(nil, "unavailable")
@@ -197,7 +201,9 @@ func startDiagnostics(afterSnapshot func(bool)) string {
 	if limit <= 0 || limit > 10*time.Second {
 		limit = 10 * time.Second
 	}
-	snapshotContext, snapshotCancel := context.WithTimeout(o.ctx, limit)
+	deadline := started.Add(totalLimit)
+	snapshotDeadline := started.Add(min(limit, totalLimit))
+	snapshotContext, snapshotCancel := context.WithDeadline(o.ctx, snapshotDeadline)
 	o.diagCancel = snapshotCancel
 	o.job = DiagnosticJob{id: id, State: "preparing", Started: started, Results: []ProbeResult{}, unknown: true}
 	o.diagMu.Unlock()
@@ -223,7 +229,7 @@ func startDiagnostics(afterSnapshot func(bool)) string {
 	}
 	o.diagMu.Lock()
 	snapshotError := snapshotContext.Err()
-	late := time.Since(started) >= limit
+	late := !time.Now().Before(snapshotDeadline)
 	snapshotCancel()
 	if epoch != o.diagEpoch {
 		// The watcher may already have been stopped when InterfaceUpdated cancels
@@ -294,7 +300,7 @@ func startDiagnostics(afterSnapshot func(bool)) string {
 		}
 		results[i] = ProbeResult{IP: ip, IPValid: valid, FQDN: fqdn, FQDNTruncated: truncated, State: state}
 	}
-	ctx, cancel := context.WithTimeout(o.ctx, 2*time.Minute)
+	ctx, cancel := context.WithDeadline(o.ctx, deadline)
 	o.diagCancel = cancel
 	o.job = DiagnosticJob{id: id, State: "running", Started: started, Results: results, total: len(snapshot.Peers), planned: len(targets)}
 	snapshot.Peers = nil
@@ -302,6 +308,14 @@ func startDiagnostics(afterSnapshot func(bool)) string {
 	o.diagMu.Unlock()
 	go func() {
 		defer cancel()
+		// A native probe may ignore its context. End the visible job on time;
+		// its admission slot is released only after all actual workers return.
+		stopWatch := context.AfterFunc(ctx, func() {
+			o.diagMu.Lock()
+			defer o.diagMu.Unlock()
+			o.finishInterruptedDiagnostic(id, ctx.Err())
+		})
+		defer stopWatch()
 		var wg sync.WaitGroup
 		queue := make(chan target)
 		for worker := 0; worker < 4; worker++ {
@@ -314,43 +328,78 @@ func startDiagnostics(afterSnapshot func(bool)) string {
 					var rtt time.Duration
 					if ctx.Err() == nil && (DiagnosticsAllowed == nil || DiagnosticsAllowed()) {
 						o.diagMu.Lock()
+						if o.job.State != "running" || ctx.Err() != nil {
+							o.diagMu.Unlock()
+							continue
+						}
 						o.job.Results[i].State = "checking"
 						o.diagMu.Unlock()
-						probeCtx, stop := context.WithTimeout(ctx, 12*time.Second)
-						var err error
-						rtt, err = p.ProbePeer(probeCtx, target.ip)
+						probeCtx, stop := context.WithTimeout(ctx, peerLimit)
+						probeDeadline, _ := probeCtx.Deadline()
+						elapsed, err := p.ProbePeer(probeCtx, target.ip)
+						expired := probeCtx.Err() != nil || !time.Now().Before(probeDeadline)
 						stop()
-						state = "reply"
-						if err != nil || ctx.Err() != nil {
-							state = "no_reply"
-							if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-								state = "cancelled"
-							}
+						state = "no_reply"
+						if err == nil && !expired {
+							state, rtt = "reply", elapsed
+						} else if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+							state = "cancelled"
 						}
 					}
 					o.diagMu.Lock()
-					o.job.Results[i].State = state
-					o.job.Results[i].RTTMillis = min(reportNumber(rtt.Milliseconds()), 12000)
+					if o.job.State == "running" && ctx.Err() == nil && time.Now().Before(deadline) {
+						o.job.Results[i].State = state
+						o.job.Results[i].RTTMillis = min(reportNumber(rtt.Milliseconds()), 12000)
+					}
 					o.diagMu.Unlock()
 				}
 			}()
 		}
+	sendTargets:
 		for _, target := range targets {
-			queue <- target
+			select {
+			case queue <- target:
+			case <-ctx.Done():
+				break sendTargets
+			}
 		}
 		close(queue)
 		wg.Wait()
 		o.diagMu.Lock()
-		o.job.State = "completed"
 		if ctx.Err() != nil {
-			o.job.State = "cancelled"
-		} else if report := o.diagnosticReportLocked(); report.MetadataUnknown || report.Coverage.Checked != report.Coverage.Total || report.Coverage.Planned != report.Coverage.Total || report.Coverage.Omitted != 0 {
-			o.job.State = "partial"
+			o.finishInterruptedDiagnostic(id, ctx.Err())
+		} else if !time.Now().Before(deadline) {
+			o.finishInterruptedDiagnostic(id, context.DeadlineExceeded)
+		} else if o.job.State == "running" {
+			report := o.diagnosticReportLocked()
+			o.job.State = "completed"
+			if report.MetadataUnknown || report.Coverage.Checked != report.Coverage.Total || report.Coverage.Planned != report.Coverage.Total || report.Coverage.Omitted != 0 {
+				o.job.State = "partial"
+			}
+			o.job.Finished = time.Now()
 		}
-		o.job.Finished = time.Now()
 		o.diagCancel = nil
 		o.diagBusy = false
 		o.diagMu.Unlock()
 	}()
 	return RuntimeDiagnostics()
+}
+
+// Caller holds diagMu. Preserve completed observations and the original finish
+// time if a late SDK worker returns after cancellation or the shared deadline.
+func (o *Outbound) finishInterruptedDiagnostic(id string, cause error) {
+	if o.job.id != id || o.job.State != "running" {
+		return
+	}
+	o.job.State = "cancelled"
+	if errors.Is(cause, context.DeadlineExceeded) {
+		o.job.State = "partial"
+	}
+	for i := range o.job.Results {
+		row := &o.job.Results[i]
+		if row.State == "checking" || row.State == "queued" {
+			row.State, row.RTTMillis = "cancelled", 0
+		}
+	}
+	o.job.Finished = time.Now()
 }

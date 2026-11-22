@@ -44,3 +44,11 @@ A pending response acknowledges dispatch. Read the diagnostic state again for th
 terminal result. A new job has a fresh ID even on the same network. Older reports
 without a job ID still show results. Cancellation signals the local context and
 the worker releases its admission slot after it exits.
+
+
+The two-minute diagnostic deadline begins before the SDK roster is read. Each
+peer gets at most 12 seconds inside that same deadline. A late SDK reply carries
+no positive reachability or RTT. At the overall deadline the UI receives a
+partial report with the completed results and the remaining peers unprobed.
+The report stays unchanged if a blocked SDK call returns later. Another batch
+can start after all original workers have exited.

@@ -1597,8 +1597,12 @@
     {
       "id": "CHECK-03",
       "text": "Предусматриваются быстрая проверка до 15 секунд и глубокое задание до 120 секунд с прогрессом, отменой, ограничением параллелизма и бюджетом данных. Дополнительные тесты пропускной способности запускаются отдельно и не являются постоянными. Состав и критерии задания определяет назначенный HealthCheckProfile; бюджет одного задания не отменяет продолжение расширенного поиска следующими шагами.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/netbird-diagnostic-lifecycle.md",
+        "native/engine-netbird/diagnostics.go",
+        "native/engine-netbird/diagnostic_deadline_test.go"
+      ]
     },
     {
       "id": "CHECK-04",
@@ -1609,8 +1613,12 @@
     {
       "id": "CHECK-05",
       "text": "Начальные лимиты: четыре лёгкие проверки одновременно, до 20 кандидатов за один шаг поиска, но не только первые 20 профилей каталога. Большой граф обходится порциями с сохранением фронтира, результатов и ротацией кандидатов. Для peers - четыре пробы с deadline 12 секунд на peer; списки разбиваются на задания. Произвольные сканы LAN и портов не выполняются.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/netbird-diagnostic-lifecycle.md",
+        "native/engine-netbird/diagnostics.go",
+        "native/engine-netbird/diagnostic_deadline_test.go"
+      ]
     },
     {
       "id": "CHECK-06",

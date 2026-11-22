@@ -8,7 +8,7 @@ class NativeDiagnosticEvidenceTest(unittest.TestCase):
         return [json.dumps({'Action': action, 'Package': package, 'Test': name}) for name in sorted(names) for action in ('run', terminal)]
 
     def test_requires_all_real_start_and_pass_records(self):
-        self.assertEqual(5, verify(self.rows()))
+        self.assertEqual(7, verify(self.rows()))
 
     def test_private_candidates_require_their_own_package_and_every_real_outcome(self):
         self.assertEqual(55, verify(self.rows(PATH_REQUIRED, package='io.syn443/bridge'), PATH_REQUIRED, 'io.syn443/bridge'))
