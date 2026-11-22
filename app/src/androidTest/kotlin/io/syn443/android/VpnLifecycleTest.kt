@@ -378,7 +378,7 @@ class VpnLifecycleTest {
         connect()
         val old = pid()
         val epoch = status().optLong("networkEpoch")
-        val mobileDataWasOff = shell("settings get global mobile_data").trim() == "0"
+        val mobileDataWasOff = shell("settings get global mobile_data").toString(Charsets.UTF_8).trim() == "0"
         try {
             shell("svc wifi disable")
             if (!mobileDataWasOff) shell("svc data disable")
