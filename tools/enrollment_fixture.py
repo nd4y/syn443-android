@@ -10,6 +10,7 @@ from pathlib import Path
 import secrets
 import ssl
 import subprocess
+import re
 import threading
 import time
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -22,6 +23,50 @@ def integer(value):
     raw=value.lstrip(b'\0') or b'\0'
     if raw[0]&128:raw=b'\0'+raw
     return bytes([2,len(raw)])+raw
+
+class CapabilityHead:
+    """State of one synthetic registration, behind the fixture's authenticated endpoint."""
+    def __init__(self, device, capabilities):
+        self.authority = digest(canonical(['fixture-capability-authority', device]))
+        self.initial = self.normalize(capabilities)
+        self.current = self.initial
+        self.version = 0
+        self.receipts = {}
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def normalize(values):
+        assert isinstance(values, list) and 3 <= len(values) <= 16
+        assert all(isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9._-]{1,64}', name) for name in values)
+        assert len(set(values)) == len(values)
+        assert {'engine-config.v1', 'tun.lease.v1', 'policy.keybound.v2'}.issubset(values)
+        return sorted(values)
+
+    def respond(self, method, body):
+        with self.lock:
+            previous = digest(canonical(self.current))
+            if method == 'GET':
+                assert body is None
+                return {'version': self.version, 'hash': previous, 'capabilities': list(self.current),
+                        'authorityHash': self.authority}
+            assert method == 'POST' and body is not None and 0 < len(body) <= 8192
+            request = json.loads(body)
+            assert set(request) == {'requestId', 'previousHash', 'capabilities'}
+            request_id = request['requestId']
+            assert isinstance(request_id, str) and re.fullmatch(r'[A-Za-z0-9_-]{43}', request_id)
+            if request_id in self.receipts:
+                original, receipt = self.receipts[request_id]
+                assert body == original
+                return dict(receipt)
+            wanted = self.normalize(request['capabilities'])
+            assert request['previousHash'] == previous and set(self.current) < set(wanted)
+            self.version += 1
+            self.current = wanted
+            receipt = {'requestId': request_id, 'state': 'approved', 'version': self.version,
+                       'hash': digest(canonical(wanted))}
+            self.receipts[request_id] = body, receipt
+            return dict(receipt)
+
 
 class Fixture:
     def __init__(self,config, *, assigned_device=None, policy_ttl_seconds=600):
@@ -42,6 +87,7 @@ class Fixture:
         self.origin='https://127.0.0.1:'+str(self.server.server_port);self.issuer=self.origin+'/realms/test'
         self.authorization={};self.codes={};self.tokens={};self.sessions={};self.receipts={};self.refresh_receipts={};self.proofs=set()
         self.config=config;self.revision=1;self.policy_status=200;self.envelopes={};self.policy_requests=0;self.registrations=0
+        self.capability_heads={}
         self.activation_reports={}
         self.policy_example=None
         self.example_deliveries={}
@@ -105,6 +151,7 @@ class Fixture:
                 now=int(time.time()*1000);self.registrations+=1
                 session={'deviceId':self.assigned_device or secrets.token_urlsafe(32),'accessToken':secrets.token_urlsafe(32),'refreshToken':secrets.token_urlsafe(32),
                     'accessUntilMs':now+590000,'refreshUntilMs':now+86000000,'generation':0,'nonce':secrets.token_urlsafe(32)}
+                self.capability_heads[thumb]=CapabilityHead(session['deviceId'],value['capabilities'])
                 self.sessions[thumb]=session;self.receipts[body]=session.copy()
             return 200,self.receipts[body],{}
         if parsed.path=='/v1/identity/devices/revoke':
@@ -119,6 +166,9 @@ class Fixture:
                 accessUntilMs=int(time.time()*1000)+590000,generation=session['generation']+1,nonce=secrets.token_urlsafe(32))
             return 200,session,{}
         assert token==session['accessToken']
+        if parsed.path=='/v1/device/capabilities':
+            assert session['accessUntilMs']>int(time.time()*1000)
+            return 200,self.capability_heads[thumb].respond(method,body),{}
         if parsed.path=='/v1/device/revoke':self.sessions.pop(thumb);return 204,None,{}
         if parsed.path=='/v1/device/telemetry':
             assert self.telemetry_enabled and method=='POST' and session['accessUntilMs']>int(time.time()*1000)

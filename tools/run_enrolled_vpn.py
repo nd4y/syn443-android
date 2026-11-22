@@ -164,6 +164,12 @@ def check_enrolled_upgrade(fixture, proxy, auth_generation, system_installer=Fal
     assert call('status')['policy']['activeRevision'] == 2 and call('auth-status')['generation'] == auth_generation
     if historical:
         exchange_through_proxy(proxy)
+        if (receipt['previous'], receipt['following']) == (136, 142):
+            head = fixture.capability_heads[next(iter(original))[0]]
+            assert 'decision.bundle.v1' not in head.initial
+            assert set(head.current) == set(head.initial) | {'decision.bundle.v1'}
+            assert head.version == 1 and len(head.receipts) == 1
+            print('Historical bound capability extension: passed', flush=True)
 
 
 def committed_online(status, revision):
