@@ -29,12 +29,12 @@ def exchange_through_proxy(proxy):
     # A pipe directly into toybox nc can close its input before the peer responds.
     proxy.payload_received = threading.Event()
     try:
-        command = (r"(printf 'GET /syn443-payload HTTP/1.1\\r\\nHost: fixture.invalid\\r\\n"
-                   r"Connection: close\\r\\n\\r\\n'; sleep 3) | run-as " + PACKAGE +
+        command = (r"(printf 'GET /syn443-payload HTTP/1.1\r\nHost: fixture.invalid\r\n"
+                   r"Connection: close\r\n\r\n'; sleep 3) | run-as " + PACKAGE +
                    " toybox nc -w 5 203.0.113.10 80")
         response = adb('shell', '-T', command, timeout=12)
         confirmed = proxy.payload_received.wait(1)
-        status = re.match(rb'HTTP/1\\.1 ([0-9]{3}) ', response)
+        status = re.match(rb'HTTP/1\.1 ([0-9]{3}) ', response)
         if not confirmed or status is None or status[1] != b'204':
             raise AssertionError('Application payload: expected proxy received=%s, HTTP status=%s' %
                                  (confirmed, status[1].decode() if status else 'absent'))

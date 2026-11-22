@@ -2,10 +2,12 @@ import hashlib
 import io
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 import zipfile
 from unittest.mock import patch
 
+from run_enrolled_vpn import exchange_through_proxy
 from protected_upgrade_inputs import REPOSITORY, read_members, select_runs
 
 
@@ -63,3 +65,22 @@ class ProtectedUpgradeTest(unittest.TestCase):
             self.assertFalse(dest.exists())
             read_members(work, receipt, members, 4096)
             self.assertEqual(dest.read_bytes(), b"synthetic fixture")
+
+    def test_payload_requires_both_its_own_fixture_event_and_http_response(self):
+        for seen, response, passes in ((True, b"HTTP/1.1 204 No Content", True),
+                                       (False, b"HTTP/1.1 204 No Content", False),
+                                       (True, b"HTTP/1.1 503 Unavailable", False), (True, b"", False)):
+            proxy = SimpleNamespace()
+            def exchange(*args, **kwargs):
+                self.assertIn("run-as io.syn443.android toybox nc", args[-1])
+                self.assertIn(r"GET /syn443-payload HTTP/1.1\r\nHost:", args[-1])
+                if seen:
+                    proxy.payload_received.set()
+                return response
+            with self.subTest(seen=seen, response=response), patch("run_enrolled_vpn.adb", side_effect=exchange):
+                if passes:
+                    exchange_through_proxy(proxy)
+                else:
+                    with self.assertRaises(AssertionError):
+                        exchange_through_proxy(proxy)
+                self.assertIsNone(proxy.payload_received)
