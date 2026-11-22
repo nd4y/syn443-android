@@ -183,6 +183,12 @@ class EngineHostService : Service() {
             if (session != token) return
             worker.post { if (session == token) engine?.diagnoseNetBird() }
         }
+        override fun cancelNetBirdDiagnostic(session: String, jobId: String) {
+            if (android.os.Binder.getCallingUid() != Process.myUid() || session != token ||
+                !NetBirdPresentation.validDiagnosticId(jobId)) return
+            // Cancellation only signals a local context and never waits for the SDK.
+            engine?.cancelNetBirdDiagnostic(jobId)
+        }
         override fun netBirdView(session: String, request: String) {
             val runtime = engine ?: return
             if (session != token || android.os.Binder.getCallingUid() != Process.myUid() ||
@@ -246,6 +252,7 @@ class EngineHostService : Service() {
         override fun pulse(token: String) = binder.pulse(token)
         override fun diagnoseNetBird(token: String) = binder.diagnoseNetBird(token)
         override fun netBirdView(token: String, request: String) = binder.netBirdView(token, request)
+        override fun cancelNetBirdDiagnostic(token: String, jobId: String) = binder.cancelNetBirdDiagnostic(token, jobId)
         override fun checkRoutes(token:String,request:String)=binder.checkRoutes(token,request)
         override fun cancelRouteChecks(token:String)=binder.cancelRouteChecks(token)
         override fun selectVerifiedRoute(token:String,receipt:String,checkId:String,group:String,previous:String,candidate:String)=

@@ -75,6 +75,7 @@ type connectionReport struct {
 	MetadataUnknown bool         `json:"metadata_unknown"`
 }
 type diagnosticReport struct {
+	JobID           string         `json:"job_id,omitempty"`
 	Stale           bool           `json:"stale"`
 	State           string         `json:"state"`
 	Started         time.Time      `json:"started"`
@@ -346,6 +347,10 @@ func projectConnection(o *Outbound, snapshot embed.ConnectionSnapshot, selection
 }
 
 func (o *Outbound) diagnosticReportLocked() diagnosticReport {
+	jobID := ""
+	if !o.job.Stale && (o.job.State == "preparing" || o.job.State == "running") {
+		jobID = o.job.id
+	}
 	selection := o.reportViews().Diagnostics
 	if o.job.unknown {
 		r := unknownDiagnostics(selection, o.job.Stale)
@@ -353,6 +358,7 @@ func (o *Outbound) diagnosticReportLocked() diagnosticReport {
 		if r.State == "completed" {
 			r.State = "unavailable"
 		}
+		r.JobID = jobID
 		r.Started = reportTime(o.job.Started)
 		r.Finished = reportTime(o.job.Finished)
 		return r
@@ -379,7 +385,7 @@ func (o *Outbound) diagnosticReportLocked() diagnosticReport {
 	if state == "completed" && (coverage.Total == 0 || coverage.Checked != coverage.Total || coverage.Planned != coverage.Total || coverage.Omitted != 0) {
 		state = "partial"
 	}
-	result := diagnosticReport{Stale: o.job.Stale, State: state, Started: reportTime(o.job.Started), Finished: reportTime(o.job.Finished), Results: make([]ProbeResult, 0, view.Shown), View: view, Coverage: coverage}
+	result := diagnosticReport{JobID: jobID, Stale: o.job.Stale, State: state, Started: reportTime(o.job.Started), Finished: reportTime(o.job.Finished), Results: make([]ProbeResult, 0, view.Shown), View: view, Coverage: coverage}
 	for i := view.Page * ReportPageSize; i < view.Page*ReportPageSize+view.Shown; i++ {
 		r := o.job.Results[i]
 		r.IP, r.IPValid = reportIP(r.IP)
@@ -493,6 +499,7 @@ func reportObjectKeys(path string, peer bool, seen map[string]bool) bool {
 			required = []string{"active", "mode", "tag", "proxy_group", "selected_proxy", "sampled_at", "management_connected", "signal_connected", "ip", "ip_valid", "fqdn", "fqdn_truncated", "connection_unknown", "peers", "view", "metadata_unknown"}
 		} else {
 			required = []string{"stale", "state", "started", "finished", "results", "view", "coverage", "metadata_unknown"}
+			optional = []string{"job_id"}
 		}
 	case "view":
 		required = []string{"page", "page_size", "total", "retained", "shown", "omitted", "pages", "request"}
@@ -546,6 +553,9 @@ func validConnectionReport(r connectionReport) bool {
 	return true
 }
 func validDiagnosticReport(r diagnosticReport) bool {
+	if r.JobID != "" && (!validDiagnosticID(r.JobID) || r.Stale || (r.State != "preparing" && r.State != "running")) {
+		return false
+	}
 	if !r.View.valid(len(r.Results)) || r.Results == nil || r.State != reportJobState(r.State) || !r.Started.Equal(reportTime(r.Started)) || !r.Finished.Equal(reportTime(r.Finished)) {
 		return false
 	}

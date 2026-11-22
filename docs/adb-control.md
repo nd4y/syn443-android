@@ -12,6 +12,7 @@ through ADB shell. It does not open a management port.
 | `diagnostic-bundle` | Redacted state, captive-portal events, current transport and IP-family availability, activation-check freshness, route totals and process counters; no peer names, profiles, config or credentials |
 | `routes-status`, `routes-check`, `routes-cancel` | Current results, request checks, or cancel; add `--route route-2` to check just one route |
 | `netbird-status`, `netbird-diagnose` | Overlay status or request diagnostics |
+| `netbird-cancel --job-id <id>` | Request cancellation of the diagnostic job shown by status |
 | `netbird-view --section peers --page 1` | Select a read-only peer page; `--section diagnostics` selects result pages, page0..63 |
 | `vpn-start`, `vpn-stop`, `vpn-resume` | Submit a command to the durable VPN intent controller |
 | `config-plan`, `config-apply` | Validate and optionally write an unmanaged local config while the VPN is fully Off |

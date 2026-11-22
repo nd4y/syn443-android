@@ -34,3 +34,13 @@ retained by that test driver; the missing evidence is not reconstructed. The
 device was restored and its one owned Cloud key/peer automatically retired with
 independent baseline checks. The cache dependency described here is a separately
 verified source-level risk, not a claim that the physical incident is resolved.
+
+## Cancel a peer check
+
+While a roster lookup or peer check runs, Android shows an action to cancel that job.
+The debug CLI exposes the same action as `netbird-cancel --job-id <id>`.
+Read `netbird.diagnostics.job_id` from `netbird-status` for the current job.
+A pending response acknowledges dispatch. Read the diagnostic state again for the
+terminal result. A new job has a fresh ID even on the same network. Older reports
+without a job ID still show results. Cancellation signals the local context and
+the worker releases its admission slot after it exits.

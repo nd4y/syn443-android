@@ -70,6 +70,7 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
                 if(reply?.opt("admitted")==false) "Проверка уже выполняется или выполнялась недавно"
                 else "Запрошено обновление политики"
             }
+            method == "netbird-cancel" -> "Запрошена отмена проверки пиров"
             method == "routes-check" && arg != null -> "Запрошена проверка маршрута"
             else -> ""
         }

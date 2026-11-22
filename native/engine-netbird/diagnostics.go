@@ -2,6 +2,8 @@ package netbird
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net"
@@ -58,6 +60,7 @@ type DiagnosticJob struct {
 	Started        time.Time     `json:"started,omitempty"`
 	Finished       time.Time     `json:"finished,omitempty"`
 	Results        []ProbeResult `json:"results"`
+	id             string
 	total, planned int
 	unknown        bool
 }
@@ -106,6 +109,36 @@ func (o *Outbound) diagnosticsSnapshot() string {
 	defer o.diagMu.Unlock()
 	return marshal(o.diagnosticReportLocked())
 }
+func validDiagnosticID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	for _, ch := range id {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// Cancel only the job observed by the caller. Cancellation never frees an occupied worker.
+func CancelDiagnosticJob(id string) bool {
+	if !validDiagnosticID(id) {
+		return false
+	}
+	o := activeOutbound()
+	if o == nil {
+		return false
+	}
+	o.diagMu.Lock()
+	defer o.diagMu.Unlock()
+	if o.job.id != id || o.job.Stale || (o.job.State != "preparing" && o.job.State != "running") || o.diagCancel == nil {
+		return false
+	}
+	o.diagCancel()
+	return true
+}
+
 func CancelDiagnostics() string {
 	o := activeOutbound()
 	if o != nil {
@@ -156,6 +189,9 @@ func startDiagnostics(afterSnapshot func(bool)) string {
 			o.diagMu.Unlock()
 		}
 	}()
+	var idBytes [16]byte
+	rand.Read(idBytes[:])
+	id := hex.EncodeToString(idBytes[:])
 	started := time.Now()
 	limit := o.diagnosticSnapshotTimeout
 	if limit <= 0 || limit > 10*time.Second {
@@ -163,7 +199,7 @@ func startDiagnostics(afterSnapshot func(bool)) string {
 	}
 	snapshotContext, snapshotCancel := context.WithTimeout(o.ctx, limit)
 	o.diagCancel = snapshotCancel
-	o.job = DiagnosticJob{State: "preparing", Started: started, Results: []ProbeResult{}, unknown: true}
+	o.job = DiagnosticJob{id: id, State: "preparing", Started: started, Results: []ProbeResult{}, unknown: true}
 	o.diagMu.Unlock()
 	stopSnapshotWatch := context.AfterFunc(snapshotContext, func() {
 		o.diagMu.Lock()
@@ -260,7 +296,7 @@ func startDiagnostics(afterSnapshot func(bool)) string {
 	}
 	ctx, cancel := context.WithTimeout(o.ctx, 2*time.Minute)
 	o.diagCancel = cancel
-	o.job = DiagnosticJob{State: "running", Started: time.Now(), Results: results, total: len(snapshot.Peers), planned: len(targets)}
+	o.job = DiagnosticJob{id: id, State: "running", Started: started, Results: results, total: len(snapshot.Peers), planned: len(targets)}
 	snapshot.Peers = nil
 	handedOff = true
 	o.diagMu.Unlock()
@@ -285,7 +321,7 @@ func startDiagnostics(afterSnapshot func(bool)) string {
 						rtt, err = p.ProbePeer(probeCtx, target.ip)
 						stop()
 						state = "reply"
-						if err != nil {
+						if err != nil || ctx.Err() != nil {
 							state = "no_reply"
 							if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 								state = "cancelled"

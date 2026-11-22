@@ -3053,8 +3053,14 @@
     {
       "id": "AC16",
       "specRow": " Проверка всех peers, запуск/отмена/смена сети | Прогресс корректен, старый job stale, нет ложного вывода offline по ICMP |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/netbird-diagnostic-lifecycle.md",
+        "native/engine-netbird/diagnostic_cache_test.go",
+        "native/engine-netbird/diagnostics_test.go",
+        "app/src/androidTest/kotlin/io/syn443/android/NetBirdPagingUiTest.kt"
+      ],
+      "remainingScope": "Native, Android and CLI checks cover explicit cancellation, stale job IDs, bounded workers and partial coverage. Live provider roster coverage and handover acceptance remain separate."
     },
     {
       "id": "AC17",

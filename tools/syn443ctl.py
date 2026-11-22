@@ -21,7 +21,7 @@ URI = "content://io.syn443.control"
 METHODS = {
     "status": "status", "logs": "logs", "routes-status": "routes-status",
     "routes-check": "routes-check", "routes-cancel": "routes-cancel",
-    "netbird-status": "status", "netbird-diagnose": "netbird-diagnose", "netbird-view": "netbird-view",
+    "netbird-status": "status", "netbird-diagnose": "netbird-diagnose", "netbird-view": "netbird-view", "netbird-cancel": "netbird-cancel",
     "vpn-start": "connect", "vpn-stop": "disconnect", "vpn-resume": "resume",
     "resources": "resources", "engine-exits": "engine-exits", "health-workers": "health-workers",
     "config-plan": "config-plan-file", "config-apply": "config-apply-file",
@@ -31,7 +31,7 @@ METHODS = {
     "support-bundle-shell-state": "bundle-shell-state", "support-bundle-shell-release": "bundle-shell-release",
 }
 OPERATIONS = ("capabilities", "status", "logs", "diagnostic-bundle", "routes-status",
-              "routes-check", "routes-cancel", "netbird-status", "netbird-diagnose", "netbird-view",
+              "routes-check", "routes-cancel", "netbird-status", "netbird-diagnose", "netbird-view", "netbird-cancel",
               "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply",
               "support-bundle", "support-bundle-collect", "support-bundle-status",
               "support-bundle-cancel", "support-bundle-export")
@@ -133,12 +133,13 @@ class Device:
                                       "support-bundle-shell-state", "support-bundle-shell-release"} and re.fullmatch(r"[0-9a-f]{32}", argument)
             bundle_read = operation == "support-bundle-read" and re.fullmatch(r"[0-9a-f]{32}:(?:0|[1-9][0-9]{0,5})", argument) and int(argument.split(":")[1]) <= SUPPORT_MAX
             view = canonical_view(argument) if operation == "netbird-view" else None
-            if not route and not ticket and not bundle_id and not bundle_read and view is None:
+            cancel = operation == "netbird-cancel" and support_hex(argument, 32)
+            if not cancel and not route and not ticket and not bundle_id and not bundle_read and view is None:
                 raise ControlError("invalid_arguments", 2)
             # adb shell joins arguments into an Android shell command. Our closed
             # ASCII view has no apostrophe; single quoting preserves JSON quotes.
             command.extend(["--arg", "'" + view + "'" if view is not None else argument])
-        elif operation == "netbird-view":
+        elif operation in {"netbird-view", "netbird-cancel"}:
             raise ControlError("invalid_arguments", 2)
         try:
             result = subprocess.run(command, capture_output=True, timeout=self.timeout, check=False)
@@ -689,6 +690,7 @@ def main(argv=None):
     parser.add_argument("--expected-candidate")
     parser.add_argument("--output")
     parser.add_argument("--bundle-id")
+    parser.add_argument("--job-id")
     parser.add_argument("--follow-seconds", type=int, choices=range(0, 301), default=0, metavar="0..300")
     try:
         args = parser.parse_args(argv)
@@ -699,6 +701,8 @@ def main(argv=None):
         if (args.output is not None) != (args.operation in {"support-bundle", "support-bundle-export"}) or (
             (args.bundle_id is not None) != (args.operation in {"support-bundle-status", "support-bundle-cancel", "support-bundle-export"})
         ) or (args.bundle_id is not None and not support_hex(args.bundle_id, 32)):
+            raise ControlError("invalid_arguments", 2)
+        if (args.job_id is not None) != (args.operation == "netbird-cancel") or (args.job_id is not None and not support_hex(args.job_id, 32)):
             raise ControlError("invalid_arguments", 2)
         if (args.route is not None and args.operation != "routes-check") or (args.follow_seconds and args.operation != "logs"):
             raise ControlError("invalid_arguments", 2)
@@ -716,7 +720,11 @@ def main(argv=None):
                 data = support_operation(device, args.operation, args.output, args.bundle_id)
         elif args.operation == "capabilities":
             state = device.call("status")
-            operations = [op for op in OPERATIONS if op not in CONFIG or state.get("localConfigControl") is True]
+            operations = [
+                op for op in OPERATIONS
+                if (op not in CONFIG or state.get("localConfigControl") is True)
+                and (op != "netbird-cancel" or state.get("netbirdDiagnosticCancellation") is True)
+            ]
             data = {"operations": operations, "access": "debug_adb_shell",
                     "device": {**numbers(state, NUMBERS), "unlocked": state.get("phase") != "NeedsUnlock"}}
         elif args.operation == "diagnostic-bundle":
@@ -724,6 +732,8 @@ def main(argv=None):
         elif args.operation == "logs" and args.follow_seconds:
             follow(device, args.follow_seconds, 2.0)
             return 0
+        elif args.operation == "netbird-cancel":
+            data = device.call(args.operation, args.job_id)
         elif args.operation == "netbird-view":
             # This receipt means queued, not a fresh page or probe result. Read
             # netbird-status and match its section view.request before using it.

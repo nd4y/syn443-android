@@ -11,6 +11,8 @@ object LifecycleAccess {
         .put("desiredOn",JSONObject.NULL).put("desiredOnKnown",false).put("generation",JSONObject.NULL)
         .put("engineActive",false).put("osPolicy",JSONObject().put("unlocked",false).put("known",false))
     @Volatile private var service:java.lang.ref.WeakReference<TunnelService>?=null
+    internal fun cancelNetBirdDiagnostic(generation: Long, jobId: String): Boolean =
+        service?.get()?.cancelNetBirdDiagnostic(generation, jobId) == true
     @Synchronized fun attach(value:TunnelService){service=java.lang.ref.WeakReference(value)}
     @Synchronized fun detach(value:TunnelService){if(service?.get()===value)service=null}
     @Synchronized internal fun recordControllerStartup(store: StateStore) {

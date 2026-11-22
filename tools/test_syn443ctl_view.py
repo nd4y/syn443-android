@@ -44,3 +44,21 @@ class NetBirdViewControlTest(unittest.TestCase):
             self.assertEqual(syn443ctl.main(["--serial", "synthetic-device", "netbird-view", "--section", "peers", "--page", "1"]), 0)
         call.assert_called_once_with("netbird-view", syn443ctl.view_argument("peers", 1, "test-view"))
         self.assertEqual(json.loads(output.getvalue())["result"], receipt)
+
+    def test_cancel_requires_the_displayed_job_and_only_queues_the_command(self):
+        job = "cd" * 16
+        reply = b'Result: Bundle[{ok=true, json={"pending":true}}]\n'
+        with patch("syn443ctl.subprocess.run", return_value=subprocess.CompletedProcess([], 0, reply, b"")) as run, contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(syn443ctl.main(["--serial", "usb-fixture", "netbird-cancel", "--job-id", job]), 0)
+        self.assertEqual(run.call_args.args[0][-4:], ["--method", "netbird-cancel", "--arg", job])
+        self.assertEqual(json.loads(output.getvalue())["result"], {"pending": True})
+        for args in (["netbird-cancel"], ["netbird-cancel", "--job-id", "not-a-job"], ["vpn-start", "--job-id", job]):
+            with patch("syn443ctl.subprocess.run") as run, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(syn443ctl.main(["--serial", "usb-fixture", *args]), 2)
+                run.assert_not_called()
+
+    def test_older_and_locked_clients_do_not_advertise_addressed_cancellation(self):
+        for state, supported in (({}, False), ({"phase": "NeedsUnlock"}, False), ({"netbirdDiagnosticCancellation": True}, True)):
+            with patch.object(syn443ctl.Device, "call", return_value=state), contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(syn443ctl.main(["--serial", "usb-fixture", "capabilities"]), 0)
+            self.assertEqual("netbird-cancel" in json.loads(out.getvalue())["result"]["operations"], supported)

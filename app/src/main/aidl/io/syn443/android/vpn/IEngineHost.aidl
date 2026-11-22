@@ -15,4 +15,5 @@ interface IEngineHost {
     oneway void debugFatal(String token, String kind);
     oneway void networkChanged(String token, String interfaceName, int interfaceIndex);
     oneway void netBirdView(String token, String request);
+    oneway void cancelNetBirdDiagnostic(String token, String jobId);
 }

@@ -251,6 +251,14 @@ class TunnelService : VpnService() {
             validatedManagedWifi=validatedPolicy!=null,meteredMaintenance=meteredMaintenance)
             ?.let {request->runCatching {host?.checkRoutes(checkNotNull(token),request)}}
     }
+    internal fun cancelNetBirdDiagnostic(generation: Long, jobId: String): Boolean {
+        if (!ownsReadyEngine(generation)) return false
+        val session = token ?: return false
+        return handler.post {
+            if (ownsReadyEngine(generation) && session == token)
+                runCatching { host?.cancelNetBirdDiagnostic(session, jobId) }
+        }
+    }
     internal fun ownsReadyEngine(generation: Long): Boolean =
         ready && !retiring && !destroyed && token != null && boundGeneration == generation
 

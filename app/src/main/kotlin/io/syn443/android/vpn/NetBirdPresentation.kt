@@ -6,6 +6,8 @@ import org.json.JSONObject
 
 /** Bounded display values only. None of these fields establish route health. */
 internal object NetBirdPresentation {
+    private val diagnosticId = Regex("[0-9a-f]{32}")
+    internal fun validDiagnosticId(value: String) = value.length == 32 && diagnosticId.matches(value)
     data class Row(val fqdn: String?, val ip: String?, val state: String,
         val relayed: Boolean?, val rttMs: Long?, val truncated: Boolean) {
         override fun toString() = "NetBirdRow([redacted])"
@@ -24,7 +26,8 @@ internal object NetBirdPresentation {
     data class Report(val active: Boolean?, val phase: String, val mode: String?, val proxy: String?,
         val management: Boolean?, val signal: Boolean?, val canDiagnose: Boolean, val stale: Boolean,
         val reason: String?, val failure: String?, val peers: Section, val diagnostics: Section,
-        val diagnosticState: String, val coverage: Coverage?, val diagnosticStale: Boolean?, val failureTruncated: Boolean? = null) {
+        val diagnosticState: String, val coverage: Coverage?, val diagnosticStale: Boolean?, val failureTruncated: Boolean? = null,
+        val cancellableJob: String? = null) {
         val connection: String get() = "Cloud: ${management?.toString() ?: "н/д"}; signal: ${signal?.toString() ?: "н/д"}"
         val transport: String get() = when (mode) {
             "direct" -> "Подключение напрямую; relay используется как резерв"
@@ -131,6 +134,9 @@ internal object NetBirdPresentation {
             if (connectionUnknown) null else bool(state, "signal_connected"),
             !connectionUnknown && bool(overlay, "active") == true && bool(state, "active") == true, stale, reason, failure, peers, results,
             (diagnostics?.opt("state") as? String)?.takeIf { it in setOf("preparing", "no_peers", "running", "completed", "partial", "cancelled", "unavailable") } ?: "unknown",
-            coverage(diagnostics, results.view), bool(diagnostics, "stale"), bool(overlay, "last_failure_truncated"))
+            coverage(diagnostics, results.view), bool(diagnostics, "stale"), bool(overlay, "last_failure_truncated"),
+            (diagnostics?.opt("job_id") as? String)?.takeIf { validDiagnosticId(it) &&
+                bool(overlay, "active") == true && bool(diagnostics, "stale") == false &&
+                diagnostics?.optString("state") in setOf("preparing", "running") })
     }
 }

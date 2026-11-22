@@ -415,6 +415,16 @@ class ControlProvider : ContentProvider() {
                     require(store.checkpoint().desiredOn)
                     context.startService(Intent(context, TunnelService::class.java).setAction(method))
                 }
+                "netbird-cancel" -> {
+                    val jobId = requireNotNull(arg)
+                    require(NetBirdPresentation.validDiagnosticId(jobId) && (extras == null || extras.isEmpty))
+                    val checkpoint = store.checkpoint()
+                    require(checkpoint.desiredOn && LifecycleAccess.cancelNetBirdDiagnostic(checkpoint.generation, jobId))
+                    return Bundle().apply {
+                        putBoolean("ok", true)
+                        putString("json", org.json.JSONObject().put("pending", true).toString())
+                    }
+                }
                 "netbird-view" -> {
                     val checkpoint = store.checkpoint()
                     require(checkpoint.desiredOn && LifecycleAccess.ownsReadyEngine(checkpoint.generation))
@@ -492,6 +502,7 @@ class ControlProvider : ContentProvider() {
             if (method == "status") {
                 LifecycleAccess.engineStatus(context,result)
                 result.put("physicalLink", LifecycleAccess.physicalLink(result) ?: org.json.JSONObject.NULL)
+                result.put("netbirdDiagnosticCancellation", true)
                 result.put("localConfigControl",io.syn443.android.BuildConfig.DEBUG)
                 if (result.optString("reason") == "policy_waiting_restart_budget" && result.optBoolean("desiredOn")) {
                     result.put("policyRetryAt", Recovery.replacementReadyAt(store.checkpoint(result), System.currentTimeMillis()))
