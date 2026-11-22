@@ -308,7 +308,7 @@ def main():
         before=proxy.progress
         driver=subprocess.run(['adb','-e','shell','am','instrument','-w','-e','fixturePort',str(fixture_port),'-e','fixtureCa',fixture.ca,
             *(['-e','fixtureTelemetry','stopped' if telemetry=='stopped' else 'true'] if telemetry else []),
-            PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=150 if telemetry=='stopped' else 75)
+            PACKAGE+'.test/io.syn443.android.EnrollmentDriver'],capture_output=True,timeout=(150 if telemetry=='stopped' else 75) + (60 if telemetry else 0))
         result=driver.stdout.decode()
         if driver.returncode or 'synthetic_enrollment_verified' not in result or 'INSTRUMENTATION_CODE: -1' not in result:
             stage=re.search(r'INSTRUMENTATION_RESULT: stage=([a-z_]{1,40})',result)

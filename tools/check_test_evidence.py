@@ -96,8 +96,7 @@ if mode=="emulator":
     assert {
         ("io.syn443.android.RouteSnapshotTest", "terminalOmissionAndDeadlineClearOnlyMissingMeasurements"),
     } <= set(identities), "Missing route measurement consistency outcomes"
-    assert {("io.syn443.android.RouteCheckPlanTest", "onlyFreshMatchedCountryEvidenceIsShownForTheCurrentMeasuredPath"),
-            ("io.syn443.android.RouteSnapshotTest", "ordinaryHttpsAndConflictingCountryChecksCannotConfirmAnExitClass")} <= set(identities), "Missing measured exit-class provenance outcomes"
+    assert ("io.syn443.android.RouteSnapshotTest", "ordinaryHttpsAndConflictingCountryChecksCannotConfirmAnExitClass") in identities, "Missing measured exit-class provenance outcome"
     assert {("io.syn443.android.RouteSnapshotTest", name) for name in (
         "applicationDurationsCountDistinctSuccessesAndRetireOnLossOfRouteEvidence",
         "routeDurationWindowBoundsSamplesLifetimeAndPathIdentity",
@@ -882,7 +881,8 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
              'countryAndIpLeavesKeepIndependentCapabilitiesAndCannotHideInAlternatives'),
             ('io.syn443.policy.RouteCheckPlanPolicyTest',
              'legacySignedBytesRemainOpaqueAndNullDuplicateCaseOrMixedProfileCannotDowngrade')],
- 'emulator': [('io.syn443.android.RouteCheckPlanTest', 'canceledBatchClearsEarlierSuccessfulLeafOutcomes'),
+ 'emulator': [('io.syn443.android.RouteCheckPlanTest', 'onlyFreshMatchedCountryEvidenceIsShownForTheCurrentMeasuredPath'),
+              ('io.syn443.android.RouteCheckPlanTest', 'canceledBatchClearsEarlierSuccessfulLeafOutcomes'),
               ('io.syn443.android.RouteCheckPlanTest',
                'ordinaryRequestOwnsWholeProfileAndNeverFlattensOrBorrowsMutatedInput'),
               ('io.syn443.android.RouteCheckPlanTest',
@@ -901,7 +901,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest',
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
 if mode in CHECK_PLAN_REQUIRED:
     required = set(CHECK_PLAN_REQUIRED[mode])
-    assert len(required) == (11 if mode == "policy" else 10)
+    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == 11
     assert required <= set(identities), "Missing exact closed check-plan, policy or passive projection outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/policy/src/test/kotlin/io/syn443/policy" if mode == "policy" else "app/src/androidTest/kotlin/io/syn443/android"

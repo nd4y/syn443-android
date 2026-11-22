@@ -262,7 +262,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         admission = compile(ast.fix_missing_locations(ast.Module(body=guard.body[:3], type_ignores=[])), '<check-plan-admission>', 'exec')
         for mode, floor, folder, classes in [
             ('policy', 31, 'core/policy/src/test/kotlin/io/syn443/policy', {'RouteCheckProfileTest': 8, 'RouteCheckPlanPolicyTest': 3}),
-            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 10}),
+            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 11}),
         ]:
             expected = set()
             for classname, count in classes.items():
