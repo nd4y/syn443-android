@@ -18,6 +18,30 @@ class RouteSnapshotTest {
     private fun report(request:String,ok:Boolean,running:Boolean=false)=JSONObject().put("request",JSONObject(request).getString("request")).put("running",running).put("results",org.json.JSONArray()
         .put(JSONObject().put("id","route-1").put("complete",true).put("ok",ok).put("code",if(ok)"ok" else "dial_failed").put("elapsedMs",5).put("sampledElapsedMs",android.os.SystemClock.elapsedRealtime()).put("path",org.json.JSONArray().put("route-1")))
         .put(JSONObject().put("id","route-2").put("complete",true).put("ok",false).put("code","ssh_banner_mismatch").put("elapsedMs",8).put("sampledElapsedMs",android.os.SystemClock.elapsedRealtime()).put("path",org.json.JSONArray().put("route-2")))).toString()
+    @Test fun ordinaryHttpsAndConflictingCountryChecksCannotConfirmAnExitClass() {
+        fun status(vararg requiredClasses: String): JSONObject {
+            val raw = JSONObject(config)
+            val checks = raw.getJSONArray("route_checks").getJSONObject(0).getJSONArray("checks")
+            for (exit in requiredClasses) {
+                checks.put(JSONObject().put("method", "https_exit_country")
+                    .put("target", "https://exit.example.invalid/").put("expected_exit_class", exit))
+            }
+            val owner = scope.copy(config = java.util.UUID.randomUUID().toString())
+            RouteSnapshot.configure(raw.toString(), owner.config)
+            RouteSnapshot.owner(owner)
+            val request = requireNotNull(RouteSnapshot.request(owner, force = true))
+            assertTrue(RouteSnapshot.update(owner, report(request, true)))
+            return RouteSnapshot.read(true, true, owner).getJSONArray("routes").getJSONObject(0)
+        }
+        try {
+            assertFalse(status().has("verifiedExit"))
+            assertEquals("RU", status("RU").getJSONObject("verifiedExit").getString("class"))
+            assertFalse(status("RU", "NON_RU").has("verifiedExit"))
+        } finally {
+            RouteSnapshot.owner(null)
+        }
+    }
+
     @Test fun applicationDurationsCountDistinctSuccessesAndRetireOnLossOfRouteEvidence() {
         val owner = scope.copy(config = java.util.UUID.randomUUID().toString())
         RouteSnapshot.configure(config, owner.config)

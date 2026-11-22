@@ -96,6 +96,8 @@ if mode=="emulator":
     assert {
         ("io.syn443.android.RouteSnapshotTest", "terminalOmissionAndDeadlineClearOnlyMissingMeasurements"),
     } <= set(identities), "Missing route measurement consistency outcomes"
+    assert {("io.syn443.android.RouteCheckPlanTest", "onlyFreshMatchedCountryEvidenceIsShownForTheCurrentMeasuredPath"),
+            ("io.syn443.android.RouteSnapshotTest", "ordinaryHttpsAndConflictingCountryChecksCannotConfirmAnExitClass")} <= set(identities), "Missing measured exit-class provenance outcomes"
     assert {("io.syn443.android.RouteSnapshotTest", name) for name in (
         "applicationDurationsCountDistinctSuccessesAndRetireOnLossOfRouteEvidence",
         "routeDurationWindowBoundsSamplesLifetimeAndPathIdentity",

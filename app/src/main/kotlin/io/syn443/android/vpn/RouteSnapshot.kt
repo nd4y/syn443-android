@@ -24,6 +24,21 @@ import java.util.UUID
 object RouteSnapshot {
     internal data class FailoverCommand(val receipt:String,val checkId:String,val group:String,val previous:String,val candidate:String)
     private data class Row(val id: String,val tag: String,val type: String,val required: Boolean,val checks: JSONArray,val profile: RouteCheckProfile?,val chain: List<String>,val rules: Int)
+    private fun Row.confirmedExitClass(): String? {
+        if (profile != null) {
+            val result = checkPlans[id] ?: return null
+            if (result.optString("outcome") != "TRUE") return null
+            val leaves = result.getJSONArray("leaves")
+            val passed = (0 until leaves.length()).map { leaves.getJSONObject(it) }
+                .filter { it.getString("outcome") == "TRUE" && it.getString("code") == "ok" }
+                .map { it.getString("id") }.toSet()
+            return profile.confirmedExitClass(passed)
+        }
+        // A successful legacy batch completed every configured check on the same path.
+        return (0 until checks.length()).map { checks.getJSONObject(it) }
+            .filter { it.getString("method") == "https_exit_country" }
+            .map { it.getString("expected_exit_class") }.distinct().singleOrNull()
+    }
     private fun Row.configured() = profile != null || checks.length() > 0
     private var rows = emptyList<Row>()
     private var observations = emptyMap<String,RouteObservation>()
@@ -429,6 +444,13 @@ object RouteSnapshot {
                 .also {value->
                     if (currentSnapshot && state == RouteState.WORKING && row.id !in queued) {
                         durations[row.id]?.summary(now)?.let { value.put("durationDistribution", it) }
+                        if (sample != null && (measuredPaths[row.id]?.length() ?: 0) > 0) {
+                            val remaining = RouteEvidence.DEFAULT_TTL_MS - (now - sample.elapsedMs)
+                            if (remaining > 0) row.confirmedExitClass()?.let { exitClass ->
+                                value.put("verifiedExit", JSONObject().put("class", exitClass)
+                                    .put("source", "https_exit_country").put("validForMs", remaining))
+                            }
+                        }
                     }
                     if (state == RouteState.FAILED && scope == live && row.id !in queued) {
                         sample?.cause?.let { value.put("cause", it.wire) }

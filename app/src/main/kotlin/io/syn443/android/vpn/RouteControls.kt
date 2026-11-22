@@ -89,6 +89,18 @@ import org.json.JSONObject
                 val duration = if (row.isNull("latencyMs")) "длительность неизвестна" else "длительность ${row.getLong("latencyMs")} мс"
                 Text("Возраст проверки ${age} с · $duration", Modifier.testTag("route-${i+1}-timing"))
             }
+            row.optJSONObject("verifiedExit")?.let { evidence ->
+                val location = when (evidence.optString("class")) {
+                    "RU" -> "Россия"
+                    "NON_RU" -> "вне России"
+                    else -> null
+                }
+                val remaining = evidence.optLong("validForMs")
+                if (location != null && evidence.optString("source") == "https_exit_country" && remaining > 0) {
+                    Text("Выход: $location · подтверждён HTTPS-проверкой · ещё ${(remaining + 999) / 1000} с",
+                        Modifier.testTag("route-${i+1}-verified-exit"))
+                }
+            }
             row.optJSONObject("durationDistribution")?.let { stats ->
                 Text(
                     "Длительность проверок · за 15 мин успешно ${stats.getInt("samples")} · " +

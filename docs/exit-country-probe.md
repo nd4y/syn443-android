@@ -24,6 +24,14 @@ stale: this is an observation at one time, not a physical-location guarantee or
 authority for future untested connections. Names, flags and profile metadata are
 never exit proof.
 
+The route detail on Android and the ADB route response show `verifiedExit` after a
+current, successful measurement on the selected path. It contains the coarse
+class (`RU` or `NON_RU`), the source `https_exit_country` and the remaining
+monotonic validity in milliseconds. A composed profile contributes only leaves
+that actually passed. Conflicting classes, ordinary HTTPS success, expiry and a
+change of network or policy remove the observation. The device keeps the
+endpoint address, observed IP and individual country code out of this field.
+
 The existing internal-only Wi-Fi failover pilot still requires comparable checks
 against the internal destination. It rejects both public exit primitives; a
 country response cannot establish access to a home service. Full adaptive public

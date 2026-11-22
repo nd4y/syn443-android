@@ -22,8 +22,10 @@ enum class RouteFailureCause(val wire: String, private val reasons: Set<String>)
 enum class RouteState { OFF, UNAVAILABLE, UNVERIFIED, CHECKING, WORKING, FAILED, STALE, INCOMPLETE }
 enum class RouteActivation { WAIT, READY, FAILED }
 object RouteEvidence {
+    const val DEFAULT_TTL_MS = 120_000L
+
     fun classify(on: Boolean, ownerReady: Boolean, current: RouteScope, result: RouteObservation?,
-                 checking: Boolean, now: Long, ttlMs: Long = 120_000): RouteState {
+                 checking: Boolean, now: Long, ttlMs: Long = DEFAULT_TTL_MS): RouteState {
         require(now >= 0 && ttlMs in 1_000..300_000)
         if (!on) return RouteState.OFF
         if (!ownerReady) return RouteState.UNAVAILABLE

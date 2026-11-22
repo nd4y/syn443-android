@@ -1315,8 +1315,12 @@
     {
       "id": "ALG-20",
       "text": "Происхождение страны/класса exit хранится с источником и сроком. Подтверждение делает назначенный exit probe или доверенная актуальная информация провайдера по политике. Entry GeoIP, имя профиля, emoji флага и доступность одного сайта не считаются достаточной независимой проверкой exit.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/exit-country-probe.md",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteCheckPlanTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/RouteSnapshotTest.kt"
+      ]
     },
     {
       "id": "ALG-21",
