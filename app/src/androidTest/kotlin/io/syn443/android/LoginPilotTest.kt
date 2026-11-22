@@ -86,7 +86,12 @@ class LoginPilotTest {
     @Test fun browserReservationAndCancellationPreserveVpnAndDeleteTheKey() = fixture {generation,url,alias->
         assertTrue(url.startsWith("https://identity.example.invalid/realms/test/protocol/openid-connect/auth?"))
         assertNotNull(DeviceKey.open(alias).publicKey)
-        assertTrue(call("auth-cancel").getBoolean("ok"))
+        val revision=auth().getLong("intentRevision")
+        val vpnGeneration=vpn().getLong("generation")
+        assertFalse(call("auth-reviewed-cancel","$generation:${revision-1}").getBoolean("ok"))
+        assertEquals(vpnGeneration,vpn().getLong("generation"))
+        assertEquals(url,call("auth-browser",generation.toString()).getString("url"))
+        assertTrue(call("auth-reviewed-cancel","$generation:$revision").getBoolean("ok"))
         until {auth().optString("phase")=="SIGNED_OUT"}
         assertTrue(auth().getLong("generation")>generation)
         assertThrows(IllegalStateException::class.java) {DeviceKey.open(alias)}

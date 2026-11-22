@@ -3,6 +3,7 @@ package io.syn443.android.vpn
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -91,8 +92,8 @@ import org.json.JSONObject
             "REFRESHING"->"Обновление защищённой сессии"
             "NEEDS_REAUTH"->when {
                 canReauthenticate->"Войдите в тот же аккаунт Keycloak. Привязка устройства сохранится."
-                status.optString("method")=="invite"->"Проверьте доступ у администратора. Завершите привязку и запросите новое приглашение."
-                else->"Нужен повторный вход. Завершите текущую сессию и войдите снова."
+                status.optBoolean("registrationMayExist")->"Обратитесь к администратору, чтобы восстановить доступ к этому устройству."
+                else->"Отмените незавершённый вход и начните его снова."
             }
             "RETIRING"->"Завершение сессии и удаление локальных ключей"
             else->"Данные входа недоступны. VPN заблокирован до восстановления."
@@ -124,9 +125,14 @@ import org.json.JSONObject
             if(command("auth-retry",generation.toString())?.getBoolean("ok")!=true)message="Не удалось повторить операцию."
             else message=""
         }},modifier=Modifier.testTag("auth-retry")) {Text(if(awaitingPermit)"Обновить конфигурацию" else "Повторить")}
-        if(phase!="SIGNED_OUT")TextButton(onClick={launchGeneration=null;launchAfterRevision=null;scope.launch {
-            if(command("auth-cancel")?.getBoolean("ok")!=true)message="Завершение не подтверждено. Повторите попытку."
-        }},modifier=Modifier.testTag("auth-cancel")) {Text("Завершить сессию")}
+        AccountExitControls(visible, phase, generation, revision, status.optBoolean("registrationMayExist", true)) {
+            launchGeneration=null
+            launchAfterRevision=null
+            scope.launch {
+                val accepted=command("auth-reviewed-cancel","$generation:$revision")?.getBoolean("ok")==true
+                message=if(accepted) "" else "Не удалось подтвердить выход. Проверьте текущее состояние и повторите попытку."
+            }
+        }
         if(status.optInt("cleanupPending")>0)Text("Очистка регистрации на сервере продолжится после нового входа в тот же аккаунт.")
         AdminEntryControls(phase in setOf("POLICY_CACHED","REFRESHING"),status.optBoolean("controlPanelAvailable"),
             status.optBoolean("busy")) {
@@ -146,4 +152,27 @@ import org.json.JSONObject
         }
         if(message.isNotEmpty())Text(message)
     }
+}
+
+@Composable
+internal fun AccountExitControls(
+    visible:Boolean, phase:String, generation:Long, revision:Long, registrationMayExist:Boolean, onExit:()->Unit
+) {
+    if (!visible || generation < 0 || revision < 0 || phase in setOf("", "SIGNED_OUT", "RETIRING", "BLOCKED")) return
+    var reviewing by remember(generation, revision, registrationMayExist) { mutableStateOf(false) }
+    TextButton(
+        onClick={ if (registrationMayExist) reviewing=true else onExit() },
+        modifier=Modifier.testTag("auth-cancel")
+    ) { Text(if (registrationMayExist) "Выйти и отвязать устройство" else "Отменить вход") }
+    if (reviewing) AlertDialog(
+        onDismissRequest={reviewing=false},
+        title={Text("Отвязать это устройство?")},
+        text={Text("VPN отключится. SYN443 удалит с телефона сессию и ключи этой привязки. Чтобы подключиться снова, потребуется зарегистрировать устройство.")},
+        confirmButton={ TextButton(onClick={reviewing=false; onExit()}, modifier=Modifier.testTag("auth-confirm-unlink")) {
+            Text("Отвязать устройство")
+        } },
+        dismissButton={ TextButton(onClick={reviewing=false}, modifier=Modifier.testTag("auth-keep-binding")) {
+            Text("Оставить привязку")
+        } }
+    )
 }
