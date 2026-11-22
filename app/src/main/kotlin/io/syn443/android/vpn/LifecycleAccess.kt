@@ -37,25 +37,29 @@ object LifecycleAccess {
 
     internal fun requestNetworkMode(stamp:String,mode:String,minutes:Int) = service?.get()?.requestNetworkMode(stamp,mode,minutes)==true
 
-    fun engineStatus(status:JSONObject,engineReady:Boolean,processPresent:Boolean?):JSONObject {
+    fun engineStatus(status:JSONObject,engineReady:Boolean,processPresent:Boolean?, serviceAttached:Boolean = true):JSONObject {
         // A newly attached controller can still be waiting for an old owner or
         // a restart budget. Only the current engine handshake is positive evidence.
         val awaitingResume = status.optBoolean("resumeRequired")
+        // Process death can interrupt retirement after the durable Stop but before
+        // engineActive is cleared. Both the service and native process must be absent.
+        val detachedStop = !serviceAttached && status.opt("desiredOn") == false && status.optString("phase") == "Off"
         val active = when {
             engineReady -> true
-            processPresent == false && (awaitingResume || !status.optBoolean("engineActive")) -> false
+            processPresent == false && (detachedStop || awaitingResume || !status.optBoolean("engineActive")) -> false
             else -> null
         }
         return status.put("engineActive",active ?: JSONObject.NULL).put("engineStateKnown",active!=null)
     }
     fun engineStatus(context:Context,status:JSONObject):JSONObject {
-        val ready=ownsReadyEngine(status.optLong("generation", -1))
+        val controller = service?.get()
+        val ready = controller?.ownsReadyEngine(status.optLong("generation", -1)) == true
         val present=if(ready)null else runCatching {
             context.getSystemService(android.app.ActivityManager::class.java)?.runningAppProcesses?.any {
                 it.uid==android.os.Process.myUid() && it.processName==context.packageName+":engine"
             }
         }.getOrNull()
-        return engineStatus(status,ready,present)
+        return engineStatus(status,ready,present,serviceAttached = controller != null || service?.get() != null)
     }
     fun policy(context:Context):JSONObject {
         val result=JSONObject().put("unlocked",unlocked(context)).put("known",false)
