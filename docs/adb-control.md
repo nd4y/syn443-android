@@ -20,6 +20,10 @@ and reauthentication flags. For example, `NEEDS_REAUTH` with `ACCESS_DENIED`
 means access was refused. A cold controller returns `unknown`. An older
 release reports an unsupported operation. On a debug pilot the same command
 without `--local-read` uses the existing private provider and filters its output.
+The current reason belongs to the running controller. After a restart, use
+`logs` or the local support ZIP to look for an earlier `auth_access_denied`
+event in the provisioning channel. It records the denial without an account
+identifier and leaves the VPN state and its current reason intact.
 
 To inspect the latest route checks, run
 `python3 tools/syn443ctl.py --serial <adb-serial> --local-read routes-status`.

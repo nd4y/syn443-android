@@ -57,6 +57,7 @@ enum class EventPhase(val wire: String) {
 
 /** The existing DiagnosticProjection lifecycle catalog, plus one fixed fallback. */
 enum class EventCode(val wire: String, val channel: EventChannel = EventChannel.LIFECYCLE) {
+    AUTH_ACCESS_DENIED("auth_access_denied", EventChannel.PROVISIONING),
     AWAITING_IDENTITY_RELEASE("awaiting_identity_release"),
     CONFIGURATION_INVALID("configuration_invalid", EventChannel.PROVISIONING),
     CONFIGURATION_OR_CAPABILITY_INVALID("configuration_or_capability_invalid", EventChannel.PROVISIONING),

@@ -57,7 +57,7 @@ EVENT_CODES = {
     "native_restart_budget", "native_start", "native_start_failed", "network_changed", "network_unavailable",
     "network_update_failed", "overlay_credentials_pending", "overlay_material_changed", "policy_baseline_degraded",
     "policy_checks_unavailable", "policy_gate_pending", "policy_lease_time_or_scope_invalid", "policy_rollback",
-    "policy_store_unavailable", "policy_waiting_restart_budget", "required_https_ok",
+    "policy_store_unavailable", "policy_waiting_restart_budget", "required_https_ok", "auth_access_denied",
     "required_route_unverified_or_failed", "retry_scheduled", "start_failed", "tcp_timeout", "tls_failed",
     "tls_timeout", "transport_eof", "user_stop", "vpn_permission_required", "vpn_permission_revoked",
 }

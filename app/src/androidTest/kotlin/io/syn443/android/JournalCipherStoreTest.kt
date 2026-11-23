@@ -82,6 +82,33 @@ class JournalCipherStoreTest {
         assertEquals(1, f.reads.get())
     }
 
+    @Test fun deniedLoginHistorySurvivesRecreationAndPreservesCurrentVpnState() = fixture { f ->
+        val state = org.json.JSONObject().put("desiredOn", false).put("phase", "Off")
+            .put("reason", "user_stopped").put("generation", 20L).put("networkEpoch", 30L)
+        val unknown = org.json.JSONObject().put("desiredOn", true)
+        assertNull(io.syn443.android.vpn.StateStore.appendLoginDenial(unknown))
+        assertFalse(unknown.has("events"))
+        val receipt = checkNotNull(io.syn443.android.vpn.StateStore.appendLoginDenial(state))
+        assertEquals("user_stopped", state.getString("reason"))
+        assertEquals("Off", state.getString("phase"))
+        assertFalse(state.getBoolean("desiredOn"))
+        assertEquals(1L, state.getLong("eventSequence"))
+        assertEquals(1, state.getJSONArray("events").length())
+        assertEquals("auth_access_denied", receipt.getString("code"))
+        assertEquals(20L, receipt.getLong("intentGeneration"))
+        assertEquals(30L, receipt.getLong("networkEpoch"))
+        val detail = EventDetail.Lifecycle(checkNotNull(EventPhase.fromWire(receipt.getString("phase"))),
+            EventCode.fromWire(receipt.getString("code")))
+        f.store().append(listOf(f.event().copy(detail = detail, level = io.syn443.observability.EventLevel.WARN)))
+        val before = f.disk()
+        assertFalse(before.values.single().toByteArray().toString(Charsets.ISO_8859_1).contains("auth_access_denied"))
+        val restored = org.json.JSONObject(checkNotNull(f.store().snapshot().bytes).decodeToString())
+        assertEquals("auth_access_denied", restored.getString("code"))
+        assertEquals("provisioning", restored.getString("channel"))
+        assertEquals("Off", restored.getString("phase"))
+        assertEquals(before, f.disk())
+    }
+
     @Test fun expiredFloorSurvivesFailedReplacementAndRejectsRollbackAfterRecreation() = fixture { f ->
         f.store().append(listOf(f.event()))
         val before = f.disk()

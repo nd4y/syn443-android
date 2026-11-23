@@ -1187,6 +1187,7 @@ JOURNAL_REQUIRED = {
             "batchingPreservesOriginalTimesCorrelationSequenceAndMinimumWriteSpacing",
         ),
         "io.syn443.android.JournalCipherStoreTest": (
+            "deniedLoginHistorySurvivesRecreationAndPreservesCurrentVpnState",
             "passiveSnapshotIsEncryptedOnDiskReadOnlyAndWorksAcrossStoreRecreation",
             "expiredFloorSurvivesFailedReplacementAndRejectsRollbackAfterRecreation",
             "passiveReadOverlappingNewCommittedFloorCannotPublishOldHistory",
@@ -1199,7 +1200,7 @@ JOURNAL_REQUIRED = {
 if mode in JOURNAL_REQUIRED:
     inventory = JOURNAL_REQUIRED[mode]
     actual = {(owner, name) for owner, methods in inventory.items() for name in methods}
-    assert len(actual) == 12 and len(identities) >= minimum + len(actual)
+    assert len(actual) == {"observability": 12, "emulator": 13}[mode] and len(identities) >= minimum + len(actual)
     assert actual <= set(identities), "Missing exact structured journal outcomes"
     prefix = root / ("app/src/androidTest/kotlin" if mode == "emulator" else "core/observability/src/test/kotlin")
     for classname, expected in inventory.items():

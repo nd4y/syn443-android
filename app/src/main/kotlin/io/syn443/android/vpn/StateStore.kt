@@ -36,6 +36,12 @@ class StateStore private constructor(private val application: Application) {
             return event
         }
 
+        internal fun appendLoginDenial(value: JSONObject): JSONObject? {
+            val phase = value.optString("phase", if (value.optBoolean("desiredOn")) "" else "Off")
+            if (io.syn443.observability.EventPhase.fromWire(phase) == null) return null
+            return appendEvent(value, phase, io.syn443.observability.EventCode.AUTH_ACCESS_DENIED.wire, value.optLong("networkEpoch"))
+        }
+
         internal fun recordAdaptiveReselection(value: JSONObject, generation: Long, epoch: Long, revision: Long, mode: NetworkMode): Boolean {
             if (!value.optBoolean("desiredOn") || value.optLong("generation") != generation || value.optLong("networkEpoch") != epoch) return false
             if (revision !in 1..9_007_199_254_740_991L) return false
@@ -127,6 +133,16 @@ class StateStore private constructor(private val application: Application) {
         } catch (_: Exception) { /* Diagnostics never changes a committed lifecycle decision. */ }
         return true
     }
+    @Synchronized internal fun observedLoginDenial() {
+        val state = read()
+        val row = appendLoginDenial(state) ?: return
+        write(state)
+        io.syn443.android.observability.LocalDiagnosticJournal.lifecycle(
+            application, directory, row.getString("phase"), row.getString("code"), row.getLong("networkEpoch"),
+            row.getLong("intentGeneration"), row.getLong("at"), row.getLong("elapsed"),
+        )
+    }
+
     internal fun observedEngine(signal: io.syn443.observability.EngineSignal, epoch: Long, generation: Long) {
         try {
             io.syn443.android.observability.LocalDiagnosticJournal.engine(application, directory, signal, epoch, generation,

@@ -192,7 +192,18 @@ class LoginController private constructor(private val context:android.app.Applic
             }
             catch(e:LoginStorageException) {if(e.reason==LoginStorageFailure.STALE)"" else e.reason.name}
             catch(_:Exception) {"LOGIN_UNAVAILABLE"}
-            if(!quiet)synchronized(commands) {if(admitted==commandEpoch)error=reason}
+            if (!quiet) {
+                val recordDenial = synchronized(commands) {
+                    if (admitted != commandEpoch) false else {
+                        val newlyDenied = reason == AuthFailure.ACCESS_DENIED.name && error != reason
+                        error = reason
+                        newlyDenied
+                    }
+                }
+                if (recordDenial && testExchange == null) {
+                    try { state().observedLoginDenial() } catch (_: Exception) { /* Diagnostics cannot change the login outcome. */ }
+                }
+            }
         } finally {
             complete()
             if(telemetryPurge.getAndSet(false))runCatching {telemetryDisk.erase()}
