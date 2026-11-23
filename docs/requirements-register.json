@@ -3435,8 +3435,13 @@
     {
       "id": "AC60",
       "specRow": " Redirect/captcha/changed body и отказ probe target | Результат не принят за здоровый путь автоматически; endpoint failure отделён от proxy failure |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "native/bridge/https_status_test.go",
+        "native/bridge/route_checks_test.go",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedFailoverTest.kt"
+      ],
+      "implementationScope": "Unexpected HTTP replies fail verification. An all-path failure at the shared check target cannot move a VPN path into cooldown or permit a switch. A fresh verified alternative allows failover after the configured number of comparisons. Physical carrier/captive portal validation remains open."
     },
     {
       "id": "AC61",

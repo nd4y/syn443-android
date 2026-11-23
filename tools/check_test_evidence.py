@@ -185,6 +185,7 @@ if mode=="emulator":
         "conservativeRevisionRequiresThirdCurrentRouteBatch",
         "nativeSelectionPlanContainsOnlyConcreteChecksForTheExactConfig",
         "failoverMembersMustMatchSelectorHTTPMethodAndStatus",
+        "sharedHttpTargetFailureNeverQuarantinesPathsWithoutAVerifiedComparator",
         "meteredMaintenanceKeepsRequiredChecksAndOnlyFullComparisonsCountTowardSwitch",
         "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
         "routineBatchesDeferOnlyCoolingReserveAndKeepRequiredSelector",

@@ -36,6 +36,59 @@ class ManagedFailoverTest {
     @Test fun differentProbePlanKeepsLiveFailoverWithoutAShadowReport() =
         assertSelection(FailoverAlgorithm.CONFIRMED, compare = true, reserveCooldown = true)
 
+    @Test fun sharedHttpTargetFailureNeverQuarantinesPathsWithoutAVerifiedComparator() {
+        val engine = JSONObject(config)
+        val rows = engine.getJSONArray("route_checks")
+        for (i in 0 until rows.length()) {
+            rows.getJSONObject(i).getJSONArray("checks").getJSONObject(0)
+                .put("method", "https_204").put("target", "https://home.example.invalid/generate_204")
+        }
+        val raw = engine.toString()
+        EngineConfig.validate(raw)
+        val scope = RouteScope(10, 20, 30, "synthetic-shared-check-target", Policy.hash(raw))
+        RouteSnapshot.configure(raw, scope.config)
+        RouteSnapshot.owner(scope)
+        val algorithm = FailoverAlgorithm.CONFIRMED
+        fun batch(reservePassed: Boolean) {
+            val request = JSONObject(checkNotNull(RouteSnapshot.request(scope, force = true, deferCoolingReserves = true)))
+            assertEquals(3, request.getJSONArray("routes").length())
+            val now = SystemClock.elapsedRealtime()
+            fun result(id: String, passed: Boolean, path: List<String>) = JSONObject().put("id", id)
+                .put("complete", true).put("ok", passed).put("code", if (passed) "ok" else "http_response_mismatch")
+                .put("elapsedMs", 20).put("sampledElapsedMs", now).put("path", JSONArray(path))
+            val reply = JSONObject().put("request", request.getString("request")).put("running", false)
+                .put("results", JSONArray(listOf(
+                    result("route-1", false, listOf("route-1")),
+                    result("route-2", reservePassed, listOf("route-2")),
+                    result("route-3", false, listOf("route-3", "route-1"))
+                )))
+            assertTrue(RouteSnapshot.update(scope, reply.toString()))
+        }
+        try {
+            repeat(algorithm.confirmations + 1) {
+                batch(reservePassed = false)
+                assertNull(RouteSnapshot.failoverAdvice(scope, trackReserveFailures = true, algorithm = algorithm))
+                assertFalse(RouteSnapshot.confirmingFailover(scope))
+                val health = RouteSnapshot.read(true, true, scope)
+                assertFalse(health.getBoolean("requiredReady"))
+                val routes = health.getJSONArray("routes")
+                assertEquals("http_response_mismatch", routes.getJSONObject(2).getString("reason"))
+                for (index in 0..1) assertFalse(routes.getJSONObject(index).has("selectionState"))
+            }
+            repeat(algorithm.confirmations - 1) {
+                batch(reservePassed = true)
+                assertNull(RouteSnapshot.failoverAdvice(scope, trackReserveFailures = true, algorithm = algorithm))
+            }
+            batch(reservePassed = true)
+            val change = checkNotNull(RouteSnapshot.failoverAdvice(scope, trackReserveFailures = true, algorithm = algorithm))
+            assertEquals("primary", change.previous)
+            assertEquals("reserve", change.candidate)
+        } finally {
+            RouteSnapshot.owner(null)
+            RouteSnapshot.configure(null, "")
+        }
+    }
+
     @Test fun failoverMembersMustMatchSelectorHTTPMethodAndStatus() {
         val engine = JSONObject(config)
         val rows = engine.getJSONArray("route_checks")
