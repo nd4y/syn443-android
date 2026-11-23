@@ -13,6 +13,14 @@ This read neither contacts peers nor includes peer names, addresses or proxy
 settings. Older clients continue to receive the original capability list. Logs also support
 `--follow-seconds 60`. An unknown engine state omits `engineActive`.
 
+To diagnose a sign-in problem, run
+`python3 tools/syn443ctl.py --serial <adb-serial> --local-read auth-status`.
+It returns the current login phase, a finite reason code, and available busy
+and reauthentication flags. For example, `NEEDS_REAUTH` with `ACCESS_DENIED`
+means access was refused. A cold controller returns `unknown`. An older
+release reports an unsupported operation. On a debug pilot the same command
+without `--local-read` uses the existing private provider and filters its output.
+
 To inspect the latest route checks, run
 `python3 tools/syn443ctl.py --serial <adb-serial> --local-read routes-status`.
 Each row identifies a route by its position in the current configuration.

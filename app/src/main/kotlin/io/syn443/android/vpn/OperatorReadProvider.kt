@@ -45,7 +45,7 @@ class OperatorReadProvider : ContentProvider() {
         fun rejected(code: String) = Bundle().apply { putBoolean("ok", false); putString("error", code) }
         if (Binder.getCallingUid() != 2000) return rejected("unauthorized")
         val validMethod = when (method) {
-            "capabilities", "status", "logs", "routes-status" -> arg == null
+            "capabilities", "status", "logs", "routes-status", "auth-status" -> arg == null
             "overlay-status" -> OverlayProviderHealth.supports(arg)
             else -> false
         }
@@ -59,7 +59,8 @@ class OperatorReadProvider : ContentProvider() {
                 when (method) {
                     "capabilities" -> JSONObject().put("schemaVersion", 1).put("operations",
                         JSONArray(listOf("capabilities", "status", "logs")))
-                        .put("optionalOperations", JSONArray(listOf("overlay-status", "routes-status")))
+                        .put("optionalOperations", JSONArray(listOf("overlay-status", "routes-status", "auth-status")))
+                    "auth-status" -> LoginController.operatorLoginStatus()
                     "overlay-status" -> OverlayProviderHealth.live(app, requireNotNull(arg))
                     "routes-status" -> {
                         val status = LifecycleAccess.engineStatus(app, StateStore.get(app).read())

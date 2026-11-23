@@ -10,6 +10,40 @@ import syn443ctl
 
 
 class AdbControlTest(unittest.TestCase):
+    def test_login_reads_are_scoped_to_the_advertised_provider_and_closed_fields(self):
+        base = {"schemaVersion": 1, "operations": list(syn443ctl.LOCAL_READ_BASE)}
+        current = dict(base, optionalOperations=["auth-status"])
+        public = {"schemaVersion": 1, "phase": "NEEDS_REAUTH", "reason": "ACCESS_DENIED",
+                  "busy": False, "canReauthenticate": True}
+        private = dict(public, pairCode="sensitive fixture", owner="sensitive fixture")
+        for local, replies, expected in [
+            (False, [private], 0), (True, [current, public], 0),
+            (True, [base], 4), (True, [current, private], 5),
+            (True, [current, dict(public, schemaVersion=True)], 5),
+        ]:
+            calls = []
+            def reply(cmd, **kwargs):
+                calls.append(cmd[cmd.index("--method") + 1])
+                self.assertIn(syn443ctl.LOCAL_READ_URI if local else syn443ctl.URI, cmd)
+                raw = ("Result: Bundle[{ok=true, json=" + json.dumps(replies[len(calls)-1]) + "}]").encode()
+                return subprocess.CompletedProcess(cmd, 0, raw, b"")
+            args = ["--serial", "synthetic"] + (["--local-read"] if local else []) + ["auth-status"]
+            with patch("syn443ctl.subprocess.run", side_effect=reply), contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(expected, syn443ctl.main(args))
+            self.assertNotIn("sensitive fixture", out.getvalue())
+            self.assertEqual(calls, (["capabilities"] if local else []) + (["auth-status"] if expected != 4 else []))
+            if expected == 0:
+                self.assertEqual(public, json.loads(out.getvalue())["result"])
+
+    def test_login_status_cannot_promote_unknown_fields_or_an_earlier_busy_error(self):
+        closed = syn443ctl.login_read_status
+        for bad in ["sensitive fixture", [], {}, 1, None]:
+            self.assertEqual({"schemaVersion": 1, "phase": "unknown", "reason": "unknown"},
+                             closed({"phase":bad,"reason":"ACCESS_DENIED","busy":False}, False))
+            self.assertEqual("unknown", closed({"phase":"BROWSER","reason":bad}, False)["reason"])
+        self.assertEqual({"schemaVersion":1, "phase":"BROWSER","reason":"","busy":True},
+                         closed({"phase":"BROWSER","reason":"ACCESS_DENIED","busy":True,"canReauthenticate":1}, False))
+
     def test_consented_overlay_negotiates_on_the_read_endpoint_before_asking_for_health(self):
         legacy = {"schemaVersion": 1, "operations": ["capabilities","status","logs"]}
         latest = dict(legacy, optionalOperations=["overlay-status"])

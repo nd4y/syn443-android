@@ -20,9 +20,9 @@ import zipfile
 URI = "content://io.syn443.control"
 LOCAL_READ_URI = "content://io.syn443.operator.read"
 LOCAL_READ_BASE = ("capabilities", "status", "logs")
-LOCAL_READ_OPERATIONS = LOCAL_READ_BASE + ("overlay-status", "routes-status")
+LOCAL_READ_OPERATIONS = LOCAL_READ_BASE + ("overlay-status", "routes-status", "auth-status")
 METHODS = {
-    "status": "status", "logs": "logs", "routes-status": "routes-status",
+    "auth-status": "auth-status", "status": "status", "logs": "logs", "routes-status": "routes-status",
     "routes-check": "routes-check", "routes-cancel": "routes-cancel",
     "overlay-status": "overlay-status", "netbird-status": "status", "netbird-diagnose": "netbird-diagnose", "netbird-view": "netbird-view", "netbird-cancel": "netbird-cancel",
     "vpn-start": "connect", "vpn-stop": "disconnect", "vpn-resume": "resume",
@@ -34,7 +34,7 @@ METHODS = {
     "support-bundle-read": "bundle-read",
     "support-bundle-shell-state": "bundle-shell-state", "support-bundle-shell-release": "bundle-shell-release",
 }
-OPERATIONS = ("capabilities", "status", "logs", "diagnostic-bundle", "routes-status",
+OPERATIONS = ("capabilities", "status", "auth-status", "logs", "diagnostic-bundle", "routes-status",
               "routes-check", "routes-cancel", "overlay-status", "netbird-status", "netbird-diagnose", "netbird-view", "netbird-cancel",
               "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply", "mode-get", "mode-set",
               "support-bundle", "support-bundle-collect", "support-bundle-status",
@@ -131,6 +131,37 @@ def local_read_operations(reply):
     ) or len(set(optional)) != len(optional):
         raise ControlError("invalid_reply", 5)
     return [name for name in LOCAL_READ_OPERATIONS if name in LOCAL_READ_BASE or name in optional]
+
+
+LOGIN_PHASES = {
+    "SIGNED_OUT", "RESERVED", "INVITING", "BROWSER", "EXCHANGING", "AUTHENTICATED", "CLEANUP", "ENROLLING",
+    "PROVISIONING", "POLICY_CACHED", "REFRESHING", "NEEDS_REAUTH", "RETIRING", "BLOCKED", "unknown",
+}
+LOGIN_REASONS = {
+    "", "CANCELLED", "TRANSPORT", "INVALID_REPLY", "ACCESS_DENIED", "REAUTHENTICATE", "SESSION_EXPIRED",
+    "CONFLICT", "PENDING", "THROTTLED", "UNAVAILABLE", "STALE", "CORRUPT", "WRONG_THREAD",
+    "LOGIN_UNAVAILABLE", "LOGIN_STORE_UNAVAILABLE", "unknown",
+}
+
+
+def login_read_status(data, local_read):
+    if local_read and (type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 1 or
+                       set(data) - {"schemaVersion", "phase", "reason", "busy", "canReauthenticate"}):
+        raise ControlError("invalid_reply", 5)
+    phase = data.get("phase")
+    reason = data.get("reason")
+    if not isinstance(phase, str) or phase not in LOGIN_PHASES:
+        phase = "unknown"
+    if phase == "unknown" or not isinstance(reason, str) or reason not in LOGIN_REASONS:
+        reason = "unknown"
+    result = {"schemaVersion": 1, "phase": phase, "reason": reason}
+    if phase != "unknown":
+        for key in ("busy", "canReauthenticate"):
+            if type(data.get(key)) is bool:
+                result[key] = data[key]
+        if result.get("busy") is True:
+            result["reason"] = ""
+    return result
 
 
 def local_route_health(data):
@@ -840,6 +871,10 @@ def main(argv=None):
         device = Device(args.serial, args.timeout, local_read=True) if args.local_read else Device(args.serial, args.timeout)
         if args.local_read and args.operation == "capabilities":
             data = {"access": "local_read_grant", "operations": local_read_operations(device.call("capabilities"))}
+        elif args.operation == "auth-status":
+            if args.local_read and "auth-status" not in local_read_operations(device.call("capabilities")):
+                raise ControlError("unsupported_by_device", 4)
+            data = login_read_status(device.call("auth-status"), args.local_read)
         elif args.local_read and args.operation == "status":
             value = device.call("status")
             phase, reason = value.get("phase"), value.get("reason")

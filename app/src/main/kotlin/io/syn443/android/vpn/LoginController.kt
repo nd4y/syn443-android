@@ -40,6 +40,9 @@ class LoginController private constructor(private val context:android.app.Applic
     companion object {
         @Volatile private var instance:LoginController?=null
         @Synchronized fun get(context:Context):LoginController = instance ?: LoginController(context.applicationContext as android.app.Application).also {instance=it}
+        internal fun operatorLoginStatus(): JSONObject = instance?.loginReadStatus()
+            ?: JSONObject().put("schemaVersion", 1).put("phase", "unknown").put("reason", "unknown")
+
         internal fun isolatedForTest(context:Context,namespace:String,exchange:IdentityExchange,beforeQueue:(()->Unit)?=null,
             anchor:TrustAnchor?=null,reportVpnOn:(()->Boolean)?=null,monotonicMillis:()->Long=SystemClock::elapsedRealtime):LoginController {
             require(io.syn443.android.BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu","goldfish") && namespace.matches(Regex("test-[a-z0-9-]{1,40}")))
@@ -343,6 +346,25 @@ class LoginController private constructor(private val context:android.app.Applic
         if (s.phase!=LoginPhase.BROWSER || browser?.first!=s.generation) return null
         val active=cached?.takeIf { it.first==s } ?: return null
         return active.second.pending?.current(s.generation,boot(),elapsed())
+    }
+
+    internal fun loginReadStatus(): JSONObject = synchronized(commands) {
+        val result = JSONObject().put("schemaVersion", 1)
+        try {
+            val login = journal.snapshot()
+            val busy = pendingCommands.get() > 0
+            val failure = error
+            val reason = when {
+                busy || failure.isEmpty() -> ""
+                AuthFailure.entries.any { it.name == failure } || LoginStorageFailure.entries.any { it.name == failure } -> failure
+                failure == "LOGIN_UNAVAILABLE" -> failure
+                else -> "unknown"
+            }
+            result.put("phase", login.phase.name).put("reason", reason)
+                .put("canReauthenticate", LoginRecovery.canReauthenticate(login)).put("busy", busy)
+        } catch (_: LoginStorageException) {
+            result.put("phase", "BLOCKED").put("reason", "LOGIN_STORE_UNAVAILABLE")
+        }
     }
 
     fun status():JSONObject = runCatching {
