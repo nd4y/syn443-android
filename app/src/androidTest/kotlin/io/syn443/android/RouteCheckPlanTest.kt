@@ -85,6 +85,30 @@ class RouteCheckPlanTest {
         assertFalse(RouteSnapshot.read(true, true, scope.copy(network = 8)).getJSONArray("routes").getJSONObject(0).has("verifiedExit"))
     }
 
+    @Test fun countrySuccessCannotValidateAReportWithAnUnmetRequiredStage() {
+        val value = config()
+        val profile = row(value).getJSONObject("profile")
+        profile.getJSONArray("leaves").getJSONObject(1).put("check", JSONObject()
+            .put("method", "https_exit_country").put("target", "https://country.example.invalid/")
+            .put("expected_exit_class", "NON_RU"))
+        profile.put("gates", JSONArray().put("b")).put("stages", JSONArray().put(JSONObject().put("leaf", "a")))
+        val scope = configure(value)
+        val first = JSONObject(requireNotNull(RouteSnapshot.request(scope)))
+        val contradictory = diagnostic()
+        val leaves = contradictory.getJSONArray("leaves")
+        leaves.getJSONObject(0).put("outcome", "FALSE").put("code", "dial_failed")
+        leaves.getJSONObject(1).put("outcome", "TRUE").put("code", "ok")
+        assertTrue(RouteSnapshot.update(scope, report(first, plan = contradictory)))
+        assertEquals("UNKNOWN", view(scope).getJSONObject("checkPlan").getString("outcome"))
+        assertFalse(view(scope).has("verifiedExit"))
+
+        val next = JSONObject(requireNotNull(RouteSnapshot.request(scope, force = true)))
+        leaves.getJSONObject(0).put("outcome", "TRUE").put("code", "ok")
+        assertTrue(RouteSnapshot.update(scope, report(next, plan = contradictory)))
+        assertEquals("TRUE", view(scope).getJSONObject("checkPlan").getString("outcome"))
+        assertEquals("NON_RU", view(scope).getJSONObject("verifiedExit").getString("class"))
+    }
+
     @Test fun canceledBatchClearsEarlierSuccessfulLeafOutcomes() {
         val scope = configure()
         val first = JSONObject(checkNotNull(RouteSnapshot.request(scope)))
