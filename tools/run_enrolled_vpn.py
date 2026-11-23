@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
+import selectors
 import subprocess
 import sys
 import threading
@@ -13,6 +15,7 @@ import xml.etree.ElementTree as ET
 from enrollment_fixture import Fixture, decode
 from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
 from run_route_lifecycle import RouteProxy
+from known_start_slo import SAMPLES, StartupCampaign
 from recovery_slo import RecoveryTimeout
 from run_vpn_process_faults import ControlUnavailable
 
@@ -86,6 +89,63 @@ def exchange_through_proxy(proxy, destination="203.0.113.10"):
                                  (confirmed, status[1].decode() if status else 'absent'))
     finally:
         proxy.payload_received = None
+
+
+def known_start_response(proxy):
+    """Read the app UID's reply with stdin open. Timestamp bytes before process cleanup."""
+    challenge = secrets.token_hex(16).encode("ascii")
+    request = b"GET /syn443-start/" + challenge + b" HTTP/1.1\r\nHost: fixture.invalid\r\nConnection: close\r\n\r\n"
+    expected = b"HTTP/1.1 204 No Content\r\nX-Syn443-Start: " + challenge + b"\r\nConnection: close\r\n\r\n"
+    proxy.start_challenge = challenge
+    try:
+        args = ["adb", "-e", "shell", "-T", "run-as", PACKAGE, "toybox", "nc", "-w", "5", "203.0.113.10", "80"]
+        with subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as client:
+            try:
+                client.stdin.write(request)
+                client.stdin.flush()
+                deadline = time.monotonic() + 7
+                reply = bytearray()
+                with selectors.DefaultSelector() as selector:
+                    selector.register(client.stdout, selectors.EVENT_READ)
+                    while len(reply) < len(expected):
+                        if not selector.select(max(0, deadline-time.monotonic())):
+                            raise RecoveryTimeout("Known-start application response timed out")
+                        part = os.read(client.stdout.fileno(), len(expected)-len(reply))
+                        if not part:
+                            raise AssertionError("Known-start application response was incomplete")
+                        reply.extend(part)
+                    received = time.monotonic_ns()
+                if reply != expected:
+                    raise AssertionError("Assigned proxy did not return the trial response")
+                return received
+            finally:
+                client.kill()
+    finally:
+        proxy.start_challenge = None
+
+
+def measure_known_starts(proxy, fixture, generation):
+    campaign = StartupCampaign()
+    for index in range(SAMPLES):
+        if index:
+            call("disconnect")
+        await_condition(vpn_stopped)
+        assert fixture.registrations == 1 and call("auth-status")["generation"] == generation
+        before = proxy.progress
+        campaign.start(index)
+        started = time.monotonic_ns()
+        try:
+            call("connect")
+            def ready():
+                state = call("status")
+                return (state.get("phase") == "Online" and state.get("policy", {}).get("activeRevision") == 1
+                        and proxy.progress > before)
+            await_condition(ready)
+            received = known_start_response(proxy)
+        except Exception:
+            campaign.finish(index)
+            raise
+        campaign.finish(index, received-started)
 
 
 def logout(fresh_install=False):
@@ -662,7 +722,7 @@ def main():
                                  'enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':'stopped'}
                 driver_result=setup(name=='enrolledPendingAssignmentRetriesWhileVisible',
                                     telemetry=telemetry_modes.get(name), installer=installer_only,
-                                    wifi_required=name=='enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath')
+                                    wifi_required=name in ('enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath','enrolledSignedAssignmentStartsRealTun'))
                 before=proxy.progress;generation=call('auth-status')['generation']
                 if name=='enrolledPendingAssignmentRetriesWhileVisible':
                     assert fixture.policy_requests>=2 and fixture.registrations==1
@@ -670,11 +730,11 @@ def main():
                 elif name=='enrolledSignedAssignmentStartsRealTun':
                     assert call('status')['policy']['activeRevision']==1 and fixture.policy_requests>=1
                     await_condition(lambda:observed_report(1,'committed',1),45)
+                    exchange_through_proxy(proxy)
                     call('disconnect');await_condition(vpn_stopped)
                     try:call('import',base64.b64encode(json.dumps(config).encode()).decode());raise RuntimeError('managed import unexpectedly accepted')
                     except AssertionError:pass
-                    before=proxy.progress;call('connect')
-                    await_condition(lambda:call('status').get('phase')=='Online' and proxy.progress>before)
+                    measure_known_starts(proxy,fixture,generation)
                 elif name=='enrolledManagementOutageRetainsTunnelThroughControllerDeath':
                     enrolled_management_outage(fixture, proxy, generation)
                 elif name=='enrolledControllerDeathRecoversAuthorizedCache':
