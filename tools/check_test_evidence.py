@@ -185,6 +185,7 @@ if mode=="emulator":
         "conservativeRevisionRequiresThirdCurrentRouteBatch",
         "nativeSelectionPlanContainsOnlyConcreteChecksForTheExactConfig",
         "failoverMembersMustMatchSelectorHTTPMethodAndStatus",
+        "sharedHttpTargetFailureNeverQuarantinesPathsWithoutAVerifiedComparator",
         "meteredMaintenanceKeepsRequiredChecksAndOnlyFullComparisonsCountTowardSwitch",
         "wifiInternalPlanCannotEnableDirectOrMismatchedCheckFallback",
         "routineBatchesDeferOnlyCoolingReserveAndKeepRequiredSelector",
@@ -896,6 +897,8 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'co
              'legacySignedBytesRemainOpaqueAndNullDuplicateCaseOrMixedProfileCannotDowngrade')],
  'emulator': [('io.syn443.android.RouteCheckPlanTest', 'onlyFreshMatchedCountryEvidenceIsShownForTheCurrentMeasuredPath'),
               ('io.syn443.android.RouteCheckPlanTest', 'countrySuccessCannotValidateAReportWithAnUnmetRequiredStage'),
+              ('io.syn443.android.RouteCheckPlanTest', 'replacementCheckOrNetworkRequiresFreshProofBeforeShowingReadinessOrExit'),
+              ('io.syn443.android.RouteCheckPlanTest', 'unsupportedIcmpAndUdpAreRejectedOnAConcreteTcpProxyChain'),
               ('io.syn443.android.RouteCheckPlanTest', 'canceledBatchClearsEarlierSuccessfulLeafOutcomes'),
               ('io.syn443.android.RouteCheckPlanTest',
                'ordinaryRequestOwnsWholeProfileAndNeverFlattensOrBorrowsMutatedInput'),
@@ -915,7 +918,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'co
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
 if mode in CHECK_PLAN_REQUIRED:
     required = set(CHECK_PLAN_REQUIRED[mode])
-    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == {'policy': 13, 'emulator': 12}[mode]
+    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == {'policy': 13, 'emulator': 14}[mode]
     assert required <= set(identities), "Missing exact closed check-plan, policy or passive projection outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/policy/src/test/kotlin/io/syn443/policy" if mode == "policy" else "app/src/androidTest/kotlin/io/syn443/android"
