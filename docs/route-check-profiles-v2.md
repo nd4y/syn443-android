@@ -177,3 +177,5 @@ Both ordered checks and v2 profile leaves support this predicate. Its verb and
 status travel in the signed engine configuration and participate in the proof hash.
 Publication requires the device capability `route.https-status.v1` together with
 `route.health.v1`. Existing clients can continue to receive their existing checks.
+
+HTTPS status, strict 204, exit IP and exit country checks evaluate the final HTTP response. Each permits up to four informational responses on its assigned connection within the existing time and byte budgets. An HTTP 101 protocol switch ends the exchange.

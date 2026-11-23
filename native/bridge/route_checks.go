@@ -627,6 +627,23 @@ func setRouteFailureCause(cause *string, stage string, err error) {
 	}
 }
 
+// A route check uses one connection and one request for all response blocks.
+const maxRouteInformationalResponses = 4
+
+func interimRouteStatus(code int) bool {
+	return code >= 100 && code < 200 && code != http.StatusSwitchingProtocols
+}
+
+func finalRouteResponse(reader *bufio.Reader, req *http.Request) (*http.Response, error) {
+	for n := 0; n <= maxRouteInformationalResponses; n++ {
+		response, err := http.ReadResponse(reader, req)
+		if err != nil || !interimRouteStatus(response.StatusCode) {
+			return response, err
+		}
+	}
+	return nil, io.ErrUnexpectedEOF
+}
+
 func probeRouteWithDetail(parent context.Context, dial routeDial, c routeCheck, roots *x509.CertPool, clock func() int64, cause *string) (code string, complete bool) {
 	if cause != nil {
 		*cause = ""
@@ -747,42 +764,30 @@ func probeRouteWithDetail(parent context.Context, dial routeDial, c routeCheck, 
 	if c.Method == "https_exit_country" {
 		return probeExitCountryResponse(parent, ctx, secure, req, c.ExpectedExitClass)
 	}
+	// The status-only probe keeps its existing 8 KiB header limit. The other
+	// probes share one 8193-byte allowance for all headers and the small body.
+	limit := int64(8193)
 	if c.Method == "https_status" {
-		// A fresh socket, one request and at most 8 KiB across all response
-		// headers. Never follow Location or drain a GET response body.
-		headers := bufio.NewReader(io.LimitReader(secure, 8192))
-		for interim := 0; interim <= 4; interim++ {
-			response, readErr := http.ReadResponse(headers, req)
-			if parent.Err() != nil {
-				return "cancelled", false
-			}
-			if ctx.Err() != nil {
-				return "check_timeout", true
-			}
-			if readErr != nil {
-				return "response_failed", true
-			}
-			if response.StatusCode >= 100 && response.StatusCode < 200 && response.StatusCode != http.StatusSwitchingProtocols {
-				continue
-			}
-			_ = conn.Close()
-			_ = response.Body.Close()
-			if response.StatusCode == c.ExpectedStatus {
-				return "ok", true
-			}
-			return "http_response_mismatch", true
-		}
-		return "response_failed", true
+		limit = 8192
 	}
-	response, err := http.ReadResponse(bufio.NewReaderSize(io.LimitReader(secure, 8193), 4096), req)
-	if err != nil {
-		if parent.Err() != nil {
-			return "cancelled", false
-		}
-		return "response_failed", true
+	response, err := finalRouteResponse(bufio.NewReader(io.LimitReader(secure, limit)), req)
+	if parent.Err() != nil {
+		return "cancelled", false
 	}
 	if ctx.Err() != nil {
 		return "check_timeout", true
+	}
+	if err != nil {
+		return "response_failed", true
+	}
+	if c.Method == "https_status" {
+		// Closing the socket first avoids draining a GET response body.
+		_ = conn.Close()
+		_ = response.Body.Close()
+		if response.StatusCode == c.ExpectedStatus {
+			return "ok", true
+		}
+		return "http_response_mismatch", true
 	}
 	defer response.Body.Close()
 	if c.Method == "https_exit_ip" {
