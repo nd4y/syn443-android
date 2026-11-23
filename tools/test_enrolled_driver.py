@@ -21,6 +21,25 @@ class SignedPolicyReadinessTest(unittest.TestCase):
         self.assertEqual(dict(base, tag=selected, server_port=14002), catalogue[selected])
         self.assertEqual(14001, base['server_port'])
 
+    def test_wifi_preflight_does_not_start_proxy_or_run_enrollment(self):
+        from run_enrolled_vpn import main
+
+        installed_driver = b'io.syn443.android.test/io.syn443.android.EnrollmentDriver'
+        for hardware in (b'ranchu\n', b'physical\n'):
+            with self.subTest(hardware=hardware), \
+                    patch('sys.argv', ['run_enrolled_vpn.py', '--prepare-wifi']), \
+                    patch('run_enrolled_vpn.adb', side_effect=[hardware, installed_driver]), \
+                    patch('run_enrolled_vpn.prepare_emulator_wifi') as prepare, \
+                    patch('run_enrolled_vpn.Server') as server:
+                if hardware.startswith(b'ranchu'):
+                    main()
+                    prepare.assert_called_once_with()
+                else:
+                    with self.assertRaises(AssertionError):
+                        main()
+                    prepare.assert_not_called()
+                server.assert_not_called()
+
     def test_wifi_reassociation_requires_disposable_emulator_and_new_app_uid_observation(self):
         def fixture(states, scan, saved=b""):
             observations = iter(states)

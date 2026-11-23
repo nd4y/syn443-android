@@ -127,6 +127,26 @@ class VpnLifecycleTest {
     }
     private fun pid() = context.getSystemService(ActivityManager::class.java).runningAppProcesses
         ?.firstOrNull { it.processName == "${context.packageName}:engine" }?.pid
+    private fun wifiPresent(): Boolean {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java)
+        return connectivity.allNetworks.any {
+            connectivity.getNetworkCapabilities(it)?.let { caps ->
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                    !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            } == true
+        }
+    }
+
+    private fun restoreFixtureWiFi() {
+        shell("svc wifi enable")
+        if (Build.VERSION.SDK_INT < 30) return
+        // The fixture owns the stock open AP and is always in airplane mode.
+        // Reassociate only if the OS did not bring the known network back.
+        val deadline = android.os.SystemClock.elapsedRealtime() + 12_000
+        while (!wifiPresent() && android.os.SystemClock.elapsedRealtime() < deadline) Thread.sleep(250)
+        if (!wifiPresent()) shell("cmd wifi connect-network AndroidWifi open")
+    }
+
     private fun await(timeout: Long = 35_000, predicate: () -> Boolean) {
         val end = android.os.SystemClock.elapsedRealtime() + timeout
         while (android.os.SystemClock.elapsedRealtime() < end) {
@@ -135,12 +155,7 @@ class VpnLifecycleTest {
             Thread.sleep(200)
         }
         val s = status()
-        val wifi = runCatching {
-            val connectivity = context.getSystemService(ConnectivityManager::class.java)
-            connectivity.allNetworks.any {
-                connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-            }
-        }.getOrNull()?.toString() ?: "unknown"
+        val wifi = runCatching { wifiPresent() }.getOrNull()?.toString() ?: "unknown"
         fail("VPN lifecycle deadline exceeded: phase=${s.optString("phase")}, reason=${s.optString("reason")}, " +
             "wifi=$wifi, desiredOn=${s.optBoolean("desiredOn")}, resumeRequired=${s.optBoolean("resumeRequired")}, " +
             "attempt=${s.optInt("attempt")}, heavyCount=${s.optJSONArray("heavyWallMs")?.length()}, native=${pid()}, tunnels=${tunnels.get()}")
@@ -402,7 +417,7 @@ class VpnLifecycleTest {
             Thread.sleep(2_000)
             assertEquals("NoNetwork", status().optString("phase"))
         } finally {
-            shell("svc wifi enable")
+            restoreFixtureWiFi()
         }
         await(60_000) { status().optString("phase") == "Online" }
         assertEquals(old, pid())

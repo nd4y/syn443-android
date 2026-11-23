@@ -20,7 +20,7 @@ from recovery_slo import RecoveryTimeout
 from run_vpn_process_faults import ControlUnavailable
 
 def prepare_emulator_wifi():
-    """Reassociate the disposable AVD if previous reboot cases left its Wi-Fi ineligible."""
+    """Require the disposable AVD to have usable Wi-Fi before starting an app scenario."""
     assert os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("SYN443_CI_AVD") == "syn443-ci"
     assert adb("emu","avd","name").splitlines() == [b"syn443-ci",b"OK"]
     assert adb("shell","getprop","ro.hardware").strip() in (b"ranchu",b"goldfish")
@@ -35,7 +35,7 @@ def prepare_emulator_wifi():
     status = observe()
     if status == "eligible":
         return
-    print("Preparing disposable Wi-Fi after reboot; observed "+status,flush=True)
+    print("Preparing disposable Wi-Fi; observed "+status,flush=True)
     adb("shell","svc","wifi","disable")
     time.sleep(2)
     adb("shell","svc","wifi","enable")
@@ -637,8 +637,11 @@ def failure_summary():
 def main():
     assert adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish'),'Emulator only'
     assert PACKAGE+'.test/io.syn443.android.EnrollmentDriver' in adb('shell','pm','list','instrumentation').decode(),'Test APK enrollment driver is not installed'
-    suite=ET.Element('testsuite',name='SYN443 enrolled native VPN')
     args=sys.argv[1:]
+    if args == ['--prepare-wifi']:
+        prepare_emulator_wifi()
+        return
+    suite=ET.Element('testsuite',name='SYN443 enrolled native VPN')
     if args not in ([], ['--system-installer'], ['--historical']):
         raise ValueError('Unexpected enrollment scenario')
     installer_only=args==['--system-installer']

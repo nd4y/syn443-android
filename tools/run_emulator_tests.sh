@@ -121,6 +121,9 @@ result=0
 # Bound the owning host invocation, without pretending interruption stops JNI.
 # A deadline fails this harness; it never proceeds to the external scenarios.
 adb -e install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+# An enabled Wi-Fi switch is not evidence of a connected, usable underlay.
+# Observe it from the app UID before the long instrumentation matrix starts.
+python3 tools/run_enrolled_vpn.py --prepare-wifi
 # The instrumentation deadline is 20 minutes. Leave the wrapper time to
 # verify the APKs first and report the last checked-in test on interruption.
 if ! timeout --signal=TERM --kill-after=20s 22m python3 tools/run_packaged_instrumentation.py run; then
