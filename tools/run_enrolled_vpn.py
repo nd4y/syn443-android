@@ -39,27 +39,40 @@ def prepare_emulator_wifi():
     adb("shell","svc","wifi","disable")
     time.sleep(2)
     adb("shell","svc","wifi","enable")
-    # The virtual access point is open. Only select its emulator-provided name
-    # if the Android Wi-Fi service itself lists it. Never adopt an arbitrary SSID.
     sdk = int(adb("shell","getprop","ro.build.version.sdk").strip())
-    if sdk >= 30:
-        adb("shell","cmd","wifi","start-scan")
-        time.sleep(3)
-        scan = adb("shell","cmd","wifi","list-scan-results").decode(errors="replace")
-        if re.search(r"\bAndroidWifi\b", scan):
-            adb("shell","cmd","wifi","connect-network","AndroidWifi","open")
-    end = time.monotonic()+50
+    # A scan request is asynchronous. A single empty scan just after reboot
+    # cannot tell us whether the emulator's own access point is available.
+    started = time.monotonic()
+    next_scan = started
+    attempts = 0
+    observed_default = False
     observations = []
-    while True:
+    while time.monotonic()-started < 70:
+        now = time.monotonic()
+        if sdk >= 30 and status == "missing" and now >= next_scan and attempts < 2:
+            adb("shell","cmd","wifi","start-scan")
+            scan = adb("shell","cmd","wifi","list-scan-results")
+            saved = adb("shell","cmd","wifi","list-networks")
+            observed_default |= any(b"AndroidWifi" in line.split() for line in (scan+ b"\n" + saved).splitlines())
+            # The workflow starts the stock AVD with its default open AP.
+            # If discovery lags, select only that fixed SSID on this owned AVD.
+            # A successful shell call never counts as usable Wi-Fi.
+            if observed_default or now-started >= 12:
+                adb("shell","cmd","wifi","connect-network","AndroidWifi","open")
+                attempts += 1
+                next_scan = now+20
+            else:
+                next_scan = now+4
         status = observe()
         if status == "eligible":
             print("App UID confirmed validated unmetered Wi-Fi after reassociation",flush=True)
             return
         if not observations or observations[-1] != status:
             observations.append(status)
-        if time.monotonic() >= end:
-            raise AssertionError("Disposable Wi-Fi eligibility after reassociation: "+",".join(observations))
         time.sleep(2)
+    raise AssertionError("Disposable Wi-Fi unavailable: "+",".join(observations)+
+                         f"; defaultSeen={observed_default}, connectionAttempts={attempts}")
+
 
 
 def stopped_rollback_recovered(controller,generation):

@@ -22,8 +22,11 @@ class SignedPolicyReadinessTest(unittest.TestCase):
         self.assertEqual(14001, base['server_port'])
 
     def test_wifi_reassociation_requires_disposable_emulator_and_new_app_uid_observation(self):
-        def fixture(states, scan):
+        def fixture(states, scan, saved=b""):
             observations = iter(states)
+            elapsed = [0.0]
+            def advance(seconds):
+                elapsed[0] += seconds
             def respond(*args, **kwargs):
                 if args == ("emu","avd","name"): return b"syn443-ci\nOK"
                 if args == ("shell","getprop","ro.hardware"): return b"ranchu"
@@ -31,8 +34,9 @@ class SignedPolicyReadinessTest(unittest.TestCase):
                 if args[:3] == ("shell","am","instrument"):
                     return b"INSTRUMENTATION_RESULT: wifiEligibility="+next(observations)+b"\nINSTRUMENTATION_CODE: -1"
                 if args == ("shell","cmd","wifi","list-scan-results"): return scan
+                if args == ("shell","cmd","wifi","list-networks"): return saved
                 return b""
-            with patch.dict(os.environ, {"GITHUB_ACTIONS":"true","SYN443_CI_AVD":"syn443-ci"}), patch("run_enrolled_vpn.adb",side_effect=respond) as adb, patch("run_enrolled_vpn.time.sleep"):
+            with patch.dict(os.environ, {"GITHUB_ACTIONS":"true","SYN443_CI_AVD":"syn443-ci"}), patch("run_enrolled_vpn.adb",side_effect=respond) as adb, patch("run_enrolled_vpn.time.sleep",side_effect=advance), patch("run_enrolled_vpn.time.monotonic",side_effect=lambda:elapsed[0]):
                 prepare_emulator_wifi()
             return [c.args for c in adb.call_args_list]
         no_change = fixture([b"eligible"], b"")
@@ -40,6 +44,13 @@ class SignedPolicyReadinessTest(unittest.TestCase):
         recovered = fixture([b"missing",b"unvalidated",b"eligible"], b"AndroidWifi")
         self.assertIn(("shell","cmd","wifi","connect-network","AndroidWifi","open"), recovered)
         self.assertFalse(any("connect-network" in c for c in fixture([b"unvalidated",b"eligible"], b"unrelated")))
+        select = ("shell","cmd","wifi","connect-network","AndroidWifi","open")
+        saved = fixture([b"missing",b"eligible"], b"", b"0 AndroidWifi open")
+        self.assertEqual([c for c in saved if "connect-network" in c], [select])
+        delayed = fixture([b"missing"]*12+[b"eligible"], b"other-AndroidWifi-test")
+        self.assertEqual([c for c in delayed if "connect-network" in c], [select])
+        with self.assertRaisesRegex(AssertionError, "defaultSeen=False, connectionAttempts=2"):
+            fixture([b"missing"]*60, b"other-AndroidWifi-test")
         with patch.dict(os.environ, {"GITHUB_ACTIONS":"false"}), patch("run_enrolled_vpn.adb") as adb:
             with self.assertRaises(AssertionError): prepare_emulator_wifi()
             adb.assert_not_called()
