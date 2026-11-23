@@ -173,15 +173,23 @@ jobs:
             dependency-inventory.txt
           retention-days: 14
       - run: test -s app/build/outputs/apk/debug/app-debug.apk && test -s app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-      - name: Verify standalone competing VPN test package
+      - name: Verify standalone Android test fixtures
         run: |
           manifest="$RUNNER_TEMP/syn443-test-manifest.txt"
           "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump xmltree app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk --file AndroidManifest.xml > "$manifest"
           grep -Fq '"io.syn443.android.acceptance.CompetingVpnService"' "$manifest"
+          grep -Fq '"io.syn443.android.acceptance.ForeignOperatorActivity"' "$manifest"
           if grep -Fq '"androidx.startup.InitializationProvider"' "$manifest"; then
             echo "The standalone VPN fixture cannot load the target application's startup provider."
             exit 1
           fi
+          for apk in app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release-unsigned.apk; do
+            "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump xmltree "$apk" --file AndroidManifest.xml > "$manifest"
+            if grep -Fq '"io.syn443.android.acceptance.ForeignOperatorActivity"' "$manifest"; then
+              echo "The separate-UID ADB fixture belongs only to the Android test APK."
+              exit 1
+            fi
+          done
       - name: Scan APK payloads
         run: |
           python3 tools/check_apk_assets.py

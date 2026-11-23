@@ -13,6 +13,7 @@ from run_vpn_process_faults import adb
 from syn443ctl import ControlError, Device
 
 PACKAGE = "io.syn443.android"
+TEST_PACKAGE = PACKAGE + ".test"
 
 
 def press(label):
@@ -54,6 +55,34 @@ def await_grant(client, enabled):
                 return
         time.sleep(.15)
     raise AssertionError("Release did not acknowledge the local consent change")
+
+
+def assert_foreign_uid_denied(client, status):
+    assert not adb("shell", "pm", "list", "packages", "--user", "0", TEST_PACKAGE).strip()
+    fixture = Path(__file__).resolve().parent.parent / "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+    assert b"Success" in adb("install", "-t", str(fixture), timeout=120)
+    try:
+        component = TEST_PACKAGE + "/io.syn443.android.acceptance.ForeignOperatorActivity"
+        assert b"Status: ok" in adb("shell", "am", "start", "-W", "-n", component)
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            receipt = subprocess.run(
+                ["adb", "-e", "shell", "run-as", TEST_PACKAGE, "cat", "no_backup/foreign-operator-result"],
+                capture_output=True, timeout=5, check=False)
+            if not receipt.returncode:
+                assert receipt.stdout in {b"", b"denied"}, "The ordinary app received an unexpected provider result"
+                if receipt.stdout == b"denied":
+                    break
+            else:
+                assert b"No such file or directory" in receipt.stderr, "Separate UID fixture could not return a result"
+            time.sleep(.15)
+        else:
+            raise AssertionError("Separate UID fixture did not return a result")
+        current = await_grant(client, True)
+        assert current["desiredOn"] is False and current["generation"] == status["generation"]
+        assert isinstance(client.call("logs")["events"], list)
+    finally:
+        assert b"Success" in adb("uninstall", TEST_PACKAGE, timeout=30)
 
 
 def run():
@@ -107,6 +136,7 @@ def run():
             assert status["desiredOn"] is False and type(status["generation"]) is int
             assert isinstance(client.call("logs")["events"], list)
             assert b"ok=false" in adb("shell", "content", "call", "--uri", "content://io.syn443.operator.read", "--method", "connect")
+            assert_foreign_uid_denied(client, status)
             press("Отозвать доступ")
             await_grant(client, False)
             denied(client)
@@ -121,6 +151,7 @@ def run():
     print("ordinaryReleasePassiveOverlayWithoutNativeOwner: passed", flush=True)
     print("ordinaryReleasePassiveRouteHealthWithoutNativeOwner: passed", flush=True)
     print("releaseAdbLoginStatusUsesConsentAndReturnsOnlyCurrentPublicFields: passed", flush=True)
+    print("releaseAdbConsentDeniesForeignUidOnBothProviders: passed", flush=True)
 
 
 if __name__ == "__main__":
