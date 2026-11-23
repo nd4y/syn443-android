@@ -1,5 +1,7 @@
 package io.syn443.android.support
 
+import io.syn443.android.vpn.AdaptiveSearchState
+import io.syn443.recovery.RouteEvidence
 import io.syn443.health.Outcome
 import io.syn443.recovery.RouteState
 import java.util.Locale
@@ -23,12 +25,13 @@ object DiagnosticProjection {
         "native_restart_budget", "native_start", "native_start_failed", "network_changed", "network_unavailable",
         "network_update_failed", "overlay_credentials_pending", "overlay_material_changed", "policy_baseline_degraded",
         "policy_checks_unavailable", "policy_gate_pending", "policy_lease_time_or_scope_invalid", "policy_rollback",
-        "policy_store_unavailable", "policy_waiting_restart_budget", "required_https_ok",
+        "policy_store_unavailable", "policy_waiting_restart_budget", "required_https_ok", "auth_access_denied",
         "required_route_unverified_or_failed", "retry_scheduled", "start_failed", "tcp_timeout", "tls_failed",
         "tls_timeout", "transport_eof", "user_stop", "vpn_permission_required", "vpn_permission_revoked",
     )
     private val version = Regex("[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}(?:-[a-z][a-z0-9-]{0,63})?")
     private val routeStates = RouteState.entries.map { it.name.lowercase(Locale.ROOT) }.toSet()
+    private val searchStates = AdaptiveSearchState.entries.map { it.name }.toSet()
     private val outcomes = Outcome.entries.map { it.name }.toSet()
     private val dnsKinds = io.syn443.health.DnsResult.entries.map { it.name }.toSet()
     private val peerStates = setOf("connected", "connecting", "disconnected", "unknown")
@@ -72,11 +75,39 @@ object DiagnosticProjection {
     }
     private fun known(source: JSONObject, name: String, allowed: Set<String>): String? =
         (source.opt(name) as? String)?.takeIf { it in allowed }
-    private fun health(source: JSONObject, link: JSONObject?): JSONObject = document().also { value ->
+    internal fun operatorStatus(source: JSONObject): JSONObject = document().also { value ->
         value.put("phase", known(source, "phase", phases) ?: "unknown")
         value.put("reason", known(source, "reason", eventCodes) ?: "unknown")
         numbers(source, value, "generation", "networkEpoch", "activationGeneration", "eventSequence", "attempt")
         booleans(source, value, "desiredOn", "engineActive", "resumeRequired")
+    }
+
+    internal fun operatorRoutes(snapshot: JSONObject): JSONObject {
+        val rows = snapshot.getJSONArray("routes")
+        require(rows.length() <= MAX_ROWS)
+        val projected = JSONArray()
+        for (index in 0 until rows.length()) {
+            val row = rows.getJSONObject(index)
+            require(row.opt("id") == "route-${index + 1}")
+            val required = row.opt("required") as? Boolean ?: throw IllegalArgumentException()
+            val state = requireNotNull(known(row, "state", routeStates))
+            val age = integer(row.opt("ageMs"))
+            val needsAge = state == "working" || state == "failed"
+            val current = !needsAge || (age != null && age <= RouteEvidence.DEFAULT_TTL_MS)
+            val visible = if (current) state else "unverified"
+            val result = JSONObject().put("position", index + 1).put("required", required).put("state", visible)
+            if (needsAge && current) result.put("ageMs", age)
+            row.optJSONObject("search")?.let { search ->
+                known(search, "state", searchStates)?.let {
+                    result.put("search", if (it == "VERIFIED" && visible != "working") "SEARCH_INCOMPLETE" else it)
+                }
+            }
+            projected.put(result)
+        }
+        return document().put("routes", projected)
+    }
+
+    private fun health(source: JSONObject, link: JSONObject?): JSONObject = operatorStatus(source).also { value ->
         if (source.opt("desiredOn") == true && link != null) {
             known(link, "transport", setOf("WIFI", "CELLULAR", "OTHER"))?.let { transport ->
                 val safe = JSONObject().put("transport", transport)

@@ -7,7 +7,7 @@ import unittest
 import json
 
 from build_manifest import APKS, apk_record
-from run_packaged_instrumentation import parse_run, verify_apks
+from run_packaged_instrumentation import deadline_failure, parse_run, verify_apks
 
 
 def event(name, position, code):
@@ -84,6 +84,16 @@ class PackagedInstrumentationTest(unittest.TestCase):
             parse_run(active + 'INSTRUMENTATION_RESULT: shortMsg=private synthetic detail')
         self.assertIn('runner_stopped; completed=0/2; active=io.syn443.android.AdminOperationRouteTest.', str(error.exception))
         self.assertNotIn('private synthetic detail', str(error.exception))
+
+    def test_deadline_reports_completed_tests_and_last_checked_in_method_without_raw_output(self):
+        name = 'explicitNativeSearchKeepsPrefixAcrossPagesAndForgetsItOnForegroundLoss'
+        active = SECOND.replace('ExampleTest', 'AdminOperationRouteTest').replace('secondCase', name)
+        failure = deadline_failure((START + PASS + active + 'untrusted final fragment').encode())
+        self.assertEqual(str(failure), 'Android instrumentation deadline; completed=1/2; active=io.syn443.android.AdminOperationRouteTest.' + name)
+        for raw in [None, b'INSTRUMENTATION_STATUS_CODE: secret\n', b'x' * (8 * 1024 * 1024 + 1)]:
+            self.assertEqual(str(deadline_failure(raw)), 'Android instrumentation deadline; completed=0/0')
+        complete = (START + PASS + SECOND + event('secondCase', 2, 0) + END).encode()
+        self.assertEqual(str(deadline_failure(complete)), 'Android instrumentation deadline; completed=2/2')
 
     def test_incomplete_reordered_duplicate_and_foreign_results_fail(self):
         last = event('secondCase', 2, 0)

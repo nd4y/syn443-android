@@ -168,6 +168,8 @@ if mode=="emulator":
         (c.get("classname"),c.get("name")) for c in cases}, "Required actual ART heap case missing"
     assert {
         ("io.syn443.android.PrototypeTest", "homeShowsVpnBeforeAccountAndKeepsToolsCollapsed"),
+        ("io.syn443.android.PrototypeTest", "darkThemeByDefault"),
+        ("io.syn443.android.PrototypeTest", "launchWindowUsesTheSameDarkSurfaceInBothSystemModes"),
         ("io.syn443.android.VpnPrimaryActionTest", "startRequiresKnownReadyStateAndStopDoesNotRequireReadiness"),
         ("io.syn443.android.VpnPrimaryActionTest", "statusRequiresCurrentEngineProofAndKeepsUnrecognizedIntentVisible"),
     } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required VPN home UI cases missing"
@@ -467,7 +469,8 @@ if mode=="emulator":
         "enrolledSignedAssignmentStartsRealTun", "enrolledControllerDeathRecoversAuthorizedCache",
         "enrolledCandidateRegressionRollsBack", "enrolledRevocationStopsNativeWithoutLocalFallback",
         "enrolledLogoutRetiresFrozenNativeBeforeAcknowledging", "enrolledRejectedUpdatesRetainAuthorizedTunnel",
-        "enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun",
+        "enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun", "enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath",
+        "enrolledManagementOutageRetainsTunnelThroughControllerDeath",
         "pendingPollFencesStaleGenerationAndCannotReviveLogout",
         "enrolledPendingAssignmentRetriesWhileVisible"}
     required |= {"encryptedRuntimeRetrySurvivesRestartAndConsentWithdrawalRetainsOnlyItsCursor",
@@ -842,7 +845,14 @@ ADMIN_OPERATION_RECONCILE_REQUIRED = {
 if mode in ADMIN_OPERATION_RECONCILE_REQUIRED:
     assert set(ADMIN_OPERATION_RECONCILE_REQUIRED[mode]) <= set(identities), "Missing exact operation outcome, deadline, stable editor ownership or explicit presentation outcomes"
 
+if mode == 'jvm':
+    assert ('io.syn443.decision.PathStabilityHistoryTest',
+            'threeAttributedFailuresAmongFiveRequireThreeFreshSuccessesForRecovery') in identities, "Missing route stability recovery evidence"
+
 ADAPTIVE_SEARCH_REQUIRED = [
+    ('io.syn443.android.ManagedAdaptiveRoutesTest', 'lowerLatencyThroughAnExtraProxyDoesNotDisplaceAHealthySharedExit'),
+    ('io.syn443.android.ManagedAdaptiveRoutesTest', 'threeAttributedFailuresLetAStableSlowerReserveReplaceTheRecoveredIncumbent'),
+    ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'sparseRecoveryFindsTheLastEligibleHopWithoutForceOrExtraNetworkProbes'),
     ('io.syn443.android.RouteSearchStatusTest', 'singleRouteControlKeepsItsRowAndRejectsAReplacedNetworkOrConfiguration'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'onlyFreshSelectedAcknowledgementChangesSearchingToVerified'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'minuteBudgetWaitRetainsContinuationWithoutInventingNoCandidateVerdict'),
@@ -851,6 +861,7 @@ ADAPTIVE_SEARCH_REQUIRED = [
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'expiredLeaseAndBackwardClockRetireStatusWithoutErasingAdmissions'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'sixteenGroupProjectionIsClosedBoundedAndFailuresStayGroupLocal'),
     ('io.syn443.android.RouteSearchStatusTest', 'lifecycleRevisionMustMatchBeforeReportingVerifiedAdaptiveRoute'),
+    ('io.syn443.android.RouteSearchStatusTest', 'mixedChecksRequireIndependentCurrentReceiptsAndDropOldModeWork'),
     ('io.syn443.android.RouteSearchStatusTest', 'verifiedProjectionJoinsExactExistingTtlScopeReadinessAndFutureSampleGuards'),
     ('io.syn443.android.RouteSearchStatusTest', 'diagnosticProjectionCannotAuthorizeRequiredReadinessOrActivation'),
     ('io.syn443.android.RouteSearchStatusTest', 'failedOrExpiredPathAndAbsentLatencyHaveDistinctLabels'),
@@ -864,6 +875,7 @@ if mode=="emulator":
 CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'confirmedCountryRequiresAPassedCountryLeafAndOneUnambiguousClass'),
             ('io.syn443.policy.RouteCheckProfileTest',
              'sharedClosedProfilesAcceptNineValidAndRejectAllFortyThreeInvalidVectors'),
+            ('io.syn443.policy.RouteCheckProfileTest', 'successfulLeavesSupportExactlyThePositiveCasesInTheSharedTruthTable'),
             ('io.syn443.policy.RouteCheckProfileTest',
              'ownedSortedLeavesAndCompleteWirePreserveOrderedExpressionsWithoutLeakingTargets'),
             ('io.syn443.policy.RouteCheckProfileTest',
@@ -883,6 +895,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'co
             ('io.syn443.policy.RouteCheckPlanPolicyTest',
              'legacySignedBytesRemainOpaqueAndNullDuplicateCaseOrMixedProfileCannotDowngrade')],
  'emulator': [('io.syn443.android.RouteCheckPlanTest', 'onlyFreshMatchedCountryEvidenceIsShownForTheCurrentMeasuredPath'),
+              ('io.syn443.android.RouteCheckPlanTest', 'countrySuccessCannotValidateAReportWithAnUnmetRequiredStage'),
               ('io.syn443.android.RouteCheckPlanTest', 'canceledBatchClearsEarlierSuccessfulLeafOutcomes'),
               ('io.syn443.android.RouteCheckPlanTest',
                'ordinaryRequestOwnsWholeProfileAndNeverFlattensOrBorrowsMutatedInput'),
@@ -902,7 +915,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'co
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
 if mode in CHECK_PLAN_REQUIRED:
     required = set(CHECK_PLAN_REQUIRED[mode])
-    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == {'policy': 12, 'emulator': 11}[mode]
+    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == {'policy': 13, 'emulator': 12}[mode]
     assert required <= set(identities), "Missing exact closed check-plan, policy or passive projection outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/policy/src/test/kotlin/io/syn443/policy" if mode == "policy" else "app/src/androidTest/kotlin/io/syn443/android"
@@ -1026,10 +1039,13 @@ PATH_CONTINUITY_REQUIRED = {'jvm': [('io.syn443.decision.RouteHealthContinuityTe
               ('io.syn443.android.AdaptivePathContinuityTest', 'changedTokenOwnerModeAndPolicyRejectNegativeCarry'),
               ('io.syn443.android.AdaptivePathContinuityTest', 'expiredLeaseBootAndClockCannotReviveCarriedHistory'),
               ('io.syn443.android.AdaptivePathContinuityTest',
-               'physicalContextRoundTripRequiresFreshAckAndKeepsAdmissionDebt')]}
+               'physicalContextRoundTripRequiresFreshAckAndKeepsAdmissionDebt'),
+              ('io.syn443.android.AdaptivePathContinuityTest', 'recentWorkingRouteIsRecheckedOnceBeforeResumingColdSearch'),
+              ('io.syn443.android.AdaptivePathContinuityTest', 'expiredForeignOrSuspectWorkingPathsCannotLeadTheNewSearch'),
+              ('io.syn443.android.AdaptivePathContinuityTest', 'activationRequiresANewProbeWhenAnEarlierSelectionArrivesLate')]}
 if mode in PATH_CONTINUITY_REQUIRED:
     required = set(PATH_CONTINUITY_REQUIRED[mode])
-    assert len(required) == len(PATH_CONTINUITY_REQUIRED[mode]) == (3 if mode == "jvm" else 6), "Duplicate negative path continuity requirement"
+    assert len(required) == len(PATH_CONTINUITY_REQUIRED[mode]) == (3 if mode == "jvm" else 9), "Duplicate negative path continuity requirement"
     assert required <= set(identities), "Missing exact compatible negative path continuity outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/decision/src/test/kotlin/io/syn443/decision" if mode == "jvm" else "app/src/androidTest/kotlin/io/syn443/android"
@@ -1171,6 +1187,7 @@ JOURNAL_REQUIRED = {
             "batchingPreservesOriginalTimesCorrelationSequenceAndMinimumWriteSpacing",
         ),
         "io.syn443.android.JournalCipherStoreTest": (
+            "deniedLoginHistorySurvivesRecreationAndPreservesCurrentVpnState",
             "passiveSnapshotIsEncryptedOnDiskReadOnlyAndWorksAcrossStoreRecreation",
             "expiredFloorSurvivesFailedReplacementAndRejectsRollbackAfterRecreation",
             "passiveReadOverlappingNewCommittedFloorCannotPublishOldHistory",
@@ -1183,10 +1200,18 @@ JOURNAL_REQUIRED = {
 if mode in JOURNAL_REQUIRED:
     inventory = JOURNAL_REQUIRED[mode]
     actual = {(owner, name) for owner, methods in inventory.items() for name in methods}
-    assert len(actual) == 12 and len(identities) >= minimum + len(actual)
+    assert len(actual) == {"observability": 12, "emulator": 13}[mode] and len(identities) >= minimum + len(actual)
     assert actual <= set(identities), "Missing exact structured journal outcomes"
     prefix = root / ("app/src/androidTest/kotlin" if mode == "emulator" else "core/observability/src/test/kotlin")
     for classname, expected in inventory.items():
         path = prefix / (classname.replace(".", "/") + ".kt")
         methods = re.findall(r"@Test\s+fun\s+(\w+)", path.read_text(encoding="utf-8"))
         assert len(methods) == len(set(methods)) == len(expected) and set(methods) == set(expected), "Structured journal test source inventory drift"
+
+if mode == "emulator":
+    operator_read = {("io.syn443.android.OperatorReadConsentTest", method) for method in (
+        "shellCanReadOnlyDuringAnExplicitLocalDiagnosticsGrant",
+        "monotonicReadWindowEndsAtItsDeadlineAndRejectsAnImpossibleClock",
+        "routeHealthProjectionPreservesOrdinalFreshnessAndDropsPrivateFields",
+    )}
+    assert operator_read <= set(identities), "Missing ordinary operator read consent or deadline evidence"

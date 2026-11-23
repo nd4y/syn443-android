@@ -65,10 +65,12 @@ internal object RouteCheckPlans {
         val leaves = value.getJSONArray("leaves")
         val ids = profile.leafIDs()
         require(leaves.length() == ids.size && leaves.length() in 1..4)
+        val passed = mutableSetOf<String>()
         for (i in 0 until leaves.length()) {
             val leaf = leaves.getJSONObject(i)
             require(leaf.keys().asSequence().toSet() == setOf("id", "outcome", "code") && leaf.get("id") == ids[i])
             val code = leaf.get("code")
+            if (leaf.get("outcome") == "TRUE") passed.add(ids[i])
             require(when (leaf.get("outcome")) {
                 "TRUE" -> code == "ok"
                 "FALSE" -> code in failureCodes
@@ -77,6 +79,7 @@ internal object RouteCheckPlans {
                 else -> false
             })
         }
+        if (value.getString("outcome") == "TRUE") require(profile.supportsPositiveReport(passed))
         return JSONObject(value.toString())
     }
     fun unknown(profile: RouteCheckProfile): JSONObject = JSONObject().put("id", profile.id).put("revision", profile.revision)

@@ -9,8 +9,25 @@ import java.net.URI
 class RouteCheckProfile private constructor(
     val id: String, val revision: Long, val deadlineMs: Long,
     private val encoded: String, private val leaves: List<Leaf>, private val gates: Set<String>,
+    private val stages: List<Condition>,
 ) {
     private data class Leaf(val id: String, val method: String, val exit: String, val check: String)
+    private sealed interface Condition {
+        fun satisfiedBy(passed: Set<String>): Boolean
+
+        data class LeafRef(val id: String) : Condition {
+            override fun satisfiedBy(passed: Set<String>) = id in passed
+        }
+
+        data class Threshold(val required: Int, val children: List<Condition>) : Condition {
+            override fun satisfiedBy(passed: Set<String>) = children.count { it.satisfiedBy(passed) } >= required
+        }
+    }
+
+    /** Check a positive diagnostic summary against the signed plan, without scheduling probes. */
+    fun supportsPositiveReport(passed: Set<String>): Boolean =
+        passed.containsAll(gates) && stages.all { it.satisfiedBy(passed) }
+
     fun wireJson(): String = encoded
     fun leafIDs(): List<String> = leaves.map { it.id }
     fun confirmedExitClass(passed: Set<String>): String? = leaves
@@ -117,29 +134,32 @@ class RouteCheckProfile private constructor(
             val stages = array(value["stages"], 0..4)
             require(gates.isNotEmpty() || stages.isNotEmpty())
             var nodes = 0
-            fun expression(rawExpression: JsonElement, depth: Int) {
+            fun expression(rawExpression: JsonElement, depth: Int): Condition {
                 require(++nodes <= 7 && depth <= 4)
                 val node = rawExpression as? JsonObject ?: error("invalid_check_profile")
                 require(node.size == 1)
-                when (val operation = node.keys.single()) {
-                    "leaf" -> reference(node[operation])
-                    "all", "any" -> array(node[operation], 2..4).forEach { expression(it, depth + 1) }
+                return when (val operation = node.keys.single()) {
+                    "leaf" -> Condition.LeafRef(reference(node[operation]))
+                    "all", "any" -> {
+                        val children = array(node[operation], 2..4).map { expression(it, depth + 1) }
+                        Condition.Threshold(if (operation == "all") children.size else 1, children)
+                    }
                     "quorum" -> {
                         val quorum = obj(node.getValue(operation), setOf("k", "of"))
                         val children = array(quorum["of"], 2..4)
-                        integer(quorum["k"], 1L..children.size.toLong())
-                        children.forEach { expression(it, depth + 1) }
+                        val required = integer(quorum["k"], 1L..children.size.toLong()).toInt()
+                        Condition.Threshold(required, children.map { expression(it, depth + 1) })
                     }
                     else -> error("invalid_check_profile")
                 }
             }
-            stages.forEach { expression(it, 1) }
+            val conditions = stages.map { expression(it, 1) }
             require(refs == names && leaves.filter { it.method in mandatory }.all { it.id in gates })
             val owned = JsonObject(value.toMutableMap().apply {
                 put("leaves", JsonArray(leaves.map { leaf -> JsonObject(linkedMapOf(
                     "id" to JsonPrimitive(leaf.id), "check" to Canonical.parse(leaf.check))) }))
             })
-            return RouteCheckProfile(id, revision, deadline, Canonical.encode(owned), leaves.toList(), gates.toSet())
+            return RouteCheckProfile(id, revision, deadline, Canonical.encode(owned), leaves.toList(), gates.toSet(), conditions)
         }
     }
 }

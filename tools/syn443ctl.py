@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded JSON client for the SYN443 debug ADB control provider."""
+"""Bounded JSON client for SYN443 Android operator access over ADB."""
 import argparse
 import base64
 from contextlib import contextmanager, nullcontext
@@ -18,21 +18,25 @@ import time
 import zipfile
 
 URI = "content://io.syn443.control"
+LOCAL_READ_URI = "content://io.syn443.operator.read"
+LOCAL_READ_BASE = ("capabilities", "status", "logs")
+LOCAL_READ_OPERATIONS = LOCAL_READ_BASE + ("overlay-status", "routes-status", "auth-status")
 METHODS = {
-    "status": "status", "logs": "logs", "routes-status": "routes-status",
+    "auth-status": "auth-status", "status": "status", "logs": "logs", "routes-status": "routes-status",
     "routes-check": "routes-check", "routes-cancel": "routes-cancel",
     "overlay-status": "overlay-status", "netbird-status": "status", "netbird-diagnose": "netbird-diagnose", "netbird-view": "netbird-view", "netbird-cancel": "netbird-cancel",
     "vpn-start": "connect", "vpn-stop": "disconnect", "vpn-resume": "resume",
     "resources": "resources", "engine-exits": "engine-exits", "health-workers": "health-workers",
+    "mode-get": "operator-mode-get", "mode-set": "operator-mode-set",
     "config-plan": "config-plan-file", "config-apply": "config-apply-file",
     "support-bundle-collect": "bundle-collect", "support-bundle-status": "bundle-status",
     "support-bundle-cancel": "bundle-cancel", "support-bundle-open": "bundle-open",
     "support-bundle-read": "bundle-read",
     "support-bundle-shell-state": "bundle-shell-state", "support-bundle-shell-release": "bundle-shell-release",
 }
-OPERATIONS = ("capabilities", "status", "logs", "diagnostic-bundle", "routes-status",
+OPERATIONS = ("capabilities", "status", "auth-status", "logs", "diagnostic-bundle", "routes-status",
               "routes-check", "routes-cancel", "overlay-status", "netbird-status", "netbird-diagnose", "netbird-view", "netbird-cancel",
-              "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply",
+              "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply", "mode-get", "mode-set",
               "support-bundle", "support-bundle-collect", "support-bundle-status",
               "support-bundle-cancel", "support-bundle-export")
 OVERLAY_PROVIDERS = ("netbird", "tailscale", "zerotier")
@@ -40,7 +44,7 @@ CONFIG = {"config-plan", "config-apply"}
 MAX_CONFIG = 262_144
 STAGE = "run-as io.syn443.android sh -c 'umask 077; base64 -d > no_backup/operator-local-config-{}.json'"
 CLEANUP = "run-as io.syn443.android rm -f no_backup/operator-local-config-{}.json"
-REJECTED = {"needs_unlock": 4, "command_rejected": 4, "unauthorized": 4}
+REJECTED = {"local_consent_required": 4, "needs_unlock": 4, "command_rejected": 4, "unauthorized": 4}
 NUMBERS = ("generation", "networkEpoch", "activationGeneration", "eventSequence")
 PHASES = {"Off", "NeedsLogin", "NeedsPermission", "NeedsUnlock", "NeedsAction", "NoNetwork",
           "Portal", "Detecting", "Connecting", "Online", "Degraded", "Recovering", "BlockedByPolicy"}
@@ -53,7 +57,7 @@ EVENT_CODES = {
     "native_restart_budget", "native_start", "native_start_failed", "network_changed", "network_unavailable",
     "network_update_failed", "overlay_credentials_pending", "overlay_material_changed", "policy_baseline_degraded",
     "policy_checks_unavailable", "policy_gate_pending", "policy_lease_time_or_scope_invalid", "policy_rollback",
-    "policy_store_unavailable", "policy_waiting_restart_budget", "required_https_ok",
+    "policy_store_unavailable", "policy_waiting_restart_budget", "required_https_ok", "auth_access_denied",
     "required_route_unverified_or_failed", "retry_scheduled", "start_failed", "tcp_timeout", "tls_failed",
     "tls_timeout", "transport_eof", "user_stop", "vpn_permission_required", "vpn_permission_revoked",
 }
@@ -118,6 +122,67 @@ def canonical_view(raw):
         raise ControlError("invalid_arguments", 2) from err
 
 
+def local_read_operations(reply):
+    if type(reply.get("schemaVersion")) is not int or reply["schemaVersion"] != 1 or reply.get("operations") != list(LOCAL_READ_BASE):
+        raise ControlError("invalid_reply", 5)
+    optional = reply.get("optionalOperations", [])
+    if not isinstance(optional, list) or len(optional) > 16 or any(
+            not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,47}", name) for name in optional
+    ) or len(set(optional)) != len(optional):
+        raise ControlError("invalid_reply", 5)
+    return [name for name in LOCAL_READ_OPERATIONS if name in LOCAL_READ_BASE or name in optional]
+
+
+LOGIN_PHASES = {
+    "SIGNED_OUT", "RESERVED", "INVITING", "BROWSER", "EXCHANGING", "AUTHENTICATED", "CLEANUP", "ENROLLING",
+    "PROVISIONING", "POLICY_CACHED", "REFRESHING", "NEEDS_REAUTH", "RETIRING", "BLOCKED", "unknown",
+}
+LOGIN_REASONS = {
+    "", "CANCELLED", "TRANSPORT", "INVALID_REPLY", "ACCESS_DENIED", "REAUTHENTICATE", "SESSION_EXPIRED",
+    "CONFLICT", "PENDING", "THROTTLED", "UNAVAILABLE", "STALE", "CORRUPT", "WRONG_THREAD",
+    "LOGIN_UNAVAILABLE", "LOGIN_STORE_UNAVAILABLE", "unknown",
+}
+
+
+def login_read_status(data, local_read):
+    if local_read and (type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 1 or
+                       set(data) - {"schemaVersion", "phase", "reason", "busy", "canReauthenticate"}):
+        raise ControlError("invalid_reply", 5)
+    phase = data.get("phase")
+    reason = data.get("reason")
+    if not isinstance(phase, str) or phase not in LOGIN_PHASES:
+        phase = "unknown"
+    if phase == "unknown" or not isinstance(reason, str) or reason not in LOGIN_REASONS:
+        reason = "unknown"
+    result = {"schemaVersion": 1, "phase": phase, "reason": reason}
+    if phase != "unknown":
+        for key in ("busy", "canReauthenticate"):
+            if type(data.get(key)) is bool:
+                result[key] = data[key]
+        if result.get("busy") is True:
+            result["reason"] = ""
+    return result
+
+
+def local_route_health(data):
+    if (set(data) != {"schemaVersion", "routes"} or type(data["schemaVersion"]) is not int
+            or data["schemaVersion"] != 1 or not isinstance(data["routes"], list) or len(data["routes"]) > 64):
+        raise ControlError("invalid_reply", 5)
+    for position, row in enumerate(data["routes"], 1):
+        if (not isinstance(row, dict) or not {"position", "required", "state"} <= row.keys()
+                or row.keys() - {"position", "required", "state", "ageMs", "search"}
+                or type(row["position"]) is not int or row["position"] != position
+                or type(row["required"]) is not bool or not isinstance(row["state"], str) or row["state"] not in ROUTE_STATES):
+            raise ControlError("invalid_reply", 5)
+        measured = row["state"] in ("working", "failed")
+        if measured != ("ageMs" in row) or measured and (type(row["ageMs"]) is not int or not 0 <= row["ageMs"] <= 120_000):
+            raise ControlError("invalid_reply", 5)
+        if "search" in row and (row["search"] not in ("WAITING_CONTEXT", "SEARCHING", "BUDGET_WAIT", "SEARCH_INCOMPLETE", "VERIFIED")
+                                or row["search"] == "VERIFIED" and row["state"] != "working"):
+            raise ControlError("invalid_reply", 5)
+    return data
+
+
 def overlay_health(provider, data):
     base = {"schemaVersion", "provider", "implementation"}
     if (type(data.get("schemaVersion")) is not int or data["schemaVersion"] != 1 or
@@ -138,15 +203,62 @@ def overlay_health(provider, data):
     return data
 
 
+MODE_CHOICES = ("WIFI", "HOME_WIFI", "CELLULAR", "CELLULAR_RESTRICTED")
+MODE_STAMP = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def valid_mode_argument(value):
+    parts = value.split(":")
+    if len(parts) != 3 or not MODE_STAMP.fullmatch(parts[0]):
+        return False
+    mode, minutes = parts[1:]
+    return (mode == "AUTO" and minutes == "0") or (
+        mode in MODE_CHOICES and re.fullmatch(r"[1-9][0-9]{0,3}", minutes) is not None and int(minutes) <= 1440)
+
+
+def mode_reply(operation, data):
+    invalid = ControlError("invalid_reply", 5)
+    counters = {"generation", "networkEpoch"}
+    for key in counters & data.keys():
+        if type(data[key]) is not int or not 0 <= data[key] < 2**63:
+            raise invalid
+    if operation == "mode-set":
+        if set(data) != counters | {"admitted"} or data["admitted"] is not True:
+            raise invalid
+        return data
+    if data.get("state") == "unavailable" and set(data) <= counters | {"state"}:
+        return data
+    fields = counters | {"state", "effective", "source", "allowed", "maxMinutes", "stamp"}
+    if data.get("source") == "manual":
+        fields.add("remainingMs")
+        remaining = data.get("remainingMs")
+        if type(remaining) is not int or not 1 <= remaining <= 86_400_000:
+            raise invalid
+    if (set(data) != fields or data.get("state") != "observed" or
+            data["effective"] not in (*MODE_CHOICES, "UNKNOWN") or data["source"] not in ("automatic", "manual", "assigned") or
+            not isinstance(data["stamp"], str) or not MODE_STAMP.fullmatch(data["stamp"]) or
+            type(data["maxMinutes"]) is not int or not 0 <= data["maxMinutes"] <= 1440):
+        raise invalid
+    allowed = data["allowed"]
+    if (not isinstance(allowed, list) or len(allowed) > len(MODE_CHOICES) or
+            any(mode not in MODE_CHOICES for mode in allowed) or len(allowed) != len(set(allowed))):
+        raise invalid
+    return data
+
+
 class Device:
-    def __init__(self, serial, timeout):
+    def __init__(self, serial, timeout, local_read=False):
         if not re.fullmatch(r"[A-Za-z0-9_.:%\[\]-]{1,128}", serial) or serial.startswith("-"):
             raise ControlError("invalid_serial", 2)
         self.serial, self.timeout = serial, timeout
+        self.local_read = local_read
 
     def call(self, operation, argument=None):
-        method = METHODS[operation]
-        command = ["adb", "-s", self.serial, "shell", "content", "call", "--uri", URI, "--method", method]
+        if self.local_read and (operation not in LOCAL_READ_OPERATIONS or argument is not None and operation != "overlay-status"):
+            raise ControlError("unsupported_operation", 4)
+        method = operation if self.local_read else METHODS[operation]
+        uri = LOCAL_READ_URI if self.local_read else URI
+        command = ["adb", "-s", self.serial, "shell", "content", "call", "--uri", uri, "--method", method]
         if argument is not None:
             route = operation == "routes-check" and re.fullmatch(r"route-[1-9][0-9]?", argument)
             ticket = operation in CONFIG and re.fullmatch(r"(?:none|[0-9a-f]{64}):[0-9a-f]{64}:[0-9a-f]{32}", argument)
@@ -156,12 +268,13 @@ class Device:
             view = canonical_view(argument) if operation == "netbird-view" else None
             cancel = operation == "netbird-cancel" and support_hex(argument, 32)
             provider = operation == "overlay-status" and argument in OVERLAY_PROVIDERS
-            if not provider and not cancel and not route and not ticket and not bundle_id and not bundle_read and view is None:
+            mode_change = operation == "mode-set" and valid_mode_argument(argument)
+            if not mode_change and not provider and not cancel and not route and not ticket and not bundle_id and not bundle_read and view is None:
                 raise ControlError("invalid_arguments", 2)
             # adb shell joins arguments into an Android shell command. Our closed
             # ASCII view has no apostrophe; single quoting preserves JSON quotes.
             command.extend(["--arg", "'" + view + "'" if view is not None else argument])
-        elif operation in {"netbird-view", "netbird-cancel", "overlay-status"}:
+        elif operation in {"netbird-view", "netbird-cancel", "overlay-status", "mode-set"}:
             raise ControlError("invalid_arguments", 2)
         try:
             result = subprocess.run(command, capture_output=True, timeout=self.timeout, check=False)
@@ -171,7 +284,7 @@ class Device:
             raise ControlError("adb_unavailable", 3) from err
         if len(result.stdout) > 262_144 or len(result.stderr) > 32_768:
             raise ControlError("reply_too_large", 5)
-        support = operation.startswith("support-bundle-")
+        support = self.local_read or operation.startswith("support-bundle-")
         try:
             output = result.stdout.decode("utf-8", errors="strict" if support else "replace")
         except UnicodeDecodeError as err:
@@ -706,11 +819,15 @@ class Arguments(argparse.ArgumentParser):
 
 def main(argv=None):
     parser = Arguments(description=__doc__)
+    parser.add_argument("--local-read", action="store_true", help="use the local 15-minute release diagnostics grant")
     parser.add_argument("--serial", required=True, help="explicit adb device serial")
     parser.add_argument("--timeout", type=int, choices=range(1, 61), default=12, metavar="1..60")
     parser.add_argument("operation", choices=OPERATIONS)
     parser.add_argument("--route")
     parser.add_argument("--provider", choices=OVERLAY_PROVIDERS)
+    parser.add_argument("--stamp")
+    parser.add_argument("--mode", choices=(*MODE_CHOICES, "AUTO"))
+    parser.add_argument("--minutes", type=int)
     parser.add_argument("--section", choices=("peers", "diagnostics"))
     parser.add_argument("--page", type=int, choices=range(64))
     parser.add_argument("--file")
@@ -743,8 +860,36 @@ def main(argv=None):
             args.operation != "config-apply" and (args.expected_revision is not None or args.expected_candidate is not None)
         ):
             raise ControlError("invalid_arguments", 2)
-        device = Device(args.serial, args.timeout)
-        if args.operation in SUPPORT_OPERATIONS:
+        mode_fields = (args.stamp, args.mode, args.minutes)
+        if args.operation == "mode-set":
+            if any(value is None for value in mode_fields) or not valid_mode_argument(f"{args.stamp}:{args.mode}:{args.minutes}"):
+                raise ControlError("invalid_arguments", 2)
+        elif any(value is not None for value in mode_fields):
+            raise ControlError("invalid_arguments", 2)
+        if args.local_read and args.operation not in LOCAL_READ_OPERATIONS:
+            raise ControlError("unsupported_operation", 4)
+        device = Device(args.serial, args.timeout, local_read=True) if args.local_read else Device(args.serial, args.timeout)
+        if args.local_read and args.operation == "capabilities":
+            data = {"access": "local_read_grant", "operations": local_read_operations(device.call("capabilities"))}
+        elif args.operation == "auth-status":
+            if args.local_read and "auth-status" not in local_read_operations(device.call("capabilities")):
+                raise ControlError("unsupported_by_device", 4)
+            data = login_read_status(device.call("auth-status"), args.local_read)
+        elif args.local_read and args.operation == "status":
+            value = device.call("status")
+            phase, reason = value.get("phase"), value.get("reason")
+            if type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1 or not isinstance(phase, str) or phase not in PHASES | {"unknown"}:
+                raise ControlError("invalid_reply", 5)
+            data = {**numbers(value, NUMBERS + ("attempt",)), "phase": phase,
+                    "reason": reason if isinstance(reason, str) and reason in EVENT_CODES else "unknown"}
+            for key in ("desiredOn", "engineActive", "resumeRequired"):
+                if type(value.get(key)) is bool:
+                    data[key] = value[key]
+        elif args.local_read and args.operation == "routes-status":
+            if "routes-status" not in local_read_operations(device.call("capabilities")):
+                raise ControlError("unsupported_by_device", 4)
+            data = local_route_health(device.call("routes-status"))
+        elif args.operation in SUPPORT_OPERATIONS:
             connection = device.bundle_connection() if args.operation in {"support-bundle", "support-bundle-export"} else nullcontext()
             with connection:
                 data = support_operation(device, args.operation, args.output, args.bundle_id)
@@ -753,18 +898,27 @@ def main(argv=None):
             operations = [
                 op for op in OPERATIONS
                 if (op not in CONFIG or state.get("localConfigControl") is True)
+                and (op not in {"mode-get", "mode-set"} or state.get("operatorNetworkMode") is True)
                 and (op != "overlay-status" or state.get("overlayProviderHealth") is True)
                 and (op != "netbird-cancel" or state.get("netbirdDiagnosticCancellation") is True)
             ]
             data = {"operations": operations, "access": "debug_adb_shell",
                     "device": {**numbers(state, NUMBERS), "unlocked": state.get("phase") != "NeedsUnlock"}}
+        elif args.operation in {"mode-get", "mode-set"}:
+            if not device.supports_type("network-mode", b"application/vnd.syn443.network-mode-v1"):
+                raise ControlError("unsupported_operation", 4)
+            argument = f"{args.stamp}:{args.mode}:{args.minutes}" if args.operation == "mode-set" else None
+            data = mode_reply(args.operation, device.call(args.operation, argument))
         elif args.operation == "diagnostic-bundle":
             data = bundle(device)
         elif args.operation == "logs" and args.follow_seconds:
             follow(device, args.follow_seconds, 2.0)
             return 0
         elif args.operation == "overlay-status":
-            if not device.supports_type("overlay-status", b"application/vnd.syn443.overlay-status-v1"):
+            if args.local_read:
+                if "overlay-status" not in local_read_operations(device.call("capabilities")):
+                    raise ControlError("unsupported_by_device", 4)
+            elif not device.supports_type("overlay-status", b"application/vnd.syn443.overlay-status-v1"):
                 raise ControlError("unsupported_by_device", 4)
             data = overlay_health(args.provider, device.call(args.operation, args.provider))
         elif args.operation == "netbird-cancel":

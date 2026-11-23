@@ -353,3 +353,61 @@ cancel the temporary choice. Network replacement, policy withdrawal and time
 expiry retire a previous choice. A home mode requires a fresh TLS proof on
 the current Wi-Fi even when explicitly selected. A mode selection grants no
 additional direct egress. Physical deployment and acceptance are separate.
+
+
+## Management outage on Wi-Fi
+
+The enrolled VPN test can disconnect the shared issuer, policy API and
+telemetry endpoint while the application proxy continues to answer. It checks
+a TCP refusal from the application UID before and after killing the controller,
+then checks application traffic at the proxy. The replacement controller and
+engine must keep the original binding and active policy within its offline
+lease. After restoring management, the test requires a fresh signed revision
+and another application response. This exercises BOOT-01 on the disposable
+Wi-Fi emulator. Physical Xperia recovery has its own acceptance record.
+
+
+## Packaged backup exclusions
+
+Release CI reads the compiled Android manifest and resolves its extraction
+resource in the APK resource table. It checks the default and all qualified
+variants. Both cloud backup and device transfer must exclude the entire
+application storage domains, including credential and device-protected files,
+preferences and databases. The normal APK also disables legacy full backup.
+The release fails if any selected XML grants access or cannot be resolved.
+Physical device migration and other NFR-04 clauses have separate acceptance.
+[Android backup rules](https://developer.android.com/identity/data/autobackup)
+
+
+## Rechecking the last working route
+
+When the native owner restarts on the same observed link, or Android updates
+that link's metadata under a compatible signed policy, the coordinator can
+probe the most recently working path first. It keeps one hop list per group
+for up to two minutes from the original measurement. The frontier checks the
+new context and removes duplicate candidates. A failed retry gives the other
+eligible paths their ordinary turn.
+
+The new context begins with no measured route, latency or traffic permission.
+The native engine must return a current probe result and confirm selection.
+A different link, changed policy authority, suspected failure or expired hint
+uses the normal cold search. This history is process-local.
+
+## Fresh adaptive checks at activation
+
+When a signed policy enters its trial, the controller requests a fresh check
+for each required adaptive group. A result from work started before the trial
+cannot establish availability in the new window. The next check uses the usual
+native receipt, current network scope and probe budget. The regression case
+delivers an earlier selection after activation starts and checks that a new
+request is necessary. The enrolled emulator suite also runs independent TCP
+traffic through a signed candidate on Wi-Fi.
+
+## Route selection and cooldown acceptance
+
+The protected Android build exercised five JVM cases and twelve distinct
+Android cases on each of API 29, 35 and 37 for AC43, AC46, AC53 and AC55.
+They cover the stable slower reserve, a single half-open trial, retained
+cooldown and resuming a 500-path search. The acceptance register records the
+remaining scope for each case.
+[Protected routing checks](https://github.com/nd4y/syn443-android/actions/runs/45070035378).

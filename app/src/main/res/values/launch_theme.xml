@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="syn443_surface">#141318</color>
+    <style name="Syn443WindowBase" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/syn443_surface</item>
+        <item name="android:statusBarColor">@color/syn443_surface</item>
+        <item name="android:navigationBarColor">@color/syn443_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+    <style name="Syn443Window" parent="Syn443WindowBase" />
+</resources>

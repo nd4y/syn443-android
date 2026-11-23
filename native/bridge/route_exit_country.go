@@ -93,24 +93,37 @@ func exitCountryClass(body []byte) (string, bool) {
 func readExitCountryResponse(conn io.Reader, req *http.Request) (*http.Response, error) {
 	limited := &io.LimitedReader{R: conn, N: exitCountryHeaderLimit + 1}
 	reader := bufio.NewReaderSize(limited, 1024)
-	header := make([]byte, 0, 1024)
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil || len(header)+len(line) > exitCountryHeaderLimit {
+	remaining := exitCountryHeaderLimit
+	for n := 0; n <= maxRouteInformationalResponses; n++ {
+		header := make([]byte, 0, 1024)
+		for {
+			line, err := reader.ReadString('\n')
+			remaining -= len(line)
+			if err != nil || remaining < 0 {
+				return nil, io.ErrUnexpectedEOF
+			}
+			header = append(header, line...)
+			if line == "\r\n" {
+				break
+			}
+		}
+		// Inspect the isolated block before attaching the body reader. An
+		// interim block cannot consume the next block or its body allowance.
+		response, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(header)), req)
+		if err != nil {
+			return nil, err
+		}
+		if interimRouteStatus(response.StatusCode) {
+			continue
+		}
+		buffered := reader.Buffered()
+		limited.N = int64(exitCountryFramedBodyLimit - buffered)
+		if limited.N < 0 {
 			return nil, io.ErrUnexpectedEOF
 		}
-		header = append(header, line...)
-		if line == "\r\n" {
-			break
-		}
+		return http.ReadResponse(bufio.NewReaderSize(io.MultiReader(bytes.NewReader(header), reader), 1024), req)
 	}
-	// Account for unread header allowance rather than granting it a second time.
-	buffered := reader.Buffered()
-	limited.N = int64(exitCountryFramedBodyLimit - buffered)
-	if limited.N < 0 {
-		return nil, io.ErrUnexpectedEOF
-	}
-	return http.ReadResponse(bufio.NewReaderSize(io.MultiReader(bytes.NewReader(header), reader), 1024), req)
+	return nil, io.ErrUnexpectedEOF
 }
 
 func probeExitCountryResponse(parent, ctx context.Context, conn io.Reader, req *http.Request, expected string) (string, bool) {

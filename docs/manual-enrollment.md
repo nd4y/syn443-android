@@ -70,3 +70,13 @@ loopback TLS CA when every signed service/issuer/client/origin/policy-key field
 matches that existing bootstrap. The URI never supplies this CA, non-loopback
 services cannot inherit it and release builds ignore the override. This reuses
 the existing debug operator mechanism without changing device trust settings.
+
+## First registration with intermittent connectivity
+
+The phone checks the invitation signature locally. After confirmation it needs a
+network that can reach the registration service. The Keycloak option also needs
+access to the identity provider. If manual registration loses connectivity, use
+Retry in the sign-in section after connectivity returns. The client keeps the
+pending operation and device key, including when a claim reached the service
+but its response was lost. The administrator's approval and the signed policy
+are still required before VPN traffic can start.

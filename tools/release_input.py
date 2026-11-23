@@ -39,6 +39,13 @@ def inspect_manifest(xml, metadata):
     control, = [item for item in app.findall("provider") if name(item) == PACKAGE + ".vpn.ControlProvider"]
     if control.get(ANDROID + "exported") != "false" or control.get(ANDROID + "authorities") != "io.syn443.control":
         raise ValueError("release control provider must be private")
+    diagnostic, = [item for item in app.findall("provider") if name(item) == PACKAGE + ".vpn.OperatorReadProvider"]
+    expected = {"authorities": "io.syn443.operator.read", "permission": "android.permission.DUMP",
+                "exported": "true", "process": ":controller", "grantUriPermissions": "false"}
+    if (any(diagnostic.get(ANDROID + key) != value for key, value in expected.items()) or
+            any(diagnostic.get(ANDROID + key) is not None for key in ("readPermission", "writePermission")) or
+            diagnostic.findall("path-permission") or diagnostic.findall("grant-uri-permission")):
+        raise ValueError("unexpected release operator read boundary")
     vpn, = [item for item in app.findall("service") if name(item) == PACKAGE + ".vpn.TunnelService"]
     if vpn.get(ANDROID + "permission") != "android.permission.BIND_VPN_SERVICE":
         raise ValueError("VPN service missing the system permission")

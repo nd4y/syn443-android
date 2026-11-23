@@ -136,6 +136,12 @@ Read-only diagnostics may expose at most four leaf IDs and fixed outcome/code pa
 under `checkPlan`, together with profile ID/revision and aggregate outcome. They
 contain no probe URL, credentials or raw errors and cannot select or publish a route.
 
+The client checks a positive diagnostic report against the signed profile.
+Every mandatory leaf must have succeeded, and the recorded successes must
+satisfy each stage. An inconsistent report appears as unknown. This also
+suppresses the confirmed exit country until a consistent fresh report arrives.
+The Go engine still evaluates the probes and owns the route selection receipt.
+
 ## Acceptance
 
 The common fixture contains9 valid profiles with canonical hash goldens,37 invalid
@@ -171,3 +177,5 @@ Both ordered checks and v2 profile leaves support this predicate. Its verb and
 status travel in the signed engine configuration and participate in the proof hash.
 Publication requires the device capability `route.https-status.v1` together with
 `route.health.v1`. Existing clients can continue to receive their existing checks.
+
+HTTPS status, strict 204, exit IP and exit country checks evaluate the final HTTP response. Each permits up to four informational responses on its assigned connection within the existing time and byte budgets. An HTTP 101 protocol switch ends the exchange.

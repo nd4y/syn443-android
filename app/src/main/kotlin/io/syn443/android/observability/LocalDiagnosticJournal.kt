@@ -144,7 +144,7 @@ internal object LocalDiagnosticJournal {
         val knownPhase = EventPhase.fromWire(phase) ?: return
         val knownCode = EventCode.fromWire(code)
         val safeDecision = decision?.takeIf { knownCode == EventCode.MANAGED_ROUTE_RECHECK }
-        val level = if (knownPhase in setOf(EventPhase.DEGRADED, EventPhase.RECOVERING, EventPhase.NEEDS_ACTION, EventPhase.BLOCKED_BY_POLICY))
+        val level = if (knownCode == EventCode.AUTH_ACCESS_DENIED || knownPhase in setOf(EventPhase.DEGRADED, EventPhase.RECOVERING, EventPhase.NEEDS_ACTION, EventPhase.BLOCKED_BY_POLICY))
             EventLevel.WARN else EventLevel.INFO
         val pending = PendingJournalEvent(wallMs, elapsedMs, EventGenerations(generation, epoch),
             EventDetail.Lifecycle(knownPhase, knownCode, safeDecision), level)

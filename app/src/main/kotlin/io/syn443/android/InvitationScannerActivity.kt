@@ -14,10 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -96,7 +94,7 @@ class InvitationScannerActivity : ComponentActivity() {
             })
         }
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            Syn443Theme {
                 Surface(Modifier.fillMaxSize()) {
                     Column(Modifier.safeDrawingPadding().padding(16.dp)) {
                         Text(hint, Modifier.padding(bottom = 12.dp))

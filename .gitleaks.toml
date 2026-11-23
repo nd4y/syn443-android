@@ -306,3 +306,24 @@ condition = "AND"
 paths = ['''^contracts/lock\.json$''']
 regexTarget = "line"
 regexes = ['''^\s*"control-openapi\.json": "766aac661686807123741295fe722fd41c311e987a45f5671e51ed4feaf0d2b7",?\s*$''']
+
+[[rules.allowlists]]
+description = "Verified SHA-256 of the public device publication history API contract"
+condition = "AND"
+paths = ['''^contracts/lock\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"control-openapi\.json": "52c666287d80c5dc96e21b69c3df4df3a15401679e4546ad21a0431eb6a975ea",?\s*$''']
+
+[[rules.allowlists]]
+description = "Verified SHA-256 of the public device inventory report expiry API contract"
+condition = "AND"
+paths = ['''^contracts/lock\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"control-openapi\.json": "657566f38cdefb814f98842e605a34617ddd59bdeb74213c8b494dd314299420",?\s*$''']
+
+[[rules.allowlists]]
+description = "Verified SHA-256 of the public device card report timing API contract"
+condition = "AND"
+paths = ['''^contracts/lock\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"control-openapi\.json": "4412befff7d0ea4a56e541172ead8a297d13f575edb91a8a9dc67483b02c6898",?\s*$''']

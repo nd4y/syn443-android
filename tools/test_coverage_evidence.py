@@ -235,14 +235,28 @@ class CoverageEvidenceTest(unittest.TestCase):
         self.assertEqual(1, len(declarations))
         required = ast.literal_eval(declarations[0].value)
         expected = set()
-        for name, count in [('ManagedAdaptiveSearchStatusTest', 6), ('RouteSearchStatusTest', 8)]:
+        for name, count in [('ManagedAdaptiveSearchStatusTest', 6), ('RouteSearchStatusTest', 9)]:
             path = root / 'app/src/androidTest/kotlin/io/syn443/android' / (name + '.kt')
             methods = re.findall(r'@Test\s+fun\s+(\w+)', path.read_text(encoding='utf-8'))
             self.assertEqual(count, len(methods))
             self.assertEqual(count, len(set(methods)))
             expected.update(('io.syn443.android.' + name, method) for method in methods)
-        self.assertEqual(14, len(required))
-        self.assertEqual(14, len(set(required)))
+        additional = {
+            'ManagedAdaptiveRoutesTest': {
+                'lowerLatencyThroughAnExtraProxyDoesNotDisplaceAHealthySharedExit',
+                'threeAttributedFailuresLetAStableSlowerReserveReplaceTheRecoveredIncumbent',
+            },
+            'ManagedAdaptiveRoutesFairnessTest': {
+                'sparseRecoveryFindsTheLastEligibleHopWithoutForceOrExtraNetworkProbes',
+            },
+        }
+        for classname, selected in additional.items():
+            path = root / 'app/src/androidTest/kotlin/io/syn443/android' / (classname + '.kt')
+            methods = re.findall(r'@Test\s+fun\s+(\w+)', path.read_text(encoding='utf-8'))
+            for method in selected:
+                self.assertEqual(1, methods.count(method))
+                expected.add(('io.syn443.android.' + classname, method))
+        self.assertEqual(len(expected), len(required))
         self.assertEqual(expected, set(required))
         self.assertRegex(source, r'elif mode=="emulator":\n(?:    [^\n]*\n)*?    minimum=524\n')
         self.assertRegex(source, r'elif mode=="identity":\n(?:    [^\n]*\n)*?    minimum=249\n')
@@ -261,8 +275,8 @@ class CoverageEvidenceTest(unittest.TestCase):
         # Exercise the actual finite admission assertions, not a mirrored helper.
         admission = compile(ast.fix_missing_locations(ast.Module(body=guard.body[:3], type_ignores=[])), '<check-plan-admission>', 'exec')
         for mode, floor, folder, classes in [
-            ('policy', 31, 'core/policy/src/test/kotlin/io/syn443/policy', {'RouteCheckProfileTest': 9, 'RouteCheckPlanPolicyTest': 3}),
-            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 11}),
+            ('policy', 31, 'core/policy/src/test/kotlin/io/syn443/policy', {'RouteCheckProfileTest': 10, 'RouteCheckPlanPolicyTest': 3}),
+            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', {'RouteCheckPlanTest': 12}),
         ]:
             expected = set()
             for classname, count in classes.items():
@@ -537,7 +551,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         complete = compile(ast.fix_missing_locations(ast.Module(body=guard.body, type_ignores=[])), '<continuity-source>', 'exec')
         for mode, floor, folder, owner, count in [
             ('jvm', 21, 'core/decision/src/test/kotlin/io/syn443/decision', 'io.syn443.decision.RouteHealthContinuityTest', 3),
-            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', 'io.syn443.android.AdaptivePathContinuityTest', 6),
+            ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', 'io.syn443.android.AdaptivePathContinuityTest', 9),
         ]:
             path = root / folder / (owner.rsplit('.', 1)[1] + '.kt')
             original = path.read_text(encoding='utf-8')

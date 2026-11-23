@@ -19,6 +19,7 @@ import io.syn443.android.vpn.RouteSnapshot
 import io.syn443.policy.Policy
 import io.syn443.recovery.RouteActivation
 import io.syn443.recovery.RouteScope
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
@@ -38,6 +39,45 @@ class RouteSearchStatusTest {
     private fun row(scope:RouteScope,now:Long=SystemClock.elapsedRealtime(),ready:Boolean=true)=
         RouteSnapshot.readAt(true,ready,scope,now).getJSONArray("routes").getJSONObject(0)
     private fun search(value:JSONObject)=value.getJSONObject("search").getString("state")
+
+    @Test fun mixedChecksRequireIndependentCurrentReceiptsAndDropOldModeWork() {
+        val config = JSONObject(ManagedAdaptiveRoutesFairnessTest().config(choices=1, groupCount=1))
+        for (tag in listOf("fixed-first", "fixed-second")) {
+            config.getJSONArray("outbounds").put(JSONObject().put("type", "direct").put("tag", tag))
+            config.getJSONArray("route_checks").put(JSONObject().put("outbound", tag)
+                .put("required", tag == "fixed-first").put("checks", JSONArray().put(
+                    JSONObject().put("method", "tcp").put("target", "192.0.2.7:22"))))
+        }
+        val raw = config.toString()
+        val scope = RouteScope(1, 2, 3, "synthetic-mixed-owner", Policy.hash(raw))
+        RouteSnapshot.owner(null)
+        RouteSnapshot.configure(raw, scope.config)
+        RouteSnapshot.owner(scope)
+        val started = SystemClock.elapsedRealtime()
+        assertTrue(RouteSnapshot.prepareActivation(scope, started))
+        val first = checkNotNull(RouteSnapshot.nextMixedCheck(scope, null, started))
+        assertEquals(RouteSnapshot.MixedCandidate("route-2", false), first)
+        assertNull(RouteSnapshot.nextMixedCheck(scope.copy(network=4), null, started))
+        assertNull(RouteSnapshot.nextMixedCheck(scope, "route-1", started))
+        val request = JSONObject(checkNotNull(RouteSnapshot.startMixedCheck(scope, first, started)))
+        assertEquals(1, request.getJSONArray("routes").length())
+        assertEquals("fixed-first", request.getJSONArray("routes").getJSONObject(0).getString("outbound"))
+        assertNull(RouteSnapshot.nextMixedCheck(scope, null, SystemClock.elapsedRealtime()))
+        fun result(id: String) = JSONObject().put("request", id).put("running", false).put("results",
+            JSONArray().put(JSONObject().put("id", "route-2").put("complete", true).put("ok", true)
+                .put("code", "ok").put("elapsedMs", 1).put("sampledElapsedMs", SystemClock.elapsedRealtime())
+                .put("path", JSONArray().put("route-2")))).toString()
+        assertTrue(RouteSnapshot.update(scope, result(request.getString("request"))))
+        assertEquals(RouteActivation.WAIT, RouteSnapshot.activation(scope, started))
+        val next = checkNotNull(RouteSnapshot.nextMixedCheck(scope, null, SystemClock.elapsedRealtime()))
+        assertEquals(RouteSnapshot.MixedCandidate("route-3", true), next)
+        val delayed = JSONObject(checkNotNull(RouteSnapshot.startMixedCheck(scope, next, SystemClock.elapsedRealtime())))
+        RouteSnapshot.clearMixedChecks()
+        assertFalse(RouteSnapshot.update(scope, result(delayed.getString("request"))))
+        val rows = RouteSnapshot.read(true, true, scope).getJSONArray("routes")
+        assertEquals("unverified", rows.getJSONObject(1).getString("state"))
+        assertEquals(RouteActivation.WAIT, RouteSnapshot.activation(scope, started))
+    }
 
     @Test fun singleRouteControlKeepsItsRowAndRejectsAReplacedNetworkOrConfiguration() {
         val scope=configure(2)

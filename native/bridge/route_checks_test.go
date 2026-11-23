@@ -323,3 +323,100 @@ func TestRouteExpiredBootBudgetDoesNotDialAndProbePanicCannotKillOtherRoute(t *t
 		t.Fatal("one probe exception poisoned independent work")
 	}
 }
+
+func TestRouteHTTPSMethodsUseFinalResponseAfterEarlyHints(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, body string
+		status             int
+	}{
+		{"status", "https_status", "", http.StatusAccepted},
+		{"no-content", "https_204", "", http.StatusNoContent},
+		{"exit-ip", "https_exit_ip", "192.0.2.8", http.StatusOK},
+		{"exit-country", "https_exit_country", `{"ip":"192.0.2.8","country":"DE"}`, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Link", "</style.css>; rel=preload")
+				for i := 0; i < maxRouteInformationalResponses; i++ {
+					w.WriteHeader(http.StatusEarlyHints)
+				}
+				w.Header().Del("Link")
+				if tc.body != "" {
+					w.Header().Set("Content-Length", fmt.Sprint(len(tc.body)))
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+			roots := x509.NewCertPool()
+			roots.AddCert(server.Certificate())
+			check := routeCheck{Method: tc.method, Target: server.URL}
+			switch tc.method {
+			case "https_status":
+				check.HTTPMethod, check.ExpectedStatus = http.MethodHead, tc.status
+			case "https_exit_ip":
+				check.ExpectedIP = "192.0.2.8"
+			case "https_exit_country":
+				check.ExpectedExitClass = "NON_RU"
+			}
+			dials := 0
+			dial := func(ctx context.Context, network string, target M.Socksaddr) (net.Conn, error) {
+				dials++
+				if network != "tcp" || "https://"+target.String() != server.URL {
+					return nil, errors.New("wrong route check destination")
+				}
+				return routeTestDial(ctx, network, target)
+			}
+			code, complete := probeRouteWithRoots(context.Background(), dial, check, roots)
+			if code != "ok" || !complete || calls.Load() != 1 || dials != 1 {
+				t.Fatalf("final proof: code=%s complete=%t requests=%d dials=%d", code, complete, calls.Load(), dials)
+			}
+		})
+	}
+}
+
+func TestRouteEarlyHintsCannotSupplyFinalEvidenceOrRenewHeaderBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name                       string
+		hints, headerBytes, status int
+	}{
+		{"wrong final", 1, 0, http.StatusFound},
+		{"switching protocols", 1, 0, http.StatusSwitchingProtocols},
+		{"too many informational responses", maxRouteInformationalResponses + 1, 0, http.StatusNoContent},
+		{"shared header limit", 3, 3000, http.StatusNoContent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Hint", strings.Repeat("x", tc.headerBytes))
+				for i := 0; i < tc.hints; i++ {
+					w.WriteHeader(http.StatusEarlyHints)
+				}
+				w.Header().Del("X-Hint")
+				w.WriteHeader(tc.status)
+			}))
+			defer server.Close()
+			roots := x509.NewCertPool()
+			roots.AddCert(server.Certificate())
+			for _, check := range []routeCheck{
+				{Method: "https_status", Target: server.URL, HTTPMethod: http.MethodGet, ExpectedStatus: 204},
+				{Method: "https_204", Target: server.URL},
+				{Method: "https_exit_ip", Target: server.URL, ExpectedIP: "192.0.2.8"},
+				{Method: "https_exit_country", Target: server.URL, ExpectedExitClass: "NON_RU"},
+			} {
+				code, complete := probeRouteWithRoots(context.Background(), routeTestDial, check, roots)
+				expected := "response_failed"
+				if tc.headerBytes == 0 && tc.hints <= maxRouteInformationalResponses {
+					expected = "http_response_mismatch"
+					if check.ExpectedIP != "" || check.ExpectedExitClass != "" {
+						expected = "exit_evidence_invalid"
+					}
+				}
+				if code != expected || !complete {
+					t.Fatalf("%s returned %s complete=%t, expected %s", check.Method, code, complete, expected)
+				}
+			}
+		})
+	}
+}

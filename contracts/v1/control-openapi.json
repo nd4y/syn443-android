@@ -1901,6 +1901,10 @@
                     "minLength": 1,
                     "maxLength": 64,
                     "pattern": "^[A-Za-z0-9_-]{1,64}$"
+                  },
+                  "includeReportExpiry": {
+                    "const": true,
+                    "description": "Request the server observation time and policy lease deadline for a current activation receipt. Older requests and historical receipts omit reportTiming."
                   }
                 },
                 "required": [
@@ -1946,6 +1950,10 @@
                     "maxLength": 64,
                     "pattern": "^[A-Za-z0-9_-]{1,64}$",
                     "description": "Case-insensitive literal prefix of an authorized device ID, applied before cursor pagination."
+                  },
+                  "includeReportExpiry": {
+                    "const": true,
+                    "description": "Request reportExpiry=true and a reportValidUntilMs lease boundary on each currently reported device. Absence preserves the original inventory representation."
                   }
                 }
               }
@@ -2072,6 +2080,10 @@
                   "hash": {
                     "type": "string",
                     "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "includePrevious": {
+                    "const": true,
+                    "description": "Return the immutable predecessor reference for this device when present. Reading it requires a separate authorized historical request."
                   }
                 }
               }

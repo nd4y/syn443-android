@@ -939,6 +939,12 @@ class LoginControllerTest {
         assertEquals(1,f.server.enrollBodies.size)
         assertEquals(LoginPhase.NEEDS_REAUTH,f.journal.snapshot().phase)
         assertEquals("ACCESS_DENIED",f.controller.status().getString("reason"))
+        val read = f.controller.loginReadStatus()
+        assertEquals(setOf("schemaVersion","phase","reason","busy","canReauthenticate"),read.keys().asSequence().toSet())
+        assertEquals("NEEDS_REAUTH",read.getString("phase"))
+        assertEquals("ACCESS_DENIED",read.getString("reason"))
+        assertTrue(read.getBoolean("canReauthenticate"))
+        assertFalse(read.getBoolean("busy"))
         f.server.subject="synthetic-owner";f.server.replaceRegisteredDevice=true
         f.controller.callback(f.repeatLogin());f.idle()
         val after=f.journal.snapshot()

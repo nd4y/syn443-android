@@ -19,8 +19,8 @@ MANIFEST = "syn443-build-manifest"
 PACKAGES = "syn443-prototype-debug-apks"
 
 
-def api(endpoint):
-    return json.loads(subprocess.check_output(["gh", "api", f"repos/{REPOSITORY}/{endpoint}"], timeout=60))
+def api(endpoint, repository=REPOSITORY):
+    return json.loads(subprocess.check_output(["gh", "api", f"repos/{repository}/{endpoint}"], timeout=60))
 
 
 def version(commit):
@@ -52,12 +52,12 @@ def select_runs(runs, main_history, candidate_id, previous_id):
     return previous, current
 
 
-def read_members(directory, artifact, members, size_limit):
+def read_members(directory, artifact, members, size_limit, repository=REPOSITORY):
     if artifact["expired"] or not 0 < artifact["size_in_bytes"] <= size_limit:
         raise ValueError("Required Actions artifact has expired or exceeds its size limit")
     archive = directory / "download.zip"
     with archive.open("wb") as stream:
-        subprocess.run(["gh", "api", f"repos/{REPOSITORY}/actions/artifacts/{artifact['id']}/zip"],
+        subprocess.run(["gh", "api", f"repos/{repository}/actions/artifacts/{artifact['id']}/zip"],
                        stdout=stream, check=True, timeout=420)
     with archive.open("rb") as stream:
         if (archive.stat().st_size != artifact["size_in_bytes"] or
@@ -73,16 +73,28 @@ def read_members(directory, artifact, members, size_limit):
     archive.unlink()
 
 
+def producer_artifact(artifacts, name, run, build):
+    # The API can retain same-name artifacts from several attempts of one run.
+    # Never take the largest ID or the first matching name as the producer.
+    result = [a for a in artifacts if a["name"] == name and not a["expired"]
+              and a.get("workflow_run", {}).get("id") == run["id"]
+              and a.get("workflow_run", {}).get("head_sha") == run["head_sha"]
+              and build["started_at"] <= a["created_at"] <= build["completed_at"]]
+    if len(result) != 1:
+        raise ValueError("Expected one retained " + name + " from the successful APK producer")
+    return result[0]
+
+
 def collect(work, item, include_driver):
     run_id, commit = item["id"], item["head_sha"]
     work.mkdir()
     artifacts = api(f"actions/runs/{run_id}/artifacts?per_page=100")["artifacts"]
-    def artifact(name):
-        matches = [a for a in artifacts if a["name"] == name and not a["expired"]]
-        if len(matches) != 1:
-            raise ValueError(f"Expected one retained {name} for run {run_id}")
-        return matches[0]
-    manifest_archive, apk_archive = artifact(MANIFEST), artifact(PACKAGES)
+    jobs = api(f"actions/runs/{run_id}/jobs?per_page=100")["jobs"]
+    builds = [j for j in jobs if j["name"] == "jvm-and-apk" and j["conclusion"] == "success"]
+    if len(builds) != 1:
+        raise ValueError("Expected one successful APK producer")
+    manifest_archive = producer_artifact(artifacts, MANIFEST, item, builds[0])
+    apk_archive = producer_artifact(artifacts, PACKAGES, item, builds[0])
     read_members(work, manifest_archive, [("build-manifest.json", work / "manifest.json", 65536)], 1048576)
     manifest = json.loads((work / "manifest.json").read_bytes())
     if (manifest["schemaVersion"] != 1 or manifest["actionsRun"] != run_id or
