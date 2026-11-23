@@ -166,7 +166,7 @@ class TunnelService : VpnService() {
             modeChoices.clear()
             if(lastHomeDeadline>0 || appliedManualExpiry>0) {
                 lastHomeDeadline=0L;appliedMode=null;appliedManualExpiry=0L;manualNativeDeadline=0L
-                if(host?.invalidateAdaptiveContext(session)!=true)retire(true)
+                if ((runCatching { host?.invalidateAdaptiveContext(session) }.getOrNull() ?: -1L) < 0) retire(true)
             }
             return
         }
@@ -178,7 +178,8 @@ class TunnelService : VpnService() {
         if (appliedMode!=null && (appliedMode!=mode || appliedManualExpiry!=view.until) ||
             homeWasActive != (mode == NetworkMode.HOME_WIFI) ||
             homeWasActive && SystemClock.elapsedRealtime()>=lastHomeDeadline) {
-            if (host?.invalidateAdaptiveContext(session)!=true) { retire(true);return }
+            val epoch = runCatching { host?.invalidateAdaptiveContext(session) }.getOrNull() ?: -1L
+            if (!routes.awaitInvalidatedOwner(epoch, SystemClock.elapsedRealtime())) { retire(true);return }
         }
         if (appliedManualExpiry!=view.until || manualNativeDeadline-now<60_000L) {
             manualNativeDeadline=if(view.until>now) minOf(view.until,now+180_000L) else 0L
@@ -446,7 +447,7 @@ class TunnelService : VpnService() {
         // bounded control call revokes old native receipts before Java exposes
         // the new epoch; the SDK worker is never entered by this call.
         if(adaptiveRoutes!=null && host!=null) {
-            val revoked=token?.let {session->runCatching {host?.invalidateAdaptiveContext(session)==true}.getOrDefault(false)}==true
+            val revoked=token?.let {session->runCatching { (host?.invalidateAdaptiveContext(session) ?: -1L) >= 0 }.getOrDefault(false)}==true
             if(!revoked)retire(true)
         }
         homeWiFi.observe(null);homeReport=null;lastHomeDeadline=0L
