@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <application android:usesCleartextTraffic="true">
+        <!-- Compose instrumentation starts this additional debug-only Activity. -->
+        <activity android:name="androidx.activity.ComponentActivity"
+            android:theme="@style/Syn443Window" tools:replace="android:theme" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="io.syn443.chat.fixture" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/chat_fixture_paths" />
         </provider>
