@@ -80,6 +80,23 @@ class CameraPermissionTest(unittest.TestCase):
                 self.assertNotIn('private-', call.args[0])
                 self.assertNotIn('private.example', call.args[0])
 
+    def test_preexisting_system_error_fails_before_enrollment_launch(self):
+        root = ET.Element('hierarchy')
+        ET.SubElement(root, 'node', {'package': 'android', 'resource-id': 'android:id/aerr_wait'})
+        with patch.object(camera, 'adb', return_value=b'ranchu'), \
+                patch.object(camera, 'require_initial_camera_denied'), \
+                patch.object(camera, 'installed_camera_state', return_value=(False, False)), \
+                patch.object(camera, 'tree', return_value=root), \
+                patch.object(camera, 'anr_owner_diagnostic', return_value={'category': 'unknown'}), \
+                patch.object(camera, 'observe_recent_crash_events', return_value=[]), \
+                patch.object(camera, 'start_enrollment') as launch, \
+                patch.object(camera, 'tap') as tap, patch('builtins.print') as emit:
+            with self.assertRaisesRegex(AssertionError, 'application crash or ANR'):
+                camera.main()
+            launch.assert_not_called()
+            tap.assert_not_called()
+            self.assertIn('before enrollment launch', emit.call_args.args[0])
+
     def test_recent_crash_events_keep_only_fixed_categories_and_bounded_scope(self):
         def event(time, process):
             return (time + b'.999  660  700 I am_crash: [0,2468,' + process +
