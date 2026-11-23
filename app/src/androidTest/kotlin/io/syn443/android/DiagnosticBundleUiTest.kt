@@ -18,8 +18,10 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.core.app.ActivityOptionsCompat
+import androidx.test.platform.app.InstrumentationRegistry
 import io.syn443.android.support.DiagnosticArchive
 import io.syn443.android.support.DiagnosticBundleControls
+import io.syn443.android.support.EmbeddedEngineBuilds
 import io.syn443.android.support.validBundlePreview
 import io.syn443.android.support.DiagnosticsRoute
 import kotlinx.coroutines.CompletableDeferred
@@ -98,6 +100,11 @@ class DiagnosticBundleUiTest {
             } })
         } }
         try {
+            val assets = InstrumentationRegistry.getInstrumentation().targetContext.assets
+            val builds = requireNotNull(EmbeddedEngineBuilds.read(assets))
+            compose.onNodeWithTag("embedded-engine-builds").performScrollTo().assertTextEquals(
+                "Встроенные движки\nsing-box ${builds.singBoxRevision.take(12)}\nNetBird ${builds.netBirdRevision.take(12)}")
+            assertFalse(requested.get())
             compose.onNodeWithTag("bundle-collect").performScrollTo().performClick()
             compose.waitUntil(5_000) { requested.get() }
             compose.onNodeWithTag("bundle-export").assertIsNotEnabled()

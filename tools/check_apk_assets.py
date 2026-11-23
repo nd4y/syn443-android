@@ -1,6 +1,8 @@
 """Admit only explicit runtime assets and original license files into the APK."""
 from pathlib import Path
 import hashlib
+import json
+import re
 import sys
 import zipfile
 
@@ -16,6 +18,11 @@ def expected_assets(root):
     result = {'assets/' + str(p.relative_to(base)).replace('\\', '/'): p.read_bytes()
               for p in base.rglob('*') if p.is_file()}
     result['assets/decision-vectors.json'] = (root / 'contracts/v1/decision-vectors.json').read_bytes()
+    sources = json.loads((root / 'native/engine-lock.json').read_bytes())['sources']
+    builds = {'schemaVersion': 1, 'singBoxRevision': sources['sing-box']['revision'],
+              'netBirdRevision': sources['netbird']['revision']}
+    assert all(re.fullmatch('[a-f0-9]{40}', builds[key]) for key in ('singBoxRevision', 'netBirdRevision'))
+    result['assets/engine-builds.json'] = json.dumps(builds, ensure_ascii=True, separators=(',', ':')).encode()
     return result
 
 

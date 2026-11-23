@@ -5,6 +5,8 @@ import io.syn443.android.support.DiagnosticArchive.Name
 import io.syn443.android.support.DiagnosticArchive.Reason
 import io.syn443.android.support.DiagnosticArchive.State
 import io.syn443.android.support.DiagnosticProjection
+import io.syn443.android.support.EmbeddedEngineBuilds
+import androidx.test.platform.app.InstrumentationRegistry
 import java.math.BigInteger
 import org.json.JSONArray
 import org.json.JSONObject
@@ -29,8 +31,8 @@ class DiagnosticProjectionTest {
     private fun exitsFixture() = JSONObject().put("schemaVersion", 1).put("state", "available")
         .put("exits", JSONArray().put(JSONObject().put("kind", "native_crash").put("at", 1000).put("status", 11)))
     private fun project(state: JSONObject = stateFixture(), overlay: JSONObject? = overlayFixture(), checks: JSONObject? = checksFixture(),
-        exits: JSONObject? = exitsFixture(), versionName: String = "0.9.64-offline-support", versionCode: Int = 64, sdk: Int = 35) =
-        DiagnosticProjection.project(state, overlay, checks, exits, versionName, versionCode, sdk)
+        exits: JSONObject? = exitsFixture(), versionName: String = "0.9.64-offline-support", versionCode: Int = 64, sdk: Int = 35, engines: EmbeddedEngineBuilds? = null) =
+        DiagnosticProjection.project(state, overlay, checks, exits, versionName, versionCode, sdk, engines = engines)
     private fun json(items: List<DiagnosticArchive.Component>, name: Name) = JSONObject(checkNotNull(items.single { it.name == name }.bytes).toString(Charsets.UTF_8))
     private fun eventRows(items: List<DiagnosticArchive.Component>) = checkNotNull(items.single { it.name == Name.EVENTS }.bytes)
         .toString(Charsets.UTF_8).lineSequence().filter { it.isNotEmpty() }.map(::JSONObject).toList()
@@ -50,6 +52,13 @@ class DiagnosticProjectionTest {
         assertEquals("0.9.64-offline-support", json(items, Name.VERSIONS).getString("versionName"))
         assertEquals(64, json(items, Name.VERSIONS).getInt("versionCode"))
         assertEquals(35, json(items, Name.VERSIONS).getInt("sdk"))
+        assertFalse(json(items, Name.VERSIONS).has("engineBuilds"))
+        val assets = InstrumentationRegistry.getInstrumentation().targetContext.assets
+        val builds = requireNotNull(EmbeddedEngineBuilds.read(assets))
+        val exported = json(project(engines = builds), Name.VERSIONS).getJSONObject("engineBuilds")
+        assertEquals(setOf("schemaVersion", "singBoxRevision", "netBirdRevision"), exported.keys().asSequence().toSet())
+        assertEquals(builds.singBoxRevision, exported.getString("singBoxRevision"))
+        assertEquals(builds.netBirdRevision, exported.getString("netBirdRevision"))
         assertEquals("offline_allowlist_projection", json(items, Name.CAPABILITIES).getString("collection"))
         assertTrue(json(items, Name.CHECKS).getBoolean("current"))
         assertEquals("direct", json(items, Name.OVERLAY).getString("mode"))

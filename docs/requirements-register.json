@@ -157,10 +157,14 @@
       "text": "В первой версии новые бинарные версии модулей доставляются обновлением подписанного APK; приложение и панель показывают состав и версии движков. Provisioning может выбирать уже встроенный движок/режим, но не исполняет код по URL из конфигурации. Независимая загрузка исполняемых модулей без обновления APK не входит в 1.0.",
       "status": "partial",
       "evidence": [
-        "docs/implementation-status.md#evidence-index-and-register-semantics"
+        "docs/implementation-status.md#evidence-index-and-register-semantics",
+        "native/engine-lock.json",
+        "tools/check_apk_assets.py",
+        "app/src/main/kotlin/io/syn443/android/support/EmbeddedEngineBuilds.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/DiagnosticBundleUiTest.kt"
       ],
-      "implementationScope": "Embedded isolated adapters, source locks, alignment and reproducible native/Android tests.",
-      "remainingScope": "Complete capabilities/version/SBOM/release/update and physical acceptance."
+      "implementationScope": "Embedded isolated adapters and reproducible build locks. Android Diagnostics shows both APK source revisions. The local support archive carries the exact revisions, checked against the lock and actual packaged bytes.",
+      "remainingScope": "Control Plane inventory, broader module ABI/release matrix and physical acceptance remain open."
     },
     {
       "id": "MOD-08",

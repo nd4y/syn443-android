@@ -1,3 +1,5 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 
@@ -10,17 +12,35 @@ abstract class PrototypeAssets : DefaultTask() {
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val inputFile: RegularFileProperty
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val engineLock: RegularFileProperty
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
     @TaskAction fun generate() {
         val output=outputDirectory.get().asFile
         output.mkdirs()
         output.resolve("decision-vectors.json").writeBytes(inputFile.get().asFile.readBytes())
+        val lock = JsonSlurper().parse(engineLock.get().asFile) as Map<*, *>
+        val sources = lock["sources"] as Map<*, *>
+        fun revision(name: String): String {
+            val value = (sources[name] as? Map<*, *>)?.get("revision") as? String
+            require(value != null && value.matches(Regex("[a-f0-9]{40}"))) {
+                "Missing or invalid embedded engine revision for $name"
+            }
+            return value
+        }
+        output.resolve("engine-builds.json").writeText(JsonOutput.toJson(linkedMapOf(
+            "schemaVersion" to 1,
+            "singBoxRevision" to revision("sing-box"),
+            "netBirdRevision" to revision("netbird"),
+        )))
     }
 }
-// Runtime uses only the decision example. Wire/signature evidence remains a JVM test resource.
+// Package the decision example and the public embedded engine build revisions.
 val prototypeAssets = tasks.register<PrototypeAssets>("preparePrototypeAssets") {
     inputFile.set(rootProject.layout.projectDirectory.file("contracts/v1/decision-vectors.json"))
+    engineLock.set(rootProject.layout.projectDirectory.file("native/engine-lock.json"))
     outputDirectory.set(layout.buildDirectory.dir("generated/prototypeAssets"))
 }
 androidComponents.onVariants { variant ->
@@ -53,8 +73,8 @@ android {
         applicationId = "io.syn443.android"
         minSdk = 29
         targetSdk = 37
-        versionCode = 157
-        versionName = "0.9.129-config-render"
+        versionCode = 158
+        versionName = "0.9.130-engine-builds"
         testInstrumentationRunner = "io.syn443.android.EnrollmentDriver"
         manifestPlaceholders["enrollmentLinkHost"] = enrollmentLinkHost
         buildConfigField("String", "ENROLLMENT_LINK_HOST", "\"$enrollmentLinkHost\"")
