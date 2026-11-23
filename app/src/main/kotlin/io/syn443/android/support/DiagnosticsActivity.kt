@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import kotlinx.coroutines.CancellationException
@@ -35,6 +36,7 @@ internal fun DiagnosticsRoute(
     exporter: (suspend (String, Uri, String, Int) -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val engines = remember(context.assets) { EmbeddedEngineBuilds.read(context.assets) }
     val scope = rememberCoroutineScope()
     var bundleId by rememberSaveable { mutableStateOf("") }
     var state by remember { mutableStateOf(JSONObject().put("state", "idle")) }
@@ -88,7 +90,8 @@ internal fun DiagnosticsRoute(
             message = "Файл сохранён. В SYN443 не отправлен."
         }
     }
-    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp)) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
         DiagnosticBundleControls(state, busy || pendingExportId.isNotEmpty(), message,
             collect = { operation {
                 val epoch = ++uiEpoch
@@ -144,5 +147,11 @@ internal fun DiagnosticsRoute(
             cancelling = cancelling,
         )
         LocalOperatorReadControls()
+        Text(
+            if (engines == null) "Сборки встроенных движков недоступны"
+            else "Встроенные движки\nsing-box ${engines.singBoxRevision.take(12)}\nNetBird ${engines.netBirdRevision.take(12)}",
+            modifier = Modifier.testTag("embedded-engine-builds"),
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }

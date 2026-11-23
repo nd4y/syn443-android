@@ -1,5 +1,6 @@
 from pathlib import Path
 import hashlib
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -14,6 +15,11 @@ class ApkAssetsTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         self.clips = [('assets/' + name, name.encode()) for name in CHAT_VIDEO_FIXTURES]
+        self.sing_box = '1' * 40
+        self.netbird = '2' * 40
+        lock = {'sources': {'sing-box': {'revision': self.sing_box}, 'netbird': {'revision': self.netbird}}}
+        (self.root / 'native').mkdir()
+        (self.root / 'native/engine-lock.json').write_text(json.dumps(lock), encoding='utf-8')
         for name, value in [('app/src/main/assets/licenses/fixture.txt', b'synthetic license'),
                             ('contracts/v1/decision-vectors.json', b'{"cases":[]}')] + [
                                 ('app/src/androidTest/' + name, data) for name, data in self.clips]:
@@ -32,6 +38,16 @@ class ApkAssetsTest(unittest.TestCase):
 
     def test_runtime_assets_and_license_bytes_are_preserved(self):
         check(self.apk(list(expected_assets(self.root).items())), self.root)
+
+    def test_engine_build_metadata_cannot_be_substituted(self):
+        name = 'assets/engine-builds.json'
+        values = expected_assets(self.root)
+        builds = json.loads(values[name])
+        self.assertEqual(builds, {'schemaVersion': 1, 'singBoxRevision': self.sing_box, 'netBirdRevision': self.netbird})
+        builds['netBirdRevision'] = '3' * 40
+        values[name] = json.dumps(builds, separators=(',', ':')).encode()
+        with self.assertRaises(AssertionError):
+            check(self.apk(values.items()), self.root)
 
     def test_instrumentation_requires_exact_pinned_suffix_data_and_runtime_rejects_it(self):
         synthetic = b'public suffix test data'

@@ -39,9 +39,11 @@ object DiagnosticProjection {
     private val diagnosticStates = setOf("idle", "preparing", "running", "completed", "partial", "cancelled", "unavailable", "no_peers")
 
     fun project(state: JSONObject, overlay: JSONObject?, checks: JSONObject?, exits: JSONObject?,
-        versionName: String, versionCode: Int, sdk: Int, physicalLink: JSONObject? = null): List<DiagnosticArchive.Component> {
+        versionName: String, versionCode: Int, sdk: Int, physicalLink: JSONObject? = null,
+        engines: EmbeddedEngineBuilds? = null): List<DiagnosticArchive.Component> {
         val versions = if (versionName.length <= 96 && version.matches(versionName) && versionCode > 0 && sdk in 1..9999)
-            json(DiagnosticArchive.Name.VERSIONS, document().put("versionName", versionName).put("versionCode", versionCode).put("sdk", sdk))
+            json(DiagnosticArchive.Name.VERSIONS, document().put("versionName", versionName).put("versionCode", versionCode).put("sdk", sdk)
+                .also { value -> engines?.let { value.put("engineBuilds", it.json()) } })
         else missing(DiagnosticArchive.Name.VERSIONS, DiagnosticArchive.Reason.INVALID_SOURCE, DiagnosticArchive.State.ERROR)
         val capabilities = json(DiagnosticArchive.Name.CAPABILITIES, document().put("collection", "offline_allowlist_projection")
             .put("maxEvents", MAX_ROWS).put("effectiveConfig", "ready_engine_projection").put("nativeStacks", "unsupported"))
