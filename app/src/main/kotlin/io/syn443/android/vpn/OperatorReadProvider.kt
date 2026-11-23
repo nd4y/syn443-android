@@ -82,9 +82,8 @@ class OperatorReadProvider : ContentProvider() {
                         .put("optionalOperations", JSONArray(listOf("overlay-status", "routes-status", "auth-status", "config-render")))
                     "auth-status" -> LoginController.operatorLoginStatus()
                     "config-render" -> {
-                        val intent = File(app.noBackupFilesDir, "vpn-intent.json")
                         operatorConfigRender(
-                            { SupportBundleSources.readState(intent) },
+                            { SupportBundleSources.readState(File(app.noBackupFilesDir, "vpn-intent.json")) },
                             { ReadyConfig.current },
                             LifecycleAccess::ownsReadyEngine,
                         )
