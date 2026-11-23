@@ -107,11 +107,20 @@ class EngineHostService : Service() {
     override fun onCreate() { super.onCreate(); workerThread.start(); worker = Handler(workerThread.looper) }
     private val binder = object : IEngineHost.Stub() {
         override fun pid() = Process.myPid()
-        override fun invalidateAdaptiveContext(session:String):Boolean = synchronized(controlLock) {
-            if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid())return@synchronized false
+        override fun invalidateAdaptiveContext(session:String):Long = synchronized(controlLock) {
+            if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid())return@synchronized -1L
             invalidateMixedProbes()
             adaptiveInvalidated=true
-            runCatching {engine?.invalidateAdaptiveContext()}.isSuccess
+            runCatching {
+                val runtime = engine ?: return@synchronized 0L
+                runtime.invalidateAdaptiveContext()
+                // A pre-start host or ordinary engine can acknowledge revocation
+                // without an adaptive epoch. A live managed owner must return one.
+                val status = org.json.JSONObject(runtime.adaptiveStatus())
+                if (!status.has("nativeEpoch")) return@synchronized 0L
+                check(status.opt("ready") == false)
+                status.getLong("nativeEpoch").also { require(it > 0) }
+            }.getOrDefault(-1L)
         }
         override fun start(fd: ParcelFileDescriptor, config: String, routeSelection: String, session: String, name: String, index: Int, leaseDeadline: Long, platform: IPlatform) {
             synchronized(controlLock) {
