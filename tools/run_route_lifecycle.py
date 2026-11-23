@@ -23,6 +23,12 @@ class RouteProxy(socketserver.BaseRequestHandler):
         if line.startswith((b'CONNECT 203.0.113.10:80 ', b'CONNECT 203.0.113.11:80 ')):
             self.request.sendall(b'HTTP/1.1 200 Connection established\r\n\r\n')
             request = stream.readline(4096)
+            challenge = getattr(self.server, 'start_challenge', None)
+            if challenge and request == b'GET /syn443-start/' + challenge + b' HTTP/1.1\r\n':
+                Proxy.headers(stream)
+                self.request.sendall(b'HTTP/1.1 204 No Content\r\nX-Syn443-Start: ' + challenge +
+                                     b'\r\nConnection: close\r\n\r\n')
+                return
             if request.startswith(b'GET /syn443-payload '):
                 received = getattr(self.server, 'payload_received', None)
                 Proxy.headers(stream)
