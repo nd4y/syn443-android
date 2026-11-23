@@ -18,6 +18,23 @@ import zipfile
 import syn443ctl as ctl
 
 
+class ConfigRenderContractTest(unittest.TestCase):
+    def test_rejects_raw_unknown_or_wrongly_typed_projection(self):
+        available = {"schemaVersion": 1, "availability": "active", "generation": 7,
+                     "configuration": {"schemaVersion": 1, "outboundTypes": {"http": 1},
+                                       "adaptiveRouting": False, "dnsServerCount": 0}}
+        unavailable = {"schemaVersion": 1, "availability": "unavailable"}
+        self.assertEqual(available, ctl.local_config_render(available))
+        self.assertEqual(unavailable, ctl.local_config_render(unavailable))
+        for update in ({"server": "protected.example.invalid"}, {"outboundTypes": {"private": 1}},
+                       {"outboundTypes": {"http": True}}, {"routeRuleCount": -1}):
+            with self.subTest(update=update), self.assertRaises(ctl.ControlError):
+                ctl.local_config_render({**available, "configuration": {**available["configuration"], **update}})
+        for reply in ({**unavailable, "generation": 7}, {**available, "generation": True}):
+            with self.assertRaises(ctl.ControlError):
+                ctl.local_config_render(reply)
+
+
 BUNDLE_ID = "a" * 32
 GRANT = "b" * 32
 

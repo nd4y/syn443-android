@@ -34,12 +34,27 @@ An empty list means the current process has no route rows to report.
 Reading the snapshot does not schedule probes. Device and proxy addresses,
 route names and policy contents stay on the phone.
 
+Use `python3 tools/syn443ctl.py --serial <adb-serial> --local-read config-render`
+to inspect the running configuration. The command returns protocol counts,
+whether adaptive routing is active, and available DNS and route-rule counts
+for the current VPN generation. An idle controller or a replaced engine
+returns `unavailable`. The command reads the same redacted configuration used
+by the diagnostic archive after the engine starts.
+
 The grant expires after fifteen minutes. The owner can revoke it on the same
 screen. A controller restart also ends it. Exit code 4 with
 `local_consent_required` means the phone needs a fresh local grant.
 The separate read endpoint checks Android shell UID and returns a closed
 projection of VPN health, overlay connectivity and technical events. The CLI lists exactly the
 operations available through this grant.
+
+The Android 15 installer workflow starts a separate ordinary app UID while the
+owner's grant is active. Android denies status, logs, login and route reads
+from that UID. It also denies access to the private config and archive
+commands. Authorized shell reads still work and the VPN intent stays the same.
+The app used to run this check is present only in the Android test APK.
+
+See the [installer result](https://github.com/nd4y/syn443-android/actions/runs/45187983487).
 
 ## Development controls
 
@@ -78,15 +93,13 @@ ADB stdin into a private staging file, never as a shell argument. A timeout
 does not imply that the operation failed; read the current revision before
 retrying.
 
-Shell control remains restricted to debug builds. This client does not
-expose fault injection, login credentials, raw configuration export or
-managed policy overrides. Release opt-in, managed configuration editing,
-mode commands, route job IDs and server audit require separate work. Keep
-device output private.
+Debug shell supports unmanaged local configuration planning and application.
+The ordinary release supports the passive reads listed above after local
+consent. Keep device output private.
 
-## Offline archive candidate
+## Offline archive in debug builds
 
-The existing `diagnostic-bundle` JSON operation remains. The candidate adds
+Use `diagnostic-bundle` for the bounded JSON snapshot. To use a local ZIP, run
 `support-bundle --output FILE`, `support-bundle-collect`,
 `support-bundle-status --bundle-id ID`, `support-bundle-cancel --bundle-id ID`
 and `support-bundle-export --bundle-id ID --output FILE`. Only an explicit

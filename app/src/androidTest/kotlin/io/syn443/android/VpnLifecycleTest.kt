@@ -279,12 +279,31 @@ class VpnLifecycleTest {
     }
     @Test fun realTunTrafficAndExplicitStop() {
         connect()
-        assertTrue(status().getBoolean("desiredOn"))
+        val on = status()
+        assertTrue(on.getBoolean("desiredOn"))
         assertNotNull(pid())
-        call("disconnect")
-        await { !status().optBoolean("desiredOn") && pid() == null }
-        Thread.sleep(1_500)
-        assertFalse(status().getBoolean("desiredOn"))
+        fun render(): JSONObject {
+            val reply = shell("content call --uri content://io.syn443.operator.read --method config-render").toString(Charsets.UTF_8)
+            assertTrue(reply.contains("ok=true"))
+            return org.json.JSONTokener(reply.substringAfter("json=", "")).nextValue() as JSONObject
+        }
+        call("operator-read-access", "grant")
+        try {
+            val active = render()
+            assertEquals("active", active.getString("availability"))
+            assertEquals(on.getLong("generation"), active.getLong("generation"))
+            val config = active.getJSONObject("configuration")
+            assertEquals(1, config.getJSONObject("outboundTypes").getInt("http"))
+            assertFalse(config.toString().contains("127.0.0.1") || config.toString().contains("test-proxy"))
+            assertEquals(on.getLong("generation"), status().getLong("generation"))
+            call("disconnect")
+            await { !status().optBoolean("desiredOn") && pid() == null }
+            val stopped = render()
+            assertEquals("unavailable", stopped.getString("availability"))
+            assertFalse(stopped.has("configuration"))
+            Thread.sleep(1_500)
+            assertFalse(status().getBoolean("desiredOn"))
+        } finally { call("operator-read-access", "revoke") }
     }
     private fun awaitOwnedDefaultRoutes() = await {
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
