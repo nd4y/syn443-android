@@ -88,7 +88,7 @@ class RouteCheckPlanTest {
     private fun scopedCheckConfig(revision: Int, method: String, exitClass: String?): JSONObject {
         val value = config()
         val plan = row(value).getJSONObject("profile").put("revision", revision)
-        val check = JSONObject().put("method", method).put("target", "https://egress.example.invalid/check")
+        val check = JSONObject().put("method", method).put("target", "https://egress.example.invalid/")
         if (exitClass != null) check.put("expected_exit_class", exitClass)
         plan.getJSONArray("leaves").getJSONObject(1).put("check", check)
         plan.put("gates", JSONArray().put("b")).put("stages", JSONArray().put(JSONObject().put("leaf", "a")))

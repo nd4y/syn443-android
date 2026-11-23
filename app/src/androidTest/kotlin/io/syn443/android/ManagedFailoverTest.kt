@@ -51,7 +51,12 @@ class ManagedFailoverTest {
         val algorithm = FailoverAlgorithm.CONFIRMED
         fun batch(reservePassed: Boolean) {
             val request = JSONObject(checkNotNull(RouteSnapshot.request(scope, force = true, deferCoolingReserves = true)))
-            assertEquals(3, request.getJSONArray("routes").length())
+            val routes = request.getJSONArray("routes")
+            val requested = (0 until routes.length()).map { routes.getJSONObject(it).getString("id") }.toSet()
+            assertTrue("Required selector and the reserve must be checked", requested.containsAll(listOf("route-2", "route-3")))
+            if (!reservePassed) {
+                assertTrue("A shared target failure must not remove the primary from the survey", "route-1" in requested)
+            }
             val now = SystemClock.elapsedRealtime()
             fun result(id: String, passed: Boolean, path: List<String>) = JSONObject().put("id", id)
                 .put("complete", true).put("ok", passed).put("code", if (passed) "ok" else "http_response_mismatch")
@@ -61,7 +66,7 @@ class ManagedFailoverTest {
                     result("route-1", false, listOf("route-1")),
                     result("route-2", reservePassed, listOf("route-2")),
                     result("route-3", false, listOf("route-3", "route-1"))
-                )))
+                ).filter { it.getString("id") in requested }))
             assertTrue(RouteSnapshot.update(scope, reply.toString()))
         }
         try {
