@@ -1,7 +1,8 @@
 import subprocess
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
-from run_route_lifecycle import direct_boot_diagnostics, locked_boot_boundary, off_after_reboot, resume_blocked, completed_route_batch
+from run_route_lifecycle import direct_boot_diagnostics, locked_boot_boundary, off_after_reboot, resume_blocked, completed_route_batch, wifi_loss_recovery
 from run_vpn_process_faults import ControlUnavailable, await_condition, vpn_stopped
 
 
@@ -139,3 +140,69 @@ class RouteBatchCompletionTest(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class WiFiLossFixtureTest(unittest.TestCase):
+    def test_wifi_loss_requires_new_route_proof_and_payload_with_the_same_intent(self):
+        proxy = SimpleNamespace(progress=1, route_probes=1)
+        operations = []
+        clock = 0
+        mode = 'before'
+        link = {'transport': 'WIFI'}
+        offline_routes = {'routes': [{'state': 'unavailable'}], 'running': False, 'requiredReady': False}
+
+        def adb(*args):
+            nonlocal mode
+            operations.append(args)
+            if args == ('emu', 'avd', 'name'):
+                return b'syn443-ci\nOK\n'
+            if args == ('shell', 'settings', 'get', 'global', 'mobile_data'):
+                return b'0'
+            if args[-1] == 'enable':
+                proxy.progress += 1
+                proxy.route_probes += 1
+                mode = 'after'
+                return b''
+            if args[-1] == 'disable':
+                mode = 'lost'
+                return b''
+            self.fail('Unexpected fixture operation')
+
+        def status(method):
+            if method == 'routes-status' and mode == 'lost':
+                return offline_routes
+            self.assertEqual('status', method)
+            return dict(generation=7, desiredOn=True, configRevision='fixture',
+                        networkEpoch={'before': 4, 'lost': 5, 'after': 6}[mode],
+                        phase='NoNetwork' if mode == 'lost' else 'Online',
+                        reason='network_unavailable' if mode == 'lost' else 'required_https_ok',
+                        physicalLink=None if mode == 'lost' else link)
+
+        def wait(seconds):
+            nonlocal clock
+            clock += seconds
+
+        with patch.dict('os.environ', {'GITHUB_ACTIONS': 'true', 'SYN443_CI_AVD': 'syn443-ci'}), \
+                patch('run_route_lifecycle.adb', side_effect=adb), \
+                patch('run_route_lifecycle.call', side_effect=status), \
+                patch('run_route_lifecycle.completed_route_batch', return_value=True) as routes, \
+                patch('run_route_lifecycle.exchange_through_proxy') as payload, \
+                patch('run_route_lifecycle.time.monotonic', side_effect=lambda: clock), \
+                patch('run_route_lifecycle.time.sleep', side_effect=wait):
+            wifi_loss_recovery(proxy)
+            self.assertEqual(2, payload.call_count)
+            self.assertEqual(2, routes.call_count)
+            self.assertGreaterEqual(clock, 6)
+            # A stale proof must fail, but Wi-Fi still has to be restored.
+            mode = 'before'
+            offline_routes['requiredReady'] = True
+            with self.assertRaises(AssertionError):
+                wifi_loss_recovery(proxy)
+            self.assertEqual('enable', operations[-1][-1])
+
+    def test_unapproved_fixture_never_mutates_network_settings(self):
+        with patch.dict('os.environ', {'GITHUB_ACTIONS': 'true', 'SYN443_CI_AVD': 'syn443-ci'}), \
+                patch('run_route_lifecycle.adb', return_value=b'other-avd\nOK\n') as adb:
+            with self.assertRaisesRegex(ValueError, 'Disposable Wi-Fi emulator required'):
+                wifi_loss_recovery(None)
+            adb.assert_called_once_with('emu', 'avd', 'name')

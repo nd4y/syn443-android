@@ -14,7 +14,7 @@ import time
 import xml.etree.ElementTree as ET
 from enrollment_fixture import Fixture, decode
 from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
-from run_route_lifecycle import RouteProxy
+from run_route_lifecycle import RouteProxy, exchange_through_proxy
 from known_start_slo import SAMPLES, StartupCampaign
 from recovery_slo import RecoveryTimeout
 from run_vpn_process_faults import ControlUnavailable
@@ -84,26 +84,6 @@ def stopped_rollback_recovered(controller,generation):
     return (pid(':controller') not in ('',controller) and state.get('engineActive') is False and
         state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
         not call('auth-status')['busy'])
-
-def exchange_through_proxy(proxy, destination="203.0.113.10", *, expected_status=204):
-    assert expected_status in (204, 503)
-    assert destination in ("203.0.113.10", "203.0.113.11")
-    # Keep the client half-open while the application UID reads the reply.
-    # A pipe directly into toybox nc can close its input before the peer responds.
-    proxy.payload_received = threading.Event()
-    try:
-        command = (r"(printf 'GET /syn443-payload HTTP/1.1\r\nHost: fixture.invalid\r\n"
-                   r"Connection: close\r\n\r\n'; sleep 3) | run-as " + PACKAGE +
-                   f" toybox nc -w 5 {destination} 80")
-        response = adb('shell', '-T', command, timeout=12)
-        confirmed = proxy.payload_received.wait(1)
-        status = re.match(rb'HTTP/1\.1 ([0-9]{3}) ', response)
-        if not confirmed or status is None or int(status[1]) != expected_status:
-            raise AssertionError('Application payload: expected proxy received=%s, HTTP status=%s' %
-                                 (confirmed, status[1].decode() if status else 'absent'))
-    finally:
-        proxy.payload_received = None
-
 
 def known_start_response(proxy):
     """Read the app UID's reply with stdin open. Timestamp bytes before process cleanup."""

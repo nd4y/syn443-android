@@ -7,7 +7,7 @@ import unittest
 import zipfile
 from unittest.mock import patch
 
-from run_enrolled_vpn import exchange_through_proxy
+from run_route_lifecycle import exchange_through_proxy
 from protected_upgrade_inputs import REPOSITORY, read_members, select_runs
 
 
@@ -84,7 +84,7 @@ class ProtectedUpgradeTest(unittest.TestCase):
                 if seen:
                     proxy.payload_received.set()
                 return response
-            with self.subTest(seen=seen, response=response), patch("run_enrolled_vpn.adb", side_effect=exchange):
+            with self.subTest(seen=seen, response=response), patch("run_route_lifecycle.adb", side_effect=exchange):
                 if passes:
                     exchange_through_proxy(proxy, expected_status=expected)
                 else:
