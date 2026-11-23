@@ -279,12 +279,24 @@ class VpnLifecycleTest {
     }
     @Test fun realTunTrafficAndExplicitStop() {
         connect()
-        assertTrue(status().getBoolean("desiredOn"))
+        val on = status()
+        assertTrue(on.getBoolean("desiredOn"))
         assertNotNull(pid())
-        call("disconnect")
-        await { !status().optBoolean("desiredOn") && pid() == null }
-        Thread.sleep(1_500)
-        assertFalse(status().getBoolean("desiredOn"))
+        val command = "content call --uri content://io.syn443.operator.read --method config-render"
+        call("operator-read-access", "grant")
+        try {
+            val active = shell(command)
+            assertTrue(active.contains("ok=true") && active.contains(""availability":"active""))
+            assertTrue(active.contains(""generation":${on.getLong("generation")}"))
+            assertTrue(active.contains(""outboundTypes"") && active.contains(""http""))
+            assertFalse(active.contains(""server"") || active.contains(""configRevision""))
+            assertEquals(on.getLong("generation"), status().getLong("generation"))
+            call("disconnect")
+            await { !status().optBoolean("desiredOn") && pid() == null }
+            assertTrue(shell(command).contains(""availability":"unavailable""))
+            Thread.sleep(1_500)
+            assertFalse(status().getBoolean("desiredOn"))
+        } finally { call("operator-read-access", "revoke") }
     }
     private fun awaitOwnedDefaultRoutes() = await {
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
