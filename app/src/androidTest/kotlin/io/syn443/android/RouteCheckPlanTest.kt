@@ -163,20 +163,28 @@ class RouteCheckPlanTest {
             .put("expected_exit_class", "NON_RU"))
         profile.put("gates", JSONArray().put("b")).put("stages", JSONArray().put(JSONObject().put("leaf", "a")))
         val scope = configure(value)
-        val first = JSONObject(requireNotNull(RouteSnapshot.request(scope)))
-        val contradictory = diagnostic()
-        val leaves = contradictory.getJSONArray("leaves")
-        leaves.getJSONObject(0).put("outcome", "FALSE").put("code", "dial_failed")
-        leaves.getJSONObject(1).put("outcome", "TRUE").put("code", "ok")
-        assertTrue(RouteSnapshot.update(scope, report(first, plan = contradictory)))
-        assertEquals("UNKNOWN", view(scope).getJSONObject("checkPlan").getString("outcome"))
-        assertFalse(view(scope).has("verifiedExit"))
+        val contradictory = completedPlan(1)
+        contradictory.getJSONArray("leaves").getJSONObject(0).put("outcome", "FALSE").put("code", "dial_failed")
+        for (invalid in listOf(contradictory, completedPlan(2), null)) {
+            val request = JSONObject(requireNotNull(RouteSnapshot.request(scope, force = true)))
+            val response = JSONObject(report(request, plan = invalid ?: completedPlan(1)))
+            if (invalid == null) response.getJSONArray("results").getJSONObject(0).remove("checkPlan")
+            assertTrue(RouteSnapshot.update(scope, response.toString()))
+            val view = view(scope)
+            assertEquals("UNKNOWN", view.getJSONObject("checkPlan").getString("outcome"))
+            assertEquals("incomplete", view.getString("state"))
+            assertEquals("probe_unavailable", view.getString("reason"))
+            assertEquals(0, view.getJSONArray("measuredPath").length())
+            assertTrue(view.isNull("latencyMs"))
+            assertFalse(view.has("verifiedExit"))
+            assertFalse(RouteSnapshot.read(true, true, scope).getBoolean("requiredReady"))
+        }
 
         val next = JSONObject(requireNotNull(RouteSnapshot.request(scope, force = true)))
-        leaves.getJSONObject(0).put("outcome", "TRUE").put("code", "ok")
-        assertTrue(RouteSnapshot.update(scope, report(next, plan = contradictory)))
+        assertTrue(RouteSnapshot.update(scope, report(next, plan = completedPlan(1))))
         assertEquals("TRUE", view(scope).getJSONObject("checkPlan").getString("outcome"))
         assertEquals("NON_RU", view(scope).getJSONObject("verifiedExit").getString("class"))
+        assertTrue(RouteSnapshot.read(true, true, scope).getBoolean("requiredReady"))
     }
 
     @Test fun canceledBatchClearsEarlierSuccessfulLeafOutcomes() {

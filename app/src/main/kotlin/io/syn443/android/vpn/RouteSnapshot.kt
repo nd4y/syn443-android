@@ -358,26 +358,37 @@ object RouteSnapshot {
         var nextObservations=observations;var nextCodes=codes;var nextTimings=timings;var nextReceipts=receipts;var nextPaths=measuredPaths;var nextPlans=checkPlans
         val nextDurations = durations.toMutableMap()
         for(i in 0 until results.length()) {
-            val r=results.getJSONObject(i);val id=r.getString("id");val code=r.getString("code")
-            require(id in queued && seen.add(id) && code in codesAllowed && r.getLong("elapsedMs") in 0..35_000)
-            val complete=r.getBoolean("complete");val ok=r.getBoolean("ok")
+            val r=results.getJSONObject(i);val id=r.getString("id");val nativeCode=r.getString("code")
+            require(id in queued && seen.add(id) && nativeCode in codesAllowed && r.getLong("elapsedMs") in 0..35_000)
+            val nativeComplete=r.getBoolean("complete");val nativeOK=r.getBoolean("ok")
+            require(!nativeOK || (nativeComplete && nativeCode=="ok"))
             val row=rows.single {it.id==id}
             val profile=row.profile
-            val diagnostic=profile?.let {RouteCheckPlans.projection(r.optJSONObject("checkPlan"),it,if(ok)"TRUE" else if(complete)"FALSE" else "UNKNOWN")}
+            val diagnostic=profile?.let {
+                RouteCheckPlans.projection(r.optJSONObject("checkPlan"),it,
+                    if(nativeOK)"TRUE" else if(nativeComplete)"FALSE" else "UNKNOWN")
+            }
+            // Named profiles require the exact positive predicate evidence.
+            val inconsistentSuccess=nativeOK && profile!=null && diagnostic==null
+            val complete=nativeComplete && !inconsistentSuccess
+            val ok=nativeOK && !inconsistentSuccess
+            val code=if(inconsistentSuccess)"probe_unavailable" else nativeCode
             val sampled=r.getLong("sampledElapsedMs");require(sampled in 0..now)
-            require(!ok || (complete && code=="ok"))
             val path=r.optJSONArray("path") ?: JSONArray()
             require(path.length()<=64 && (0 until path.length()).all {n->rows.any {it.id==path.getString(n)}})
             // First receipt time is retained across repeated heartbeat snapshots.
             if(receipts[id]!=pending) {
                 val cause = if (complete && !ok) RouteFailureCause.fromWire(code, r.optString("cause")) else null
-                nextObservations=nextObservations+(id to RouteObservation(scope,sampled,complete,ok,cause));nextCodes=nextCodes+(id to code);nextTimings=nextTimings+(id to r.getLong("elapsedMs"));nextReceipts=nextReceipts+(id to pending)
+                nextObservations=nextObservations+(id to RouteObservation(scope,sampled,complete,ok,cause))
+                nextCodes=nextCodes+(id to code)
+                nextTimings=if(inconsistentSuccess)nextTimings-id else nextTimings+(id to r.getLong("elapsedMs"))
+                nextReceipts=nextReceipts+(id to pending)
                 if (ok && row.type != "syn443-adaptive" && scope == live && scope.config == revision &&
                     row.hasSingleApplicationCheck() && path.optString(0) == id) {
                     val measured = (0 until path.length()).map { path.getString(it) }
                     nextDurations[id] = RouteProbeDurations.append(durations[id], measured, pending, sampled, r.getLong("elapsedMs"))
                 } else nextDurations.remove(id)
-                nextPaths=nextPaths+(id to path)
+                nextPaths=if(inconsistentSuccess)nextPaths-id else nextPaths+(id to path)
                 nextPlans=if(diagnostic!=null)nextPlans+(id to diagnostic) else nextPlans-id
             }
         }
