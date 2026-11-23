@@ -19,6 +19,8 @@ on:
       - tools/test_protected_upgrade_inputs.py
       - tools/run_installer_acceptance.sh
       - tools/run_enrolled_vpn.py
+      - tools/enrollment_fixture.py
+      - tools/test_fixture_capabilities.py
 permissions:
   contents: read
   actions: read
@@ -52,6 +54,7 @@ jobs:
           PREVIOUS_RUN: ${{ inputs.previous_run || '' }}
         run: |
           python3 -m unittest discover -s tools -p 'test_protected_upgrade_inputs.py'
+          python3 -m unittest discover -s tools -p 'test_fixture_capabilities.py'
           python3 tools/protected_upgrade_inputs.py
       - name: Enable KVM
         run: |
