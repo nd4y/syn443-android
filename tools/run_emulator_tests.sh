@@ -97,15 +97,6 @@ adb -e shell df -h /data
 adb -e shell cmd uimode night no
 test -f app/build/outputs/apk/debug/app-debug.apk
 test -f app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb -e install -r app/build/outputs/apk/debug/app-debug.apk
-# Exercise the new passive Provider/CLI path before ordinary status or login
-# can initialize the fresh app. This never runs on a physical device.
-python3 tools/run_support_bundle_smoke.py
-# Permission changes happen before the instrumentation process exists.
-adb -e shell appops set io.syn443.android ACTIVATE_VPN allow
-if [ "$(adb -e shell getprop ro.build.version.sdk | tr -d '\r')" -ge 33 ]; then
-  adb -e shell pm grant io.syn443.android android.permission.POST_NOTIFICATIONS
-fi
 # Compose needs a visible root for UI assertions. Keep this fixture's screen
 # awake only for instrumentation; the later lifecycle scenarios own their
 # display, lock, reboot and idle conditions separately.
@@ -115,6 +106,22 @@ instrumentation_display="$screen_original"
 adb -e shell settings put global stay_on_while_plugged_in 7
 adb -e shell input keyevent KEYCODE_WAKEUP
 adb -e shell wm dismiss-keyguard
+# Exercise real denial before any other app scenario can leave a system dialog
+# in the AVD. Use a fresh install again for passive capture and instrumentation.
+adb -e install -r app/build/outputs/apk/debug/app-debug.apk
+adb -e install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+python3 tools/run_invitation_camera_permission.py
+adb -e uninstall io.syn443.android.test
+adb -e uninstall io.syn443.android
+adb -e install -r app/build/outputs/apk/debug/app-debug.apk
+# Exercise the new passive Provider/CLI path before ordinary status or login
+# can initialize the fresh app. This never runs on a physical device.
+python3 tools/run_support_bundle_smoke.py
+# Permission changes happen before the instrumentation process exists.
+adb -e shell appops set io.syn443.android ACTIVATE_VPN allow
+if [ "$(adb -e shell getprop ro.build.version.sdk | tr -d '\r')" -ge 33 ]; then
+  adb -e shell pm grant io.syn443.android android.permission.POST_NOTIFICATIONS
+fi
 result=0
 # Capture the actual failing assertion before long native fault scenarios. A
 # failed instrumentation run cannot satisfy the mandatory evidence gate anyway.
@@ -130,15 +137,8 @@ if ! timeout --signal=TERM --kill-after=20s 22m python3 tools/run_packaged_instr
   python3 tools/print_emulator_reports.py || true
   exit 1
 fi
-# The external suite starts from a fresh installation of the same APKs.
-adb -e uninstall io.syn443.android.test
-adb -e uninstall io.syn443.android
-adb -e install -r app/build/outputs/apk/debug/app-debug.apk
-adb -e install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-python3 tools/run_invitation_camera_permission.py
 restore_instrumentation_display
-# Restore a fresh package, UID permissions and data for the VPN scenarios
-# after the real denial. Android 10 does not expose the newer flag-reset CLI.
+# Restore a fresh package, UID permissions and data for the VPN scenarios.
 adb -e uninstall io.syn443.android.test
 adb -e uninstall io.syn443.android
 adb -e install -r app/build/outputs/apk/debug/app-debug.apk

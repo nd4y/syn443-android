@@ -208,6 +208,7 @@ def main():
     assert installed_camera_state() == (False, False), 'Camera must start without a user decision'
     adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
     adb('shell', 'wm', 'dismiss-keyguard')
+    fail_on_error_dialog(list(tree().iter('node')), 'before enrollment launch')
     start_enrollment()
     try:
         def label(text):
