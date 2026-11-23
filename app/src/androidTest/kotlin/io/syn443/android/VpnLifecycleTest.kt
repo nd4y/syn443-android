@@ -283,7 +283,7 @@ class VpnLifecycleTest {
         assertTrue(on.getBoolean("desiredOn"))
         assertNotNull(pid())
         fun render(): JSONObject {
-            val reply = shell("content call --uri content://io.syn443.operator.read --method config-render")
+            val reply = shell("content call --uri content://io.syn443.operator.read --method config-render").toString(Charsets.UTF_8)
             assertTrue(reply.contains("ok=true"))
             return org.json.JSONTokener(reply.substringAfter("json=", "")).nextValue() as JSONObject
         }
