@@ -96,8 +96,23 @@ def wifi_loss_recovery(proxy):
     if (os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('SYN443_CI_AVD') != 'syn443-ci'
             or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']):
         raise ValueError('Disposable Wi-Fi emulator required')
-    assert adb('shell', 'settings', 'get', 'global', 'mobile_data').strip() == b'0', 'Cellular data must already be disabled'
+    airplane = ('shell', 'cmd', 'connectivity', 'airplane-mode')
+    original = adb(*airplane).strip()
+    assert original in (b'enabled', b'disabled'), 'Airplane mode state could not be verified'
+    try:
+        if original == b'disabled':
+            adb(*airplane, 'enable')
+        assert adb(*airplane).strip() == b'enabled', 'Wi-Fi-only isolation failed'
+        adb('shell', 'svc', 'wifi', 'enable')
+        exercise_wifi_loss(proxy)
+    finally:
+        if original == b'disabled':
+            adb('shell', 'svc', 'data', 'disable')
+            adb(*airplane, 'disable')
+            adb('shell', 'svc', 'wifi', 'enable')
 
+
+def exercise_wifi_loss(proxy):
     def online_after(epoch):
         current = call('status')
         physical = current.get('physicalLink') or {}
@@ -105,9 +120,9 @@ def wifi_loss_recovery(proxy):
             return None
         return current if current['networkEpoch'] > epoch else None
 
-    await_condition(lambda: online_after(-1), 25)
+    await_condition(lambda: online_after(-1) and completed_route_batch(), 90)
     before = online_after(-1)
-    assert before is not None and before['desiredOn'] and completed_route_batch()
+    assert before is not None and before['desiredOn']
     exchange_through_proxy(proxy)
 
     def offline():

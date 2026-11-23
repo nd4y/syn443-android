@@ -148,22 +148,30 @@ class WiFiLossFixtureTest(unittest.TestCase):
         operations = []
         clock = 0
         mode = 'before'
+        airplane = b'disabled'
         link = {'transport': 'WIFI'}
         offline_routes = {'routes': [{'state': 'unavailable'}], 'running': False, 'requiredReady': False}
 
         def adb(*args):
-            nonlocal mode
+            nonlocal mode, airplane
             operations.append(args)
             if args == ('emu', 'avd', 'name'):
                 return b'syn443-ci\nOK\n'
-            if args == ('shell', 'settings', 'get', 'global', 'mobile_data'):
-                return b'0'
-            if args[-1] == 'enable':
-                proxy.progress += 1
-                proxy.route_probes += 1
-                mode = 'after'
+            if args[:4] == ('shell', 'cmd', 'connectivity', 'airplane-mode'):
+                if len(args) == 4:
+                    return airplane
+                airplane = b'enabled' if args[4] == 'enable' else b'disabled'
                 return b''
-            if args[-1] == 'disable':
+            if args == ('shell', 'svc', 'data', 'disable'):
+                return b''
+            if args == ('shell', 'svc', 'wifi', 'enable'):
+                if mode == 'lost':
+                    proxy.progress += 1
+                    proxy.route_probes += 1
+                    mode = 'after'
+                return b''
+            if args == ('shell', 'svc', 'wifi', 'disable'):
+                self.assertEqual(b'enabled', airplane)
                 mode = 'lost'
                 return b''
             self.fail('Unexpected fixture operation')
@@ -199,6 +207,9 @@ class WiFiLossFixtureTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 wifi_loss_recovery(proxy)
             self.assertEqual('enable', operations[-1][-1])
+            self.assertEqual(('shell', 'cmd', 'connectivity', 'airplane-mode', 'disable'), operations[-2])
+            self.assertEqual(b'disabled', airplane)
+            self.assertNotIn(('shell', 'svc', 'data', 'enable'), operations)
 
     def test_unapproved_fixture_never_mutates_network_settings(self):
         with patch.dict('os.environ', {'GITHUB_ACTIONS': 'true', 'SYN443_CI_AVD': 'syn443-ci'}), \
