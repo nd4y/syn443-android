@@ -1,6 +1,7 @@
 import hashlib
 import io
 from pathlib import Path
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -65,6 +66,39 @@ class ProtectedUpgradeTest(unittest.TestCase):
             self.assertFalse(dest.exists())
             read_members(work, receipt, members, 4096)
             self.assertEqual(dest.read_bytes(), b"synthetic fixture")
+
+    def test_transient_actions_failure_retries_only_the_same_artifact_and_preserves_its_digest(self):
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w") as archive:
+            archive.writestr("debug/app-debug.apk", b"synthetic fixture")
+        raw = data.getvalue()
+        receipt = {"id": 17, "expired": False, "size_in_bytes": len(raw),
+                   "digest": "sha256:" + hashlib.sha256(raw).hexdigest()}
+        for statuses, succeed in (((503, 502, 200), True), ((403,), False), ((503, 503, 503), False)):
+            responses = iter(statuses)
+            def download(command, *, stdout, **kwargs):
+                self.assertEqual(command, ["gh", "api", f"repos/{REPOSITORY}/actions/artifacts/17/zip"])
+                status = next(responses)
+                if status != 200:
+                    stdout.write(b"partial previous download")
+                    raise subprocess.CalledProcessError(1, command, stderr=f"gh: HTTP {status}\n".encode())
+                stdout.write(raw)
+
+            with self.subTest(statuses=statuses), tempfile.TemporaryDirectory() as tmp, \
+                    patch("protected_upgrade_inputs.subprocess.run", side_effect=download) as invoked, \
+                    patch("protected_upgrade_inputs.time.sleep") as pause:
+                work = Path(tmp)
+                destination = work / "verified.apk"
+                members = [("debug/app-debug.apk", destination, 64)]
+                if succeed:
+                    read_members(work, receipt, members, 4096)
+                    self.assertEqual(destination.read_bytes(), b"synthetic fixture")
+                else:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        read_members(work, receipt, members, 4096)
+                    self.assertFalse(destination.exists())
+                self.assertEqual(invoked.call_count, len(statuses))
+                self.assertEqual([p.args[0] for p in pause.call_args_list], [1, 2][:len(statuses)-1])
 
     def test_payload_requires_both_its_own_fixture_event_and_http_response(self):
         for expected, seen, response, passes in (

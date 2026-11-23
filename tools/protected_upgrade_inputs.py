@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
 
 from build_manifest import APKS, describe
@@ -56,9 +57,18 @@ def read_members(directory, artifact, members, size_limit, repository=REPOSITORY
     if artifact["expired"] or not 0 < artifact["size_in_bytes"] <= size_limit:
         raise ValueError("Required Actions artifact has expired or exceeds its size limit")
     archive = directory / "download.zip"
-    with archive.open("wb") as stream:
-        subprocess.run(["gh", "api", f"repos/{repository}/actions/artifacts/{artifact['id']}/zip"],
-                       stdout=stream, check=True, timeout=420)
+    command = ["gh", "api", f"repos/{repository}/actions/artifacts/{artifact['id']}/zip"]
+    for attempt in range(3):
+        try:
+            with archive.open("wb") as stream:
+                subprocess.run(command, stdout=stream, stderr=subprocess.PIPE, check=True, timeout=420)
+            break
+        except subprocess.CalledProcessError as failure:
+            transient = re.search(rb"(?m)^gh: HTTP (502|503|504)(?:[ \r\n]|$)", failure.stderr or b"")
+            if transient is None or attempt == 2:
+                raise
+            print("Retrying the same Actions artifact after HTTP " + transient[1].decode("ascii"), flush=True)
+            time.sleep(1 << attempt)
     with archive.open("rb") as stream:
         if (archive.stat().st_size != artifact["size_in_bytes"] or
                 "sha256:" + hashlib.file_digest(stream, "sha256").hexdigest() != artifact["digest"]):
