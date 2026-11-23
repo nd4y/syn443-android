@@ -2572,7 +2572,7 @@
         "tools/run_release_operator_consent.py",
         "app/src/androidTest/kotlin/io/syn443/android/OperatorReadConsentTest.kt"
       ],
-      "implementationScope": "The ordinary release has a dedicated permission-protected shell-only read provider. Local explicit consent on the diagnostics screen admits passive VPN status, redacted per-route freshness and adaptive search state, overlay status and redacted logs for fifteen minutes, with immediate revocation and process-local lifetime. The general controller continues to be private in release.",
+      "implementationScope": "The ordinary release has a dedicated permission-protected shell-only read provider. Local explicit consent on the diagnostics screen admits passive VPN status, redacted per-route freshness and adaptive search state, overlay status and redacted logs for fifteen minutes, with immediate revocation and process-local lifetime. The general controller continues to be private in release. The Android 15 installer check confirms an unrelated app UID without DUMP cannot call either provider while an authorized shell can still read.",
       "remainingScope": "Production mutation operations with per-operation authorization, managed-field enforcement and central audit."
     },
     {
@@ -3166,8 +3166,14 @@
     {
       "id": "AC23",
       "specRow": " ADB конфиг/логи/бандл | Машинный контракт стабилен, managed права не обходятся, нет доступа у обычного чужого UID |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/adb-control.md",
+        "tools/run_release_operator_consent.py",
+        "tools/run_support_bundle_smoke.py",
+        "tools/syn443ctl.py"
+      ],
+      "remainingScope": "The ordinary release denied all seven accesses from an unrelated app UID while the local shell grant was active. Debug CLI plans local configuration and exports the redacted support ZIP. Full managed export/import, per-command audit and physical combined acceptance remain open."
     },
     {
       "id": "AC24",

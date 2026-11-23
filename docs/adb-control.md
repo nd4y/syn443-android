@@ -41,6 +41,14 @@ The separate read endpoint checks Android shell UID and returns a closed
 projection of VPN health, overlay connectivity and technical events. The CLI lists exactly the
 operations available through this grant.
 
+The Android 15 installer workflow starts a separate ordinary app UID while the
+owner's grant is active. Android denies status, logs, login and route reads
+from that UID. It also denies access to the private config and archive
+commands. Authorized shell reads still work and the VPN intent stays the same.
+The app used to run this check is present only in the Android test APK.
+
+See the [installer result](https://github.com/nd4y/syn443-android/actions/runs/45187983487).
+
 ## Development controls
 
 Use `python3 tools/syn443ctl.py --serial <adb-serial> capabilities` to check
@@ -78,15 +86,13 @@ ADB stdin into a private staging file, never as a shell argument. A timeout
 does not imply that the operation failed; read the current revision before
 retrying.
 
-Shell control remains restricted to debug builds. This client does not
-expose fault injection, login credentials, raw configuration export or
-managed policy overrides. Release opt-in, managed configuration editing,
-mode commands, route job IDs and server audit require separate work. Keep
-device output private.
+Debug shell supports unmanaged local configuration planning and application.
+The ordinary release supports the passive reads listed above after local
+consent. Keep device output private.
 
-## Offline archive candidate
+## Offline archive in debug builds
 
-The existing `diagnostic-bundle` JSON operation remains. The candidate adds
+Use `diagnostic-bundle` for the bounded JSON snapshot. To use a local ZIP, run
 `support-bundle --output FILE`, `support-bundle-collect`,
 `support-bundle-status --bundle-id ID`, `support-bundle-cancel --bundle-id ID`
 and `support-bundle-export --bundle-id ID --output FILE`. Only an explicit
