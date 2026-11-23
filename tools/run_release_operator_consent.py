@@ -35,7 +35,7 @@ def denied(client):
         try:
             client.call(method, arg)
         except ControlError as err:
-            assert err.code == "local_consent_required", err.code
+            assert err.code == "local_consent_required", f"Unconsented {method} returned {err.code}"
         else:
             raise AssertionError("Unconsented release read succeeded")
 

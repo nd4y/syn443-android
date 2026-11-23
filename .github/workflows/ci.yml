@@ -53,6 +53,8 @@ jobs:
     needs: public-data
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    outputs:
+      engine_artifact_id: ${{ steps.engine-upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -75,6 +77,7 @@ jobs:
       - run: python3 tools/check_public_data.py native/build/engine.aar
       - run: bash tools/scan_secrets.sh native/build/engine.aar
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: engine-upload
         with:
           name: embedded-native-engine
           path: native/build/engine.aar
@@ -84,6 +87,13 @@ jobs:
     needs: [public-data, native]
     runs-on: ubuntu-24.04
     timeout-minutes: 65
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      apk_artifact_id: ${{ steps.apk-upload.outputs.artifact-id }}
+      manifest_artifact_id: ${{ steps.manifest-upload.outputs.artifact-id }}
+      upgrade_artifact_id: ${{ steps.upgrade-upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -93,10 +103,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: embedded-native-engine
-          path: native/build
+      - name: Read the engine from the successful native job
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          ENGINE_ARTIFACT_ID: ${{ needs.native.outputs.engine_artifact_id }}
+        run: python3 tools/ci_input_artifacts.py native
       - uses: gradle/actions/wrapper-validation@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
       - uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
@@ -190,6 +202,7 @@ jobs:
           python3 tools/check_public_data.py public-evidence/build-manifest.json
           bash tools/scan_secrets.sh public-evidence/build-manifest.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: manifest-upload
         with:
           name: syn443-build-manifest
           path: public-evidence/build-manifest.json
@@ -263,6 +276,7 @@ jobs:
           python3 tools/check_public_data.py "$fixture"
           bash tools/scan_secrets.sh "$fixture"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: upgrade-upload
         with:
           name: syn443-version-upgrade-fixture
           path: ${{ runner.temp }}/upgrade-fixture/
@@ -339,6 +353,9 @@ jobs:
     env:
       SYN443_CI_AVD: syn443-ci
       SYN443_CI_EMULATOR_OPTIONS: ${{ matrix.options || '-no-window -gpu software -no-snapshot -noaudio -no-boot-anim -no-metrics -feature -Vulkan -show-kernel' }}
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -360,18 +377,14 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: syn443-prototype-debug-apks
-          path: app/build/outputs/apk
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: syn443-build-manifest
-          path: ${{ runner.temp }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: syn443-version-upgrade-fixture
-          path: ${{ runner.temp }}/upgrade-fixture
+      - name: Read the APK, manifest and upgrade fixture from the same producer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          APK_ARTIFACT_ID: ${{ needs.jvm-and-apk.outputs.apk_artifact_id }}
+          MANIFEST_ARTIFACT_ID: ${{ needs.jvm-and-apk.outputs.manifest_artifact_id }}
+          UPGRADE_ARTIFACT_ID: ${{ needs.jvm-and-apk.outputs.upgrade_artifact_id }}
+        run: python3 tools/ci_input_artifacts.py emulator
       - run: python3 tools/run_packaged_instrumentation.py verify
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
         with:
