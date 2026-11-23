@@ -423,18 +423,21 @@ def enrolled_operator_mode(fixture):
             }), flush=True)
             raise
         exchange_through_proxy(reserve)
-        automatic = mode('automatic')
-        assert automatic and automatic['maxMinutes'] == 3
-        submitted = cli('mode-set', '--stamp', automatic['stamp'], '--mode', 'WIFI', '--minutes', '2')
-        assert submitted == {'admitted': True, 'generation': automatic['generation'], 'networkEpoch': automatic['networkEpoch']}
-        await_condition(lambda: mode('manual') and working(), 100)
-        exchange_through_proxy(reserve)
-        manual = mode('manual')
-        assert manual and manual['stamp'] != automatic['stamp'] and 0 < manual['remainingMs'] <= 120_000
-        cleared = cli('mode-set', '--stamp', manual['stamp'], '--mode', 'AUTO', '--minutes', '0')
-        assert cleared == submitted
-        await_condition(lambda: mode('automatic') and working(), 100)
-        exchange_through_proxy(reserve)
+        # Dedicated diagnostic replay isolates mixed-policy activation from the
+        # separate automatic/manual mode-switch acceptance in the full matrix.
+        if os.environ.get('SYN443_ISOLATE_MIXED_POLICY') != 'true':
+            automatic = mode('automatic')
+            assert automatic and automatic['maxMinutes'] == 3
+            submitted = cli('mode-set', '--stamp', automatic['stamp'], '--mode', 'WIFI', '--minutes', '2')
+            assert submitted == {'admitted': True, 'generation': automatic['generation'], 'networkEpoch': automatic['networkEpoch']}
+            await_condition(lambda: mode('manual') and working(), 100)
+            exchange_through_proxy(reserve)
+            manual = mode('manual')
+            assert manual and manual['stamp'] != automatic['stamp'] and 0 < manual['remainingMs'] <= 120_000
+            cleared = cli('mode-set', '--stamp', manual['stamp'], '--mode', 'AUTO', '--minutes', '0')
+            assert cleared == submitted
+            await_condition(lambda: mode('automatic') and working(), 100)
+            exchange_through_proxy(reserve)
         # Keep the existing automatic/manual/automatic case intact. The next signed
         # revision requires an independently reached static route before activation.
         fixed = Server(('127.0.0.1', 0), RouteProxy)
@@ -453,10 +456,21 @@ def enrolled_operator_mode(fixture):
             fixture.revision = 3
             call('policy-refresh')
 
+            observed = set()
             def mixed_ready():
-                if not committed_online(call('status'), 3):
-                    return False
+                state = call('status')
                 report = call('routes-status')
+                policy = state.get('policy', {})
+                allowed = {'off','checking','working','failed','incomplete','unavailable','unverified','stale','unknown'}
+                phases = {'committed','applying','rolled_back','degraded'}
+                visible = tuple(next((r.get('state') for r in report.get('routes', []) if r.get('label') == label), '') for label in ('managed-office','fixed-office'))
+                facts = (policy.get('phase') if policy.get('phase') in phases else 'other',
+                         *(v if v in allowed else 'absent' for v in visible), fixed.route_probes > 0)
+                if facts not in observed:
+                    print('Mixed Wi-Fi (policy, adaptive, ordinary, ordinary proxy reached):', facts, flush=True)
+                    observed.add(facts)
+                if not committed_online(state, 3):
+                    return False
                 rows = {r['label']: r for r in report['routes'] if r.get('required')}
                 if set(rows) != {'managed-office', 'fixed-office'} or not report['requiredReady']:
                     return False
