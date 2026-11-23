@@ -521,3 +521,23 @@ that an old generation cannot trigger the fetch, that a healthy permit stops
 polling and that the VPN remains off. Foreground retries share the existing
 provisioning budget and backoff. A manual refresh is available on the same
 screen while a cached policy has no usable permit.
+
+## Known-policy startup on Wi-Fi
+
+The normal enrolled emulator suite measures three starts for each Android API in the
+matrix. A validated Wi-Fi underlay, a previously committed signed policy and a
+working assigned HTTP proxy establish the fixture. Before each timed Connect,
+the controller must report Off and the native engine must have stopped.
+
+The host monotonic clock starts immediately before Connect. After the client
+reports Online with the known revision, a process running as the application UID
+sends a fresh challenge through the assigned proxy. Timing ends when the process
+returns the complete matching HTTP 204 headers. Probe traffic alone cannot
+complete a sample. Repeating a late or failed measurement in place is prohibited.
+
+Each Actions artifact `android-known-start-<api>-evidence` contains the three
+planned outcomes and their nearest-rank p95. At the 10,000 ms boundary a sample
+passes. An unfinished suite preserves missing or interrupted attempts and an
+unknown p95. These measurements describe the controlled Wi-Fi proxy and emulator
+API in that artifact. Physical startup, transport handover, cold discovery and
+emergency overlay have separate acceptance criteria.

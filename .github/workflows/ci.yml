@@ -414,6 +414,22 @@ jobs:
           retention-days: 14
       - name: Check both planned proxy recovery samples on a successful emulator
         run: python3 tools/recovery_slo.py --require-success
+      - name: Preserve all planned known-policy startup attempts
+        id: known-start-scan
+        if: always()
+        run: |
+          python3 tools/known_start_slo.py
+          python3 tools/check_public_data.py public-evidence/known-start
+          bash tools/scan_secrets.sh public-evidence/known-start
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.known-start-scan.outcome == 'success'
+        with:
+          name: android-known-start-${{ matrix.api }}-evidence
+          path: public-evidence/known-start/known-start.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Enforce known-policy startup p95 on a complete emulator suite
+        run: python3 tools/known_start_slo.py --require-target
       - name: Scan emulator report payloads
         id: emulator-scan
         if: always()
