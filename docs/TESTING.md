@@ -541,3 +541,12 @@ passes. An unfinished suite preserves missing or interrupted attempts and an
 unknown p95. These measurements describe the controlled Wi-Fi proxy and emulator
 API in that artifact. Physical startup, transport handover, cold discovery and
 emergency overlay have separate acceptance criteria.
+
+The enrolled Wi-Fi failover case sends traffic as the application UID. The
+primary first serves a request, then returns HTTP 503 for the same assigned
+destination. Its path check also fails. The client independently measures and
+selects the signed reserve. The application receives HTTP 204 through that
+reserve while a destination outside the selector rule still receives HTTP 503
+through the original primary. The case checks the existing engine process,
+policy activation and enrollment throughout. These observations cover the
+assigned internal route on Wi-Fi.

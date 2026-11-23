@@ -72,7 +72,8 @@ def stopped_rollback_recovered(controller,generation):
         state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
         not call('auth-status')['busy'])
 
-def exchange_through_proxy(proxy, destination="203.0.113.10"):
+def exchange_through_proxy(proxy, destination="203.0.113.10", *, expected_status=204):
+    assert expected_status in (204, 503)
     assert destination in ("203.0.113.10", "203.0.113.11")
     # Keep the client half-open while the application UID reads the reply.
     # A pipe directly into toybox nc can close its input before the peer responds.
@@ -84,7 +85,7 @@ def exchange_through_proxy(proxy, destination="203.0.113.10"):
         response = adb('shell', '-T', command, timeout=12)
         confirmed = proxy.payload_received.wait(1)
         status = re.match(rb'HTTP/1\.1 ([0-9]{3}) ', response)
-        if not confirmed or status is None or status[1] != b'204':
+        if not confirmed or status is None or int(status[1]) != expected_status:
             raise AssertionError('Application payload: expected proxy received=%s, HTTP status=%s' %
                                  (confirmed, status[1].decode() if status else 'absent'))
     finally:
@@ -277,15 +278,24 @@ def signed_program_failover(fixture, primary, generation):
         assert original and fixture.registrations==1
         thumb, = fixture.sessions
         original_device = fixture.sessions[thumb]['deviceId']
+        # Reject real traffic first while the primary is still selected. A failed
+        # check alone does not prove the user actually experienced an outage.
+        primary.refuse_payload = True
+        exchange_through_proxy(primary, expected_status=503)
         before = reserve.route_probes
         primary.ssh_ok = False
         # No check or switch command is issued after the outage.
         await_condition(lambda: measured('reserve'), 240)
         assert reserve.route_probes >= before+4, 'Reserve lacked a successful comparator for four batches'
         exchange_through_proxy(reserve)
+        # This destination is outside the signed selector rule. It must still
+        # reach the original failing egress, including after the scoped recovery.
+        exchange_through_proxy(primary, "203.0.113.11", expected_status=503)
+        print("Signed Wi-Fi failover payloads: primary=204, primary=503, reserve=204, default=503", flush=True)
         assert active() and pid(':engine')==original and call('status')['policy']['activationGeneration']==activation
         assert call('auth-status')['generation']==generation and fixture.registrations==1 and fixture.sessions[thumb]['deviceId']==original_device
     finally:
+        primary.refuse_payload = False
         primary.ssh_ok = True
         try:
             adb('reverse','--remove','tcp:'+str(port))

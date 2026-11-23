@@ -34,6 +34,9 @@ class RouteProxy(socketserver.BaseRequestHandler):
                 Proxy.headers(stream)
                 if received is not None:
                     received.set()
+                    if getattr(self.server, 'refuse_payload', False):
+                        self.request.sendall(b'HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+                        return
                     self.request.sendall(b'HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
             elif request.startswith(b'GET /generate_204 '):
                 Proxy.headers(stream)

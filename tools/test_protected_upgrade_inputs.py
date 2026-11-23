@@ -67,9 +67,16 @@ class ProtectedUpgradeTest(unittest.TestCase):
             self.assertEqual(dest.read_bytes(), b"synthetic fixture")
 
     def test_payload_requires_both_its_own_fixture_event_and_http_response(self):
-        for seen, response, passes in ((True, b"HTTP/1.1 204 No Content", True),
-                                       (False, b"HTTP/1.1 204 No Content", False),
-                                       (True, b"HTTP/1.1 503 Unavailable", False), (True, b"", False)):
+        for expected, seen, response, passes in (
+            (204, True, b"HTTP/1.1 204 No Content", True),
+            (204, False, b"HTTP/1.1 204 No Content", False),
+            (204, True, b"HTTP/1.1 503 Unavailable", False),
+            (204, True, b"", False),
+            (503, True, b"HTTP/1.1 503 Unavailable", True),
+            (503, False, b"HTTP/1.1 503 Unavailable", False),
+            (503, True, b"HTTP/1.1 204 No Content", False),
+            (503, True, b"", False),
+        ):
             proxy = SimpleNamespace()
             def exchange(*args, **kwargs):
                 self.assertIn("run-as io.syn443.android toybox nc", args[-1])
@@ -79,8 +86,8 @@ class ProtectedUpgradeTest(unittest.TestCase):
                 return response
             with self.subTest(seen=seen, response=response), patch("run_enrolled_vpn.adb", side_effect=exchange):
                 if passes:
-                    exchange_through_proxy(proxy)
+                    exchange_through_proxy(proxy, expected_status=expected)
                 else:
                     with self.assertRaises(AssertionError):
-                        exchange_through_proxy(proxy)
+                        exchange_through_proxy(proxy, expected_status=expected)
                 self.assertIsNone(proxy.payload_received)
