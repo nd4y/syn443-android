@@ -98,16 +98,34 @@ def visible_owner(nodes):
     return 'other'
 
 
-def find_node(predicate, stage, reveal=False):
+def start_enrollment():
+    start = adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.EnrollmentActivity',
+                '-f', '0x10008000')
+    assert re.search(rb'(?m)^Status: ok\s*$', start), 'The enrollment Activity did not start'
+
+
+def find_node(predicate, stage, reveal=False, recover_initial_focus=False):
     deadline = time.monotonic() + 45
     observed = set()
+    retry_after = time.monotonic() + 8
     while time.monotonic() < deadline:
         nodes = list(tree().iter('node'))
+        if any(node.get('resource-id', '').split('/')[-1] in ('aerr_close', 'aerr_wait', 'aerr_report') for node in nodes):
+            raise AssertionError('The disposable emulator displayed an application crash or ANR')
         matches = [node for node in nodes if node.get('enabled') == 'true' and predicate(node)]
         if len(matches) == 1:
             return matches[0]
         owned = [node for node in nodes if node.get('package') == PACKAGE]
-        observed.add((visible_owner(nodes), len(matches)))
+        owner = visible_owner(nodes)
+        observed.add((owner, len(matches)))
+        if recover_initial_focus and not owned and owner in ('other', 'launcher', 'system_ui') and time.monotonic() >= retry_after:
+            # Package replacement may leave the launcher or another task over the
+            # first Activity. Recover only before opening the system permission dialog.
+            recover_initial_focus = False
+            adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
+            adb('shell', 'wm', 'dismiss-keyguard')
+            start_enrollment()
+            continue
         panes = [node for node in owned if node.get('scrollable') == 'true']
         if reveal and not matches and len(panes) == 1:
             bounds = [int(value) for value in re.findall(r'\d+', panes[0].get('bounds', ''))]
@@ -130,12 +148,11 @@ def main():
     assert installed_camera_state() == (False, False), 'Camera must start without a user decision'
     adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP')
     adb('shell', 'wm', 'dismiss-keyguard')
-    start = adb('shell', 'am', 'start', '-W', '-n', PACKAGE + '/.EnrollmentActivity')
-    assert re.search(rb'(?m)^Status: ok\s*$', start), 'The enrollment Activity did not start'
+    start_enrollment()
     try:
         def label(text):
             return lambda n: n.get('package') == PACKAGE and n.get('text') == text
-        tap(find_node(label('Сканировать QR'), 'open scanner', reveal=True))
+        tap(find_node(label('Сканировать QR'), 'open scanner', reveal=True, recover_initial_focus=True))
         deny_camera()
         find_node(label('QR из фото'), 'image alternative')
         find_node(lambda n: n.get('package') == PACKAGE and n.get('class') == 'android.widget.EditText', 'paste alternative')
