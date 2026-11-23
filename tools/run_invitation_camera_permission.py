@@ -1,9 +1,10 @@
 """Exercise the system camera prompt on a fresh, disposable Actions emulator."""
 import re
+import subprocess
 import time
 import xml.etree.ElementTree as ET
 
-from emulator_policy_ui import tap, tree
+from emulator_policy_ui import anr_owner_diagnostic, tap, tree
 from run_vpn_process_faults import PACKAGE, ROOT, adb
 
 
@@ -58,6 +59,65 @@ def camera_deny_target(nodes):
     return candidates[0] if len(candidates) == 1 else None
 
 
+ERROR_CONTROLS = {'aerr_close', 'aerr_wait', 'aerr_report'}
+CRASH_PROCESSES = {
+    b'io.syn443.android': 'syn443_app',
+    b'io.syn443.android:controller': 'syn443_controller',
+    b'io.syn443.android:engine': 'syn443_engine',
+    **{name.encode('ascii'): 'permission_controller' for name in PERMISSION_OWNERS},
+    b'com.android.systemui': 'system_ui',
+    b'com.android.settings': 'settings',
+}
+CRASH_EVENT = re.compile(
+    rb'([0-9]{9,12})[.][0-9]{3,6}\s+[0-9]+\s+[0-9]+\s+I\s+am_crash\s*:\s*'
+    rb'\[[0-9]{1,5},[0-9]{1,10},([A-Za-z0-9_.:]{1,160}),[^\r\n]*\]'
+)
+
+
+def recent_crash_event_categories(report, now):
+    # These observations are adjacent in time only. They do not bind the
+    # dialog to one of the events or reveal the process name or error text.
+    if len(report) > 1_048_576:
+        return ['oversized']
+    categories = set()
+    for line in report.splitlines():
+        if b'am_crash' not in line:
+            continue
+        match = CRASH_EVENT.fullmatch(line.strip())
+        if match is None:
+            categories.add('unrecognized')
+            continue
+        if now - 120 <= int(match[1]) <= now:
+            categories.add(CRASH_PROCESSES.get(match[2], 'other'))
+    return sorted(categories)
+
+
+def observe_recent_crash_events():
+    try:
+        clock = adb('shell', 'date', '+%s', timeout=2).strip()
+        if not re.fullmatch(rb'[0-9]{9,12}', clock):
+            return ['unavailable']
+        report = adb('shell', 'logcat', '-d', '-b', 'events', '-v', 'epoch', '-t', '2048',
+                     'am_crash:I', "'*:S'", timeout=3)
+        return recent_crash_event_categories(report, int(clock))
+    except (OSError, subprocess.SubprocessError):
+        return ['unavailable']
+
+
+def fail_on_error_dialog(nodes, stage):
+    controls = sorted({node.get('resource-id', '').rsplit('/', 1)[-1] for node in nodes} & ERROR_CONTROLS)
+    if not controls:
+        return
+    anr_evidence = {}
+    owner = anr_owner_diagnostic(evidence=anr_evidence)
+    print('Camera test system dialog: ' + repr({
+        'stage': stage, 'controls': controls, 'visibleOwner': visible_owner(nodes),
+        'anrOwner': owner, 'anrEvidence': anr_evidence,
+        'recentCrashEvents': observe_recent_crash_events(),
+    }), flush=True)
+    raise AssertionError('The disposable emulator displayed an application crash or ANR')
+
+
 def deny_camera():
     deadline = time.monotonic() + 45
     stable = None
@@ -66,6 +126,7 @@ def deny_camera():
     observed = set()
     while time.monotonic() < deadline:
         nodes = list(tree().iter('node'))
+        fail_on_error_dialog(nodes, 'deny permission')
         granted, user_set = installed_camera_state()
         assert not granted, 'Camera was granted during the denial scenario'
         target = camera_deny_target(nodes)
@@ -110,8 +171,7 @@ def find_node(predicate, stage, reveal=False, recover_initial_focus=False):
     retry_after = time.monotonic() + 8
     while time.monotonic() < deadline:
         nodes = list(tree().iter('node'))
-        if any(node.get('resource-id', '').split('/')[-1] in ('aerr_close', 'aerr_wait', 'aerr_report') for node in nodes):
-            raise AssertionError('The disposable emulator displayed an application crash or ANR')
+        fail_on_error_dialog(nodes, stage)
         matches = [node for node in nodes if node.get('enabled') == 'true' and predicate(node)]
         if len(matches) == 1:
             return matches[0]
