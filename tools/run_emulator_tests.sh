@@ -11,8 +11,10 @@ esac
 test "${GITHUB_ACTIONS:-}" = true
 test "${SYN443_CI_AVD:-}" = syn443-ci
 test "$(adb -e emu avd name | tr -d '\r')" = $'syn443-ci\nOK'
-adb -e shell svc wifi enable
 adb -e shell svc data disable
+adb -e shell cmd connectivity airplane-mode enable
+test "$(adb -e shell cmd connectivity airplane-mode | tr -d '\r')" = enabled
+adb -e shell svc wifi enable
 
 instrumentation_display=''
 restore_instrumentation_display() {

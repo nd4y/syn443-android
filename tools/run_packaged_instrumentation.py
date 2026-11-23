@@ -43,6 +43,28 @@ def interruption(reporter_line, completed, total, active):
     return InstrumentationInterrupted(summary)
 
 
+VPN_LIFECYCLE_CLASS = 'io.syn443.android.VpnLifecycleTest'
+VPN_PHASES = {'Off', 'NoNetwork', 'Online', 'Starting', 'Connecting', 'Recovering', 'Degraded',
+              'NeedsAction', 'NeedsPermission', 'NeedsLogin', 'NeedsUnlock', 'BlockedByPolicy'}
+VPN_REASONS = {'network_unavailable', 'network_changed', 'network_capabilities_changed', 'captive_portal',
+               'dns_resolution_failed', 'tls_failed', 'transport_failed', 'transport_eof', 'required_https_ok',
+               'native_start_failed', 'native_release_timeout', 'policy_gate_pending', 'health_check_timeout'}
+
+
+def vpn_lifecycle_snapshot(stack_head):
+    match = re.match(
+        r'java\.lang\.AssertionError: VPN lifecycle deadline exceeded: phase=([^,\r\n]{0,48}), '
+        r'reason=([^,\r\n]{0,64}), wifi=(true|false|unknown), ',
+        stack_head,
+    )
+    if match is None:
+        return None
+    phase, reason, wifi = match.groups()
+    return (phase if phase in VPN_PHASES else 'unknown',
+            reason if reason in VPN_REASONS else 'other',
+            wifi)
+
+
 def parse_run(output, *, timed_out=False):
     """Require a matching start and finish for each AndroidJUnitRunner result."""
     fields = {}
@@ -50,6 +72,7 @@ def parse_run(output, *, timed_out=False):
     active = None
     source_lines = {}
     failure_categories = {}
+    vpn_snapshots = {}
     reading_stack = False
     total = None
     finished = False
@@ -76,6 +99,10 @@ def parse_run(output, *, timed_out=False):
                 }.get(exception)
                 if category:
                     failure_categories[active] = category
+                if active[0] == VPN_LIFECYCLE_CLASS:
+                    snapshot = vpn_lifecycle_snapshot(value)
+                    if snapshot is not None:
+                        vpn_snapshots[active] = snapshot
             if key in ('class', 'test', 'id', 'current', 'numtests'):
                 if finished or key in fields:
                     raise ValueError('Repeated or late instrumentation field')
@@ -126,6 +153,9 @@ def parse_run(output, *, timed_out=False):
                 print(f'Test failure category: {failure_categories[classname, method]}')
             if (classname, method) in source_lines:
                 print(f'Test source line: {source_lines[classname, method]}')
+            if (classname, method) in vpn_snapshots:
+                phase, reason, wifi = vpn_snapshots[classname, method]
+                print(f'VPN lifecycle snapshot: phase={phase}, reason={reason}, wifi={wifi}')
     return suite
 
 

@@ -135,8 +135,14 @@ class VpnLifecycleTest {
             Thread.sleep(200)
         }
         val s = status()
+        val wifi = runCatching {
+            val connectivity = context.getSystemService(ConnectivityManager::class.java)
+            connectivity.allNetworks.any {
+                connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            }
+        }.getOrNull()?.toString() ?: "unknown"
         fail("VPN lifecycle deadline exceeded: phase=${s.optString("phase")}, reason=${s.optString("reason")}, " +
-            "desiredOn=${s.optBoolean("desiredOn")}, resumeRequired=${s.optBoolean("resumeRequired")}, " +
+            "wifi=$wifi, desiredOn=${s.optBoolean("desiredOn")}, resumeRequired=${s.optBoolean("resumeRequired")}, " +
             "attempt=${s.optInt("attempt")}, heavyCount=${s.optJSONArray("heavyWallMs")?.length()}, native=${pid()}, tunnels=${tunnels.get()}")
     }
     @Before fun setup() {
@@ -387,10 +393,9 @@ class VpnLifecycleTest {
         connect()
         val old = pid()
         val epoch = status().optLong("networkEpoch")
-        val mobileDataWasOff = shell("settings get global mobile_data").toString(Charsets.UTF_8).trim() == "0"
+        assertEquals("enabled", shell("cmd connectivity airplane-mode").toString(Charsets.UTF_8).trim())
         try {
             shell("svc wifi disable")
-            if (!mobileDataWasOff) shell("svc data disable")
             await { status().optString("phase") == "NoNetwork" }
             assertTrue(status().getBoolean("desiredOn"))
             assertEquals(old, pid())
@@ -398,7 +403,6 @@ class VpnLifecycleTest {
             assertEquals("NoNetwork", status().optString("phase"))
         } finally {
             shell("svc wifi enable")
-            if (!mobileDataWasOff) shell("svc data enable")
         }
         await(60_000) { status().optString("phase") == "Online" }
         assertEquals(old, pid())
