@@ -69,14 +69,15 @@ def stopped_rollback_recovered(controller,generation):
         state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
         not call('auth-status')['busy'])
 
-def exchange_through_proxy(proxy):
+def exchange_through_proxy(proxy, destination="203.0.113.10"):
+    assert destination in ("203.0.113.10", "203.0.113.11")
     # Keep the client half-open while the application UID reads the reply.
     # A pipe directly into toybox nc can close its input before the peer responds.
     proxy.payload_received = threading.Event()
     try:
         command = (r"(printf 'GET /syn443-payload HTTP/1.1\r\nHost: fixture.invalid\r\n"
                    r"Connection: close\r\n\r\n'; sleep 3) | run-as " + PACKAGE +
-                   " toybox nc -w 5 203.0.113.10 80")
+                   f" toybox nc -w 5 {destination} 80")
         response = adb('shell', '-T', command, timeout=12)
         confirmed = proxy.payload_received.wait(1)
         status = re.match(rb'HTTP/1\.1 ([0-9]{3}) ', response)
@@ -423,7 +424,47 @@ def enrolled_operator_mode(fixture):
         assert cleared == submitted
         await_condition(lambda: mode('automatic') and working(), 100)
         exchange_through_proxy(reserve)
-        assert fixture.registrations == 1
+        # Keep the existing automatic/manual/automatic case intact. The next signed
+        # revision requires an independently reached static route before activation.
+        fixed = Server(('127.0.0.1', 0), RouteProxy)
+        fixed.ssh_ok, fixed.health_ok, fixed.delay, fixed.route_probes = True, True, 0, 0
+        fixed_port = fixed.server_address[1]
+        threading.Thread(target=fixed.serve_forever, daemon=True).start()
+        try:
+            adb('reverse', 'tcp:' + str(fixed_port), 'tcp:' + str(fixed_port))
+            mixed = copy.deepcopy(route)
+            mixed['outbounds'].append(dict(base, tag='fixed-office', server_port=fixed_port))
+            mixed['route']['rules'].insert(0, {'ip_cidr': ['203.0.113.11/32'], 'network': ['tcp'],
+                                              'action': 'route', 'outbound': 'fixed-office'})
+            mixed['route_checks'].append({'outbound': 'fixed-office', 'required': True,
+                                          'checks': [{'method': 'ssh_banner', 'target': '192.0.2.9:22'}]})
+            fixture.config = mixed
+            fixture.revision = 3
+            call('policy-refresh')
+
+            def mixed_ready():
+                if not committed_online(call('status'), 3):
+                    return False
+                report = call('routes-status')
+                rows = {r['label']: r for r in report['routes'] if r.get('required')}
+                if set(rows) != {'managed-office', 'fixed-office'} or not report['requiredReady']:
+                    return False
+                adaptive, concrete = rows['managed-office'], rows['fixed-office']
+                return (all(r['state'] == 'working' and type(r.get('ageMs')) is int and 0 <= r['ageMs'] <= 120_000
+                            for r in rows.values()) and adaptive['measuredPath'] == [wifi_hop]
+                        and concrete['measuredPath'] == [concrete['id']] and fixed.route_probes > 0)
+
+            await_condition(mixed_ready, 120)
+            exchange_through_proxy(reserve)
+            exchange_through_proxy(fixed, '203.0.113.11')
+            assert fixture.registrations == 1
+            print('Signed mixed policy: fresh independent adaptive and static checks; both application payloads received', flush=True)
+        finally:
+            try:
+                adb('reverse', '--remove', 'tcp:' + str(fixed_port))
+            finally:
+                fixed.shutdown()
+                fixed.server_close()
     finally:
         try:
             adb('reverse', '--remove', 'tcp:' + str(port))

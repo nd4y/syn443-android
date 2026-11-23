@@ -20,7 +20,7 @@ class RouteProxy(socketserver.BaseRequestHandler):
     def handle(self):
         self.request.settimeout(5);stream=self.request.makefile('rb')
         line=stream.readline(4096);Proxy.headers(stream)
-        if line.startswith(b'CONNECT 203.0.113.10:80 '):
+        if line.startswith((b'CONNECT 203.0.113.10:80 ', b'CONNECT 203.0.113.11:80 ')):
             self.request.sendall(b'HTTP/1.1 200 Connection established\r\n\r\n')
             request = stream.readline(4096)
             if request.startswith(b'GET /syn443-payload '):

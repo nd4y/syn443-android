@@ -59,9 +59,56 @@ object RouteSnapshot {
     private var lastStarted = -60_000L
     private var queued = emptySet<String>()
     private var revision = ""
-    private var adaptiveConfig = false
+    private var mixedRows = emptyList<Row>()
     private var manualContext: String? = null
-    private fun Row.individuallyCheckable() = configured() && (!adaptiveConfig || type=="syn443-adaptive")
+    private fun Row.individuallyCheckable() = configured()
+    private var mixedStarts = emptyMap<String, Long>()
+    internal data class MixedCandidate(val id: String, val routine: Boolean)
+
+    @Synchronized internal fun isMixedRoute(scope: RouteScope, id: String) =
+        live == scope && scope.config == revision && mixedRows.any { it.id == id }
+
+    /** One concrete route per admission. Missing required observations precede routine
+     * maintenance. Within each class the least recently checked route gets a turn. */
+    @Synchronized internal fun nextMixedCheck(scope: RouteScope, manual: String?, now: Long): MixedCandidate? {
+        if (mixedRows.isEmpty() || live != scope || scope.config != revision || now < 0) return null
+        if (pending.isNotEmpty() && now - startedAt < 35_000) return null
+        val candidates = mixedRows
+        if (manual != null) return candidates.firstOrNull { it.id == manual }?.let { MixedCandidate(it.id, false) }
+        val due = candidates.filter { row ->
+            val last = mixedStarts[row.id]
+            val interval = if (row.required) 60_000L else 300_000L
+            last == null || now - last >= interval
+        }
+        fun urgent(row: Row) = row.required && observations[row.id]?.let {
+            it.scope == scope && it.complete && now - it.elapsedMs in 0..RouteEvidence.DEFAULT_TTL_MS
+        } != true
+        val row = due.minWithOrNull(compareBy<Row> { !urgent(it) }.thenBy { mixedStarts[it.id] ?: -1L }) ?: return null
+        return MixedCandidate(row.id, !urgent(row))
+    }
+
+    @Synchronized internal fun startMixedCheck(scope: RouteScope, candidate: MixedCandidate, now: Long): String? {
+        if (nextMixedCheck(scope, candidate.id, now) == null) return null
+        val command = request(scope, candidate.id, force = true) ?: return null
+        mixedStarts = mixedStarts + (candidate.id to now)
+        return command
+    }
+
+    /** A mode change can replace a concrete outbound's downstream path without
+     * replacing the native process. Late ordinary receipts must lose their request. */
+    @Synchronized internal fun clearMixedChecks() {
+        if (mixedRows.isEmpty()) return
+        val static = mixedRows.map { it.id }.toSet()
+        pending = ""; queued = emptySet(); completedReceipt = ""
+        observations = observations - static
+        receipts = receipts - static
+        durations = durations - static
+        timings = timings - static
+        codes = codes - static
+        measuredPaths = measuredPaths - static
+        checkPlans = checkPlans - static
+        mixedStarts = emptyMap()
+    }
     private var activationAttempt:Pair<RouteScope,Long>?=null
     private var failover:ManagedFailoverPlan?=null
     private data class ReserveRecoveryHint(val selected: String, val observedAt: Long)
@@ -158,7 +205,7 @@ object RouteSnapshot {
             Row(checkNotNull(tags[tag]),tag,o.getString("type"),p?.optBoolean("required")==true,checks,profile,chain,
                 (0 until rules.length()).count {rules.optJSONObject(it)?.optString("outbound")==tag} + if(route?.optString("final")==tag) 1 else 0)
         }
-        adaptiveConfig=config.has("adaptive_routes")
+        mixedRows = if (config.has("adaptive_routes")) rows.filter { it.type != "syn443-adaptive" && it.configured() } else emptyList()
         revision=hash;invalidate()
     }
     /** Only the active configuration's concrete checks can authorize a native switch. */
@@ -172,7 +219,7 @@ object RouteSnapshot {
         }
     }
 
-    @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();searchScope=null;searches=emptyMap();codes=emptyMap();timings=emptyMap();durations=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();checkPlans=emptyMap();lastStarted=-60_000;activationAttempt=null
+    @Synchronized fun invalidate() {current=null;validatedBatch=null;pending="";queued=emptySet();observations=emptyMap();searchScope=null;searches=emptyMap();codes=emptyMap();timings=emptyMap();durations=emptyMap();receipts=emptyMap();measuredPaths=emptyMap();checkPlans=emptyMap();lastStarted=-60_000;mixedStarts=emptyMap();activationAttempt=null
         completedReceipt="";reserveRecovery=null;failoverAdmission=null;activeFailoverProgram=null;failoverShadow=null;batchSequence=0;confirmingFailure=false;skippedMeteredReserves=false;manualContext=null}
     @Synchronized fun due(intervalMs:Long=60_000):Boolean {
         require(intervalMs in 10_000..60_000)
@@ -228,6 +275,9 @@ object RouteSnapshot {
         }
         return true
     }
+    @Synchronized internal fun activationStart(scope: RouteScope): Long? =
+        activationAttempt?.takeIf { it.first == scope }?.second
+
     @Synchronized fun activation(scope:RouteScope,startedElapsed:Long=0):RouteActivation {
         require(startedElapsed>=0)
         if(revision!=scope.config || live!=scope)return RouteActivation.WAIT

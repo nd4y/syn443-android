@@ -23,6 +23,17 @@ class EngineHostService : Service() {
     @Volatile private var engine: Runtime? = null
     @Volatile private var token: String? = null
     private val controlLock = Any()
+    private var ordinaryProbeEpoch = 0L
+    private var mixedProbeStarted = false
+
+    // Called under controlLock at the same point as the adaptive owner fence.
+    private fun invalidateMixedProbes() {
+        ordinaryProbeEpoch++
+        if (mixedProbeStarted) {
+            engine?.cancelRouteChecks()
+            mixedProbeStarted = false
+        }
+    }
     @Volatile private var desiredLease = 0L
     private var tun: ParcelFileDescriptor? = null
     private var lockFile: RandomAccessFile? = null
@@ -98,6 +109,7 @@ class EngineHostService : Service() {
         override fun pid() = Process.myPid()
         override fun invalidateAdaptiveContext(session:String):Long = synchronized(controlLock) {
             if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid())return@synchronized -1L
+            invalidateMixedProbes()
             adaptiveInvalidated=true
             runCatching {
                 val runtime = engine ?: return@synchronized 0L
@@ -174,7 +186,7 @@ class EngineHostService : Service() {
             if (session != token) return
             latestNetwork = NetworkUpdate(session, name, index)
             // Revoke path authority before a possibly blocked SDK worker runs.
-            synchronized(controlLock) {runCatching {engine?.invalidateAdaptiveContext()}}
+            synchronized(controlLock) { invalidateMixedProbes(); runCatching {engine?.invalidateAdaptiveContext()} }
             worker.removeCallbacks(applyNetwork)
             worker.post(applyNetwork)
         }
@@ -210,6 +222,7 @@ class EngineHostService : Service() {
         }
         override fun checkRoutes(session:String,request:String) {
             if(session!=token || android.os.Binder.getCallingUid()!=Process.myUid() || request.length>32768)return
+            val ordinaryEpoch = synchronized(controlLock) { ordinaryProbeEpoch }
             worker.post {if(session==token) {
                 val frame=runCatching {org.json.JSONObject(request)}.getOrNull()
                 if(frame?.optString("kind")=="adaptive") {
@@ -227,10 +240,21 @@ class EngineHostService : Service() {
                     publishAdaptive(session,runtime)
                     return@post
                 }
-                val key=runCatching {org.json.JSONObject(request).getString("request")}.getOrNull()
-                val runtime=engine
+                val mixed = frame?.opt("kind") == "mixed-static"
+                val body = if (mixed) frame?.optJSONObject("check") ?: return@post else frame ?: return@post
+                val key = body.opt("request") as? String
+                val runtime = engine
                 if(key!=null && key.length in 1..80) {
-                    if(runtime!=null && runCatching {runtime.startRouteChecks(request)}.getOrDefault(false))startRoutePoll(session,key,runtime)
+                    val accepted = runtime != null && runCatching {
+                        if (!mixed) runtime.startRouteChecks(request)
+                        else synchronized(controlLock) {
+                            session == token && engine === runtime && ordinaryEpoch == ordinaryProbeEpoch &&
+                                frame!!.keys().asSequence().toSet() == setOf("kind", "check", AdaptiveHandoff.DEADLINE) &&
+                                body.optJSONArray("routes")?.length() == 1 && AdaptiveHandoff.withinDeadline(frame, SystemClock.elapsedRealtime()) &&
+                                runtime.startRouteChecks(body.toString()).also { if (it) mixedProbeStarted = true }
+                        }
+                    }.getOrDefault(false)
+                    if (accepted && runtime != null) startRoutePoll(session,key,runtime)
                     else callback?.routeState(session,org.json.JSONObject().put("request",key)
                         .put("running",false).put("results",org.json.JSONArray()).toString())
                 }

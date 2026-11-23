@@ -6,6 +6,13 @@ specified by [`adaptive-runtime.schema.json`](../contracts/v1/adaptive-runtime.s
 Graph metadata describes eligibility; only a fresh actual native check receipt
 can authorize a data path. A caller cannot replace the signed `route_checks`.
 
+A managed policy can require checks on both adaptive groups and ordinary
+outbounds. Each concrete outbound is checked through its own signed plan.
+Both kinds share the device's start budget. A required route needs its own
+fresh observation after activation begins. On a mode change the client discards
+obsolete results and pending ordinary checks. Manual single-route checks use
+the same admission rules.
+
 Go and Kotlin use dedicated duplicate/presence/canonical decoders. The original
 wire's UTF-8 bytes and number lexemes are retained before JSON normalization.
 Limits remain196608 wire bytes,262144 assigned engine bytes,500 normalized
