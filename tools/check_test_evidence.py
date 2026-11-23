@@ -1088,7 +1088,7 @@ SUPPORT_BUNDLE_REQUIRED = {'io.syn443.android.DiagnosticArchiveTest': ['storedAr
                                                    'foreignFilesAndSymlinkFilesOrDirectoriesArePreservedAndFailClosed',
                                                    'blockedReadKeepsItsSingleSlotAndCancelledVerifiedBytesCannotPublish',
                                                    'failedSourcesAtomicWriteFailuresAndOverLimitComponentsNeverAutoRetry'],
- 'io.syn443.android.SupportBundleSourcesTest': ['offlineArchiveContainsOnlyCurrentPhysicalFactsAndTypedPortalReason', 'passiveCaptureLeavesItsSourcesUnchangedAndRunsEachSupplierOnce',
+ 'io.syn443.android.SupportBundleSourcesTest': ['operatorRenderReturnsOnlyCurrentRedactedConfiguration', 'offlineArchiveContainsOnlyCurrentPhysicalFactsAndTypedPortalReason', 'passiveCaptureLeavesItsSourcesUnchangedAndRunsEachSupplierOnce',
                                                 'changedContextRejectsCapturedHealthChecksAndOverlayWithoutRepeatingWork',
                                                 'missingOrFailingSourcesBecomePartialWithoutRawExceptionText',
                                                 'stateFileReadRejectsOversizeDepthUtf8TrailingAndSymlinkWithoutModifyingFiles',

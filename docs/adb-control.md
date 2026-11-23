@@ -34,6 +34,13 @@ An empty list means the current process has no route rows to report.
 Reading the snapshot does not schedule probes. Device and proxy addresses,
 route names and policy contents stay on the phone.
 
+Use `python3 tools/syn443ctl.py --serial <adb-serial> --local-read config-render`
+to inspect the running configuration. The command returns protocol counts,
+whether adaptive routing is active, and available DNS and route-rule counts
+for the current VPN generation. An idle controller or a replaced engine
+returns `unavailable`. The command reads the same redacted configuration used
+by the diagnostic archive after the engine starts.
+
 The grant expires after fifteen minutes. The owner can revoke it on the same
 screen. A controller restart also ends it. Exit code 4 with
 `local_consent_required` means the phone needs a fresh local grant.

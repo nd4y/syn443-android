@@ -20,7 +20,7 @@ import zipfile
 URI = "content://io.syn443.control"
 LOCAL_READ_URI = "content://io.syn443.operator.read"
 LOCAL_READ_BASE = ("capabilities", "status", "logs")
-LOCAL_READ_OPERATIONS = LOCAL_READ_BASE + ("overlay-status", "routes-status", "auth-status")
+LOCAL_READ_OPERATIONS = LOCAL_READ_BASE + ("overlay-status", "routes-status", "auth-status", "config-render")
 METHODS = {
     "auth-status": "auth-status", "status": "status", "logs": "logs", "routes-status": "routes-status",
     "routes-check": "routes-check", "routes-cancel": "routes-cancel",
@@ -38,7 +38,7 @@ OPERATIONS = ("capabilities", "status", "auth-status", "logs", "diagnostic-bundl
               "routes-check", "routes-cancel", "overlay-status", "netbird-status", "netbird-diagnose", "netbird-view", "netbird-cancel",
               "vpn-start", "vpn-stop", "vpn-resume", "config-plan", "config-apply", "mode-get", "mode-set",
               "support-bundle", "support-bundle-collect", "support-bundle-status",
-              "support-bundle-cancel", "support-bundle-export")
+              "support-bundle-cancel", "support-bundle-export", "config-render")
 OVERLAY_PROVIDERS = ("netbird", "tailscale", "zerotier")
 CONFIG = {"config-plan", "config-apply"}
 MAX_CONFIG = 262_144
@@ -120,6 +120,31 @@ def canonical_view(raw):
         return canonical
     except (ValueError, TypeError, RecursionError) as err:
         raise ControlError("invalid_arguments", 2) from err
+
+
+def local_config_render(reply):
+    base = {"schemaVersion", "availability"}
+    if not isinstance(reply, dict) or type(reply.get("schemaVersion")) is not int or reply["schemaVersion"] != 1:
+        raise ControlError("invalid_reply", 5)
+    if set(reply) == base and reply["availability"] == "unavailable":
+        return reply
+    if set(reply) != base | {"generation", "configuration"} or reply["availability"] != "active":
+        raise ControlError("invalid_reply", 5)
+    generation, value = reply["generation"], reply["configuration"]
+    fields = {"schemaVersion", "outboundTypes", "adaptiveRouting"}
+    optional = {"dnsServerCount", "routeRuleCount"}
+    protocols = {"direct", "http", "socks", "vless", "ssh", "selector", "urltest", "netbird", "syn443-adaptive", "unknown"}
+    if (type(generation) is not int or not 1 <= generation <= (1 << 63) - 1
+            or not isinstance(value, dict) or not fields <= set(value) <= fields | optional
+            or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1
+            or type(value["adaptiveRouting"]) is not bool):
+        raise ControlError("invalid_reply", 5)
+    counts = value["outboundTypes"]
+    if (not isinstance(counts, dict) or not set(counts) <= protocols
+            or any(type(n) is not int or not 1 <= n <= MAX_CONFIG for n in counts.values())
+            or any(type(value[k]) is not int or not 0 <= value[k] <= MAX_CONFIG for k in optional & set(value))):
+        raise ControlError("invalid_reply", 5)
+    return reply
 
 
 def local_read_operations(reply):
@@ -866,7 +891,7 @@ def main(argv=None):
                 raise ControlError("invalid_arguments", 2)
         elif any(value is not None for value in mode_fields):
             raise ControlError("invalid_arguments", 2)
-        if args.local_read and args.operation not in LOCAL_READ_OPERATIONS:
+        if (args.local_read and args.operation not in LOCAL_READ_OPERATIONS) or (args.operation == "config-render" and not args.local_read):
             raise ControlError("unsupported_operation", 4)
         device = Device(args.serial, args.timeout, local_read=True) if args.local_read else Device(args.serial, args.timeout)
         if args.local_read and args.operation == "capabilities":
@@ -889,6 +914,10 @@ def main(argv=None):
             if "routes-status" not in local_read_operations(device.call("capabilities")):
                 raise ControlError("unsupported_by_device", 4)
             data = local_route_health(device.call("routes-status"))
+        elif args.operation == "config-render":
+            if "config-render" not in local_read_operations(device.call("capabilities")):
+                raise ControlError("unsupported_by_device", 4)
+            data = local_config_render(device.call("config-render"))
         elif args.operation in SUPPORT_OPERATIONS:
             connection = device.bundle_connection() if args.operation in {"support-bundle", "support-bundle-export"} else nullcontext()
             with connection:
@@ -897,7 +926,7 @@ def main(argv=None):
             state = device.call("status")
             operations = [
                 op for op in OPERATIONS
-                if (op not in CONFIG or state.get("localConfigControl") is True)
+                if op != "config-render" and (op not in CONFIG or state.get("localConfigControl") is True)
                 and (op not in {"mode-get", "mode-set"} or state.get("operatorNetworkMode") is True)
                 and (op != "overlay-status" or state.get("overlayProviderHealth") is True)
                 and (op != "netbird-cancel" or state.get("netbirdDiagnosticCancellation") is True)

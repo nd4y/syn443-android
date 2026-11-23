@@ -4,6 +4,8 @@ import org.json.JSONObject
 
 /** Redacted while rendering, before any config bytes reach the diagnostic collector. */
 internal class EffectiveConfig private constructor(private val json: String, val hasNetBird: Boolean) {
+    fun snapshot() = JSONObject(json)
+
     fun component() = DiagnosticArchive.Component(
         DiagnosticArchive.Name.EFFECTIVE_CONFIG, json.toByteArray(Charsets.UTF_8),
         DiagnosticArchive.State.AVAILABLE, DiagnosticArchive.Reason.PROJECTION_ONLY,

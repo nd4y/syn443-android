@@ -3,6 +3,7 @@ package io.syn443.android
 import io.syn443.android.support.EffectiveConfig
 import io.syn443.android.support.ReadyConfig
 import io.syn443.android.vpn.EngineConfig
+import io.syn443.android.vpn.operatorConfigRender
 import io.syn443.android.support.DiagnosticArchive
 import io.syn443.android.support.SupportBundleSources
 import java.io.File
@@ -14,6 +15,31 @@ import org.junit.Test
 class SupportBundleSourcesTest {
     private fun state() = JSONObject().put("phase", "Online").put("generation", 7).put("networkEpoch", 4)
         .put("desiredOn", true).put("engineActive", true)
+
+    @Test fun operatorRenderReturnsOnlyCurrentRedactedConfiguration() {
+        val source = state().put("configRevision", "synthetic-revision")
+        val config = EffectiveConfig.fromRendered(JSONObject(
+            """{"outbounds":[{"type":"http","server":"protected.example.invalid","password":"synthetic-private"}],
+                "route":{"rules":[{"domain":"protected.example.invalid"}]},"dns":{"servers":[]}}"""))
+        val active = ReadyConfig(7, config)
+        val denied = JSONObject().put("schemaVersion", 1).put("availability", "unavailable")
+        val current = operatorConfigRender({ source }, { active }, { it == 7L })
+        assertEquals(setOf("schemaVersion", "availability", "generation", "configuration"), current.keys().asSequence().toSet())
+        assertEquals("active", current.getString("availability"))
+        assertEquals(7, current.getInt("generation"))
+        assertEquals(1, current.getJSONObject("configuration").getJSONObject("outboundTypes").getInt("http"))
+        assertEquals(1, current.getJSONObject("configuration").getInt("routeRuleCount"))
+        assertFalse(current.toString().contains("protected"))
+        assertFalse(current.toString().contains("synthetic"))
+        fun unavailable(report: JSONObject) = assertEquals(denied.toString(), report.toString())
+        unavailable(operatorConfigRender({ source }, { null }, { true }))
+        unavailable(operatorConfigRender({ source }, { active }, { false }))
+        unavailable(operatorConfigRender({ state().put("generation", 8) }, { active }, { true }))
+        unavailable(operatorConfigRender({ state().put("engineActive", false) }, { active }, { true }))
+        var reads = 0
+        unavailable(operatorConfigRender({ if (++reads == 1) source else state().put("networkEpoch", 5) }, { active }, { true }))
+        unavailable(operatorConfigRender({ source }, { ReadyConfig(7, config) }, { true }))
+    }
 
     @Test fun offlineArchiveContainsOnlyCurrentPhysicalFactsAndTypedPortalReason() {
         val owner = state().put("reason", "captive_portal")

@@ -32,7 +32,7 @@ def press(label):
 
 
 def denied(client):
-    for method, arg in (("status", None), ("overlay-status", "netbird"), ("routes-status", None), ("auth-status", None)):
+    for method, arg in (("status", None), ("overlay-status", "netbird"), ("routes-status", None), ("auth-status", None), ("config-render", None)):
         try:
             client.call(method, arg)
         except ControlError as err:
@@ -113,7 +113,7 @@ def run():
             status = await_grant(client, True)
             capabilities = client.call("capabilities")
             assert capabilities["operations"] == ["capabilities", "status", "logs"]
-            assert capabilities["optionalOperations"] == ["overlay-status", "routes-status", "auth-status"]
+            assert capabilities["optionalOperations"] == ["overlay-status", "routes-status", "auth-status", "config-render"]
             netbird = client.call("overlay-status", "netbird")
             assert set(netbird) == {"schemaVersion", "provider", "implementation", "configured", "control", "controlTransport"}
             assert netbird["control"] == netbird["controlTransport"] == "unknown"
@@ -127,6 +127,10 @@ def run():
             assert set(login) <= {"schemaVersion", "phase", "reason", "busy", "canReauthenticate"}
             assert login["phase"] in {"SIGNED_OUT", "unknown"} and login["schemaVersion"] == 1
             assert json.loads(subprocess.check_output(login_command, timeout=20))["result"] == login
+            config_command = command[:command.index("overlay-status")] + ["config-render"]
+            empty_render = {"schemaVersion": 1, "availability": "unavailable"}
+            assert client.call("config-render") == empty_render
+            assert json.loads(subprocess.check_output(config_command, timeout=20))["result"] == empty_render
             route_health = client.call("routes-status")
             assert json.loads(subprocess.check_output(route_command, timeout=20))["result"] == route_health
             assert all(row["state"] == "off" for row in route_health["routes"])
@@ -152,6 +156,7 @@ def run():
     print("ordinaryReleasePassiveRouteHealthWithoutNativeOwner: passed", flush=True)
     print("releaseAdbLoginStatusUsesConsentAndReturnsOnlyCurrentPublicFields: passed", flush=True)
     print("releaseAdbConsentDeniesForeignUidOnBothProviders: passed", flush=True)
+    print("releaseConfigRenderRequiresConsentAndReportsUnavailableWithoutEngine: passed", flush=True)
 
 
 if __name__ == "__main__":

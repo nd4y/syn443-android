@@ -65,7 +65,7 @@ public final class ForeignOperatorActivity extends Activity {
             }
         }
         if (!readFound || !privateFound) throw new AssertionError("Both installed providers are required");
-        for (String method : new String[]{"status", "logs", "auth-status", "routes-status"}) {
+        for (String method : new String[]{"status", "logs", "auth-status", "routes-status", "config-render"}) {
             requireDenied(READ, method, false);
         }
         for (String method : new String[]{"status", "config-plan-file", "bundle-collect"}) {

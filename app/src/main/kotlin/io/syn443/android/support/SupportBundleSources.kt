@@ -73,7 +73,7 @@ internal object SupportBundleSources {
         }
     }
 
-    private fun sameContext(before: JSONObject, after: JSONObject): Boolean =
+    internal fun sameContext(before: JSONObject, after: JSONObject): Boolean =
         listOf("generation", "networkEpoch").all { before.opt(it) == after.opt(it) } &&
             listOf("configRevision", "desiredOn", "engineActive").all { before.opt(it) == after.opt(it) }
 

@@ -8,6 +8,9 @@ import android.os.Binder
 import android.os.Bundle
 import android.os.SystemClock
 import io.syn443.android.support.DiagnosticProjection
+import io.syn443.android.support.ReadyConfig
+import io.syn443.android.support.SupportBundleSources
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -37,6 +40,23 @@ internal object OperatorReadGrant {
     }
 }
 
+internal fun operatorConfigRender(
+    state: () -> JSONObject?,
+    ready: () -> ReadyConfig?,
+    ownsEngine: (Long) -> Boolean,
+): JSONObject {
+    val result = JSONObject().put("schemaVersion", 1).put("availability", "unavailable")
+    val rendering = ready() ?: return result
+    val before = state() ?: return result
+    val generation = before.opt("generation")
+    if ((generation !is Int && generation !is Long) || (generation as Number).toLong() != rendering.generation ||
+        before.opt("desiredOn") != true || before.opt("engineActive") != true || !ownsEngine(rendering.generation)) return result
+    val after = state() ?: return result
+    if (!SupportBundleSources.sameContext(before, after) || ready() !== rendering || !ownsEngine(rendering.generation)) return result
+    return result.put("availability", "active").put("generation", rendering.generation)
+        .put("configuration", rendering.summary.snapshot())
+}
+
 /** Separate from the private command writer. No URI conveys a grant or selects a file. */
 class OperatorReadProvider : ContentProvider() {
     override fun onCreate() = true
@@ -45,7 +65,7 @@ class OperatorReadProvider : ContentProvider() {
         fun rejected(code: String) = Bundle().apply { putBoolean("ok", false); putString("error", code) }
         if (Binder.getCallingUid() != 2000) return rejected("unauthorized")
         val validMethod = when (method) {
-            "capabilities", "status", "logs", "routes-status", "auth-status" -> arg == null
+            "capabilities", "status", "logs", "routes-status", "auth-status", "config-render" -> arg == null
             "overlay-status" -> OverlayProviderHealth.supports(arg)
             else -> false
         }
@@ -59,8 +79,16 @@ class OperatorReadProvider : ContentProvider() {
                 when (method) {
                     "capabilities" -> JSONObject().put("schemaVersion", 1).put("operations",
                         JSONArray(listOf("capabilities", "status", "logs")))
-                        .put("optionalOperations", JSONArray(listOf("overlay-status", "routes-status", "auth-status")))
+                        .put("optionalOperations", JSONArray(listOf("overlay-status", "routes-status", "auth-status", "config-render")))
                     "auth-status" -> LoginController.operatorLoginStatus()
+                    "config-render" -> {
+                        val intent = File(app.noBackupFilesDir, "vpn-intent.json")
+                        operatorConfigRender(
+                            { SupportBundleSources.readState(intent) },
+                            { ReadyConfig.current },
+                            LifecycleAccess::ownsReadyEngine,
+                        )
+                    }
                     "overlay-status" -> OverlayProviderHealth.live(app, requireNotNull(arg))
                     "routes-status" -> {
                         val status = LifecycleAccess.engineStatus(app, StateStore.get(app).read())
