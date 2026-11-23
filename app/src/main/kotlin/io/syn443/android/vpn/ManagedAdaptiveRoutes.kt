@@ -88,6 +88,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private var mode=NetworkMode.WIFI
     private var policyScope=""
     private var nativeEpoch=0L
+    private var expectedResetEpoch=0L
     private var nativeScope=""
     private var observedNativeScope=""
     private var drainingSince:Long?=null
@@ -170,7 +171,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         } else RouteHealthMemory(next)
         val sameEngine=routeScope?.engine==scope.engine
         previousPolicyScope=if(sameEngine)policyScope else ""
-        if(!sameEngine) {nativeEpoch=0;retireOwner=false}
+        if(!sameEngine) {nativeEpoch=0;expectedResetEpoch=0;retireOwner=false}
         context=next;routeScope=scope;mode=networkMode;policyRevision=revision;policyScope=next.dependencyHash
         stability.clear()
         memory=nextMemory;pending=null;pendingAdmission=null;nativeReady=false;nativeScope="";observedNativeScope="";drainingSince=null
@@ -253,6 +254,16 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
      * scope did not change. Negative evidence and admission debt stay owned.
      * An old pending command remains a tombstone until a current idle report
      * proves the actual native probe-worker has exited; configure is not ACK. */
+    fun awaitInvalidatedOwner(epoch: Long, now: Long): Boolean {
+        if (routeScope == null || retireOwner || epoch <= nativeEpoch || epoch <= expectedResetEpoch || !advanceClock(now)) return false
+        expectedResetEpoch = epoch
+        nativeReady = false
+        nativeScope = ""
+        nativeOwnerChanged(now)
+        publishSearch()
+        return !retireOwner
+    }
+
     private fun nativeOwnerChanged(now:Long) {
         stability.clear()
         drainingSince=pending?.startedAt ?: drainingSince ?: now
@@ -299,8 +310,11 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val reportedPolicy=raw.optString("policyScope")
         if(reportedPolicy!=policyScope && reportedPolicy!=previousPolicyScope)return
         val ownerChanged=nativeEpoch>0 && observedNativeScope.isNotEmpty() && (epoch!=nativeEpoch || scope!=observedNativeScope)
-        if(ownerChanged && !nativeResetReport(raw))return
-        if(ownerChanged)nativeOwnerChanged(now)
+        val locallyRevoked = expectedResetEpoch > 0
+        if (locallyRevoked && epoch < expectedResetEpoch) return
+        if ((locallyRevoked || ownerChanged) && !nativeResetReport(raw)) return
+        if (ownerChanged && !locallyRevoked) nativeOwnerChanged(now)
+        expectedResetEpoch = 0
         nativeEpoch=epoch;observedNativeScope=scope
         if(retireOwner)return
         if(drainingSince?.let {now-it>35_000}==true) {retireOwner=true;return}
