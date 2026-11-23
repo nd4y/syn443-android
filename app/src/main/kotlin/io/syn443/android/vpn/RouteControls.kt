@@ -50,8 +50,9 @@ import org.json.JSONObject
         if(routes==null || routes.length()==0)Text("Список маршрутов ещё не получен")
         if(routes!=null)for(i in 0 until routes.length()) {
             val row=routes.getJSONObject(i)
+            val state=row.getString("state")
             Text("${row.getString("id")}: ${row.getString("label")} (${row.getString("type")})",Modifier.testTag("route-${i+1}-title"))
-            Text(when(row.getString("state")) {
+            Text(when(state) {
                 "working"->"Проверка назначенной цели успешна"
                 "failed"->"Проверка назначенной цели не прошла"
                 "checking"->"Проверяется"
@@ -74,9 +75,14 @@ import org.json.JSONObject
             row.optJSONObject("checkPlan")?.let {plan->
                 Text("План проверки ${plan.optString("id")}: "+checkPlanOutcomeLabel(plan.optString("outcome")),Modifier.testTag("route-${i+1}-check-plan"))
                 val leaves=plan.optJSONArray("leaves")
+                val current=state in setOf("working","failed","incomplete")
                 if(leaves!=null && leaves.length() in 1..4)for(n in 0 until leaves.length()) {
                     val leaf=leaves.getJSONObject(n)
-                    Text("${n+1}/${leaves.length()} ${leaf.optString("id")}: "+checkPlanOutcomeLabel(leaf.optString("outcome")),Modifier.testTag("route-${i+1}-check-leaf-${n+1}"))
+                    val outcome=leaf.optString("outcome")
+                    val detail=if (current && (outcome == "FALSE" || outcome == "UNKNOWN")) routeFailureDescription(leaf.optString("code"),null) else null
+                    val result=checkPlanOutcomeLabel(outcome) + (detail?.let { " · $it" } ?: "")
+                    Text("${n+1}/${leaves.length()} ${leaf.optString("id")}: $result",
+                        Modifier.testTag("route-${i+1}-check-leaf-${n+1}"))
                 }
             }
             if(row.getBoolean("required"))Text("Обязательный маршрут")
@@ -110,7 +116,7 @@ import org.json.JSONObject
             }
             val path=row.optJSONArray("measuredPath")
             if (path != null && path.length() > 0) {
-                val title = when (row.getString("state")) {
+                val title = when (state) {
                     "working" -> "Проверенный путь"
                     "failed", "incomplete" -> "Путь последней попытки"
                     else -> "Путь предыдущей проверки"
@@ -169,7 +175,10 @@ internal fun SystemVpnProtection(policy: JSONObject?, openSettings: () -> Unit) 
     }
 }
 
-internal fun routeFailureLabel(reason: String, cause: RouteFailureCause?): String = when (cause) {
+internal fun routeFailureLabel(reason: String, cause: RouteFailureCause?): String =
+    routeFailureDescription(reason, cause) ?: "Причина: $reason"
+
+private fun routeFailureDescription(reason: String, cause: RouteFailureCause?): String? = when (cause) {
     RouteFailureCause.DNS_NOT_FOUND -> "DNS не нашёл имя узла"
     RouteFailureCause.DNS_TIMEOUT -> "Истекло время ожидания ответа DNS"
     RouteFailureCause.DNS_FAILED -> "Ошибка разрешения имени в DNS"
@@ -185,7 +194,16 @@ internal fun routeFailureLabel(reason: String, cause: RouteFailureCause?): Strin
         "exit_mismatch" -> "Выход не соответствует назначенной проверке"
         "exit_ip_mismatch" -> "IP-адрес выхода отличается от ожидаемого"
         "exit_evidence_invalid" -> "Сервис проверки вернул некорректные сведения о выходе"
-        else -> "Причина: $reason"
+        "check_timeout" -> "Истекло время ожидания проверки"
+        "ssh_banner_mismatch" -> "Сервер не вернул ожидаемое приветствие SSH"
+        "request_failed" -> "Не удалось отправить запрос проверки"
+        "response_failed" -> "Не удалось прочитать ответ проверки"
+        "http_response_mismatch" -> "Ответ HTTP отличается от ожидаемого"
+        "cancelled" -> "Проверка отменена"
+        "unsupported" -> "Маршрут не поддерживает этот способ проверки"
+        "probe_unavailable" -> "Проверка сейчас недоступна"
+        "outbound_unavailable" -> "Выход маршрута сейчас недоступен"
+        else -> null
     }
 }
 internal fun checkPlanOutcomeLabel(value:String)=when(value) {

@@ -915,6 +915,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'co
               ('io.syn443.android.RouteCheckPlanTest',
                'legacyArraysRemainCompatibleWhenNewEnrollmentsAdvertiseNamedChecks'),
               ('io.syn443.android.RouteCheckPlanTest', 'readOnlyPlanLabelsAreFiniteAndRecompositionDoesNotDispatch'),
+              ('io.syn443.android.RouteCheckPlanTest', 'currentFailedCheckShowsOnlyItsOwnFiniteCauseAndClearsWithStaleEvidence'),
               ('io.syn443.android.RouteCheckPlanTest',
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
 if mode in CHECK_PLAN_REQUIRED:
