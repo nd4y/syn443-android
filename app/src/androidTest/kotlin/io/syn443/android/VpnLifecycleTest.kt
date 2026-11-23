@@ -282,18 +282,25 @@ class VpnLifecycleTest {
         val on = status()
         assertTrue(on.getBoolean("desiredOn"))
         assertNotNull(pid())
-        val command = "content call --uri content://io.syn443.operator.read --method config-render"
+        fun render(): JSONObject {
+            val reply = shell("content call --uri content://io.syn443.operator.read --method config-render")
+            assertTrue(reply.contains("ok=true"))
+            return org.json.JSONTokener(reply.substringAfter("json=", "")).nextValue() as JSONObject
+        }
         call("operator-read-access", "grant")
         try {
-            val active = shell(command)
-            assertTrue(active.contains("ok=true") && active.contains(""availability":"active""))
-            assertTrue(active.contains(""generation":${on.getLong("generation")}"))
-            assertTrue(active.contains(""outboundTypes"") && active.contains(""http""))
-            assertFalse(active.contains(""server"") || active.contains(""configRevision""))
+            val active = render()
+            assertEquals("active", active.getString("availability"))
+            assertEquals(on.getLong("generation"), active.getLong("generation"))
+            val config = active.getJSONObject("configuration")
+            assertEquals(1, config.getJSONObject("outboundTypes").getInt("http"))
+            assertFalse(config.toString().contains("127.0.0.1") || config.toString().contains("test-proxy"))
             assertEquals(on.getLong("generation"), status().getLong("generation"))
             call("disconnect")
             await { !status().optBoolean("desiredOn") && pid() == null }
-            assertTrue(shell(command).contains(""availability":"unavailable""))
+            val stopped = render()
+            assertEquals("unavailable", stopped.getString("availability"))
+            assertFalse(stopped.has("configuration"))
             Thread.sleep(1_500)
             assertFalse(status().getBoolean("desiredOn"))
         } finally { call("operator-read-access", "revoke") }
