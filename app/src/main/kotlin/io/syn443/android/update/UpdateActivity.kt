@@ -1,5 +1,6 @@
 package io.syn443.android.update
 
+import io.syn443.android.Syn443Theme
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -113,7 +114,7 @@ class UpdateActivity : ComponentActivity() {
             }
         }
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            Syn443Theme {
                 Surface(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
                            verticalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -2002,8 +2002,13 @@
         "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/chat-acceptance-20261115.md",
-        "docs/mobile-admin-browser.md"
-      ]
+        "docs/mobile-admin-browser.md",
+        "app/src/main/res/values/launch_theme.xml",
+        "app/src/main/res/values-v31/launch_theme.xml",
+        "app/src/main/kotlin/io/syn443/android/Syn443Theme.kt"
+      ],
+      "implementationScope": "All activity launch windows and all seven Compose screens share one dark surface. Android 12+ splash uses the same resource. Instrumentation checks installed themes in both resource modes and compares the rendered home background with the launch surface.",
+      "remainingScope": "Physical startup transitions, larger text, cutout geometry and the complete per-control contrast matrix."
     },
     {
       "id": "EDIT-01",
@@ -3536,8 +3541,13 @@
         "app/src/main/kotlin/io/syn443/android/MainActivity.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PrototypeTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt",
-        "docs/implementation-status.md"
-      ]
+        "docs/implementation-status.md",
+        "app/src/main/res/values/launch_theme.xml",
+        "app/src/main/res/values-v31/launch_theme.xml",
+        "app/src/main/kotlin/io/syn443/android/Syn443Theme.kt"
+      ],
+      "implementationScope": "All activity launch windows and all seven Compose screens share one dark surface. Android 12+ splash uses the same resource. Instrumentation checks installed themes in both resource modes and compares the rendered home background with the launch surface.",
+      "remainingScope": "Physical startup transitions, larger text, cutout geometry and the complete per-control contrast matrix."
     },
     {
       "id": "AC82",
