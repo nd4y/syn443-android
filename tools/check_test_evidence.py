@@ -854,6 +854,7 @@ ADAPTIVE_SEARCH_REQUIRED = [
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'expiredLeaseAndBackwardClockRetireStatusWithoutErasingAdmissions'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'sixteenGroupProjectionIsClosedBoundedAndFailuresStayGroupLocal'),
     ('io.syn443.android.RouteSearchStatusTest', 'lifecycleRevisionMustMatchBeforeReportingVerifiedAdaptiveRoute'),
+    ('io.syn443.android.RouteSearchStatusTest', 'mixedChecksRequireIndependentCurrentReceiptsAndDropOldModeWork'),
     ('io.syn443.android.RouteSearchStatusTest', 'verifiedProjectionJoinsExactExistingTtlScopeReadinessAndFutureSampleGuards'),
     ('io.syn443.android.RouteSearchStatusTest', 'diagnosticProjectionCannotAuthorizeRequiredReadinessOrActivation'),
     ('io.syn443.android.RouteSearchStatusTest', 'failedOrExpiredPathAndAbsentLatencyHaveDistinctLabels'),

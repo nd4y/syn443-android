@@ -1,5 +1,7 @@
 package io.syn443.android.vpn
 
+import org.json.JSONObject
+
 import io.syn443.android.support.EffectiveConfig
 import io.syn443.android.support.ReadyConfig
 
@@ -89,6 +91,12 @@ class TunnelService : VpnService() {
     private data class PendingFailover(val scope: RouteScope, val receipt: String, val decision: RouteDecisionStamp)
     private var pendingFailover: PendingFailover? = null
     private var adaptiveRoutes:ManagedAdaptiveRoutes?=null
+    private data class MixedContext(val scope: RouteScope, val mode: NetworkMode, val overrideUntil: Long, val activationStart: Long?)
+    private var mixedContext: MixedContext? = null
+    private class MixedReservation(val requestedAt: Long)
+    private var mixedAdmission: MixedReservation? = null
+    private var mixedManual: Pair<RouteScope, String>? = null
+    private var mixedLastStart = -10_000L
     private fun adaptivePolicy():AdaptivePolicyBinding? {
         val state=policies.read()
         if(!state.enrolled)return null
@@ -163,6 +171,10 @@ class TunnelService : VpnService() {
         val session=token ?: return
         val policy=adaptivePolicy() ?: run {
             homeWiFi.observe(null);homeReport=null;modeReport=null
+            if (mixedContext != null) {
+                mixedContext = null; mixedAdmission = null; mixedManual = null
+                RouteSnapshot.clearMixedChecks()
+            }
             modeChoices.clear()
             if(lastHomeDeadline>0 || appliedManualExpiry>0) {
                 lastHomeDeadline=0L;appliedMode=null;appliedManualExpiry=0L;manualNativeDeadline=0L
@@ -200,6 +212,16 @@ class TunnelService : VpnService() {
                         fresh.semanticAuthority==policy.semanticAuthority && fresh.revision>=policy.revision}==true)
             }.getOrDefault(false)
         }
+        val mixed = MixedContext(scope, mode, view.until, RouteSnapshot.activationStart(scope))
+        if (mixedContext != mixed) {
+            mixedAdmission = null
+            if (mixedContext?.scope == scope && (mixedContext?.mode != mode || mixedContext?.overrideUntil != view.until)) {
+                RouteSnapshot.clearMixedChecks()
+            }
+            mixedContext = mixed
+            mixedManual = mixedManual?.takeIf { it.first == scope }
+        }
+        startDueMixedCheck(mixed, now, current)
         routes.tickBudgeted(SystemClock.elapsedRealtime(),probeContext?.network?.metered==false,
             !power.isPowerSaveMode && battery in 25..100,current) {command,latest->
             // Storage admission can finish after this callback's service,
@@ -211,6 +233,38 @@ class TunnelService : VpnService() {
         }
         if(routes.requiresRetirement())retire(true)
     }
+    private fun startDueMixedCheck(context: MixedContext, now: Long, current: () -> Boolean) {
+        // At least one shared five-second start slot between ordinary starts is
+        // available to adaptive recovery, including on policies with many rows.
+        mixedAdmission?.let { reservation ->
+            if (now - reservation.requestedAt <= 12_000L) return
+            mixedAdmission = null
+        }
+        if (now - mixedLastStart < 10_000L) return
+        val manual = mixedManual?.second
+        val candidate = RouteSnapshot.nextMixedCheck(context.scope, manual, now) ?: return
+        val owner = ControllerProbeBudget.get(this)
+        if (!owner.canStart(now, candidate.routine)) return
+        val admission = MixedReservation(now)
+        mixedAdmission = admission
+        val queued = owner.request(now, candidate.routine) { outcome ->
+            if (mixedAdmission !== admission) return@request
+            mixedAdmission = null
+            val at = SystemClock.elapsedRealtime()
+            if (!outcome.allowed || at !in outcome.observedAtMs..outcome.latestStartMs ||
+                mixedContext != context || !current() || RouteSnapshot.activationStart(context.scope) != context.activationStart) return@request
+            val session = token ?: return@request
+            val runtime = host ?: return@request
+            val command = RouteSnapshot.startMixedCheck(context.scope, candidate, at) ?: return@request
+            if (manual == candidate.id) mixedManual = null
+            mixedLastStart = at
+            val frame = JSONObject().put("kind", "mixed-static").put("check", JSONObject(command))
+                .put(AdaptiveHandoff.DEADLINE, outcome.latestStartMs)
+            runCatching { runtime.checkRoutes(session, frame.toString()) }
+        }
+        if (!queued && mixedAdmission === admission) mixedAdmission = null
+    }
+
     private fun routeScope() = token?.let {RouteScope(boundGeneration,epoch,policies.read().journal.activationGeneration,it,runningConfigHash)}
     private fun failoverWifi(): Boolean = probeContext?.network?.let {
         it.transport == PhysicalTransport.WIFI && it.validated
@@ -231,7 +285,8 @@ class TunnelService : VpnService() {
             val tag=RouteSnapshot.resolveManualCheck(scope,only,stamp) ?: return
             adaptiveRoutes?.let { routes ->
                 // The ordinary heartbeat handles this group under the same fairness and energy budget.
-                routes.requestGroupCheck(scope,tag)
+                if (!routes.requestGroupCheck(scope,tag) && RouteSnapshot.isMixedRoute(scope, only)) mixedManual = scope to only
+                adaptiveTick()
                 return
             }
         }
