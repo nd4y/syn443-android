@@ -29,6 +29,36 @@ class AdbControlTest(unittest.TestCase):
                 self.assertEqual(json.loads(out.getvalue())["result"]["controlTransport"],"vless")
             self.assertEqual(len(payloads),int(expected!=0))
 
+    def test_consented_route_health_has_a_closed_schema_and_uses_only_the_read_endpoint(self):
+        caps = {"schemaVersion": 1, "operations": list(syn443ctl.LOCAL_READ_BASE)}
+        current = dict(caps, optionalOperations=["future-operation", "routes-status"])
+        row = {"position": 1, "state": "working", "required": True, "ageMs": 0, "search": "VERIFIED"}
+        good = {"schemaVersion": 1, "routes": [row, {"position": 2, "state": "off", "required": False}]}
+        variants = [dict(row, position=True), dict(row, required=1), dict(row, ageMs=True), dict(row, ageMs=120001),
+                    dict(row, ageMs=-1), dict(row, state=[]), dict(row, search="unexpected"), dict(row, position=2),
+                    dict(row, label="private-test"), dict(row, state="failed"), {k: v for k, v in row.items() if k != "ageMs"}]
+        cases = [(current, good, 0), (current, dict(good, routes=[]), 0), (caps, good, 4),
+                 (current, dict(good, routes=[row] * 65), 5), (current, dict(good, extra="private-test"), 5)]
+        cases.extend((current, dict(good, routes=[variant]), 5) for variant in variants)
+        for capability, snapshot, expected in cases:
+            with self.subTest(snapshot=snapshot, expected=expected):
+                payloads = [capability, snapshot]
+
+                def reply(command, **kwargs):
+                    self.assertEqual(command[command.index("--uri") + 1], syn443ctl.LOCAL_READ_URI)
+                    self.assertEqual(command[command.index("--method") + 1],
+                                     "capabilities" if len(payloads) == 2 else "routes-status")
+                    raw = ("Result: Bundle[{ok=true, json=" + json.dumps(payloads.pop(0)) + "}]").encode()
+                    return subprocess.CompletedProcess(command, 0, raw, b"")
+
+                with patch("syn443ctl.subprocess.run", side_effect=reply), contextlib.redirect_stdout(io.StringIO()) as out:
+                    code = syn443ctl.main(["--serial", "synthetic", "--local-read", "routes-status"])
+                self.assertEqual(code, expected)
+                self.assertEqual(len(payloads), int(expected == 4))
+                self.assertNotIn("private-test", out.getvalue())
+                if code == 0:
+                    self.assertEqual(json.loads(out.getvalue())["result"], snapshot)
+
     def test_local_grant_uses_only_the_separate_read_endpoint(self):
         def invoke(operation, payload):
             wire = ("Result: Bundle[{ok=true, json=" + json.dumps(payload) + "}]").encode()

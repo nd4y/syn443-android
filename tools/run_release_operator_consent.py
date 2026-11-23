@@ -31,7 +31,7 @@ def press(label):
 
 
 def denied(client):
-    for method, arg in (("status", None), ("overlay-status", "netbird")):
+    for method, arg in (("status", None), ("overlay-status", "netbird"), ("routes-status", None)):
         try:
             client.call(method, arg)
         except ControlError as err:
@@ -84,7 +84,7 @@ def run():
             status = await_grant(client, True)
             capabilities = client.call("capabilities")
             assert capabilities["operations"] == ["capabilities", "status", "logs"]
-            assert capabilities["optionalOperations"] == ["overlay-status"]
+            assert capabilities["optionalOperations"] == ["overlay-status", "routes-status"]
             netbird = client.call("overlay-status", "netbird")
             assert set(netbird) == {"schemaVersion", "provider", "implementation", "configured", "control", "controlTransport"}
             assert netbird["control"] == netbird["controlTransport"] == "unknown"
@@ -92,6 +92,10 @@ def run():
                        "--local-read", "overlay-status", "--provider", "netbird"]
             projection = json.loads(subprocess.check_output(command, timeout=20))
             assert projection["result"] == netbird
+            route_command = command[:command.index("overlay-status")] + ["routes-status"]
+            route_health = client.call("routes-status")
+            assert json.loads(subprocess.check_output(route_command, timeout=20))["result"] == route_health
+            assert all(row["state"] == "off" for row in route_health["routes"])
             for reserved in ("tailscale", "zerotier"):
                 assert client.call("overlay-status", reserved) == {"schemaVersion":1,"provider":reserved,"implementation":"not_implemented"}
             assert (PACKAGE + ":engine").encode() not in adb("shell", "ps", "-A", "-o", "NAME").splitlines()
@@ -110,6 +114,7 @@ def run():
             assert b"Success" in adb("uninstall", PACKAGE, timeout=30)
     print("ordinaryReleaseLocalOperatorGrantAndProcessRestart: passed", flush=True)
     print("ordinaryReleasePassiveOverlayWithoutNativeOwner: passed", flush=True)
+    print("ordinaryReleasePassiveRouteHealthWithoutNativeOwner: passed", flush=True)
 
 
 if __name__ == "__main__":

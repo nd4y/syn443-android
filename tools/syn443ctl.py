@@ -20,7 +20,7 @@ import zipfile
 URI = "content://io.syn443.control"
 LOCAL_READ_URI = "content://io.syn443.operator.read"
 LOCAL_READ_BASE = ("capabilities", "status", "logs")
-LOCAL_READ_OPERATIONS = LOCAL_READ_BASE + ("overlay-status",)
+LOCAL_READ_OPERATIONS = LOCAL_READ_BASE + ("overlay-status", "routes-status")
 METHODS = {
     "status": "status", "logs": "logs", "routes-status": "routes-status",
     "routes-check": "routes-check", "routes-cancel": "routes-cancel",
@@ -131,6 +131,25 @@ def local_read_operations(reply):
     ) or len(set(optional)) != len(optional):
         raise ControlError("invalid_reply", 5)
     return [name for name in LOCAL_READ_OPERATIONS if name in LOCAL_READ_BASE or name in optional]
+
+
+def local_route_health(data):
+    if (set(data) != {"schemaVersion", "routes"} or type(data["schemaVersion"]) is not int
+            or data["schemaVersion"] != 1 or not isinstance(data["routes"], list) or len(data["routes"]) > 64):
+        raise ControlError("invalid_reply", 5)
+    for position, row in enumerate(data["routes"], 1):
+        if (not isinstance(row, dict) or not {"position", "required", "state"} <= row.keys()
+                or row.keys() - {"position", "required", "state", "ageMs", "search"}
+                or type(row["position"]) is not int or row["position"] != position
+                or type(row["required"]) is not bool or not isinstance(row["state"], str) or row["state"] not in ROUTE_STATES):
+            raise ControlError("invalid_reply", 5)
+        measured = row["state"] in ("working", "failed")
+        if measured != ("ageMs" in row) or measured and (type(row["ageMs"]) is not int or not 0 <= row["ageMs"] <= 120_000):
+            raise ControlError("invalid_reply", 5)
+        if "search" in row and (row["search"] not in ("WAITING_CONTEXT", "SEARCHING", "BUDGET_WAIT", "SEARCH_INCOMPLETE", "VERIFIED")
+                                or row["search"] == "VERIFIED" and row["state"] != "working"):
+            raise ControlError("invalid_reply", 5)
+    return data
 
 
 def overlay_health(provider, data):
@@ -831,6 +850,10 @@ def main(argv=None):
             for key in ("desiredOn", "engineActive", "resumeRequired"):
                 if type(value.get(key)) is bool:
                     data[key] = value[key]
+        elif args.local_read and args.operation == "routes-status":
+            if "routes-status" not in local_read_operations(device.call("capabilities")):
+                raise ControlError("unsupported_by_device", 4)
+            data = local_route_health(device.call("routes-status"))
         elif args.operation in SUPPORT_OPERATIONS:
             connection = device.bundle_connection() if args.operation in {"support-bundle", "support-bundle-export"} else nullcontext()
             with connection:

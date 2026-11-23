@@ -1201,5 +1201,6 @@ if mode == "emulator":
     operator_read = {("io.syn443.android.OperatorReadConsentTest", method) for method in (
         "shellCanReadOnlyDuringAnExplicitLocalDiagnosticsGrant",
         "monotonicReadWindowEndsAtItsDeadlineAndRejectsAnImpossibleClock",
+        "routeHealthProjectionPreservesOrdinalFreshnessAndDropsPrivateFields",
     )}
     assert operator_read <= set(identities), "Missing ordinary operator read consent or deadline evidence"

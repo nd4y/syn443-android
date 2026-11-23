@@ -2572,7 +2572,7 @@
         "tools/run_release_operator_consent.py",
         "app/src/androidTest/kotlin/io/syn443/android/OperatorReadConsentTest.kt"
       ],
-      "implementationScope": "The ordinary release has a dedicated permission-protected shell-only read provider. Local explicit consent on the diagnostics screen admits passive status and redacted logs for fifteen minutes, with immediate revocation and process-local lifetime. The general controller continues to be private in release.",
+      "implementationScope": "The ordinary release has a dedicated permission-protected shell-only read provider. Local explicit consent on the diagnostics screen admits passive VPN status, redacted per-route freshness and adaptive search state, overlay status and redacted logs for fifteen minutes, with immediate revocation and process-local lifetime. The general controller continues to be private in release.",
       "remainingScope": "Production mutation operations with per-operation authorization, managed-field enforcement and central audit."
     },
     {
