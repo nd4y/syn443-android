@@ -30,6 +30,10 @@ internal object AdaptiveHandoff {
             envelope.opt("kind") as? String != "adaptive") return false
         val command = envelope.opt("commandJson") as? String ?: return false
         if (command.length !in 1..4096) return false
+        return withinDeadline(envelope, now)
+    }
+
+    fun withinDeadline(envelope: JSONObject, now: Long): Boolean {
         val latest = integer(envelope.opt(DEADLINE)) ?: return false
         return now in 0..latest && latest - now <= AdaptiveProbeBudget.MAX_HANDOFF_MS
     }

@@ -46,6 +46,25 @@ class ControlProvider : ContentProvider() {
             if(method=="status")putString("json",LifecycleAccess.lockedStatus().toString()) else putString("error","needs_unlock")
         }
         return try {
+            if (method == "operator-read-access") {
+                require(caller == Process.myUid() && extras == null)
+                val remaining = OperatorReadGrant.applyOwnerAction(requireNotNull(arg))
+                return Bundle().apply {
+                    putBoolean("ok", true)
+                    putString("json", org.json.JSONObject().put("remainingMs", remaining).toString())
+                }
+            }
+            if (method == "operator-mode-get" || method == "operator-mode-set") {
+                require(io.syn443.android.BuildConfig.DEBUG && caller == 2000 && (extras == null || extras.isEmpty))
+                val state = StateStore.get(context).read()
+                val report = LifecycleAccess.physicalLink(state)?.optJSONObject("modeSelection")
+                val view = OperatorNetworkMode.observe(state, report, android.os.SystemClock.elapsedRealtime())
+                val result = if (method == "operator-mode-get") {
+                    require(arg == null)
+                    view
+                } else OperatorNetworkMode.request(view, requireNotNull(arg), LifecycleAccess::requestNetworkMode)
+                return Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
+            }
             // Passive diagnostics must not initialize login, observe OS intent,
             // configure routes, or reconcile the VPN as a side effect of collection.
             if (method in setOf("bundle-shell-hold", "bundle-shell-state", "bundle-shell-release")) {
@@ -67,12 +86,7 @@ class ControlProvider : ContentProvider() {
             }
             if (method == "overlay-status") {
                 require(extras == null || extras.isEmpty)
-                val result = OverlayProviderHealth.read(requireNotNull(arg)) {
-                    val state = StateStore.get(context).read()
-                    LifecycleAccess.engineStatus(context, state)
-                    OverlaySnapshot.forStatus(state.optLong("generation", -1), state.optLong("networkEpoch", -1),
-                        state.opt("desiredOn") == true, state.opt("engineActive") == true)
-                }
+                val result = OverlayProviderHealth.live(context, requireNotNull(arg))
                 return Bundle().apply { putBoolean("ok", true); putString("json", result.toString()) }
             }
             if (method == "route-explain") {
@@ -518,6 +532,7 @@ class ControlProvider : ContentProvider() {
                 result.put("physicalLink", LifecycleAccess.physicalLink(result) ?: org.json.JSONObject.NULL)
                 result.put("netbirdDiagnosticCancellation", true).put("overlayProviderHealth", true)
                 result.put("localConfigControl",io.syn443.android.BuildConfig.DEBUG)
+                result.put("operatorNetworkMode",io.syn443.android.BuildConfig.DEBUG)
                 if (result.optString("reason") == "policy_waiting_restart_budget" && result.optBoolean("desiredOn")) {
                     result.put("policyRetryAt", Recovery.replacementReadyAt(store.checkpoint(result), System.currentTimeMillis()))
                 }
@@ -540,6 +555,7 @@ class ControlProvider : ContentProvider() {
     override fun getType(uri: Uri): String? =
         if (!io.syn443.android.BuildConfig.DEBUG) null else when (uri.toString()) {
             "content://io.syn443.control/support-bundle-session" -> "application/vnd.syn443.bundle-session-v1"
+            "content://io.syn443.control/network-mode" -> "application/vnd.syn443.network-mode-v1"
             "content://io.syn443.control/overlay-status" -> "application/vnd.syn443.overlay-status-v1"
             else -> null
         }

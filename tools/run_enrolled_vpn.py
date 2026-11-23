@@ -13,6 +13,51 @@ import xml.etree.ElementTree as ET
 from enrollment_fixture import Fixture, decode
 from run_vpn_process_faults import ROOT, PACKAGE, Proxy, Server, adb, call, pid, await_condition, vpn_stopped
 from run_route_lifecycle import RouteProxy
+from recovery_slo import RecoveryTimeout
+from run_vpn_process_faults import ControlUnavailable
+
+def prepare_emulator_wifi():
+    """Reassociate the disposable AVD if previous reboot cases left its Wi-Fi ineligible."""
+    assert os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("SYN443_CI_AVD") == "syn443-ci"
+    assert adb("emu","avd","name").splitlines() == [b"syn443-ci",b"OK"]
+    assert adb("shell","getprop","ro.hardware").strip() in (b"ranchu",b"goldfish")
+
+    def observe():
+        raw = adb("shell","am","instrument","-w","-e","observeFixtureWifi","true",
+                  PACKAGE+".test/io.syn443.android.EnrollmentDriver",timeout=25)
+        match = re.search(rb"INSTRUMENTATION_RESULT: wifiEligibility=(eligible|missing|unavailable|unvalidated|metered|unstable)\b", raw)
+        assert match and b"INSTRUMENTATION_CODE: -1" in raw, "No app-UID Wi-Fi observation"
+        return match[1].decode()
+
+    status = observe()
+    if status == "eligible":
+        return
+    print("Preparing disposable Wi-Fi after reboot; observed "+status,flush=True)
+    adb("shell","svc","wifi","disable")
+    time.sleep(2)
+    adb("shell","svc","wifi","enable")
+    # The virtual access point is open. Only select its emulator-provided name
+    # if the Android Wi-Fi service itself lists it. Never adopt an arbitrary SSID.
+    sdk = int(adb("shell","getprop","ro.build.version.sdk").strip())
+    if sdk >= 30:
+        adb("shell","cmd","wifi","start-scan")
+        time.sleep(3)
+        scan = adb("shell","cmd","wifi","list-scan-results").decode(errors="replace")
+        if re.search(r"\bAndroidWifi\b", scan):
+            adb("shell","cmd","wifi","connect-network","AndroidWifi","open")
+    end = time.monotonic()+50
+    observations = []
+    while True:
+        status = observe()
+        if status == "eligible":
+            print("App UID confirmed validated unmetered Wi-Fi after reassociation",flush=True)
+            return
+        if not observations or observations[-1] != status:
+            observations.append(status)
+        if time.monotonic() >= end:
+            raise AssertionError("Disposable Wi-Fi eligibility after reassociation: "+",".join(observations))
+        time.sleep(2)
+
 
 def stopped_rollback_recovered(controller,generation):
     # A provider read is the explicit recreation request. An empty PID must
@@ -24,14 +69,15 @@ def stopped_rollback_recovered(controller,generation):
         state['policy']['phase']=='rolled_back' and state['policy'].get('activeRevision')==1 and
         not call('auth-status')['busy'])
 
-def exchange_through_proxy(proxy):
+def exchange_through_proxy(proxy, destination="203.0.113.10"):
+    assert destination in ("203.0.113.10", "203.0.113.11")
     # Keep the client half-open while the application UID reads the reply.
     # A pipe directly into toybox nc can close its input before the peer responds.
     proxy.payload_received = threading.Event()
     try:
         command = (r"(printf 'GET /syn443-payload HTTP/1.1\r\nHost: fixture.invalid\r\n"
                    r"Connection: close\r\n\r\n'; sleep 3) | run-as " + PACKAGE +
-                   " toybox nc -w 5 203.0.113.10 80")
+                   f" toybox nc -w 5 {destination} 80")
         response = adb('shell', '-T', command, timeout=12)
         confirmed = proxy.payload_received.wait(1)
         status = re.match(rb'HTTP/1\.1 ([0-9]{3}) ', response)
@@ -188,6 +234,245 @@ def signed_program_failover(fixture, primary, generation):
             reserve.server_close()
 
 
+def enrolled_management_outage(fixture, proxy, generation):
+    from process_failure_evidence import reverse_snapshot
+
+    if (os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('SYN443_CI_AVD') != 'syn443-ci'
+            or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']):
+        raise ValueError('Disposable Wi-Fi emulator required')
+    port = fixture.server.server_port
+    assert port != proxy.server_address[1] and fixture.telemetry_enabled
+    assert fixture.issuer.startswith(fixture.origin + '/') and fixture.origin == 'https://127.0.0.1:' + str(port)
+    binding = set((key, row['deviceId']) for key, row in fixture.sessions.copy().items())
+    assert len(binding) == 1 and fixture.registrations == 1
+    endpoint = 'tcp:' + str(port)
+
+    def confirm_mapping(present):
+        assert reverse_snapshot(adb('reverse', '--list'), port) == {'known': True, 'ownedMappingPresent': present}
+
+    def offline():
+        confirm_mapping(False)
+        result = subprocess.run(['adb', '-e', 'shell', '-T', 'run-as', PACKAGE, 'toybox', 'nc',
+                                 '-w', '2', '127.0.0.1', str(port)], stdin=subprocess.DEVNULL,
+                                capture_output=True, timeout=8)
+        assert result.returncode != 0 and b'connection refused' in (result.stdout + result.stderr).lower()
+
+    def bound():
+        return (fixture.registrations == 1 and
+                {(key, row['deviceId']) for key, row in fixture.sessions.copy().items()} == binding and
+                call('auth-status')['generation'] == generation)
+
+    confirm_mapping(True)
+    exchange_through_proxy(proxy)
+    original_controller, original_engine = pid(':controller'), pid(':engine')
+    assert original_controller and original_engine and committed_online(call('status'), 1)
+    adb('reverse', '--remove', endpoint)
+    try:
+        offline()
+        call('policy-refresh')
+        exchange_through_proxy(proxy)
+        call('fault-controller')
+
+        def replaced():
+            if not committed_online(call('status'), 1):
+                return False
+            controller, engine = pid(':controller'), pid(':engine')
+            return controller not in ('', original_controller) and engine not in ('', original_engine)
+
+        await_condition(replaced, 100)
+        assert bound()
+        offline()
+        exchange_through_proxy(proxy)
+    finally:
+        adb('reverse', endpoint, endpoint)
+
+    confirm_mapping(True)
+    requests = fixture.policy_requests
+    fixture.revision = 2
+    last_refresh = None
+
+    def renewed():
+        nonlocal last_refresh
+        if fixture.policy_requests > requests and committed_online(call('status'), 2):
+            return True
+        now = time.monotonic()
+        if last_refresh is None or now - last_refresh >= 7:
+            call('policy-refresh')
+            last_refresh = now
+        return False
+
+    await_condition(renewed, 90)
+    assert bound()
+    exchange_through_proxy(proxy)
+
+
+def operator_mode_candidates(base, reserve_port):
+    names = ['hop-%02d' % i for i in range(21)]
+    features = ['TCP', 'IPV4']
+    graph = {'schemaVersion': 1, 'edges': [], 'hops': [], 'templates': [{'id': 'one', 'slots': [names]}],
+             'groups': [{'id': 'office', 'intent': 'INTERNAL', 'features': features, 'templates': ['one']}]}
+    catalogue = {}
+    for index, name in enumerate(names):
+        eligible = name == names[-1]
+        graph['hops'].append({'id': name, 'entryModes': ['WIFI' if eligible else 'HOME_WIFI'],
+                              'exitClass': 'INTERNAL', 'features': features})
+        # The signed catalogue identifies profiles independently of their display tags.
+        # Keep the Wi-Fi candidate on the real reverse port and unused home hops in TEST-NET-1.
+        profile = dict(base, tag=name)
+        if eligible:
+            profile['server_port'] = reserve_port
+        else:
+            profile.update(server='192.0.2.%d' % (index + 1), server_port=8080)
+        catalogue[name] = profile
+    return graph, catalogue, names[-1]
+
+
+def enrolled_operator_mode(fixture):
+    from policy_fixture import b64
+    if os.environ.get('GITHUB_ACTIONS') != 'true' or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']:
+        raise ValueError('Disposable Wi-Fi emulator required')
+    serial = adb('get-serialno').decode().strip()
+    if not re.fullmatch(r'emulator-[0-9]+', serial):
+        raise ValueError('Unexpected emulator identity')
+
+    def cli(operation, *options):
+        raw = subprocess.check_output([sys.executable, str(ROOT / 'tools/syn443ctl.py'), '--serial', serial,
+                                       operation, *options], timeout=20)
+        result = json.loads(raw)
+        assert result['schemaVersion'] == 1 and result['operation'] == operation
+        return result['result']
+
+    reserve = Server(('127.0.0.1', 0), RouteProxy)
+    reserve.ssh_ok, reserve.health_ok, reserve.delay, reserve.route_probes = True, True, 0, 0
+    port = reserve.server_address[1]
+    threading.Thread(target=reserve.serve_forever, daemon=True).start()
+    try:
+        adb('reverse', 'tcp:' + str(port), 'tcp:' + str(port))
+        route = copy.deepcopy(fixture.config)
+        base = route['outbounds'][0]
+        graph, catalogue, wifi_hop = operator_mode_candidates(base, port)
+        def encode(document):
+            return b64(json.dumps(document, sort_keys=True, separators=(',', ':')).encode())
+        route['adaptive_routes'] = {'schemaVersion': 1, 'graphB64': encode(graph),
+                                    'catalogueB64': encode(catalogue), 'groups': {'office': 'managed-office'}}
+        route['outbounds'].append({'type': 'syn443-adaptive', 'tag': 'managed-office', 'group': 'office'})
+        route['route']['rules'] = [
+            {'ip_cidr': ['203.0.113.10/32'], 'network': ['tcp'], 'action': 'route', 'outbound': 'managed-office'},
+            {'network': ['udp'], 'action': 'reject', 'method': 'drop'},
+        ]
+        route['route_checks'] = [{'outbound': 'managed-office', 'required': True,
+                                  'checks': [{'method': 'ssh_banner', 'target': '192.0.2.9:22'}]}]
+        route['network_mode'] = {'preferredMode': 'AUTO', 'userModes': ['WIFI'], 'maxOverrideMinutes': 3}
+        fixture.extra_capabilities = ('route.health.v1', 'route.adaptive-tcp.v1', 'route.decision.v1', 'network.mode-selection.v1')
+        fixture.config = route
+        fixture.revision = 2
+        call('policy-refresh')
+
+        applying_search = set()
+        last_route_sample = 0.0
+
+        def working():
+            nonlocal last_route_sample
+            status = call('status')
+            if status.get('policy', {}).get('phase') == 'applying' and time.monotonic() - last_route_sample >= 1:
+                last_route_sample = time.monotonic()
+                rows = call('routes-status')['routes']
+                row = next((item for item in rows if item.get('type') == 'syn443-adaptive'), {})
+                search = row.get('search', {}).get('state')
+                known = ('WAITING_CONTEXT', 'SEARCHING', 'BUDGET_WAIT', 'SEARCH_INCOMPLETE', 'VERIFIED')
+                applying_search.add(search if search in known else 'unknown')
+            if not committed_online(status, 2):
+                return False
+            return any(row.get('state') == 'working' and row.get('measuredPath') == [wifi_hop]
+                       for row in call('routes-status')['routes'])
+
+        def mode(source):
+            result = cli('mode-get')
+            return result if (result.get('state') == 'observed' and result.get('effective') == 'WIFI'
+                              and result.get('source') == source and result.get('allowed') == ['WIFI']) else None
+
+        try:
+            await_condition(working, 120)
+        except RecoveryTimeout:
+            # Only bounded facts from the synthetic fixture can reach public CI.
+            try:
+                rows = call('routes-status').get('routes', [])
+            except ControlUnavailable:
+                rows = []
+            adaptive = next((r for r in rows if r.get('type') == 'syn443-adaptive'), {})
+            search = adaptive.get('search', {}).get('state')
+            print('Signed Wi-Fi selection:', json.dumps({
+                'candidateServed': any(revision == 2 for _, revision in list(fixture.envelopes)),
+                'applyingSearch': sorted(applying_search),
+                'routePresent': bool(adaptive),
+                'working': adaptive.get('state') == 'working',
+                'selectedExpectedHop': adaptive.get('measuredPath') == [wifi_hop],
+                'search': search if search in ('WAITING_CONTEXT','SEARCHING','BUDGET_WAIT','SEARCH_INCOMPLETE','VERIFIED') else 'unknown',
+                'reserveProbed': reserve.route_probes > 0,
+            }), flush=True)
+            raise
+        exchange_through_proxy(reserve)
+        automatic = mode('automatic')
+        assert automatic and automatic['maxMinutes'] == 3
+        submitted = cli('mode-set', '--stamp', automatic['stamp'], '--mode', 'WIFI', '--minutes', '2')
+        assert submitted == {'admitted': True, 'generation': automatic['generation'], 'networkEpoch': automatic['networkEpoch']}
+        await_condition(lambda: mode('manual') and working(), 100)
+        exchange_through_proxy(reserve)
+        manual = mode('manual')
+        assert manual and manual['stamp'] != automatic['stamp'] and 0 < manual['remainingMs'] <= 120_000
+        cleared = cli('mode-set', '--stamp', manual['stamp'], '--mode', 'AUTO', '--minutes', '0')
+        assert cleared == submitted
+        await_condition(lambda: mode('automatic') and working(), 100)
+        exchange_through_proxy(reserve)
+        # Keep the existing automatic/manual/automatic case intact. The next signed
+        # revision requires an independently reached static route before activation.
+        fixed = Server(('127.0.0.1', 0), RouteProxy)
+        fixed.ssh_ok, fixed.health_ok, fixed.delay, fixed.route_probes = True, True, 0, 0
+        fixed_port = fixed.server_address[1]
+        threading.Thread(target=fixed.serve_forever, daemon=True).start()
+        try:
+            adb('reverse', 'tcp:' + str(fixed_port), 'tcp:' + str(fixed_port))
+            mixed = copy.deepcopy(route)
+            mixed['outbounds'].append(dict(base, tag='fixed-office', server_port=fixed_port))
+            mixed['route']['rules'].insert(0, {'ip_cidr': ['203.0.113.11/32'], 'network': ['tcp'],
+                                              'action': 'route', 'outbound': 'fixed-office'})
+            mixed['route_checks'].append({'outbound': 'fixed-office', 'required': True,
+                                          'checks': [{'method': 'ssh_banner', 'target': '192.0.2.9:22'}]})
+            fixture.config = mixed
+            fixture.revision = 3
+            call('policy-refresh')
+
+            def mixed_ready():
+                if not committed_online(call('status'), 3):
+                    return False
+                report = call('routes-status')
+                rows = {r['label']: r for r in report['routes'] if r.get('required')}
+                if set(rows) != {'managed-office', 'fixed-office'} or not report['requiredReady']:
+                    return False
+                adaptive, concrete = rows['managed-office'], rows['fixed-office']
+                return (all(r['state'] == 'working' and type(r.get('ageMs')) is int and 0 <= r['ageMs'] <= 120_000
+                            for r in rows.values()) and adaptive['measuredPath'] == [wifi_hop]
+                        and concrete['measuredPath'] == [concrete['id']] and fixed.route_probes > 0)
+
+            await_condition(mixed_ready, 120)
+            exchange_through_proxy(reserve)
+            exchange_through_proxy(fixed, '203.0.113.11')
+            assert fixture.registrations == 1
+            print('Signed mixed policy: fresh independent adaptive and static checks; both application payloads received', flush=True)
+        finally:
+            try:
+                adb('reverse', '--remove', 'tcp:' + str(fixed_port))
+            finally:
+                fixed.shutdown()
+                fixed.server_close()
+    finally:
+        try:
+            adb('reverse', '--remove', 'tcp:' + str(port))
+        finally:
+            reserve.shutdown()
+            reserve.server_close()
+
+
 def check_rejected_policies(fixture, proxy, generation):
     """Deliver each negative AC06 example over the normal, authenticated policy endpoint."""
     from policy_fixture import b64
@@ -268,6 +553,11 @@ def failure_summary():
     state=call('status');auth=call('auth-status');policy=state.get('policy',{})
     phases={'unmanaged','unavailable','blocked','prepared','applying','committed','degraded','rolled_back','rejected','released'}
     safe_policy={'phase':policy.get('phase') if policy.get('phase') in phases else 'unknown'}
+    reasons = ('native_configuration_rejected', 'native_activation_failed', 'activation_deadline',
+               'candidate_expired_or_revoked', 'required_route_failed', 'activation_failed',
+               'release_checks_failed')
+    if policy.get('reason') in reasons:
+        safe_policy['reason'] = policy['reason']
     for name in ('activeRevision','lastKnownGoodRevision','candidateRevision','activationGeneration','maxRevision'):
         value=policy.get(name)
         if type(value) is int and 0<=value<=9007199254740991:safe_policy[name]=value
@@ -303,7 +593,7 @@ def main():
         nonlocal fixture
         if fixture:
             adb('reverse','--remove','tcp:'+str(fixture.server.server_port));fixture.close();fixture=None
-    def setup(pending=False, telemetry=None, installer=False):
+    def setup(pending=False, telemetry=None, installer=False, wifi_required=False):
         nonlocal fixture
         device=None
         if installer:
@@ -316,6 +606,8 @@ def main():
             assert b'Success' in adb('install','-r',str(directory/'installer-base.apk'),timeout=120).splitlines()
         logout(fresh_install=historical or installer)
         close_fixture();call('policy-test-reset');call('test-reset')
+        if telemetry or wifi_required:
+            prepare_emulator_wifi()
         call('import',base64.b64encode(json.dumps(config,separators=(',',':')).encode()).decode())
         call('test-health','synthetic-http');proxy.allowed=True
         # Keep the assignment valid for the first periodic job while the access token rotates.
@@ -352,6 +644,7 @@ def main():
            'enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet',
            'enrolledStopFencesPendingCandidateRouteSuccess','enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn',
            'enrolledRejectedUpdatesRetainAuthorizedTunnel', 'enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun',
+           'enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath', 'enrolledManagementOutageRetainsTunnelThroughControllerDeath',
            'enrolledVersionUpgradeRetainsBindingPolicyAndRealTun']
     if installer_only:
         names=['enrolledSystemInstallerCancelKeepsBoundPolicy']
@@ -364,9 +657,12 @@ def main():
         for name in names:
             case=ET.SubElement(suite,'testcase',classname='io.syn443.android.EnrolledVpn',name=name)
             try:
-                telemetry_modes={'enrolledCandidateRegressionRollsBack':'foreground',
+                telemetry_modes={'enrolledManagementOutageRetainsTunnelThroughControllerDeath':'foreground',
+                                 'enrolledCandidateRegressionRollsBack':'foreground',
                                  'enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn':'stopped'}
-                driver_result=setup(name=='enrolledPendingAssignmentRetriesWhileVisible',telemetry=telemetry_modes.get(name), installer=installer_only)
+                driver_result=setup(name=='enrolledPendingAssignmentRetriesWhileVisible',
+                                    telemetry=telemetry_modes.get(name), installer=installer_only,
+                                    wifi_required=name=='enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath')
                 before=proxy.progress;generation=call('auth-status')['generation']
                 if name=='enrolledPendingAssignmentRetriesWhileVisible':
                     assert fixture.policy_requests>=2 and fixture.registrations==1
@@ -379,6 +675,8 @@ def main():
                     except AssertionError:pass
                     before=proxy.progress;call('connect')
                     await_condition(lambda:call('status').get('phase')=='Online' and proxy.progress>before)
+                elif name=='enrolledManagementOutageRetainsTunnelThroughControllerDeath':
+                    enrolled_management_outage(fixture, proxy, generation)
                 elif name=='enrolledControllerDeathRecoversAuthorizedCache':
                     old_controller=pid(':controller');old_engine=pid(':engine');assert old_controller and old_engine
                     fixture.policy_status=503;call('fault-controller')
@@ -388,6 +686,8 @@ def main():
                     assert fixture.registrations==1
                 elif name=='enrolledNegotiatedFailoverAutonomouslySwitchesWorkingTun':
                     signed_program_failover(fixture, proxy, generation)
+                elif name=='enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath':
+                    enrolled_operator_mode(fixture)
                 elif name=='enrolledRejectedUpdatesRetainAuthorizedTunnel':
                     check_rejected_policies(fixture, proxy, generation)
                 elif name=='enrolledCandidateRegressionRollsBack':

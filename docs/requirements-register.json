@@ -1226,7 +1226,10 @@
       "text": "Цикл: определить networkEpoch/режим и активную policy; классифицировать требуемые назначения; взять разрешённые свежие last-known-good; проверить жёсткие ограничения и cache; сформировать shortlist; выполнить минимальный необходимый probe plan; сравнить кандидатов; закрепить основной/резерв; наблюдать и при деградации расширять поиск.",
       "status": "partial",
       "evidence": [
-        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms"
+        "docs/managed-adaptive-runtime.md#recovery-capacity-and-passive-symptoms",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedAdaptiveRoutes.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdaptivePathContinuityTest.kt",
+        "docs/implementation-status.md#rechecking-the-last-working-route"
       ],
       "remainingScope": "Local adaptive TCP admission and passive recheck source only. Exact Actions/native race/Android/device acceptance, common SDK/diagnostic/telemetry governor, broader modes and failure correlation remain separate requirements."
     },
@@ -1244,7 +1247,10 @@
       "status": "partial",
       "evidence": [
         "docs/route-frontier.md",
-        "docs/private-path-construction.md#fresh-proof-selection"
+        "docs/private-path-construction.md#fresh-proof-selection",
+        "app/src/main/kotlin/io/syn443/android/vpn/ManagedAdaptiveRoutes.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdaptivePathContinuityTest.kt",
+        "docs/implementation-status.md#rechecking-the-last-working-route"
       ]
     },
     {
@@ -1996,8 +2002,13 @@
         "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt",
         "docs/implementation-status.md#evidence-index-and-register-semantics",
         "docs/chat-acceptance-20261115.md",
-        "docs/mobile-admin-browser.md"
-      ]
+        "docs/mobile-admin-browser.md",
+        "app/src/main/res/values/launch_theme.xml",
+        "app/src/main/res/values-v31/launch_theme.xml",
+        "app/src/main/kotlin/io/syn443/android/Syn443Theme.kt"
+      ],
+      "implementationScope": "All activity launch windows and all seven Compose screens share one dark surface. Android 12+ splash uses the same resource. Instrumentation checks installed themes in both resource modes and compares the rendered home background with the launch surface.",
+      "remainingScope": "Physical startup transitions, larger text, cutout geometry and the complete per-control contrast matrix."
     },
     {
       "id": "EDIT-01",
@@ -2532,10 +2543,13 @@
       "status": "partial",
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/adb-control.md"
+        "docs/adb-control.md",
+        "app/src/main/kotlin/io/syn443/android/vpn/OperatorNetworkMode.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/ManagedNetworkModeTest.kt",
+        "tools/test_syn443ctl.py"
       ],
       "implementationScope": "Explicit-device debug CLI for status, events, diagnostics, route/overlay checks, VPN intent and guarded local configuration preview/apply.",
-      "remainingScope": "Configuration export/render and managed import, network modes and atomic reconnect."
+      "remainingScope": "Debug shell mode-get and mode-set use a live policy scope and an expiring choice. Managed configuration export, render, import and atomic reconnect remain open."
     },
     {
       "id": "ADB-02",
@@ -2554,10 +2568,12 @@
       "status": "partial",
       "evidence": [
         "docs/implementation-status.md#evidence-index-and-register-semantics",
-        "docs/adb-control.md"
+        "docs/adb-control.md",
+        "tools/run_release_operator_consent.py",
+        "app/src/androidTest/kotlin/io/syn443/android/OperatorReadConsentTest.kt"
       ],
-      "implementationScope": "Existing same-UID/debug shell authorization and an explicit device selector; no listening port.",
-      "remainingScope": "Release opt-in and complete managed field and operation acceptance."
+      "implementationScope": "The ordinary release has a dedicated permission-protected shell-only read provider. Local explicit consent on the diagnostics screen admits passive VPN status, redacted per-route freshness and adaptive search state, overlay status and redacted logs for fifteen minutes, with immediate revocation and process-local lifetime. The general controller continues to be private in release.",
+      "remainingScope": "Production mutation operations with per-operation authorization, managed-field enforcement and central audit."
     },
     {
       "id": "ADB-04",
@@ -2574,20 +2590,34 @@
     {
       "id": "BOOT-01",
       "text": "Рабочий VPN продолжает работать при недоступных панели, телеметрии и Keycloak в пределах действующего конфига и offline policy. Телеметрия не стоит в критическом пути пользовательского соединения.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "tools/run_enrolled_vpn.py",
+        "tools/test_enrolled_driver.py",
+        "docs/implementation-status.md#management-outage-on-wi-fi"
+      ]
     },
     {
       "id": "BOOT-02",
       "text": "Первый запуск требует достижимости сервера регистрации; при входе через Keycloak также необходим доступ к IdP. Ручная привязка через ссылку/QR исключает вход в Keycloak, но не необходимость получить конфиг от сервера. Для белых списков нужен проверенный доступный маршрут регистрации либо заранее выданный индивидуальный сетевой bootstrap.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md#first-registration-with-intermittent-connectivity",
+        "app/src/androidTest/kotlin/io/syn443/android/InvitationControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/EnrollmentAppLinkTest.kt"
+      ],
+      "remainingScope": "Hosted controller faults cover an unavailable registration clock and a lost manual claim reply. The separate IdP reachability flow, constrained-network bootstrap and physical first registration remain outstanding."
     },
     {
       "id": "BOOT-03",
       "text": "QR-приглашение выполняет привязку устройства и не создаёт сетевую доступность само по себе. Общий секретный VLESS, встроенный во все APK, не принимается как универсальное решение. При полностью недоступном сервере регистрации нужен доступный Wi-Fi или отдельный проверенный сетевой bootstrap. OIDC и ручная привязка проверяются как независимые сценарии.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "docs/manual-enrollment.md#first-registration-with-intermittent-connectivity",
+        "app/src/androidTest/kotlin/io/syn443/android/InvitationControllerTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/EnrollmentAppLinkTest.kt"
+      ],
+      "remainingScope": "Hosted controller faults cover an unavailable registration clock and a lost manual claim reply. The separate IdP reachability flow, constrained-network bootstrap and physical first registration remain outstanding."
     },
     {
       "id": "BOOT-04",
@@ -2710,8 +2740,14 @@
     {
       "id": "NFR-04",
       "text": "Служебные события и очереди ограничены, секреты зашифрованы на диске, Android backup не переносит enrollment/private keys. Подпись APK и ключи публикации хранятся отдельно от повседневного приложения панели; ротация и восстановление доверия документированы.",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/main/AndroidManifest.xml",
+        "app/src/main/res/xml/data_extraction_rules.xml",
+        "tools/check_packaged_backup.py",
+        "tools/test_packaged_backup.py",
+        "docs/implementation-status.md#packaged-backup-exclusions"
+      ]
     },
     {
       "id": "NFR-05",
@@ -3505,8 +3541,13 @@
         "app/src/main/kotlin/io/syn443/android/MainActivity.kt",
         "app/src/androidTest/kotlin/io/syn443/android/PrototypeTest.kt",
         "app/src/androidTest/kotlin/io/syn443/android/VpnPrimaryActionTest.kt",
-        "docs/implementation-status.md"
-      ]
+        "docs/implementation-status.md",
+        "app/src/main/res/values/launch_theme.xml",
+        "app/src/main/res/values-v31/launch_theme.xml",
+        "app/src/main/kotlin/io/syn443/android/Syn443Theme.kt"
+      ],
+      "implementationScope": "All activity launch windows and all seven Compose screens share one dark surface. Android 12+ splash uses the same resource. Instrumentation checks installed themes in both resource modes and compares the rendered home background with the launch surface.",
+      "remainingScope": "Physical startup transitions, larger text, cutout geometry and the complete per-control contrast matrix."
     },
     {
       "id": "AC82",

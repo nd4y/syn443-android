@@ -10,6 +10,106 @@ import syn443ctl
 
 
 class AdbControlTest(unittest.TestCase):
+    def test_consented_overlay_negotiates_on_the_read_endpoint_before_asking_for_health(self):
+        legacy = {"schemaVersion": 1, "operations": ["capabilities","status","logs"]}
+        latest = dict(legacy, optionalOperations=["overlay-status"])
+        health = {"schemaVersion":1,"provider":"netbird","implementation":"available","configured":True,
+                  "control":"connected","controlTransport":"vless"}
+        for caps, expected in [(legacy,4),(latest,0),(dict(legacy, optionalOperations=["bad value"]),5)]:
+            payloads = [caps,health]
+            def reply(command, **kwargs):
+                self.assertEqual(command[command.index("--uri")+1], syn443ctl.LOCAL_READ_URI)
+                self.assertEqual(command[command.index("--method")+1], "capabilities" if len(payloads)==2 else "overlay-status")
+                raw = ("Result: Bundle[{ok=true, json="+json.dumps(payloads.pop(0))+"}]").encode()
+                return subprocess.CompletedProcess(command,0,raw,b"")
+            with patch("syn443ctl.subprocess.run", side_effect=reply), contextlib.redirect_stdout(io.StringIO()) as out:
+                code = syn443ctl.main(["--serial","synthetic","--local-read","overlay-status","--provider","netbird"])
+            self.assertEqual(code,expected)
+            if code == 0:
+                self.assertEqual(json.loads(out.getvalue())["result"]["controlTransport"],"vless")
+            self.assertEqual(len(payloads),int(expected!=0))
+
+    def test_consented_route_health_has_a_closed_schema_and_uses_only_the_read_endpoint(self):
+        caps = {"schemaVersion": 1, "operations": list(syn443ctl.LOCAL_READ_BASE)}
+        current = dict(caps, optionalOperations=["future-operation", "routes-status"])
+        row = {"position": 1, "state": "working", "required": True, "ageMs": 0, "search": "VERIFIED"}
+        good = {"schemaVersion": 1, "routes": [row, {"position": 2, "state": "off", "required": False}]}
+        variants = [dict(row, position=True), dict(row, required=1), dict(row, ageMs=True), dict(row, ageMs=120001),
+                    dict(row, ageMs=-1), dict(row, state=[]), dict(row, search="unexpected"), dict(row, position=2),
+                    dict(row, label="private-test"), dict(row, state="failed"), {k: v for k, v in row.items() if k != "ageMs"}]
+        cases = [(current, good, 0), (current, dict(good, routes=[]), 0), (caps, good, 4),
+                 (current, dict(good, routes=[row] * 65), 5), (current, dict(good, extra="private-test"), 5)]
+        cases.extend((current, dict(good, routes=[variant]), 5) for variant in variants)
+        for capability, snapshot, expected in cases:
+            with self.subTest(snapshot=snapshot, expected=expected):
+                payloads = [capability, snapshot]
+
+                def reply(command, **kwargs):
+                    self.assertEqual(command[command.index("--uri") + 1], syn443ctl.LOCAL_READ_URI)
+                    self.assertEqual(command[command.index("--method") + 1],
+                                     "capabilities" if len(payloads) == 2 else "routes-status")
+                    raw = ("Result: Bundle[{ok=true, json=" + json.dumps(payloads.pop(0)) + "}]").encode()
+                    return subprocess.CompletedProcess(command, 0, raw, b"")
+
+                with patch("syn443ctl.subprocess.run", side_effect=reply), contextlib.redirect_stdout(io.StringIO()) as out:
+                    code = syn443ctl.main(["--serial", "synthetic", "--local-read", "routes-status"])
+                self.assertEqual(code, expected)
+                self.assertEqual(len(payloads), int(expected == 4))
+                self.assertNotIn("private-test", out.getvalue())
+                if code == 0:
+                    self.assertEqual(json.loads(out.getvalue())["result"], snapshot)
+
+    def test_local_grant_uses_only_the_separate_read_endpoint(self):
+        def invoke(operation, payload):
+            wire = ("Result: Bundle[{ok=true, json=" + json.dumps(payload) + "}]").encode()
+            with patch("syn443ctl.subprocess.run", return_value=subprocess.CompletedProcess([], 0, wire, b"")) as run, contextlib.redirect_stdout(io.StringIO()) as out:
+                code = syn443ctl.main(["--serial", "synthetic", "--local-read", operation])
+            self.assertEqual(run.call_args.args[0], ["adb", "-s", "synthetic", "shell", "content", "call", "--uri", syn443ctl.LOCAL_READ_URI, "--method", operation])
+            return code, json.loads(out.getvalue())
+        code, status = invoke("status", {"schemaVersion":1,"phase":"Online","reason":"required_https_ok","engineActive":True,
+                                         "generation":4,"networkEpoch":-1,"address":"sensitive fixture"})
+        self.assertEqual(code, 0)
+        self.assertEqual(status["result"], {"phase":"Online","reason":"required_https_ok","engineActive":True,"generation":4})
+        self.assertEqual(invoke("capabilities", {"schemaVersion":1,"operations":["capabilities","status","logs"]})[1]["result"]["access"], "local_read_grant")
+        self.assertEqual(invoke("capabilities", {"schemaVersion":1,"operations":["status","connect"]})[0], 5)
+        self.assertEqual(invoke("logs", {"events":[{"phase":"Recovering","code":"private fixture","target":"private fixture"}]})[1]["result"]["events"], [{"phase":"Recovering","code":"redacted"}])
+        with patch("syn443ctl.subprocess.run") as run, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(syn443ctl.main(["--serial", "synthetic", "--local-read", "vpn-start"]), 4)
+            run.assert_not_called()
+        with patch("syn443ctl.subprocess.run", return_value=subprocess.CompletedProcess([], 0, b"Result: Bundle[{ok=false, error=local_consent_required}]", b"")), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(syn443ctl.main(["--serial", "synthetic", "--local-read", "status"]), 4)
+            self.assertEqual(json.loads(out.getvalue())["error"], "local_consent_required")
+
+    def test_network_mode_negotiates_then_issues_one_safe_serial_scoped_command(self):
+        stamp = "00000000-0000-4000-8000-000000000001"
+        receipt = {"admitted": True, "generation": 5, "networkEpoch": 2}
+        argv = ["--serial", "synthetic", "mode-set", "--stamp", stamp, "--mode", "WIFI", "--minutes", "15"]
+        with patch.object(syn443ctl.Device, "supports_type", return_value=True), patch.object(syn443ctl.Device, "call", return_value=receipt) as call:
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(0, syn443ctl.main(argv))
+        call.assert_called_once_with("mode-set", stamp + ":WIFI:15")
+        self.assertEqual(receipt, json.loads(output.getvalue())["result"])
+        with patch.object(syn443ctl.Device, "supports_type", return_value=False), patch.object(syn443ctl.Device, "call") as old:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(4, syn443ctl.main(argv))
+            old.assert_not_called()
+        for unsafe in (stamp + ":WIFI:0", stamp + ":AUTO:3", stamp + ":WIFI:5|other", stamp + ":WIFI:1441"):
+            with patch("syn443ctl.subprocess.run") as transport, self.assertRaises(syn443ctl.ControlError):
+                syn443ctl.Device("synthetic", 5).call("mode-set", unsafe)
+            transport.assert_not_called()
+
+    def test_network_mode_never_exposes_private_fields_or_invents_a_mode(self):
+        stamp = "00000000-0000-4000-8000-000000000001"
+        off = {"state": "unavailable", "networkEpoch": 3}
+        self.assertEqual(off, syn443ctl.mode_reply("mode-get", off))
+        live = dict(state="observed", effective="WIFI", source="manual", allowed=["WIFI"], maxMinutes=15,
+                    generation=3, networkEpoch=2, stamp=stamp, remainingMs=40)
+        self.assertEqual(live, syn443ctl.mode_reply("mode-get", live))
+        for changes in ({"ssid": "synthetic"}, {"allowed": ["WIFI", "WIFI"]}, {"remainingMs": True},
+                        {"stamp": "synthetic"}, {"effective": "invented"}, {"allowed": [{}]}):
+            with self.assertRaises(syn443ctl.ControlError):
+                syn443ctl.mode_reply("mode-get", dict(live, **changes))
+
     def test_adb_uses_explicit_device_and_never_interprets_provider_json(self):
         data = {"phase": "Off", "label": "ok=false, error=command_rejected"}
         for content in ("ok=true, json=" + json.dumps(data), "json=" + json.dumps(data) + ", ok=true"):

@@ -1,5 +1,6 @@
 package io.syn443.android.admin
 
+import io.syn443.android.Syn443Theme
 import android.os.Bundle
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
@@ -34,7 +35,7 @@ import kotlinx.coroutines.launch
 class AdminActivity:ComponentActivity() {
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {MaterialTheme(colorScheme=darkColorScheme()) {Surface(Modifier.fillMaxSize()) {
+        setContent {Syn443Theme {Surface(Modifier.fillMaxSize()) {
             val bridge=remember {ResolverAdminUiBridge(applicationContext.contentResolver)}
             AdminRoute(bridge)
         }}}

@@ -19,12 +19,45 @@ import javax.net.ssl.TrustManagerFactory
 class EnrollmentDriver:AndroidJUnitRunner() {
     private var fixtureArguments:Bundle?=null
     private var observeCameraPermission = false
+    private var observeWifi = false
     override fun onCreate(args:Bundle?) {
+        observeWifi = args?.getString("observeFixtureWifi") == "true"
         observeCameraPermission = args?.getString("observeCameraPermission") == "true"
         fixtureArguments=args?.takeIf {it.containsKey("fixturePort")}
         super.onCreate(args)
     }
+    private fun fixtureWifi(): String {
+        val capture = runCatching {
+            io.syn443.android.vpn.PhysicalIdentityRoute.capture(targetContext, wifiOnly = true, unmeteredOnly = true).check()
+        }
+        if (capture.isSuccess) return "eligible"
+        val manager = checkNotNull(targetContext.getSystemService(ConnectivityManager::class.java))
+        val networks = manager.allNetworks.mapNotNull { network ->
+            manager.getNetworkCapabilities(network)?.takeIf {
+                it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            }?.let { network to it }
+        }
+        if (networks.isEmpty()) return "missing"
+        val usable = networks.filter { (network, caps) ->
+            manager.getLinkProperties(network)?.interfaceName != null &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED) &&
+                !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
+        }
+        if (usable.isEmpty()) return "unavailable"
+        val validated = usable.filter { (_, caps) -> caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) }
+        if (validated.isEmpty()) return "unvalidated"
+        if (validated.none { (_, caps) -> caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) }) return "metered"
+        return "unstable"
+    }
+
     override fun onStart() {
+        if (observeWifi) {
+            require(BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
+            finish(android.app.Activity.RESULT_OK, Bundle().apply { putString("wifiEligibility", fixtureWifi()) })
+            return
+        }
         if (observeCameraPermission) {
             val granted = targetContext.checkSelfPermission(android.Manifest.permission.CAMERA) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -91,9 +124,10 @@ class EnrollmentDriver:AndroidJUnitRunner() {
                 require(BuildConfig.DEBUG && android.os.Build.HARDWARE in setOf("ranchu", "goldfish"))
                 stage = "telemetry_wifi"
                 val deadline = SystemClock.elapsedRealtime() + 60_000
-                while (runCatching {
-                    io.syn443.android.vpn.PhysicalIdentityRoute.capture(targetContext, wifiOnly = true, unmeteredOnly = true).check()
-                }.isFailure) {
+                while (true) {
+                    val observation = fixtureWifi()
+                    if (observation == "eligible") break
+                    stage = "telemetry_wifi_$observation"
                     check(SystemClock.elapsedRealtime() < deadline)
                     SystemClock.sleep(500)
                 }

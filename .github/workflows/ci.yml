@@ -212,6 +212,7 @@ jobs:
             exit 1
           fi
           apkanalyzer manifest print "$apk" > "$RUNNER_TEMP/release-manifest.xml"
+          python3 tools/check_packaged_backup.py "$apk" "$RUNNER_TEMP/release-manifest.xml" "$ANDROID_HOME/build-tools/36.0.0/aapt2"
           python3 tools/release_input.py "$RUNNER_TEMP/release-manifest.xml" "$SOURCE_COMMIT" "$stage/inventory.json"
           cp "$apk" "$stage/"
           python3 tools/check_public_data.py "$stage"

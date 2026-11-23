@@ -51,7 +51,14 @@ class Publisher:
             payload['schemaVersion']=2;payload['keyThumbprint']=key_thumbprint
             payload['requiredCapabilities'].append('policy.keybound.v2')
         assert len(set(extra_capabilities)) == len(extra_capabilities)
-        assert set(extra_capabilities) <= {'route.health.v1', 'route.failover.v1', 'route.reserve-cooldown.v1'}
+        adaptive = {'route.health.v1', 'route.adaptive-tcp.v1', 'route.decision.v1', 'network.mode-selection.v1'}
+        if 'adaptive_routes' in config or adaptive.intersection(extra_capabilities) - {'route.health.v1'}:
+            assert key_thumbprint and operation == 'configure' and decision_program is None
+            assert set(extra_capabilities) == adaptive and 'adaptive_routes' in config and 'network_mode' in config
+            assert 'route_failover' not in config
+            payload['algorithmRevision'] = 'm4-graph-tcp-v1'
+        else:
+            assert set(extra_capabilities) <= {'route.health.v1', 'route.failover.v1', 'route.reserve-cooldown.v1'}
         if 'route.reserve-cooldown.v1' in extra_capabilities:
             assert key_thumbprint is not None and operation == 'configure'
             assert {'route.health.v1', 'route.failover.v1'} <= set(extra_capabilities) and isinstance(config.get('route_failover'), dict)

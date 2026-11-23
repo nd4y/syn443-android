@@ -108,6 +108,26 @@ class AdaptiveOwnerTransitionTest {
     }
 
     @Test fun nativeEpochChangeRetractsReadinessAndUsesRecoveryBeforeRoutineCadence() {
+        Harness(config()).use { h ->
+            h.ready(1_000)
+            val selected = checkNotNull(h.tick(1_000))
+            h.selected(selected, 1_000)
+            assertTrue(h.view().getBoolean("requiredReady"))
+            val old = h.status()
+            assertTrue(h.controller.awaitInvalidatedOwner(h.epoch + 1, 1_001))
+            h.assertRetracted()
+            assertTrue(h.controller.awaitInvalidatedOwner(h.epoch + 2, 1_002))
+            h.report(old, 1_003)
+            h.report(h.result(selected, "selected"), 1_004)
+            h.changeOwner(1_005) // This intermediate native epoch is also revoked.
+            h.assertRetracted()
+            assertNull(h.tick(6_000))
+            h.changeOwner(6_001)
+            val fresh = checkNotNull(h.tick(6_002))
+            assertEquals(h.epoch, fresh.getLong("nativeEpoch"))
+            h.selected(fresh, 6_003)
+            assertTrue(h.view().getBoolean("requiredReady"))
+        }
         val budget = AdaptiveProbeBudget()
         repeat(16) { minute -> repeat(6) { slot ->
             assertTrue(budget.start(minute * 60_000L + slot * 5_000L, true))

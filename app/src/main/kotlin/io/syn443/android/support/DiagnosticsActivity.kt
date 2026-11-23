@@ -1,5 +1,6 @@
 package io.syn443.android.support
 
+import io.syn443.android.Syn443Theme
 import android.os.Bundle
 import android.net.Uri
 import androidx.activity.ComponentActivity
@@ -24,7 +25,7 @@ import org.json.JSONObject
 class DiagnosticsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme(colorScheme = darkColorScheme()) { Surface(Modifier.fillMaxSize()) { DiagnosticsRoute() } } }
+        setContent { Syn443Theme { Surface(Modifier.fillMaxSize()) { DiagnosticsRoute() } } }
     }
 }
 
@@ -142,5 +143,6 @@ internal fun DiagnosticsRoute(
             },
             cancelling = cancelling,
         )
+        LocalOperatorReadControls()
     }
 }

@@ -119,7 +119,9 @@ result=0
 # Bound the owning host invocation, without pretending interruption stops JNI.
 # A deadline fails this harness; it never proceeds to the external scenarios.
 adb -e install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-if ! timeout --signal=TERM --kill-after=20s 20m python3 tools/run_packaged_instrumentation.py run; then
+# The instrumentation deadline is 20 minutes. Leave the wrapper time to
+# verify the APKs first and report the last checked-in test on interruption.
+if ! timeout --signal=TERM --kill-after=20s 22m python3 tools/run_packaged_instrumentation.py run; then
   python3 tools/print_emulator_reports.py || true
   exit 1
 fi

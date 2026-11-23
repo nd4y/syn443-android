@@ -49,6 +49,9 @@ class InvitationControllerTest {
         val state=InvitationState(Identity.random(),2,"pending_approval","123456",Identity.random(),"",now+600,Identity.random())
         val device=Identity.random();val access=Identity.random();val refresh=Identity.random()
         val paths=CopyOnWriteArrayList<String>()
+        val claimRequests=CopyOnWriteArrayList<Pair<String,String>>()
+        @Volatile var timeUnavailable=false
+        @Volatile var loseClaimReply=false
         @Volatile var approved=false
         @Volatile var publicationError=""
         @Volatile var holdClaim=false
@@ -78,10 +81,16 @@ class InvitationControllerTest {
 
         override fun request(method:String,url:String,headers:Map<String,String>,body:ByteArray?,scope:BoundedHttp.Scope,maxBody:Int):Reply {
             val path=java.net.URI(url).path;paths.add(path)
+            if(path=="/v1/invitations/time" && timeUnavailable)throw DeliveryException(DeliveryFailure.DNS)
             if(path=="/v1/invitations/time"){check(method=="GET" && body==null && "DPoP" !in headers && "Authorization" !in headers);return reply(text="""{"serviceId":"synthetic"}""")}
-            checkedProof(method,url,headers,body)
+            val thumbprint=checkedProof(method,url,headers,body)
             return when(path){
                 "/v1/invitations/claim"->{
+                    claimRequests.add(thumbprint to Identity.hash(checkNotNull(body)))
+                    if(loseClaimReply){
+                        loseClaimReply=false
+                        throw DeliveryException(DeliveryFailure.EOF)
+                    }
                     if(holdClaim){holdClaim=false;entered.countDown();check(release.await(10,TimeUnit.SECONDS))}
                     reply(text=Canonical.json.encodeToString(state.copy(error=publicationError)))
                 }
@@ -126,6 +135,54 @@ class InvitationControllerTest {
         controller.cancel();until{!controller.status().getBoolean("busy")};assertEquals(LoginPhase.SIGNED_OUT,journal.snapshot().phase)
         assertTrue("/v1/device/revoke" in server.paths);assertThrows(IllegalStateException::class.java){DeviceKey.open(registered.keyAlias)}
     }
+    @Test fun unavailableRegistrationAndLostClaimReplyRetryWithTheOriginalKey()=fixture {server,controller,journal,_->
+        val id=UUID.randomUUID().toString().replace("-","")
+        server.timeUnavailable=true
+        assertTrue(controller.previewInvitation(id,server.link))
+        until{!controller.status().getBoolean("busy")}
+        assertEquals("verified",controller.invitationPreview(id).getString("state"))
+        assertTrue(server.paths.isEmpty())
+
+        controller.startInvitation(id)
+        until{!controller.status().getBoolean("busy")}
+        val first=journal.snapshot()
+        assertEquals(LoginPhase.INVITING,first.phase)
+        assertEquals("TRANSPORT",controller.status().getString("reason"))
+        assertEquals(listOf("/v1/invitations/time"),server.paths.toList())
+        assertFalse(controller.allowsConnect())
+        val key=Identity.thumbprint(DeviceKey.open(first.keyAlias).publicKey)
+
+        server.timeUnavailable=false
+        server.loseClaimReply=true
+        controller.retry(first.generation)
+        until{!controller.status().getBoolean("busy")}
+        assertEquals("TRANSPORT",controller.status().getString("reason"))
+        assertEquals(key,server.claimRequests.single().first)
+        assertFalse(server.completed)
+        assertFalse(controller.allowsConnect())
+
+        controller.retry(first.generation)
+        until{!controller.status().getBoolean("busy")}
+        val pending=journal.snapshot()
+        assertEquals(first.generation,pending.generation)
+        assertEquals(first.keyAlias,pending.keyAlias)
+        assertEquals(2,server.claimRequests.size)
+        assertEquals(server.claimRequests.first(),server.claimRequests.last())
+        assertEquals("pending_approval",controller.status().getString("inviteState"))
+        assertFalse(controller.allowsConnect())
+
+        server.approved=true
+        controller.retry(pending.generation)
+        until{!controller.status().getBoolean("busy")}
+        assertEquals(server.device,journal.snapshot().deviceId)
+        assertEquals(first.keyAlias,journal.snapshot().keyAlias)
+        assertEquals(LoginPhase.PROVISIONING,journal.snapshot().phase)
+        assertEquals(1,server.paths.count{it=="/v1/invitations/complete"})
+        assertTrue("/v1/device/policy" in server.paths)
+        assertTrue(server.paths.none{it.contains("openid")})
+        assertFalse(controller.allowsConnect())
+    }
+
     @Test fun cancelledClaimCannotCompleteOrResurrectItsRetiredKey()=fixture {server,controller,journal,_->
         val id=UUID.randomUUID().toString().replace("-","");assertTrue(controller.previewInvitation(id,server.link));until{!controller.status().getBoolean("busy")}
         server.holdClaim=true;controller.startInvitation(id);assertTrue(server.entered.await(10,TimeUnit.SECONDS))
