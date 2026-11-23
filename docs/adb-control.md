@@ -1,6 +1,6 @@
 # Android operator access over ADB
 
-## Read VPN status, NetBird connectivity and logs from the release app
+## Read VPN, route and NetBird status and logs from the release app
 
 On the phone, open **Диагностический архив**. Under **Чтение через ADB**,
 tap **Разрешить на 15 минут**. From the computer already paired with Android,
@@ -12,6 +12,15 @@ When the underlying state cannot be confirmed the result is `unknown`.
 This read neither contacts peers nor includes peer names, addresses or proxy
 settings. Older clients continue to receive the original capability list. Logs also support
 `--follow-seconds 60`. An unknown engine state omits `engineActive`.
+
+To inspect the latest route checks, run
+`python3 tools/syn443ctl.py --serial <adb-serial> --local-read routes-status`.
+Each row identifies a route by its position in the current configuration.
+It reports whether the route is required, its state, and the age in milliseconds
+of a fresh success or failure. Adaptive routes can also report search progress.
+An empty list means the current process has no route rows to report.
+Reading the snapshot does not schedule probes. Device and proxy addresses,
+route names and policy contents stay on the phone.
 
 The grant expires after fifteen minutes. The owner can revoke it on the same
 screen. A controller restart also ends it. Exit code 4 with
