@@ -738,7 +738,7 @@ def main():
     elif historical:
         names=['enrolledHistoricalUpgradeKeepsOriginalBindingAndPayload']
     elif args == ['--wifi-only']:
-        names = ['enrolledOperatorModeKeepsTrafficOnTheObservedWiFiPath']
+        names = ['enrolledSignedAssignmentStartsRealTun']
     def observed_report(revision,outcome,selected):
         return any(r['policyRevision']==revision and r['outcome']==outcome and r['activePolicyRevision']==selected
                    for r in list(fixture.activation_reports.values()))
