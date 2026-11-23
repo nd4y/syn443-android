@@ -3072,8 +3072,12 @@
     {
       "id": "AC10",
       "specRow": " Одна кнопка и отказ основного выхода | Самостоятельный переход на разрешённый рабочий кандидат без UI действий |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "tools/run_enrolled_vpn.py",
+        "tools/run_route_lifecycle.py"
+      ],
+      "implementationScope": "Three enrolled emulator API levels observed a primary application response change from HTTP 204 to 503 and the allowed reserve return 204 without a UI action. Actions 45104479452 also verified that the unassigned endpoint stayed unavailable. Physical-device active-session recovery remains open."
     },
     {
       "id": "AC11",
@@ -3420,8 +3424,13 @@
     {
       "id": "AC59",
       "specRow": " ICMP через TCP-only цепочку или несовместимый UDP/DNS метод | Unsupported до активации; прямая проба не подставляется как успех туннеля |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/androidTest/kotlin/io/syn443/android/RouteCheckPlanTest.kt",
+        "app/src/androidTest/kotlin/io/syn443/android/AdaptiveEngineConfigTest.kt",
+        "native/bridge/route_checks_test.go"
+      ],
+      "implementationScope": "Named ICMP and UDP leaves on a concrete TCP proxy chain are rejected during configuration validation. Covered sources also exercise unsupported native inputs. Physical and broader DNS transport combinations remain open."
     },
     {
       "id": "AC60",
@@ -3432,8 +3441,12 @@
     {
       "id": "AC61",
       "specRow": " Смена check profile revision, метода, exit predicate и сетевого контекста | Неактуальные измерения не переиспользуются неверно; site reachability не доказывает страну выхода |",
-      "status": "planned",
-      "evidence": []
+      "status": "partial",
+      "evidence": [
+        "app/src/androidTest/kotlin/io/syn443/android/RouteCheckPlanTest.kt",
+        "app/src/main/kotlin/io/syn443/android/vpn/RouteSnapshot.kt"
+      ],
+      "implementationScope": "A scoped regression exercises revision, method, exit predicate and physical-network generation changes independently, including a late receipt while a fresh check is pending. Physical-device acceptance remains open."
     },
     {
       "id": "AC62",
