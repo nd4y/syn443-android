@@ -32,6 +32,20 @@ class RouteCheckProfileTest {
             RouteCheckProfile.decode(value.jsonObject.getValue("raw").jsonPrimitive.content)
         }
     }
+    @Test fun successfulLeavesSupportExactlyThePositiveCasesInTheSharedTruthTable() {
+        val raw = checkNotNull(javaClass.getResourceAsStream("/route-check-profile-v2-vectors.json"))
+            .bufferedReader().use { it.readText() }
+        val cases = Json.parseToJsonElement(raw).jsonObject.getValue("truthCases").jsonArray
+        assertEquals(51, cases.size)
+        for (item in cases) {
+            val case = item.jsonObject
+            val plan = RouteCheckProfile.decode(case.getValue("profile").toString())
+            val passed = case.getValue("leafStates").jsonObject.filterValues { it.jsonPrimitive.content == "TRUE" }.keys
+            assertEquals(case.getValue("name").jsonPrimitive.content,
+                case.getValue("expected").jsonPrimitive.content == "TRUE", plan.supportsPositiveReport(passed))
+        }
+    }
+
     @Test fun ownedSortedLeavesAndCompleteWirePreserveOrderedExpressionsWithoutLeakingTargets() {
         val raw=profile(leaf("b")+","+leaf("a"))
         val value=RouteCheckProfile.decode(raw)

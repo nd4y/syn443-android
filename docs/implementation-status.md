@@ -402,3 +402,12 @@ native receipt, current network scope and probe budget. The regression case
 delivers an earlier selection after activation starts and checks that a new
 request is necessary. The enrolled emulator suite also runs independent TCP
 traffic through a signed candidate on Wi-Fi.
+
+## Route selection and cooldown acceptance
+
+The protected Android build exercised five JVM cases and twelve distinct
+Android cases on each of API 29, 35 and 37 for AC43, AC46, AC53 and AC55.
+They cover the stable slower reserve, a single half-open trial, retained
+cooldown and resuming a 500-path search. The acceptance register records the
+remaining scope for each case.
+[Protected routing checks](https://github.com/nd4y/syn443-android/actions/runs/45070035378).

@@ -845,7 +845,14 @@ ADMIN_OPERATION_RECONCILE_REQUIRED = {
 if mode in ADMIN_OPERATION_RECONCILE_REQUIRED:
     assert set(ADMIN_OPERATION_RECONCILE_REQUIRED[mode]) <= set(identities), "Missing exact operation outcome, deadline, stable editor ownership or explicit presentation outcomes"
 
+if mode == 'jvm':
+    assert ('io.syn443.decision.PathStabilityHistoryTest',
+            'threeAttributedFailuresAmongFiveRequireThreeFreshSuccessesForRecovery') in identities, "Missing route stability recovery evidence"
+
 ADAPTIVE_SEARCH_REQUIRED = [
+    ('io.syn443.android.ManagedAdaptiveRoutesTest', 'lowerLatencyThroughAnExtraProxyDoesNotDisplaceAHealthySharedExit'),
+    ('io.syn443.android.ManagedAdaptiveRoutesTest', 'threeAttributedFailuresLetAStableSlowerReserveReplaceTheRecoveredIncumbent'),
+    ('io.syn443.android.ManagedAdaptiveRoutesFairnessTest', 'sparseRecoveryFindsTheLastEligibleHopWithoutForceOrExtraNetworkProbes'),
     ('io.syn443.android.RouteSearchStatusTest', 'singleRouteControlKeepsItsRowAndRejectsAReplacedNetworkOrConfiguration'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'onlyFreshSelectedAcknowledgementChangesSearchingToVerified'),
     ('io.syn443.android.ManagedAdaptiveSearchStatusTest', 'minuteBudgetWaitRetainsContinuationWithoutInventingNoCandidateVerdict'),
@@ -868,6 +875,7 @@ if mode=="emulator":
 CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'confirmedCountryRequiresAPassedCountryLeafAndOneUnambiguousClass'),
             ('io.syn443.policy.RouteCheckProfileTest',
              'sharedClosedProfilesAcceptNineValidAndRejectAllFortyThreeInvalidVectors'),
+            ('io.syn443.policy.RouteCheckProfileTest', 'successfulLeavesSupportExactlyThePositiveCasesInTheSharedTruthTable'),
             ('io.syn443.policy.RouteCheckProfileTest',
              'ownedSortedLeavesAndCompleteWirePreserveOrderedExpressionsWithoutLeakingTargets'),
             ('io.syn443.policy.RouteCheckProfileTest',
@@ -887,6 +895,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'co
             ('io.syn443.policy.RouteCheckPlanPolicyTest',
              'legacySignedBytesRemainOpaqueAndNullDuplicateCaseOrMixedProfileCannotDowngrade')],
  'emulator': [('io.syn443.android.RouteCheckPlanTest', 'onlyFreshMatchedCountryEvidenceIsShownForTheCurrentMeasuredPath'),
+              ('io.syn443.android.RouteCheckPlanTest', 'countrySuccessCannotValidateAReportWithAnUnmetRequiredStage'),
               ('io.syn443.android.RouteCheckPlanTest', 'canceledBatchClearsEarlierSuccessfulLeafOutcomes'),
               ('io.syn443.android.RouteCheckPlanTest',
                'ordinaryRequestOwnsWholeProfileAndNeverFlattensOrBorrowsMutatedInput'),
@@ -906,7 +915,7 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'co
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
 if mode in CHECK_PLAN_REQUIRED:
     required = set(CHECK_PLAN_REQUIRED[mode])
-    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == {'policy': 12, 'emulator': 11}[mode]
+    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == {'policy': 13, 'emulator': 12}[mode]
     assert required <= set(identities), "Missing exact closed check-plan, policy or passive projection outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/policy/src/test/kotlin/io/syn443/policy" if mode == "policy" else "app/src/androidTest/kotlin/io/syn443/android"
