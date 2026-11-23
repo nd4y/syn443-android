@@ -127,6 +127,26 @@ class VpnLifecycleTest {
     }
     private fun pid() = context.getSystemService(ActivityManager::class.java).runningAppProcesses
         ?.firstOrNull { it.processName == "${context.packageName}:engine" }?.pid
+    private fun wifiPresent(): Boolean {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java)
+        return connectivity.allNetworks.any {
+            connectivity.getNetworkCapabilities(it)?.let { caps ->
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                    !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            } == true
+        }
+    }
+
+    private fun restoreFixtureWiFi() {
+        shell("svc wifi enable")
+        if (Build.VERSION.SDK_INT < 30) return
+        // The fixture owns the stock open AP and is always in airplane mode.
+        // Reassociate only if the OS did not bring the known network back.
+        val deadline = android.os.SystemClock.elapsedRealtime() + 12_000
+        while (!wifiPresent() && android.os.SystemClock.elapsedRealtime() < deadline) Thread.sleep(250)
+        if (!wifiPresent()) shell("cmd wifi connect-network AndroidWifi open")
+    }
+
     private fun await(timeout: Long = 35_000, predicate: () -> Boolean) {
         val end = android.os.SystemClock.elapsedRealtime() + timeout
         while (android.os.SystemClock.elapsedRealtime() < end) {
@@ -135,8 +155,9 @@ class VpnLifecycleTest {
             Thread.sleep(200)
         }
         val s = status()
+        val wifi = runCatching { wifiPresent() }.getOrNull()?.toString() ?: "unknown"
         fail("VPN lifecycle deadline exceeded: phase=${s.optString("phase")}, reason=${s.optString("reason")}, " +
-            "desiredOn=${s.optBoolean("desiredOn")}, resumeRequired=${s.optBoolean("resumeRequired")}, " +
+            "wifi=$wifi, desiredOn=${s.optBoolean("desiredOn")}, resumeRequired=${s.optBoolean("resumeRequired")}, " +
             "attempt=${s.optInt("attempt")}, heavyCount=${s.optJSONArray("heavyWallMs")?.length()}, native=${pid()}, tunnels=${tunnels.get()}")
     }
     @Before fun setup() {
@@ -387,18 +408,16 @@ class VpnLifecycleTest {
         connect()
         val old = pid()
         val epoch = status().optLong("networkEpoch")
-        val mobileDataWasOff = shell("settings get global mobile_data").toString(Charsets.UTF_8).trim() == "0"
+        assertEquals("enabled", shell("cmd connectivity airplane-mode").toString(Charsets.UTF_8).trim())
         try {
             shell("svc wifi disable")
-            if (!mobileDataWasOff) shell("svc data disable")
             await { status().optString("phase") == "NoNetwork" }
             assertTrue(status().getBoolean("desiredOn"))
             assertEquals(old, pid())
             Thread.sleep(2_000)
             assertEquals("NoNetwork", status().optString("phase"))
         } finally {
-            shell("svc wifi enable")
-            if (!mobileDataWasOff) shell("svc data enable")
+            restoreFixtureWiFi()
         }
         await(60_000) { status().optString("phase") == "Online" }
         assertEquals(old, pid())

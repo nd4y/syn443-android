@@ -51,6 +51,25 @@ class PackagedInstrumentationTest(unittest.TestCase):
                                                      'Test failure category: assertion', 'Test source line: 42'])
         self.assertEqual(suite[1][0].get('message'), 'AndroidJUnitRunner status -2')
 
+    def test_vpn_deadline_prints_only_fixed_phase_reason_and_wifi_categories(self):
+        for classname, phase, reason, expected in (
+            ('VpnLifecycleTest', 'NoNetwork', 'network_unavailable', 'phase=NoNetwork, reason=network_unavailable'),
+            ('VpnLifecycleTest', 'private-phase', 'private-reason', 'phase=unknown, reason=other'),
+            ('ExampleTest', 'NoNetwork', 'network_unavailable', None),
+        ):
+            with self.subTest(classname=classname, phase=phase, reason=reason):
+                pending = SECOND.replace('ExampleTest', classname)
+                failure = event('secondCase', 2, -2).replace('ExampleTest', classname)
+                stack = (f'INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: VPN lifecycle deadline exceeded: '
+                         f'phase={phase}, reason={reason}, wifi=false, desiredOn=private-state\n')
+                log = io.StringIO()
+                with redirect_stdout(log):
+                    suite = parse_run(START + PASS + pending + stack + failure + END)
+                self.assertEqual('failure', suite[1][0].tag)
+                self.assertNotIn('private-', log.getvalue())
+                snapshots = [l for l in log.getvalue().splitlines() if 'VPN lifecycle snapshot:' in l]
+                self.assertEqual([] if expected is None else [f'VPN lifecycle snapshot: {expected}, wifi=false'], snapshots)
+
     def test_failure_categories_never_disclose_names_or_messages(self):
         for exception, expected in [
             ('androidx.compose.ui.test.ComposeTimeoutException', 'compose_timeout'),

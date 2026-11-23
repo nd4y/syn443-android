@@ -172,6 +172,7 @@ if mode=="emulator":
         ("io.syn443.android.PrototypeTest", "launchWindowUsesTheSameDarkSurfaceInBothSystemModes"),
         ("io.syn443.android.VpnPrimaryActionTest", "startRequiresKnownReadyStateAndStopDoesNotRequireReadiness"),
         ("io.syn443.android.VpnPrimaryActionTest", "statusRequiresCurrentEngineProofAndKeepsUnrecognizedIntentVisible"),
+        ("io.syn443.android.VpnPrimaryActionTest", "tileDistinguishesPortalLoginAndUnknownIntentWithoutACommandGuess"),
     } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required VPN home UI cases missing"
     assert {("io.syn443.android.RouteSnapshotTest",name) for name in {
         "sshWithoutServerPinCannotBeImportedAssignedOrRendered",
@@ -352,7 +353,7 @@ if mode=="emulator":
         "enrolledRequiredRouteFailureCannotCommitThroughHealthyInternet",
         "enrolledStopFencesPendingCandidateRouteSuccess","enrolledStoppedTelemetryUsesScheduledWorkWithoutRevivingVpn","enrolledVersionUpgradeRetainsBindingPolicyAndRealTun"}
     live_engine_required={"savedEngineCheckpointCannotClaimAnUnownedLiveProcess"}
-    route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","replacedPolicyCannotShowAnotherBatchPendingOrFailed","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
+    route_required={"independentRoutesKeepOptionalFailureAndUnconfiguredUnknown","replacedPolicyCannotShowAnotherBatchPendingOrFailed","routeLateNetworkAndEngineResultsCannotOverrideStop","duplicateRouteHeartbeatCannotRefreshAgeAndNewBatchCanReplaceResult","routeProfilesRejectUnsupportedTargetsDuplicatesAndWrongTypes","routeClientMetadataNeverReachesNativeConfiguration","lockedBootStatusHasUnknownIntentAndNoCredentialFields","routesAndSystemPolicyHaveVisibleControlsWithoutChangingIntent","routeChecksUseActualOutboundsAndSelectedProxy","requiredRouteFailureDegradesWithoutRestartAndRecovers","physicalWiFiLossInvalidatesRoutesAndRecoversPayloadWithoutNewIntent","stopCancelsPendingRouteChecksAndRejectsLateSuccess","packageUpdatePreservesConfigIntentAndOffAcrossSystemCallback","rebootBeforeUnlockDoesNotReadCredentialStateThenReconciles","rebootWithOffIntentCannotStartOrSpendBudget","actualAlwaysOnLockdownRespectsNewerStop","forceStopThenPackageUpdateCannotResumeWithoutUserConnect"}
     account_telemetry_cases = {
         ("AccountExitControlsTest", "registeredExitCanBeDismissedAndStaleConfirmationDisappears"),
         ("AccountExitControlsTest", "pendingLoginCanBeCancelledAndUnreadableAccountHasNoUnlinkAction"),
@@ -914,11 +915,12 @@ CHECK_PLAN_REQUIRED = {'policy': [('io.syn443.policy.RouteCheckProfileTest', 'co
               ('io.syn443.android.RouteCheckPlanTest',
                'legacyArraysRemainCompatibleWhenNewEnrollmentsAdvertiseNamedChecks'),
               ('io.syn443.android.RouteCheckPlanTest', 'readOnlyPlanLabelsAreFiniteAndRecompositionDoesNotDispatch'),
+              ('io.syn443.android.RouteCheckPlanTest', 'currentFailedCheckShowsOnlyItsOwnFiniteCauseAndClearsWithStaleEvidence'),
               ('io.syn443.android.RouteCheckPlanTest',
                'adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind')]}
 if mode in CHECK_PLAN_REQUIRED:
     required = set(CHECK_PLAN_REQUIRED[mode])
-    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == {'policy': 13, 'emulator': 14}[mode]
+    assert len(required) == len(CHECK_PLAN_REQUIRED[mode]) == {'policy': 13, 'emulator': 15}[mode]
     assert required <= set(identities), "Missing exact closed check-plan, policy or passive projection outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/policy/src/test/kotlin/io/syn443/policy" if mode == "policy" else "app/src/androidTest/kotlin/io/syn443/android"

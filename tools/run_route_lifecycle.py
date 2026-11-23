@@ -4,6 +4,7 @@ All targets and the disposable emulator PIN are synthetic. No physical credentia
 import base64
 import hashlib
 import json
+import os
 import re
 import socketserver
 import subprocess
@@ -49,6 +50,26 @@ class RouteProxy(socketserver.BaseRequestHandler):
 
 
 
+def exchange_through_proxy(proxy, destination="203.0.113.10", *, expected_status=204):
+    assert expected_status in (204, 503)
+    assert destination in ("203.0.113.10", "203.0.113.11")
+    # Keep the client half-open while the application UID reads the reply.
+    # A pipe directly into toybox nc can close its input before the peer responds.
+    proxy.payload_received = threading.Event()
+    try:
+        command = (r"(printf 'GET /syn443-payload HTTP/1.1\r\nHost: fixture.invalid\r\n"
+                   r"Connection: close\r\n\r\n'; sleep 3) | run-as " + PACKAGE +
+                   f" toybox nc -w 5 {destination} 80")
+        response = adb('shell', '-T', command, timeout=12)
+        confirmed = proxy.payload_received.wait(1)
+        status = re.match(rb'HTTP/1\.1 ([0-9]{3}) ', response)
+        if not confirmed or status is None or int(status[1]) != expected_status:
+            raise AssertionError('Application payload: expected proxy received=%s, HTTP status=%s' %
+                                 (confirmed, status[1].decode() if status else 'absent'))
+    finally:
+        proxy.payload_received = None
+
+
 def completed_route_batch():
     # Online is independent HTTPS health, not completion of every outbound probe.
     report=call('routes-status')
@@ -69,6 +90,67 @@ def completed_route_batch():
     assert report.get('running') is False and report.get('requiredReady') is True, 'Route batch has no completion proof'
     assert rows[2].get('measuredPath')==['route-3','route-1'], 'Selector probe did not traverse its actual selected outbound'
     return True
+
+
+def wifi_loss_recovery(proxy):
+    if (os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('SYN443_CI_AVD') != 'syn443-ci'
+            or adb('emu', 'avd', 'name').splitlines() != [b'syn443-ci', b'OK']):
+        raise ValueError('Disposable Wi-Fi emulator required')
+    assert adb('shell', 'cmd', 'connectivity', 'airplane-mode').strip() == b'enabled', 'Wi-Fi-only isolation failed'
+
+    def online_after(epoch):
+        current = call('status')
+        physical = current.get('physicalLink') or {}
+        if current.get('phase') != 'Online' or physical.get('transport') != 'WIFI':
+            return None
+        return current if current['networkEpoch'] > epoch else None
+
+    await_condition(lambda: online_after(-1) and completed_route_batch(), 90)
+    before = online_after(-1)
+    assert before is not None and before['desiredOn']
+    exchange_through_proxy(proxy)
+
+    def offline():
+        current = call('status')
+        assert current['desiredOn'] and current['generation'] == before['generation']
+        assert current['configRevision'] == before['configRevision']
+        if current['phase'] != 'NoNetwork':
+            return None
+        routes = call('routes-status')
+        assert current['reason'] == 'network_unavailable' and current.get('physicalLink') is None
+        assert current['networkEpoch'] > before['networkEpoch']
+        assert routes['running'] is False and routes['requiredReady'] is False
+        assert routes['routes'] and all(row['state'] != 'working' for row in routes['routes'])
+        return current
+
+    adb('shell', 'svc', 'wifi', 'disable')
+    try:
+        await_condition(offline, 35)
+        lost = offline()
+        assert lost is not None
+        traffic = (proxy.progress, proxy.route_probes)
+        # Observe longer than the early health-probe throttle. No available
+        # underlay may publish old checks or initiate a new request.
+        end = time.monotonic() + 6
+        while time.monotonic() < end:
+            current = offline()
+            assert current and current['networkEpoch'] == lost['networkEpoch']
+            assert (proxy.progress, proxy.route_probes) == traffic
+            time.sleep(1)
+    finally:
+        adb('shell', 'svc', 'wifi', 'enable')
+
+    after = None
+    def recovered():
+        nonlocal after
+        after = online_after(lost['networkEpoch'])
+        return after is not None and completed_route_batch()
+
+    await_condition(recovered, 90)
+    assert after['desiredOn'] and after['generation'] == before['generation']
+    assert after['configRevision'] == before['configRevision']
+    assert proxy.progress > traffic[0] and proxy.route_probes > traffic[1]
+    exchange_through_proxy(proxy)
 
 
 def resume_blocked(before):
@@ -217,6 +299,10 @@ def main():
         servers[0].health_ok=True
         await_condition(lambda:call('status')['phase']=='Online',90)
         assert pid(':engine')==before
+        print(case.get('name')+': passed',flush=True)
+
+        case=new_case('physicalWiFiLossInvalidatesRoutesAndRecoversPayloadWithoutNewIntent')
+        wifi_loss_recovery(servers[0])
         print(case.get('name')+': passed',flush=True)
 
         case=new_case('stopCancelsPendingRouteChecksAndRejectsLateSuccess')

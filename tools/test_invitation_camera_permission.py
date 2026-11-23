@@ -55,3 +55,41 @@ class CameraPermissionTest(unittest.TestCase):
                                ('com.android.launcher3','launcher'),('com.android.permissioncontroller','permission'),
                                ('private.example','other')]:
             self.assertEqual(label, camera.visible_owner([ET.Element('node', package=package)]))
+
+
+    def test_camera_error_never_taps_or_logs_dynamic_content(self):
+        nodes = [ET.Element('node', package='android', text='private-dialog-content',
+                            **{'resource-id': 'android:id/aerr_close'}),
+                 ET.Element('node', package='private.example', text='private-other-content')]
+        with patch.object(camera, 'tree', return_value=ET.Element('hierarchy')) as tree, \
+                patch.object(camera, 'anr_owner_diagnostic',
+                             return_value={'category': 'syn443_app', 'correlated': True}) as owner, \
+                patch.object(camera, 'observe_recent_crash_events', return_value=['other']), \
+                patch.object(camera, 'tap') as tap, \
+                patch('builtins.print') as emit:
+            tree.return_value.extend(nodes)
+            with self.assertRaisesRegex(AssertionError, 'application crash or ANR'):
+                camera.find_node(lambda node: False, 'open scanner', recover_initial_focus=True)
+            with self.assertRaisesRegex(AssertionError, 'application crash or ANR'):
+                camera.deny_camera()
+            self.assertEqual(2, owner.call_count)
+            tap.assert_not_called()
+            for call, stage in zip(emit.call_args_list, ('open scanner', 'deny permission'), strict=True):
+                self.assertIn(stage, call.args[0])
+                self.assertIn('aerr_close', call.args[0])
+                self.assertNotIn('private-', call.args[0])
+                self.assertNotIn('private.example', call.args[0])
+
+    def test_recent_crash_events_keep_only_fixed_categories_and_bounded_scope(self):
+        def event(time, process):
+            return (time + b'.999  660  700 I am_crash: [0,2468,' + process +
+                    b',0,IllegalStateException,private-detail,/private/path,10,0]\n')
+        events = (event(b'1699999880', b'io.syn443.android:engine') +
+                  event(b'1699999995', b'private.example') +
+                  event(b'1699999879', b'com.android.systemui') +
+                  event(b'1700000001', b'io.syn443.android:controller') +
+                  b'1700000000.999  660  700 I am_crash: [malformed]\n')
+        self.assertEqual(['other', 'syn443_engine', 'unrecognized'],
+                         camera.recent_crash_event_categories(events, 1700000000))
+        self.assertEqual([], camera.recent_crash_event_categories(b'', 1700000000))
+        self.assertEqual(['oversized'], camera.recent_crash_event_categories(b'x' * 1_048_577, 1700000000))

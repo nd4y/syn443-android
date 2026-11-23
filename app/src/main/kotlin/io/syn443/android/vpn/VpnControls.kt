@@ -167,7 +167,7 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
         val reason = status.optString("reason")
         val portal = statusAvailable == true && phase == "NoNetwork" && reason == "captive_portal"
         val policy = status.optJSONObject("policy")
-        val accountPolicyBlocked = policy?.let { it.optString("source") == "account" && it.optString("phase") == "blocked" } == true
+        val accountPolicyBlocked = status.hasBlockedAccountPolicy()
         Text(when (desiredOn) {
             true -> "VPN включён"
             false -> "VPN выключен"
@@ -334,31 +334,7 @@ internal fun VpnStatusSummary(status: JSONObject, available: Boolean?, accountPo
     val known = status.optBoolean("engineStateKnown")
     val active = status.optBoolean("engineActive")
     val phase = status.optString("phase")
-    val checking = "Проверяем состояние VPN"
-    val label = when {
-        available == null -> checking
-        !available -> "Состояние VPN временно недоступно"
-        phase == "NeedsUnlock" -> "Нужно разблокировать телефон"
-        status.opt("desiredOn") == false -> when {
-            known && active -> "Останавливаем VPN"
-            !known -> checking
-            accountPolicyBlocked -> "Ожидаем конфигурацию от сервера"
-            else -> "Отключён"
-        }
-        status.opt("desiredOn") != true -> checking
-        else -> when (phase) {
-            "Online" -> if (known && active) "Работает" else checking
-            "Degraded" -> if (known && active) "Частично работает" else checking
-            "BlockedByPolicy", "Blocked" -> "Доступ ограничен политикой"
-            "NoNetwork" -> if (status.optString("reason") == "captive_portal") "Войдите в сеть Wi-Fi" else "Ожидание сети"
-            "Recovering" -> "Восстанавливаем соединение"
-            "Starting", "Connecting" -> "Подключаемся"
-            "NeedsPermission" -> "Нужно разрешение Android на VPN"
-            "NeedsAction" -> "Требуется действие пользователя"
-            "NeedsLogin" -> "Требуется вход в аккаунт"
-            else -> checking
-        }
-    }
+    val label = vpnStatusLabel(status, available, accountPolicyBlocked)
     Text(label, Modifier.testTag("vpn-status").semantics { liveRegion = LiveRegionMode.Polite })
     if (available == true && status.opt("desiredOn") == true && known && active &&
         phase in setOf("Online", "Degraded", "Recovering")) {

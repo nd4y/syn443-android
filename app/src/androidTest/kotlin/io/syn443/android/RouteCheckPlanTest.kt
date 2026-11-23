@@ -325,6 +325,35 @@ class RouteCheckPlanTest {
         }
         compose.waitForIdle();assertTrue(commands.isEmpty())
     }
+    @Test fun currentFailedCheckShowsOnlyItsOwnFiniteCauseAndClearsWithStaleEvidence() {
+        val scope=configure()
+        val pending=JSONObject(requireNotNull(RouteSnapshot.request(scope)))
+        val tested=diagnostic().apply {
+            getJSONArray("leaves").getJSONObject(1).put("outcome","FALSE").put("code","dial_failed")
+        }
+        val response=JSONObject(report(pending,plan=tested))
+        val at=response.getJSONArray("results").getJSONObject(0).getLong("sampledElapsedMs")
+        assertTrue(RouteSnapshot.update(scope,response.toString()))
+        fun snapshot(time:Long)=JSONObject().put("routeHealth",RouteSnapshot.readAt(true,true,scope,time))
+        val model=mutableStateOf(snapshot(at))
+        compose.setContent { MaterialTheme { RouteControls(model.value){ _,_ -> error("Read-only screen") } } }
+        val successful=compose.onNodeWithTag("route-1-check-leaf-1")
+        val failed=compose.onNodeWithTag("route-1-check-leaf-2")
+        successful.assertTextEquals("1/2 a: условие подтверждено")
+        failed.assertTextEquals("2/2 b: условие не выполнено · Не удалось установить соединение")
+
+        compose.runOnIdle {
+            model.value=snapshot(at).apply {
+                getJSONObject("routeHealth").getJSONArray("routes").getJSONObject(0).getJSONObject("checkPlan")
+                    .getJSONArray("leaves").getJSONObject(1).put("code","private-unexpected value")
+            }
+        }
+        failed.assertTextEquals("2/2 b: условие не выполнено")
+
+        compose.runOnIdle {model.value=snapshot(at + io.syn443.recovery.RouteEvidence.DEFAULT_TTL_MS + 1)}
+        failed.assertTextEquals("2/2 b: проверка не выполнялась")
+    }
+
     @Test fun adaptiveProjectionWaitsForExactSelectedReceiptOwnsValuesAndClearsOnRebind() {
         val config=JSONObject(ManagedAdaptiveRoutesFairnessTest().config(choices=1,groupCount=1))
         row(config).remove("checks");row(config).put("profile",profile())

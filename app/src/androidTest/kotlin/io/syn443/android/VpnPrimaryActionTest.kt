@@ -10,8 +10,12 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import io.syn443.android.vpn.VpnPrimaryAction
 import io.syn443.android.vpn.VpnStatusSummary
+import io.syn443.android.vpn.hasBlockedAccountPolicy
+import io.syn443.android.vpn.vpnStatusLabel
+import io.syn443.android.vpn.vpnTileIntent
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 
@@ -50,6 +54,30 @@ class VpnPrimaryActionTest {
         label.assertTextEquals("Ожидаем конфигурацию от сервера")
         compose.runOnIdle { available.value = false }
         label.assertTextEquals("Состояние VPN временно недоступно")
+    }
+
+    @Test fun tileDistinguishesPortalLoginAndUnknownIntentWithoutACommandGuess() {
+        val status = JSONObject().put("phase", "NoNetwork").put("desiredOn", true)
+            .put("engineStateKnown", true).put("engineActive", true).put("reason", "captive_portal")
+        fun expect(text: String) = assertEquals(text, vpnStatusLabel(status, true, status.hasBlockedAccountPolicy()))
+        expect("Войдите в сеть Wi-Fi")
+        assertEquals(true, vpnTileIntent(status))
+        status.put("reason", "network_unavailable")
+        expect("Ожидание сети")
+        status.put("phase", "NeedsLogin")
+        expect("Требуется вход в аккаунт")
+        status.put("phase", "NeedsUnlock")
+        expect("Нужно разблокировать телефон")
+        assertNull(vpnTileIntent(status))
+        status.put("phase", "Off").put("desiredOn", false).put("engineActive", false)
+            .put("policy", JSONObject().put("source", "account").put("phase", "blocked"))
+        assertEquals(false, vpnTileIntent(status))
+        expect("Ожидаем конфигурацию от сервера")
+        status.put("desiredOn", "false")
+        assertNull(vpnTileIntent(status))
+        assertNull(vpnTileIntent(null))
+        expect("Проверяем состояние VPN")
+        assertEquals("Состояние VPN временно недоступно", vpnStatusLabel(JSONObject(), false, false))
     }
 
     @Test fun startRequiresKnownReadyStateAndStopDoesNotRequireReadiness() {
