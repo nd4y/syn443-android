@@ -71,17 +71,20 @@ internal class AssignedPolicyContinuityFixture(val raw: String) : Closeable {
     init { receive(policy, "fixture-root"); activate(); publish() }
     private fun utcNow()=utc+elapsed-1000
     private fun time()=TrustedTime(boot, elapsed, utcNow(), utcNow()+1000)
-    private fun signed(p: Payload, kid: String): String {
+    private fun signed(p: Payload, kid: String, signer: KeyPair = roots.getValue(kid)): String {
         val header="""{"alg":"ES256","kid":"$kid","typ":"syn443-policy+jws"}"""
         val body=Canonical.encode(Canonical.parse(Policy.json.encodeToString(p)))
         val input=Identity.encode(header.toByteArray())+"."+Identity.encode(body.toByteArray())
-        val der=Signature.getInstance("SHA256withECDSA").run {initSign(roots.getValue(kid).private); update(input.toByteArray()); sign()}
+        val der=Signature.getInstance("SHA256withECDSA").run {initSign(signer.private); update(input.toByteArray()); sign()}
         return input+"."+Identity.encode(Identity.derToRaw(der))
     }
     private fun receive(p: Payload, kid: String) {
-        state=Assignments.receive(state, login, payload, PolicyReply(signed(p, kid), time()), boot, elapsed)
-        login=LoginRecovery.policyCached(login, login.generation, Assignments.receipt(state, login, payload, boot, elapsed), login.protectedHash)
+        receive(signed(p, kid))
         policy=p
+    }
+    private fun receive(envelope: String) {
+        state=Assignments.receive(state, login, payload, PolicyReply(envelope, time()), boot, elapsed)
+        login=LoginRecovery.policyCached(login, login.generation, Assignments.receipt(state, login, payload, boot, elapsed), login.protectedHash)
     }
     private fun activate() {
         state=Assignments.begin(state, login, payload, listOf(false), boot, elapsed)
@@ -99,9 +102,20 @@ internal class AssignedPolicyContinuityFixture(val raw: String) : Closeable {
     }
     fun stage(at: Long, kid: String="fixture-root", change: (Payload)->Payload={it}) {
         elapsed=at
-        val next=change(policy.copy(revision=policy.revision+1, issuedAtMs=utcNow(), notBeforeMs=utcNow(),
-            refreshAfterMs=utcNow()+300_000, offlineUntilMs=utcNow()+3_600_000))
-        receive(next, kid)
+        receive(change(nextPayload()), kid)
+        publish()
+    }
+    private fun nextPayload() = policy.copy(
+        revision=policy.revision+1, issuedAtMs=utcNow(), notBeforeMs=utcNow(),
+        refreshAfterMs=utcNow()+300_000, offlineUntilMs=utcNow()+3_600_000,
+    )
+    fun signedCandidate(useDeviceSigner: Boolean = false, change: (Payload) -> Payload = { it }): String {
+        val kid = "fixture-root"
+        val signer = if (useDeviceSigner) device else roots.getValue(kid)
+        return signed(change(nextPayload()), kid, signer)
+    }
+    fun offer(envelope: String) {
+        receive(envelope)
         publish()
     }
     fun beginActivation() {
@@ -119,6 +133,42 @@ class AssignedPolicyRuntimeContinuityTest {
     private fun replacement(b: AdaptivePolicyBinding, revision: Long=b.revision, authority: String=b.semanticAuthority,
         deadline: Long=b.leaseDeadlineElapsed, boot: Int=b.boot)=
         AdaptivePolicyBinding(revision, b.contentHash, authority, deadline, boot)
+
+    @Test fun rejectedPoliciesKeepCurrentAssignmentAndRuntimeAuthority() {
+        AssignedPolicyContinuityFixture(config()).use { fixture ->
+            val replay = checkNotNull(fixture.state.journal.active)
+            fixture.renew(301_000)
+            val active = fixture.state
+            val login = fixture.login
+            val ticket = fixture.runtime.ticket(login)
+            val binding = fixture.binding()
+            assertNotEquals(replay, active.journal.active)
+
+            val invalid = mapOf(
+                "bad signature" to fixture.signedCandidate(useDeviceSigner = true),
+                "wrong device" to fixture.signedCandidate { it.copy(targetDevice = Identity.random()) },
+                "replayed revision" to replay,
+                "incompatible capability" to fixture.signedCandidate {
+                    it.copy(requiredCapabilities = it.requiredCapabilities + "fixture.unsupported.v1")
+                },
+            )
+            for ((reason, envelope) in invalid) {
+                assertThrows(reason, IllegalArgumentException::class.java) { fixture.offer(envelope) }
+                assertEquals(reason, active, fixture.state)
+                assertEquals(reason, login, fixture.login)
+                assertSame(reason, binding, fixture.read(ticket = ticket))
+            }
+
+            val valid = fixture.signedCandidate {
+                it.copy(activation = it.activation.copy(timeoutSeconds = 31))
+            }
+            fixture.offer(valid)
+            assertEquals("prepared", fixture.state.journal.phase)
+            assertEquals(valid, fixture.state.journal.candidate)
+            assertEquals(active.journal.active, fixture.state.journal.active)
+            assertEquals(active.journal.lastGood, fixture.state.journal.lastGood)
+        }
+    }
 
     @Test fun signedPureLeaseUsesWorkerAuthorityAndCurrentReceiptWithoutHandlerHashing() {
         AssignedPolicyContinuityFixture(config()).use { f ->

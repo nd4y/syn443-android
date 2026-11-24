@@ -507,6 +507,11 @@ CONTINUITY_REQUIRED = {'jvm': [('io.syn443.decision.RouteFrontierResumeTest', 'f
 if mode in CONTINUITY_REQUIRED:
     assert set(CONTINUITY_REQUIRED[mode]) <= set(identities), "Missing actual policy/search continuity outcomes"
 
+if mode == "emulator":
+    assert ("io.syn443.android.AssignedPolicyRuntimeContinuityTest",
+            "rejectedPoliciesKeepCurrentAssignmentAndRuntimeAuthority") in identities, \
+        "Missing assignment rejection and retained runtime authority outcome"
+
 
 # Passive symptoms request a budgeted fresh check and never establish failure.
 RECOVERY_RESERVE_REQUIRED = {'jvm': [('io.syn443.decision.AdaptiveProbeBudgetTest', 'routineSixLeavesTwoRecoveryStartsAndMinuteBoundaryRemainsStrict'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'repeatedReadinessAndCpuQuantaDoNotChargeOrRelaxFiveSecondSpacing'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'routineNinetySixReservesHourCapacityButTotalOneTwentyEightStillCapsAllWork'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'sixteenGroupsCanMaintainContinuouslyAndRecoverAtOldFifteenMinuteThirtySixSecondExhaustion'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'invalidOrBackwardBootTimePermanentlySealsWithoutRefillingHistory'), ('io.syn443.decision.AdaptiveProbeBudgetTest', 'cadenceIsBoundedAndDiagnosticsNeverExposeAdmissionHistory')], 'emulator': [('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'sixteenHealthyGroupsReserveRecoveryAfterNinetySixForcedRoutineStarts'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'malformedStaleForeignAndOldABASelectionHintsCannotChangeRoutesOrStartWork'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'duplicateHeartbeatsDoNotRequeueACompletedHintOrGrantMissingACKToken'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'busyAndPendingNativeOwnersKeepOneAdmissionAndHungOwnerRequiresRetirement'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'wrongSelectedReceiptCannotMintTokenOrReadinessAndValidACKIsConsumedOnce'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'sixteenGroupsSustainTwoHoursOfPacedMaintenanceWithRecoveryCapacity'), ('io.syn443.android.AdaptiveRecoveryAdmissionTest', 'forceAndRealContextChangesPreserveMinuteAdmissionDebt')]}
