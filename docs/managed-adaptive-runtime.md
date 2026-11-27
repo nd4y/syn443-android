@@ -148,6 +148,11 @@ budget remains charged. A matching native outcome advances the frontier, and
 an owner or route-context change clears the retained candidate. Retention does
 not supply a route result or authorize packets.
 
+If a rejected handoff had already acquired a half-open trial, its retained
+candidate waits for that trial's original deadline. A manual check keeps the
+deadline. Other due groups still get their normal turns, and a later probe
+requires a new admission.
+
 Actual admitted TCP read/write failures can request a fresh check through the
 existing heartbeat. A selector has one bounded hint slot. Three independent
 owned flows must complete with a finite recognized network error inside30s;

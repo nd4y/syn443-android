@@ -566,6 +566,51 @@ class AdaptiveAdmissionCoordinatorTest {
         }
     }
 
+    @Test fun preJniRejectionKeepsHalfOpenFrontierCandidateUntilItsTrialExpires() {
+        Harness(config(publicExit = true, choices = 2)).use { h ->
+            h.ready(1_000)
+            fun failFirst(now: Long) {
+                val probe = h.begin(now)
+                assertEquals("hop-000", probe.getJSONArray("hops").getString(0))
+                h.failed(probe, now + 100)
+            }
+            fun leaveAlternativeEligible(now: Long) {
+                val probe = h.begin(now)
+                assertEquals("hop-001", probe.getJSONArray("hops").getString(0))
+                h.report(h.result(probe, "probe_unavailable"), now + 100)
+            }
+            failFirst(1_000)
+            leaveAlternativeEligible(7_000)
+            failFirst(13_000)
+            leaveAlternativeEligible(19_000)
+
+            val trial = h.begin(50_000)
+            assertEquals("hop-000", trial.getJSONArray("hops").getString(0))
+            val deadline = trial.getLong("retryUntilBootMs")
+            assertEquals(65_100L, deadline)
+            val rejection = checkNotNull(AdaptiveHandoff.parseRejection(
+                JSONObject(checkNotNull(AdaptiveHandoff.rejection(trial)))))
+            h.reject(rejection, 51_001)
+
+            val charged = h.admission.reservations.toList()
+            for (now in listOf(57_001L, 58_001L, deadline - 1)) {
+                h.controller.force()
+                h.tick(now)
+                assertFalse(h.admission.hasPending)
+                assertEquals(charged, h.admission.reservations)
+                assertFalse(h.view().getBoolean("requiredReady"))
+            }
+            val retried = h.begin(deadline)
+            assertEquals("hop-000", retried.getJSONArray("hops").getString(0))
+            assertNotEquals(trial.getString("request"), retried.getString("request"))
+            assertEquals(deadline + 15_100, retried.getLong("retryUntilBootMs"))
+            assertEquals(listOf(1_000L, 7_000L, 13_000L, 19_000L, 50_000L, deadline),
+                h.admission.reservations.map { it.first })
+            h.selected(retried, deadline + 100)
+            assertTrue(h.view().getBoolean("requiredReady"))
+        }
+    }
+
     @Test fun sixteenGroupsRetainFairProgressRoutineReserveAndHourlyDebtAcrossRebind() {
         Harness(config(groups = 16)).use { h ->
             h.ready(1_000)

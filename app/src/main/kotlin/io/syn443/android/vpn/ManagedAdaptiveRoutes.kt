@@ -28,7 +28,9 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private data class WarmPath(val hops: List<String>, val measuredAt: Long) {
         fun fresh(now: Long) = now - measuredAt in 0L until 120_000L
     }
-    private data class FrontierCandidate(val path: PlannedPath, val exhausted: Boolean)
+    private data class FrontierCandidate(val path: PlannedPath, val exhausted: Boolean) {
+        var rejectedTrialUntil: Long? = null
+    }
 
     private data class Group(var frontier:RouteFrontier?=null,var current:PlannedPath?=null,
         var frontierCandidate:FrontierCandidate?=null,
@@ -627,6 +629,12 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         }
         val frontierCandidate=group.frontierCandidate.takeIf {preferred==null}
         val candidate=preferred ?: checkNotNull(frontierCandidate).path
+        val rejectedTrial=group.frontierCandidate?.takeIf {it.path.id==candidate.id}?.rejectedTrialUntil
+        if(rejectedTrial!=null && now<rejectedTrial) {
+            // Force can request a fair turn, but cannot release this path's existing trial.
+            group.nextAt=rejectedTrial
+            return
+        }
         val health=checkNotNull(memory).view(current,key(groupID,candidate),now)
         if(health.readiness in setOf(PathReadiness.QUARANTINED,PathReadiness.HALF_OPEN,PathReadiness.CONFIG_CHANGE_REQUIRED)) {
             if(frontierCandidate!=null)group.frontierCandidate=null
@@ -688,9 +696,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         pending=next
         val handedOff=try {work.handoff(command,latest)}catch(_:Exception) {false}
         if(!handedOff) {
-            if(pending===next)pending=null
-            group.nextAt=at+5_000
-            markSearch(work.group,AdaptiveSearchState.BUDGET_WAIT)
+            if(pending===next)deferRejectedHandoff(next,at)
             return
         }
         cpuYields.remove(work.group)
@@ -698,6 +704,19 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         lastCommandAt=at
         markSearch(work.group,AdaptiveSearchState.SEARCHING)
         if(work.explore)group.exploreAt=at+300_000
+    }
+    private fun deferRejectedHandoff(work:Pending, now:Long) {
+        pending=null
+        val group=groups.getValue(work.group)
+        val held=work.frontierCandidate
+        val trial=work.retryUntil
+        var nextAt=now+5_000
+        if(held!=null && held===group.frontierCandidate && trial!=null) {
+            held.rejectedTrialUntil=trial
+            nextAt=maxOf(nextAt,trial)
+        }
+        group.nextAt=nextAt
+        markSearch(work.group,AdaptiveSearchState.BUDGET_WAIT)
     }
     /** A closed host rejection proves only that this start was not passed to
      * JNI. It never supplies a route measurement, selection or bad-proxy fact. */
@@ -707,11 +726,9 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             if(work.action!="probe" || rejection.request!=work.request || rejection.nativeEpoch!=work.nativeEpoch ||
                 rejection.scope!=work.nativeScope || nativeEpoch!=work.nativeEpoch || nativeScope!=work.nativeScope ||
                 now<work.startedAt || !advanceClock(now))return
-            pending=null
-            groups.getValue(work.group).nextAt=now+5_000
-            markSearch(work.group,AdaptiveSearchState.BUDGET_WAIT)
             // An already acquired retry keeps its existing bounded 15s fence;
             // local cancellation must not erase its cooldown or invent failure.
+            deferRejectedHandoff(work,now)
         } finally {publishSearch()}
     }
     fun force() {groups.values.forEach {it.nextAt=0;it.forceCheck=it.current!=null}}
