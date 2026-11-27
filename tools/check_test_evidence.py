@@ -977,6 +977,12 @@ DURABLE_BUDGET_REQUIRED = {'jvm': [('io.syn443.decision.AdaptiveProbeCheckpointT
               ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
                'busyDeniedAndLateGrantsLeaveCandidateEligibleWithoutCommands'),
               ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'deniedFrontierCandidateKeepsItsPlaceWithoutBlockingAnotherGroup'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'onlyNativeOutcomeAdvancesFrontierAfterHandoffRefusals'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'newNetworkScopeRestartsFrontierInsteadOfBorrowingHeldCandidate'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
                'networkPolicyAndOwnerRebindsRejectDelayedAdmission'),
               ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
                'nativeEpochScopeAndReadinessChangesRejectDelayedAdmission'),
@@ -990,7 +996,7 @@ DURABLE_BUDGET_REQUIRED = {'jvm': [('io.syn443.decision.AdaptiveProbeCheckpointT
                'sixteenGroupsRetainFairProgressRoutineReserveAndHourlyDebtAcrossRebind')]}
 if mode in DURABLE_BUDGET_REQUIRED:
     required = set(DURABLE_BUDGET_REQUIRED[mode])
-    assert len(required) == len(DURABLE_BUDGET_REQUIRED[mode]) == (7 if mode == "jvm" else 18), "Duplicate durable budget requirement"
+    assert len(required) == len(DURABLE_BUDGET_REQUIRED[mode]) == (7 if mode == "jvm" else 21), "Duplicate durable budget requirement"
     assert required <= set(identities), "Missing exact durable adaptive budget checkpoint or storage outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/decision/src/test/kotlin/io/syn443/decision" if mode == "jvm" else "app/src/androidTest/kotlin/io/syn443/android"

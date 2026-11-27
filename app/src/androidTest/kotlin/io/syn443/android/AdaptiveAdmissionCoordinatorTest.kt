@@ -160,8 +160,8 @@ class AdaptiveAdmissionCoordinatorTest {
         override fun close() { RouteSnapshot.owner(null); RouteSnapshot.configure(null, "") }
     }
 
-    private fun config(groups: Int = 1, publicExit: Boolean = false) =
-        ManagedAdaptiveRoutesFairnessTest().config(choices = 1, groupCount = groups, publicExit = publicExit)
+    private fun config(groups: Int = 1, publicExit: Boolean = false, choices: Int = 1) =
+        ManagedAdaptiveRoutesFairnessTest().config(choices = choices, groupCount = groups, publicExit = publicExit)
     private fun binding(raw: String, revision: Long, until: Long) =
         AdaptivePolicyBinding(revision, Policy.hash(raw), Policy.hash("synthetic-admission-authority"), until, 1)
 
@@ -236,7 +236,7 @@ class AdaptiveAdmissionCoordinatorTest {
     }
 
     @Test fun busyDeniedAndLateGrantsLeaveCandidateEligibleWithoutCommands() {
-        Harness(config()).use { h ->
+        Harness(config(choices = 2)).use { h ->
             h.ready(1_000)
             h.admission.ownerBusy = true
             h.tick(1_000)
@@ -314,6 +314,77 @@ class AdaptiveAdmissionCoordinatorTest {
             assertEquals(5, h.admission.reservations.size) // Rejected handoff was charged, never refunded.
             assertTrue(h.view().getBoolean("requiredReady"))
             assertFalse(h.controller.requiresRetirement())
+        }
+    }
+
+    @Test fun deniedFrontierCandidateKeepsItsPlaceWithoutBlockingAnotherGroup() {
+        Harness(config(groups = 2, choices = 2)).use { h ->
+            h.ready(1_000)
+            h.admission.denyNext = true
+            h.tick(1_000)
+            assertNull(h.complete(1_100))
+            assertTrue(h.handoffFrames.isEmpty())
+
+            val other = h.begin(2_000)
+            assertEquals("group-01", other.getString("group"))
+            assertEquals("hop-000", other.getJSONArray("hops").getString(0))
+            h.selected(other, 2_100)
+
+            h.tick(7_999)
+            assertFalse(h.admission.hasPending)
+            val retry = h.begin(8_000)
+            assertEquals("group-00", retry.getString("group"))
+            assertEquals("hop-000", retry.getJSONArray("hops").getString(0))
+            assertEquals(listOf(2_000L, 8_000L), h.admission.reservations.map { it.first })
+        }
+    }
+
+    @Test fun onlyNativeOutcomeAdvancesFrontierAfterHandoffRefusals() {
+        Harness(config(choices = 2)).use { h ->
+            h.ready(1_000)
+            h.acceptHandoff = false
+            h.tick(1_000)
+            assertNull(h.complete(1_100))
+            assertEquals(1, h.handoffFrames.size)
+            h.acceptHandoff = true
+
+            val handedOff = h.begin(7_000)
+            assertEquals("hop-000", handedOff.getJSONArray("hops").getString(0))
+            val rejection = checkNotNull(AdaptiveHandoff.parseRejection(
+                JSONObject(checkNotNull(AdaptiveHandoff.rejection(handedOff)))))
+            h.reject(rejection, 8_001)
+            assertEquals("not_checked", h.view().getJSONArray("routes").getJSONObject(0).getString("reason"))
+
+            val retry = h.begin(13_001)
+            assertEquals("hop-000", retry.getJSONArray("hops").getString(0))
+            assertNotEquals(handedOff.getString("request"), retry.getString("request"))
+            h.failed(retry, 13_101)
+            val next = h.begin(19_001)
+            assertEquals("hop-001", next.getJSONArray("hops").getString(0))
+            assertEquals(listOf(1_000L, 7_000L, 13_001L, 19_001L), h.admission.reservations.map { it.first })
+        }
+    }
+
+    @Test fun newNetworkScopeRestartsFrontierInsteadOfBorrowingHeldCandidate() {
+        Harness(config(choices = 2)).use { h ->
+            h.ready(1_000)
+            val first = h.begin(1_000)
+            assertEquals("hop-000", first.getJSONArray("hops").getString(0))
+            h.failed(first, 1_100)
+
+            h.acceptHandoff = false
+            h.tick(7_000)
+            assertNull(h.complete(7_100))
+            val refused = JSONObject(h.handoffFrames.last().getString("commandJson"))
+            assertEquals("hop-001", refused.getJSONArray("hops").getString(0))
+
+            h.rebind(h.scope.copy(network = h.scope.network + 1), 1, 7_200)
+            h.acceptHandoff = true
+            h.tick(12_999)
+            assertFalse(h.admission.hasPending)
+            val fresh = h.begin(13_000)
+            assertEquals("hop-000", fresh.getJSONArray("hops").getString(0))
+            assertEquals(listOf(1_000L, 7_000L, 13_000L), h.admission.reservations.map { it.first })
         }
     }
 

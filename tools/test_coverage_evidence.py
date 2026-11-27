@@ -351,7 +351,7 @@ class CoverageEvidenceTest(unittest.TestCase):
         for mode, floor, folder, classes in [
             ('jvm', 21, 'core/decision/src/test/kotlin/io/syn443/decision', {'io.syn443.decision.AdaptiveProbeCheckpointTest': 7}),
             ('emulator', 524, 'app/src/androidTest/kotlin/io/syn443/android', {
-                'io.syn443.android.AdaptiveProbeStoreTest': 10, 'io.syn443.android.AdaptiveAdmissionCoordinatorTest': 8}),
+                'io.syn443.android.AdaptiveProbeStoreTest': 10, 'io.syn443.android.AdaptiveAdmissionCoordinatorTest': 11}),
         ]:
             originals = {}
             expected = set()

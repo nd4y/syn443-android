@@ -141,6 +141,13 @@ is bounded by16 groups and cannot be erased by force. A manual refresh requests
 a routine current-path check without discarding its actual measurement time or
 borrowing recovery capacity.
 
+Each group retains at most one candidate already read from its frontier while
+admission or handoff is pending. A storage refusal or confirmed pre-JNI
+rejection leaves that candidate eligible for the next fair turn. Any prepaid
+budget remains charged. A matching native outcome advances the frontier, and
+an owner or route-context change clears the retained candidate. Retention does
+not supply a route result or authorize packets.
+
 Actual admitted TCP read/write failures can request a fresh check through the
 existing heartbeat. A selector has one bounded hint slot. Three independent
 owned flows must complete with a finite recognized network error inside30s;
