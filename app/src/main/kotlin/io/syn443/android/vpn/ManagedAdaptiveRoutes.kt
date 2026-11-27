@@ -28,8 +28,12 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
     private data class WarmPath(val hops: List<String>, val measuredAt: Long) {
         fun fresh(now: Long) = now - measuredAt in 0L until 120_000L
     }
+    private data class FrontierCandidate(val path: PlannedPath, val exhausted: Boolean) {
+        var rejectedTrialUntil: Long? = null
+    }
 
     private data class Group(var frontier:RouteFrontier?=null,var current:PlannedPath?=null,
+        var frontierCandidate:FrontierCandidate?=null,
         var emptyPages:Int=0,var onlyFenced:Boolean=true,var firstRetryAt:Long?=null,
         var measuredAt:Long=0,var latency:Long=0,var nextAt:Long=0,var exploreAt:Long=0,
         var selectedAt:Long=0,var improvementPath:PlannedPath?=null,var improvementCount:Int=0,
@@ -49,6 +53,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 else -> nextHint?.takeIf { it.fresh(now) }
             }
             frontierHints = emptyList()
+            frontierCandidate = null
         }
 
         fun beginFrontier(now: Long) {
@@ -71,11 +76,13 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         }
     }
     private data class Pending(val request:String,val group:String,val path:PlannedPath,val attempt:Long,val startedAt:Long,
-        val nativeEpoch:Long,val nativeScope:String,var action:String="probe",var latency:Long=0,var receipt:String="",var retries:Int=0,
+        val nativeEpoch:Long,val nativeScope:String,val frontierCandidate:FrontierCandidate?,
+        var action:String="probe",var latency:Long=0,var receipt:String="",var retries:Int=0,
          var recovery:CurrentFailure?=null,var checkPlan:JSONObject?=null,var retryUntil:Long?=null,var measuredAt:Long=startedAt)
     private data class PendingAdmission(val request:String,val group:String,val path:PlannedPath,val attempt:Long,
         val startedAt:Long,val context:Context,val scope:RouteScope?,val mode:NetworkMode,
         val nativeEpoch:Long,val nativeScope:String,val leaseDeadlineElapsed:Long?,val explore:Boolean,
+        val frontierCandidate:FrontierCandidate?,
         val isCurrent:()->Boolean,val handoff:(JSONObject,Long)->Boolean)
     private val groups=wire.graph.groupIDs().associateWith {Group()}
     private val order=groups.keys.sortedWith(compareBy<String>({wire.groupTags()[it]!=priorityTag},{it}))
@@ -501,6 +508,10 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             group.nextAt = 0
             group.search = AdaptiveSearchState.SEARCH_INCOMPLETE
         }
+        // Only a matching native outcome advances an admitted frontier candidate.
+        // Denial or a known pre-JNI rejection never measured the retained path.
+        if(work.frontierCandidate!=null && group.frontierCandidate===work.frontierCandidate)
+            group.frontierCandidate=null
         pending=null
         markSearch(work.group,AdaptiveSearchState.SEARCH_INCOMPLETE)
         val binding = boundPolicy
@@ -573,9 +584,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val explore=routine && now-group.measuredAt<=120_000 && !group.forceCheck && unmetered && allowExplore && now>=group.exploreAt
         val recheck=group.current?.takeIf {group.forceCheck || !explore && !group.recheckFailed && (group.urgentRecheck || now-group.measuredAt>=maintenanceCadence)}
         val retryImprovement=group.improvementPath?.takeIf {!group.urgentRecheck && !group.forceCheck}
-        var candidate=retryImprovement?.takeIf {now-group.measuredAt<=120_000} ?: recheck
-        var exhausted=false
-        if(candidate==null) {
+        val preferred=retryImprovement?.takeIf {now-group.measuredAt<=120_000} ?: recheck
+        if(preferred==null && group.frontierCandidate==null) {
             if(group.frontier==null) {
                 group.beginFrontier(now)
                 group.frontier=wire.graph.frontier(groupID,current,mode,group.frontierHints,now,600_000)
@@ -599,10 +609,10 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 // ordinary64-slot CPU quantum and at most one I/O attempt.
                 batch=frontier.next(current,now,1,64)
             }
-            exhausted=batch.exhausted
+            val exhausted=batch.exhausted
             if(exhausted)group.frontier=null
-            candidate=batch.paths.firstOrNull()
-            if(candidate==null) {
+            val path=batch.paths.firstOrNull()
+            if(path==null) {
                 if(!exhausted && group.current==null) {
                     // There are unvisited signed positions. Yield one bounded CPU
                     // page and back off while no eligible path has been found.
@@ -614,19 +624,29 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
                 }
                 return
             }
+            group.frontierCandidate=FrontierCandidate(path,exhausted)
             group.emptyPages=0
+        }
+        val frontierCandidate=group.frontierCandidate.takeIf {preferred==null}
+        val candidate=preferred ?: checkNotNull(frontierCandidate).path
+        val rejectedTrial=group.frontierCandidate?.takeIf {it.path.id==candidate.id}?.rejectedTrialUntil
+        if(rejectedTrial!=null && now<rejectedTrial) {
+            // Force can request a fair turn, but cannot release this path's existing trial.
+            group.nextAt=rejectedTrial
+            return
         }
         val health=checkNotNull(memory).view(current,key(groupID,candidate),now)
         if(health.readiness in setOf(PathReadiness.QUARANTINED,PathReadiness.HALF_OPEN,PathReadiness.CONFIG_CHANGE_REQUIRED)) {
+            if(frontierCandidate!=null)group.frontierCandidate=null
             health.retryAtMs?.let {retry->group.firstRetryAt=minOf(group.firstRetryAt ?: retry,retry)}
-            group.nextAt=if(exhausted && group.current==null && group.onlyFenced)afterScan(group,now) else now+1000
+            group.nextAt=if(frontierCandidate?.exhausted==true && group.current==null && group.onlyFenced)afterScan(group,now) else now+1000
             return
         }
         group.onlyFenced=false
         attempt++
         val request=UUID.randomUUID().toString()
         val admission=PendingAdmission(request,groupID,candidate,attempt,now,current,routeScope,mode,nativeEpoch,nativeScope,
-            boundPolicy?.leaseDeadlineElapsed,explore,isCurrent,handoff)
+            boundPolicy?.leaseDeadlineElapsed,explore,frontierCandidate,isCurrent,handoff)
         pendingAdmission=admission
         markSearch(groupID,AdaptiveSearchState.BUDGET_WAIT)
         val queued=try {budget.request(now,routine) {result->
@@ -662,7 +682,8 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         val health=checkNotNull(memory).view(work.context,key(work.group,work.path),now)
         if(health.readiness in setOf(PathReadiness.QUARANTINED,PathReadiness.HALF_OPEN,PathReadiness.CONFIG_CHANGE_REQUIRED))return
         val command=frame("start").put("request",work.request).put("group",work.group).put("hops",JSONArray(work.path.hops))
-        val next=Pending(work.request,work.group,work.path,work.attempt,work.startedAt,work.nativeEpoch,work.nativeScope)
+        val next=Pending(work.request,work.group,work.path,work.attempt,work.startedAt,work.nativeEpoch,work.nativeScope,
+            work.frontierCandidate)
         val latest=minOf(result.latestStartMs,work.startedAt+11_999,work.leaseDeadlineElapsed?.minus(1) ?: Decision.MAX_TIME)
         val at=admissionTime(work,result,now) ?: return
         if(at>latest)return
@@ -675,9 +696,7 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         pending=next
         val handedOff=try {work.handoff(command,latest)}catch(_:Exception) {false}
         if(!handedOff) {
-            if(pending===next)pending=null
-            group.nextAt=at+5_000
-            markSearch(work.group,AdaptiveSearchState.BUDGET_WAIT)
+            if(pending===next)deferRejectedHandoff(next,at)
             return
         }
         cpuYields.remove(work.group)
@@ -685,6 +704,19 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
         lastCommandAt=at
         markSearch(work.group,AdaptiveSearchState.SEARCHING)
         if(work.explore)group.exploreAt=at+300_000
+    }
+    private fun deferRejectedHandoff(work:Pending, now:Long) {
+        pending=null
+        val group=groups.getValue(work.group)
+        val held=work.frontierCandidate
+        val trial=work.retryUntil
+        var nextAt=now+5_000
+        if(held!=null && held===group.frontierCandidate && trial!=null) {
+            held.rejectedTrialUntil=trial
+            nextAt=maxOf(nextAt,trial)
+        }
+        group.nextAt=nextAt
+        markSearch(work.group,AdaptiveSearchState.BUDGET_WAIT)
     }
     /** A closed host rejection proves only that this start was not passed to
      * JNI. It never supplies a route measurement, selection or bad-proxy fact. */
@@ -694,11 +726,9 @@ internal class ManagedAdaptiveRoutes private constructor(private val wire:Adapti
             if(work.action!="probe" || rejection.request!=work.request || rejection.nativeEpoch!=work.nativeEpoch ||
                 rejection.scope!=work.nativeScope || nativeEpoch!=work.nativeEpoch || nativeScope!=work.nativeScope ||
                 now<work.startedAt || !advanceClock(now))return
-            pending=null
-            groups.getValue(work.group).nextAt=now+5_000
-            markSearch(work.group,AdaptiveSearchState.BUDGET_WAIT)
             // An already acquired retry keeps its existing bounded 15s fence;
             // local cancellation must not erase its cooldown or invent failure.
+            deferRejectedHandoff(work,now)
         } finally {publishSearch()}
     }
     fun force() {groups.values.forEach {it.nextAt=0;it.forceCheck=it.current!=null}}

@@ -173,6 +173,8 @@ if mode=="emulator":
         ("io.syn443.android.VpnPrimaryActionTest", "startRequiresKnownReadyStateAndStopDoesNotRequireReadiness"),
         ("io.syn443.android.VpnPrimaryActionTest", "statusRequiresCurrentEngineProofAndKeepsUnrecognizedIntentVisible"),
         ("io.syn443.android.VpnPrimaryActionTest", "tileDistinguishesPortalLoginAndUnknownIntentWithoutACommandGuess"),
+        ("io.syn443.android.VpnPrimaryActionTest", "diagnosticsHideCachedResultsAndActionsUntilTheControllerRecovers"),
+        ("io.syn443.android.VpnPrimaryActionTest", "statusAcceptsOnlyTypedCurrentGenerationsOrExplicitLockedBoot"),
     } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required VPN home UI cases missing"
     assert {("io.syn443.android.RouteSnapshotTest",name) for name in {
         "sshWithoutServerPinCannotBeImportedAssignedOrRendered",
@@ -215,6 +217,8 @@ if mode=="health":
         'positionalDiagnosticsKeepEachFailureSeparateFromLaterSuccessOrMismatch',
         'dnsResultsRequireAFailedResolutionAndNeverSurviveCancellation',
         'checksNeverStartedDoNotInheritAStageOrNetworkFailure',
+        'exceptionalDnsCompletionAtBatchDeadlineIsNotAFailedProbe',
+        'exceptionalDnsCompletionAtCheckDeadlineIsTimeoutWithoutRcode',
         'oneAdmissionRetryUsesFreedCapacityAndRunsTheProbeOnlyOnce'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required per-check diagnostic cases missing'
     required={('io.syn443.health.AddressFallbackTest',name) for name in {
         'unavailableFirstFamilyFallsBackWithoutExtraWorkersOrLeakedSockets',
@@ -368,6 +372,12 @@ if mode=="emulator":
     }
     observed = {(case.get("classname"), case.get("name")) for case in cases}
     assert {("io.syn443.android." + suite, name) for suite, name in account_telemetry_cases} <= observed, "Account/telemetry evidence missing"
+    photo_cases = {
+        ("io.syn443.android.ChatStorageTest", "chatPngPhotoDownscalesAndPreservesOriginal"),
+        ("io.syn443.android.ChatStorageTest", "chatWebpPhotoDownscalesAndPreservesOriginal"),
+        ("io.syn443.android.ChatStorageTest", "chatPhotoRejectsOverLimitPixelsAndCleansScratch"),
+    }
+    assert photo_cases <= observed, "Missing chat photo format or pixel-limit evidence"
     assert ("io.syn443.android.LoginControllerTest", "cachedPolicyRefreshUsesTheSignedDeadlineOrFiveMinuteLimit") in {(c.get("classname"),c.get("name")) for c in cases}, "Signed refresh deadline coverage missing"
     route_required.add("adbLocalConfigPreviewDoesNotWriteAndApplyFencesStaleBase")
     route_required.add("assignmentQuotedStringStreamingMatchesReferenceDefaultsEscapesAndUnicode")
@@ -977,6 +987,12 @@ DURABLE_BUDGET_REQUIRED = {'jvm': [('io.syn443.decision.AdaptiveProbeCheckpointT
               ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
                'busyDeniedAndLateGrantsLeaveCandidateEligibleWithoutCommands'),
               ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'deniedFrontierCandidateKeepsItsPlaceWithoutBlockingAnotherGroup'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'onlyNativeOutcomeAdvancesFrontierAfterHandoffRefusals'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'newNetworkScopeRestartsFrontierInsteadOfBorrowingHeldCandidate'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
                'networkPolicyAndOwnerRebindsRejectDelayedAdmission'),
               ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
                'nativeEpochScopeAndReadinessChangesRejectDelayedAdmission'),
@@ -987,10 +1003,12 @@ DURABLE_BUDGET_REQUIRED = {'jvm': [('io.syn443.decision.AdaptiveProbeCheckpointT
               ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
                'deniedHalfOpenAdmissionDoesNotAcquireRetryOwnership'),
               ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
+               'preJniRejectionKeepsHalfOpenFrontierCandidateUntilItsTrialExpires'),
+              ('io.syn443.android.AdaptiveAdmissionCoordinatorTest',
                'sixteenGroupsRetainFairProgressRoutineReserveAndHourlyDebtAcrossRebind')]}
 if mode in DURABLE_BUDGET_REQUIRED:
     required = set(DURABLE_BUDGET_REQUIRED[mode])
-    assert len(required) == len(DURABLE_BUDGET_REQUIRED[mode]) == (7 if mode == "jvm" else 18), "Duplicate durable budget requirement"
+    assert len(required) == len(DURABLE_BUDGET_REQUIRED[mode]) == (7 if mode == "jvm" else 22), "Duplicate durable budget requirement"
     assert required <= set(identities), "Missing exact durable adaptive budget checkpoint or storage outcomes"
     for classname in {classname for classname, _ in required}:
         folder = "core/decision/src/test/kotlin/io/syn443/decision" if mode == "jvm" else "app/src/androidTest/kotlin/io/syn443/android"

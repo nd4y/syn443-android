@@ -2,6 +2,53 @@ package io.syn443.android.vpn
 
 import org.json.JSONObject
 
+internal fun JSONObject.vpnIntentGeneration(): Long? =
+    when (val value = opt("generation")) {
+        is Int -> value.toLong()
+        is Long -> value
+        else -> null
+    }?.takeIf { it >= 0 }
+
+/** Intent acknowledgements can change the action immediately, but only a
+ * current controller observation supplies live status and diagnostics. */
+internal class VpnHomeStatus private constructor(
+    val status: JSONObject,
+    val available: Boolean?,
+    private val generationFloor: Long,
+) {
+    constructor() : this(JSONObject(), null, -1)
+
+    fun awaitingPoll(): VpnHomeStatus = VpnHomeStatus(status, null, generationFloor)
+
+    fun afterPoll(reply: JSONObject?): VpnHomeStatus {
+        if (reply != null) {
+            if (reply.isLockedObservation())
+                return VpnHomeStatus(LifecycleAccess.lockedStatus(), true, generationFloor)
+            val generation = reply.vpnIntentGeneration()
+            val phase = reply.opt("phase")
+            // An initial unlocked state may omit phase before the first command.
+            if (generation != null && generation >= generationFloor && reply.opt("desiredOn") is Boolean &&
+                (phase == null || phase is String) && phase != "NeedsUnlock")
+                return VpnHomeStatus(reply, true, generation)
+        }
+        return VpnHomeStatus(status, false, generationFloor)
+    }
+
+    fun afterIntent(reply: JSONObject): VpnHomeStatus {
+        val generation = reply.vpnIntentGeneration() ?: return this
+        val desiredOn = reply.opt("desiredOn") as? Boolean ?: return this
+        if (generation < generationFloor) return this
+        val intent = JSONObject().put("generation", generation).put("desiredOn", desiredOn)
+        return VpnHomeStatus(intent, null, generation)
+    }
+
+    private fun JSONObject.isLockedObservation(): Boolean =
+        opt("phase") == "NeedsUnlock" && opt("reason") == "credential_storage_locked" &&
+            opt("generation") === JSONObject.NULL && opt("desiredOn") === JSONObject.NULL &&
+            opt("desiredOnKnown") == false && opt("engineActive") == false &&
+            optJSONObject("osPolicy")?.let { it.opt("unlocked") == false && it.opt("known") == false } == true
+}
+
 internal fun JSONObject.hasBlockedAccountPolicy(): Boolean =
     optJSONObject("policy")?.let { it.optString("source") == "account" && it.optString("phase") == "blocked" } == true
 
