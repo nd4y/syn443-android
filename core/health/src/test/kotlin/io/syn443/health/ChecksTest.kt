@@ -7,6 +7,7 @@ import java.io.ByteArrayInputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.*
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 class ChecksTest {
@@ -126,6 +127,35 @@ class ChecksTest {
             val job = CheckJob(pool, Probe { _, _ -> clock.set(200); true }, { clock.get() }, 100, 1_000)
             assertEquals(Outcome.FAIL, job.run(listOf(check)).outcomes.single())
             assertEquals(Failure.TIMEOUT, job.failure)
+        }
+    }
+    @Test fun exceptionalDnsCompletionAtBatchDeadlineIsNotAFailedProbe() {
+        assertDnsCompletionAt(3_000, CheckObservation(Outcome.DEADLINE, stage = Stage.RESOLVE))
+    }
+    @Test fun exceptionalDnsCompletionAtCheckDeadlineIsTimeoutWithoutRcode() {
+        assertDnsCompletionAt(1_999, CheckObservation(Outcome.FAIL, Failure.DNS, Stage.RESOLVE, DnsResult.NXDOMAIN))
+        assertDnsCompletionAt(2_000, CheckObservation(Outcome.FAIL, Failure.TIMEOUT, Stage.RESOLVE))
+    }
+    private fun assertDnsCompletionAt(completion: Long, expected: CheckObservation) {
+        ProbePool().use { pool ->
+            val clock = AtomicLong()
+            val samples = AtomicInteger()
+            val waitBudgetRead = CountDownLatch(1)
+            val job = CheckJob(pool, Probe { _, scope ->
+                scope.enter(Stage.RESOLVE)
+                kotlin.check(waitBudgetRead.await(1, TimeUnit.SECONDS))
+                clock.set(completion)
+                throw ProbeDnsException(DnsResult.NXDOMAIN)
+            }, clockMillis = {
+                // The fifth sample supplies Future.get's wait budget. Keep
+                // that budget positive while releasing the late completion.
+                val now = clock.get()
+                if (samples.incrementAndGet() == 5) waitBudgetRead.countDown()
+                now
+            }, checkMillis = 2_000, batchMillis = 3_000)
+            assertEquals(expected, job.run(listOf(check)).observations.single())
+            assertEquals(expected.failure, job.failure)
+            assertEquals(expected.stage.takeIf { expected.failure != null }, job.failureStage)
         }
     }
     @Test fun timeoutFreezesEachStageAndLateResolverCannotAdvanceIt() {

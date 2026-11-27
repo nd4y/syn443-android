@@ -173,6 +173,8 @@ if mode=="emulator":
         ("io.syn443.android.VpnPrimaryActionTest", "startRequiresKnownReadyStateAndStopDoesNotRequireReadiness"),
         ("io.syn443.android.VpnPrimaryActionTest", "statusRequiresCurrentEngineProofAndKeepsUnrecognizedIntentVisible"),
         ("io.syn443.android.VpnPrimaryActionTest", "tileDistinguishesPortalLoginAndUnknownIntentWithoutACommandGuess"),
+        ("io.syn443.android.VpnPrimaryActionTest", "diagnosticsHideCachedResultsAndActionsUntilTheControllerRecovers"),
+        ("io.syn443.android.VpnPrimaryActionTest", "statusAcceptsOnlyTypedCurrentGenerationsOrExplicitLockedBoot"),
     } <= {(c.get("classname"),c.get("name")) for c in cases}, "Required VPN home UI cases missing"
     assert {("io.syn443.android.RouteSnapshotTest",name) for name in {
         "sshWithoutServerPinCannotBeImportedAssignedOrRendered",
@@ -215,6 +217,8 @@ if mode=="health":
         'positionalDiagnosticsKeepEachFailureSeparateFromLaterSuccessOrMismatch',
         'dnsResultsRequireAFailedResolutionAndNeverSurviveCancellation',
         'checksNeverStartedDoNotInheritAStageOrNetworkFailure',
+        'exceptionalDnsCompletionAtBatchDeadlineIsNotAFailedProbe',
+        'exceptionalDnsCompletionAtCheckDeadlineIsTimeoutWithoutRcode',
         'oneAdmissionRetryUsesFreedCapacityAndRunsTheProbeOnlyOnce'}} <= {(c.get('classname'),c.get('name')) for c in cases}, 'Required per-check diagnostic cases missing'
     required={('io.syn443.health.AddressFallbackTest',name) for name in {
         'unavailableFirstFamilyFallsBackWithoutExtraWorkersOrLeakedSockets',

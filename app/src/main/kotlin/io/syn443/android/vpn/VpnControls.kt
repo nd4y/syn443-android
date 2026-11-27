@@ -2,10 +2,12 @@ package io.syn443.android.vpn
 
 import android.app.Activity
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
-import android.net.VpnService
+import android.provider.Settings
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,12 +43,15 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 private val controlUri = "content://io.syn443.control".toUri()
+private fun Bundle.vpnStatusObject(): JSONObject? =
+    getString("json")?.takeIf { getBoolean("ok") }?.let { runCatching { JSONObject(it) }.getOrNull() }
 
 @Composable
 fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> Unit = {}) {
     val context = LocalContext.current
-    var status by remember { mutableStateOf(JSONObject()) }
-    var statusAvailable by remember { mutableStateOf<Boolean?>(null) }
+    var homeStatus by remember { mutableStateOf(VpnHomeStatus()) }
+    val status = homeStatus.status
+    val statusAvailable = homeStatus.available
     var message by remember { mutableStateOf("") }
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
     var revealOnOpen by remember { mutableStateOf(false) }
@@ -58,7 +63,11 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
     val lifecycle = (context as LifecycleOwner).lifecycle
     var visible by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
     DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, _ -> visible = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
+        val observer = LifecycleEventObserver { _, _ ->
+            val started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            if (visible && !started) homeStatus = homeStatus.awaitingPoll()
+            visible = started
+        }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
@@ -81,16 +90,12 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
         return accepted
     }
     fun updateIntent(reply: Bundle) {
-        val accepted = reply.getString("json")?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return
-        val generation = accepted.optLong("generation", -1)
-        if (generation >= status.optLong("generation", -1) && accepted.has("desiredOn")) {
-            status = JSONObject(status.toString())
-                .put("generation", generation)
-                .put("desiredOn", accepted.getBoolean("desiredOn"))
-                .put("phase", accepted.optString("phase"))
-                .put("reason", accepted.optString("reason"))
-        }
+        val accepted = reply.vpnStatusObject() ?: return
+        homeStatus = homeStatus.afterIntent(accepted)
     }
+    fun readStatus(): JSONObject? = runCatching {
+        context.contentResolver.call(controlUri, "status", null, null)?.vpnStatusObject()
+    }.getOrNull()
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) message = "Уведомления VPN отключены в Android"
     }
@@ -127,17 +132,13 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
     LaunchedEffect(visible) {
         // Opening UI is never Connect, including after an Android Force stop.
         if (visible) withContext(Dispatchers.IO) { runCatching {
-            val raw = context.contentResolver.call(controlUri, "status", null, null)?.getString("json")
-            if (raw != null) context.contentResolver.call(controlUri, "foreground-open", JSONObject(raw).optLong("generation").toString(), null)
+            readStatus()?.vpnIntentGeneration()?.let { generation ->
+                context.contentResolver.call(controlUri, "foreground-open", generation.toString(), null)
+            }
         } }
         while (visible) {
-            val current = withContext(Dispatchers.IO) { runCatching {
-                context.contentResolver.call(controlUri, "status", null, null)?.getString("json")?.let(::JSONObject)
-            }.getOrNull() }
-            statusAvailable = current != null
-            if (current != null && (current.isNull("generation") || current.optLong("generation") >= status.optLong("generation", -1))) {
-                status = current
-            }
+            val current = withContext(Dispatchers.IO) { readStatus() }
+            homeStatus = homeStatus.afterPoll(current)
             delay(1_000)
         }
     }
@@ -153,16 +154,13 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
     }
     LaunchedEffect(consentGeneration) {
         if (consentGeneration >= 0) {
-            val raw = withContext(Dispatchers.IO) { context.contentResolver.call(controlUri, "status", null, null)?.getString("json") }
-            if (raw != null) {
-                val current = JSONObject(raw)
-                if (current.optBoolean("desiredOn") && current.optLong("generation") == consentGeneration)
-                    VpnService.prepare(context)?.let { consent.launch(it) }
-            }
+            val current = withContext(Dispatchers.IO) { readStatus() } ?: return@LaunchedEffect
+            if (current.opt("desiredOn") == true && current.vpnIntentGeneration() == consentGeneration)
+                VpnService.prepare(context)?.let { consent.launch(it) }
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        val desiredOn = if (status.isNull("desiredOn")) null else status.optBoolean("desiredOn")
+        val desiredOn = status.opt("desiredOn") as? Boolean
         val phase = status.optString("phase")
         val reason = status.optString("reason")
         val portal = statusAvailable == true && phase == "NoNetwork" && reason == "captive_portal"
@@ -221,29 +219,14 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
         if (detailsOpen) {
             val heading = remember { BringIntoViewRequester() }
             var headingPlaced by remember { mutableStateOf(false) }
-            RouteControls(status, routeHeading = {
+            VpnSnapshotDiagnostics(status, statusAvailable, routeHeading = {
                 RouteHeading(Modifier.bringIntoViewRequester(heading).onGloballyPositioned { headingPlaced = true })
             }) { method, arg ->
                 command(method, arg)
             }
             // Only the tap requests a reveal. Polls and restored scroll positions keep their place.
             if (revealOnOpen && headingPlaced) LaunchedEffect(Unit) { heading.bringIntoView() }
-            if (statusAvailable == true && desiredOn == true) PhysicalLinkDetails(status.optJSONObject("physicalLink"))
-            if (statusAvailable == true && desiredOn == true) {
-                for (detail in internetDnsFailures(status.optJSONObject("internetChecks"))) Text(detail)
-            }
-            if (status.optBoolean("testHealth")) Text("ТЕСТОВЫЙ СТЕНД: синтетический HTTP, проверка TLS не выполняется")
-            if (status.optString("reason").isNotEmpty()) Text("Диагностика: " + status.optString("reason"))
-            if (policy?.optBoolean("managed") == true) {
-                Text("Политика: ${policy.optString("phase")}", Modifier.testTag("policy-status"))
-                Text("Желаемая: ${policy.optString("desiredRevision", "-")}; активная: ${policy.optString("activeRevision", "-")}; рабочая: ${policy.optString("lastKnownGoodRevision", "-")}")
-                if (policy.optString("reason").isNotEmpty()) Text("Политика: ${policy.optString("reason")}")
-                Button(enabled=status.optBoolean("desiredOn") || policy.optString("source")=="account",
-                    onClick = { command("policy-refresh") }) { Text("Проверить обновление политики") }
-            }
-            val overlay = status.optJSONObject("netbird")
-            if (overlay != null) NetBirdControls(overlay) { method, arg -> command(method, arg) }
-            if (visible && statusAvailable == true) {
+            if (visible && statusAvailable == true && phase != "NeedsUnlock") {
                 key(status.optString("configRevision"), status.optLong("generation"), status.optLong("networkEpoch"),
                     policy?.optString("source"), policy?.optString("phase"), policy?.optString("activeRevision"),
                     policy?.optString("desiredRevision"), policy?.optString("activationGeneration")) {
@@ -327,6 +310,41 @@ fun VpnControls(consentGeneration: Long = -1, account: @Composable (Boolean) -> 
             Button(onClick = { importer.launch(arrayOf("application/json", "text/plain")) }, enabled = statusAvailable == true && desiredOn == false && policy?.optBoolean("managed") != true) { Text("Импорт конфигурации движка") }
         }
     }
+}
+
+@Composable
+internal fun VpnSnapshotDiagnostics(status: JSONObject, available: Boolean?,
+    routeHeading: @Composable () -> Unit = { RouteHeading() }, command: (String, String?) -> Unit) {
+    val locked = available == true && status.opt("phase") == "NeedsUnlock"
+    if (available != true || locked) {
+        routeHeading()
+        val message = when {
+            locked -> "Разблокируйте телефон, чтобы увидеть диагностику VPN"
+            available == null -> "Проверяем доступность диагностики"
+            else -> "Текущая диагностика VPN недоступна"
+        }
+        Text(message, Modifier.testTag("vpn-diagnostics-unknown").semantics { liveRegion = LiveRegionMode.Polite })
+        val context = LocalContext.current
+        SystemVpnProtection(null) { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) }
+        return
+    }
+    RouteControls(status, routeHeading, command)
+    if (status.opt("desiredOn") == true) {
+        PhysicalLinkDetails(status.optJSONObject("physicalLink"))
+        for (detail in internetDnsFailures(status.optJSONObject("internetChecks"))) Text(detail)
+    }
+    if (status.optBoolean("testHealth")) Text("ТЕСТОВЫЙ СТЕНД: синтетический HTTP, проверка TLS не выполняется")
+    val reason = status.optString("reason")
+    if (reason.isNotEmpty()) Text("Диагностика: $reason")
+    val policy = status.optJSONObject("policy")
+    if (policy?.optBoolean("managed") == true) {
+        Text("Политика: ${policy.optString("phase")}", Modifier.testTag("policy-status"))
+        Text("Желаемая: ${policy.optString("desiredRevision", "-")}; активная: ${policy.optString("activeRevision", "-")}; рабочая: ${policy.optString("lastKnownGoodRevision", "-")}")
+        if (policy.optString("reason").isNotEmpty()) Text("Политика: ${policy.optString("reason")}")
+        Button(enabled = status.optBoolean("desiredOn") || policy.optString("source") == "account",
+            onClick = { command("policy-refresh", null) }) { Text("Проверить обновление политики") }
+    }
+    status.optJSONObject("netbird")?.let { NetBirdControls(it, command) }
 }
 
 @Composable

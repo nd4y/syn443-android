@@ -1,5 +1,6 @@
 package io.syn443.android
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsEnabled
@@ -8,14 +9,21 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import io.syn443.android.vpn.LifecycleAccess
+import io.syn443.android.vpn.VpnHomeStatus
 import io.syn443.android.vpn.VpnPrimaryAction
+import io.syn443.android.vpn.VpnSnapshotDiagnostics
 import io.syn443.android.vpn.VpnStatusSummary
 import io.syn443.android.vpn.hasBlockedAccountPolicy
 import io.syn443.android.vpn.vpnStatusLabel
 import io.syn443.android.vpn.vpnTileIntent
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -78,6 +86,111 @@ class VpnPrimaryActionTest {
         assertNull(vpnTileIntent(null))
         expect("Проверяем состояние VPN")
         assertEquals("Состояние VPN временно недоступно", vpnStatusLabel(JSONObject(), false, false))
+    }
+
+    @Test fun diagnosticsHideCachedResultsAndActionsUntilTheControllerRecovers() {
+        fun snapshot(generation: Int, routeState: String, policyPhase: String): JSONObject {
+            val route = JSONObject().put("id", "synthetic-route").put("label", "Fixture").put("type", "direct")
+                .put("configured", true).put("required", false).put("state", routeState).put("reason", "ok")
+            return JSONObject().put("generation", generation).put("desiredOn", true).put("engineActive", true)
+                .put("routeHealth", JSONObject().put("routes", JSONArray().put(route)))
+                .put("policy", JSONObject().put("managed", true).put("source", "account").put("phase", policyPhase))
+        }
+        val model = mutableStateOf(VpnHomeStatus())
+        val old = snapshot(1, "working", "active")
+        compose.setContent {
+            MaterialTheme {
+                Column {
+                    VpnPrimaryAction(model.value.status.opt("desiredOn") as? Boolean, model.value.available == true,
+                        { error("No Connect was requested") }, { error("No Stop was requested") })
+                    VpnSnapshotDiagnostics(model.value.status, model.value.available) { _, _ ->
+                        error("No diagnostic command was requested")
+                    }
+                }
+            }
+        }
+        val unknown = compose.onNodeWithTag("vpn-diagnostics-unknown")
+        val route = compose.onNodeWithTag("route-1-state")
+        val check = compose.onNodeWithTag("routes-check")
+        val policy = compose.onNodeWithTag("policy-status")
+        val stop = compose.onNodeWithTag("vpn-disconnect")
+        unknown.assertTextEquals("Проверяем доступность диагностики")
+        route.assertDoesNotExist()
+
+        compose.runOnIdle { model.value = model.value.afterPoll(old) }
+        route.assertTextEquals("Проверка назначенной цели успешна")
+        check.assertIsEnabled()
+        policy.assertTextEquals("Политика: active")
+
+        compose.runOnIdle { model.value = model.value.awaitingPoll() }
+        unknown.assertTextEquals("Проверяем доступность диагностики")
+        route.assertDoesNotExist()
+        stop.assertIsEnabled()
+
+        compose.runOnIdle { model.value = model.value.afterPoll(null) }
+        unknown.assertTextEquals("Текущая диагностика VPN недоступна")
+        route.assertDoesNotExist()
+        check.assertDoesNotExist()
+        policy.assertDoesNotExist()
+        stop.assertIsEnabled()
+        compose.onNodeWithTag("vpn-system-settings").assertIsEnabled()
+
+        compose.runOnIdle {
+            model.value = model.value.afterPoll(old)
+            // The command acknowledgement itself may include old diagnostic fields.
+            val ack = JSONObject(old.toString()).put("generation", 2)
+            model.value = model.value.afterIntent(ack)
+            assertFalse(model.value.status.has("routeHealth"))
+            assertFalse(model.value.status.has("engineActive"))
+        }
+        unknown.assertTextEquals("Проверяем доступность диагностики")
+        route.assertDoesNotExist()
+        stop.assertIsEnabled()
+
+        compose.runOnIdle { model.value = model.value.afterPoll(old) }
+        unknown.assertTextEquals("Текущая диагностика VPN недоступна")
+        route.assertDoesNotExist()
+        stop.assertIsEnabled()
+
+        compose.runOnIdle { model.value = model.value.afterPoll(snapshot(2, "stale", "refreshing")) }
+        unknown.assertDoesNotExist()
+        route.assertTextEquals("Результат устарел")
+        check.assertIsEnabled()
+        policy.assertTextEquals("Политика: refreshing")
+
+        compose.runOnIdle {
+            model.value = model.value.afterIntent(JSONObject().put("generation", 3).put("desiredOn", false))
+        }
+        stop.assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        unknown.assertTextEquals("Проверяем доступность диагностики")
+        route.assertDoesNotExist()
+    }
+
+    @Test fun statusAcceptsOnlyTypedCurrentGenerationsOrExplicitLockedBoot() {
+        val initial = JSONObject().put("generation", 0).put("desiredOn", false)
+        assertEquals(true, VpnHomeStatus().afterPoll(initial).available)
+        val active = JSONObject().put("phase", "Online").put("generation", 3).put("desiredOn", true)
+        val state = VpnHomeStatus().afterPoll(active)
+        for (bad in listOf(null, JSONObject.NULL, -1, 2, "3", 3.0, true)) {
+            val reply = JSONObject(active.toString()).put("generation", bad)
+            val rejected = state.afterPoll(reply)
+            assertEquals(false, rejected.available)
+            assertSame(active, rejected.status)
+            assertSame(state, state.afterIntent(reply))
+        }
+        for (missing in listOf("generation", "desiredOn", "desiredOnKnown", "reason")) {
+            val malformed = LifecycleAccess.lockedStatus().apply { remove(missing) }
+            assertEquals(false, state.afterPoll(malformed).available)
+        }
+        val locked = state.afterPoll(LifecycleAccess.lockedStatus())
+        assertEquals(true, locked.available)
+        assertEquals("Нужно разблокировать телефон", vpnStatusLabel(locked.status, locked.available, false))
+        assertNull(vpnTileIntent(locked.status))
+        assertEquals(false, locked.afterPoll(JSONObject(active.toString()).put("generation", 2L)).available)
+        val unlocked = locked.afterPoll(JSONObject(active.toString()).put("generation", Int.MAX_VALUE.toLong() + 1))
+        assertEquals(true, unlocked.available)
+        assertTrue(unlocked.status.getBoolean("desiredOn"))
     }
 
     @Test fun startRequiresKnownReadyStateAndStopDoesNotRequireReadiness() {

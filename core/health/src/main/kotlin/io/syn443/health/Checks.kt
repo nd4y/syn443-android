@@ -119,19 +119,22 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
         var checkFailure: Failure? = null
         var dnsResult: DnsResult? = null
         fun failed(value: Failure) { checkFailure = value; failure = value; failureStage = scope.stage }
+        fun completed(result: () -> Outcome): Outcome {
+            val now = clockMillis()
+            return when {
+                cancelled.get() -> Outcome.CANCELLED
+                now >= deadline -> Outcome.DEADLINE
+                now >= checkDeadline -> { failed(Failure.TIMEOUT); Outcome.FAIL }
+                else -> result()
+            }
+        }
         var future: Future<Boolean>? = null
         val outcome = try {
             future = submit(check, scope, minOf(checkDeadline, deadline))
             pending.set(future)
             if (cancelled.get()) { scope.cancel(); future.cancel(true) }
             val value = future.get((minOf(checkDeadline, deadline) - clockMillis()).coerceAtLeast(0), TimeUnit.MILLISECONDS)
-            when {
-                cancelled.get() -> Outcome.CANCELLED
-                clockMillis() >= deadline -> Outcome.DEADLINE
-                clockMillis() >= checkDeadline -> { failed(Failure.TIMEOUT); Outcome.FAIL }
-                value -> Outcome.PASS
-                else -> Outcome.FAIL
-            }
+            completed { if (value) Outcome.PASS else Outcome.FAIL }
         } catch (_: RejectedExecutionException) {
             checkFailure = Failure.WORKER_REJECTED
             Outcome.UNAVAILABLE
@@ -147,15 +150,19 @@ class CheckJob(private val pool: ProbePool, private val probe: Probe,
                 Outcome.UNAVAILABLE
             } else Outcome.FAIL
         } catch (error: ExecutionException) {
-            if (scope.stage == Stage.RESOLVE) dnsResult = (error.cause as? ProbeDnsException)?.result
-            failed(when (error.cause) {
+            val cause = error.cause
+            val typedFailure = when (cause) {
                 is java.net.UnknownHostException -> Failure.DNS
                 is javax.net.ssl.SSLException -> Failure.TLS
                 is java.io.EOFException -> Failure.EOF
                 is java.net.SocketTimeoutException -> Failure.TIMEOUT
                 else -> Failure.TRANSPORT
-            })
-            if (cancelled.get()) Outcome.CANCELLED else Outcome.FAIL
+            }
+            completed {
+                if (scope.stage == Stage.RESOLVE) dnsResult = (cause as? ProbeDnsException)?.result
+                failed(typedFailure)
+                Outcome.FAIL
+            }
         } finally {
             scope.cancel(); future?.cancel(true)
             (future as? Runnable)?.let { pool.executor.remove(it) }
