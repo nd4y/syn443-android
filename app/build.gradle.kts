@@ -104,7 +104,7 @@ dependencies {
     implementation("androidx.browser:browser:1.10.0")
     implementation("androidx.work:work-multiprocess:2.12.0")
     implementation("com.google.zxing:core:3.5.4")
-    implementation("com.google.re2j:re2j:1.8")
+    implementation("com.google.re2j:re2j:1.9")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
