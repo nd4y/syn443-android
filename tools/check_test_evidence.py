@@ -368,6 +368,12 @@ if mode=="emulator":
     }
     observed = {(case.get("classname"), case.get("name")) for case in cases}
     assert {("io.syn443.android." + suite, name) for suite, name in account_telemetry_cases} <= observed, "Account/telemetry evidence missing"
+    photo_cases = {
+        ("io.syn443.android.ChatStorageTest", "chatPngPhotoDownscalesAndPreservesOriginal"),
+        ("io.syn443.android.ChatStorageTest", "chatWebpPhotoDownscalesAndPreservesOriginal"),
+        ("io.syn443.android.ChatStorageTest", "chatPhotoRejectsOverLimitPixelsAndCleansScratch"),
+    }
+    assert photo_cases <= observed, "Missing chat photo format or pixel-limit evidence"
     assert ("io.syn443.android.LoginControllerTest", "cachedPolicyRefreshUsesTheSignedDeadlineOrFiveMinuteLimit") in {(c.get("classname"),c.get("name")) for c in cases}, "Signed refresh deadline coverage missing"
     route_required.add("adbLocalConfigPreviewDoesNotWriteAndApplyFencesStaleBase")
     route_required.add("assignmentQuotedStringStreamingMatchesReferenceDefaultsEscapesAndUnicode")

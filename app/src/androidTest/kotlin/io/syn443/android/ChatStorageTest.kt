@@ -17,8 +17,13 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.util.zip.CRC32
+import java.util.zip.DeflaterOutputStream
 
 @RunWith(AndroidJUnit4::class)
 class ChatStorageTest {
@@ -160,6 +165,120 @@ class ChatStorageTest {
             }
         } finally {input.delete()}
     }
+
+    @Test fun chatPngPhotoDownscalesAndPreservesOriginal() = runBlocking {
+        verifyPhotoResize("png", Bitmap.CompressFormat.PNG, 4096, 512, 1600, 200)
+    }
+
+    @Suppress("DEPRECATION") // The same WebP encoder constant is available on every tested API.
+    @Test fun chatWebpPhotoDownscalesAndPreservesOriginal() = runBlocking {
+        verifyPhotoResize("webp", Bitmap.CompressFormat.WEBP, 512, 4096, 200, 1600)
+    }
+
+    private suspend fun verifyPhotoResize(
+        extension: String,
+        format: Bitmap.CompressFormat,
+        width: Int,
+        height: Int,
+        expectedWidth: Int,
+        expectedHeight: Int,
+    ) {
+        val directory = File(context.cacheDir, "chat-test").apply { mkdirs() }
+        val input = File.createTempFile("photo-", ".$extension", directory)
+        val scratchBefore = mediaScratch()
+        try {
+            val original = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            try {
+                original.eraseColor(Color.BLUE)
+                input.outputStream().use { assertTrue(original.compress(format, 95, it)) }
+            } finally {
+                original.recycle()
+            }
+            val sourceBytes = input.readBytes()
+            val uri = FileProvider.getUriForFile(context, "io.syn443.chat.fixture", input)
+            assertEquals("image/$extension", context.contentResolver.getType(uri))
+
+            ChatMedia.prepare(context, uri, true) {}.use { output ->
+                assertEquals("photo", output.kind)
+                assertEquals("image/jpeg", output.mime)
+                assertEquals(input.nameWithoutExtension + ".jpg", output.name)
+                assertTrue(output.file.length() in 1..ChatLimits.file.toLong())
+                assertNotEquals(input, output.file)
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(output.file.path, bounds)
+                assertEquals("image/jpeg", bounds.outMimeType)
+                val decoded = checkNotNull(BitmapFactory.decodeFile(output.file.path))
+                try {
+                    assertEquals(expectedWidth, decoded.width)
+                    assertEquals(expectedHeight, decoded.height)
+                    assertTrue(Color.blue(decoded.getPixel(expectedWidth / 2, expectedHeight / 2)) > 200)
+                } finally {
+                    decoded.recycle()
+                }
+                assertEquals(scratchBefore + output.file.name, mediaScratch())
+            }
+            assertArrayEquals(sourceBytes, input.readBytes())
+            assertEquals(scratchBefore, mediaScratch())
+        } finally {
+            input.delete()
+        }
+    }
+
+    @Test fun chatPhotoRejectsOverLimitPixelsAndCleansScratch() = runBlocking {
+        val directory = File(context.cacheDir, "chat-test").apply { mkdirs() }
+        val input = File.createTempFile("photo-limit-", ".png", directory)
+        val scratchBefore = mediaScratch()
+        try {
+            val size = 8192
+            writeMonochromePng(input, size)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(input.path, bounds)
+            assertEquals("image/png", bounds.outMimeType)
+            assertEquals(size, bounds.outWidth)
+            assertEquals(size, bounds.outHeight)
+            val sourceBytes = input.readBytes()
+            val uri = FileProvider.getUriForFile(context, "io.syn443.chat.fixture", input)
+            val result = runCatching { ChatMedia.prepare(context, uri, true) {} }
+            result.getOrNull()?.close()
+            assertTrue("A recognized photo above the pixel limit must be rejected",
+                result.exceptionOrNull() is IllegalArgumentException)
+            assertArrayEquals(sourceBytes, input.readBytes())
+            assertEquals(scratchBefore, mediaScratch())
+        } finally {
+            input.delete()
+        }
+    }
+
+    private fun writeMonochromePng(file: File, size: Int) {
+        // A valid one-bit grayscale source exercises the decoder's dimension
+        // check without allocating a full-sized bitmap to build the fixture.
+        val pixels = ByteArrayOutputStream()
+        DeflaterOutputStream(pixels).use { compressed ->
+            val row = ByteArray(1 + size / 8)
+            repeat(size) { compressed.write(row) }
+        }
+        val header = ByteBuffer.allocate(13).putInt(size).putInt(size)
+            .put(byteArrayOf(1, 0, 0, 0, 0)).array()
+        DataOutputStream(file.outputStream()).use { png ->
+            fun chunk(type: String, data: ByteArray) {
+                val tag = type.toByteArray(Charsets.US_ASCII)
+                val crc = CRC32().apply { update(tag); update(data) }
+                png.writeInt(data.size)
+                png.write(tag)
+                png.write(data)
+                png.writeInt(crc.value.toInt())
+            }
+            png.write(byteArrayOf(137.toByte(), 80, 78, 71, 13, 10, 26, 10))
+            chunk("IHDR", header)
+            chunk("IDAT", pixels.toByteArray())
+            chunk("IEND", byteArrayOf())
+        }
+    }
+
+    private fun mediaScratch() = context.cacheDir.listFiles().orEmpty()
+        .filter { it.name.startsWith("chat-") && (it.name.endsWith(".input") || it.name.endsWith(".output")) }
+        .map { it.name }.toSet()
+
     @Test fun chatTextAndDocumentBoundariesDoNotAcceptInvalidMedia()=runBlocking {
         assertTrue(ChatLimits.text("😀".repeat(4096)));assertFalse(ChatLimits.text("😀".repeat(4097)));assertFalse(ChatLimits.text("bad\u0000text"))
         val dir=File(context.cacheDir,"chat-test").apply {mkdirs()};val input=File(dir,"bad-${ChatLimits.id()}.jpg")
@@ -285,15 +404,14 @@ class ChatStorageTest {
 
     @Test fun chatCancellingActiveVideoExportRemovesPrivateTemporaryFiles()=runBlocking {
         val input=videoFixture()
-        fun temporary()=context.cacheDir.listFiles().orEmpty().filter {it.name.startsWith("chat-") && (it.name.endsWith(".input") || it.name.endsWith(".output"))}.map {it.name}.toSet()
-        val before=temporary();var started=false
+        val before=mediaScratch();var started=false
         try {
             val job=launch {
                 ChatMedia.prepare(context,FileProvider.getUriForFile(context,"io.syn443.chat.fixture",input),true) {value->
                     if(value.contains("0%")) {started=true;cancel()}
                 }.close()
             }
-            withTimeout(30_000) {job.join()};assertTrue(started);assertTrue(job.isCancelled);assertEquals(before,temporary())
+            withTimeout(30_000) {job.join()};assertTrue(started);assertTrue(job.isCancelled);assertEquals(before,mediaScratch())
         } finally {input.delete()}
     }
 }
